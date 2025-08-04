@@ -26,15 +26,16 @@ use alloy_evm::{
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{Bytes, U256};
-use reth_payload_primitives::NewPayloadError;
+use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_engine_primitives::{ConfigureEngineEvm, ExecutableTxIterator};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory, ExecutionCtxFor, NextBlockEnvAttributes, TransactionEnv
+    precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory, ExecutionCtxFor,
+    NextBlockEnvAttributes, TransactionEnv,
 };
+use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
 use revm::{
     context::{BlockEnv, CfgEnv},
@@ -278,7 +279,22 @@ where
     }
 }
 
-impl ConfigureEngineEvm<ExecutionData> for EthEvmConfig {
+impl<ChainSpec, EvmF> ConfigureEngineEvm<ExecutionData> for EthEvmConfig<ChainSpec, EvmF>
+where
+    ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
+    EvmF: EvmFactory<
+            Tx: TransactionEnv
+                    + FromRecoveredTx<TransactionSigned>
+                    + FromTxWithEncoded<TransactionSigned>,
+            Spec = SpecId,
+            Precompiles = PrecompilesMap,
+        > + Clone
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
     fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
         let timestamp = payload.payload.timestamp();
         let block_number = payload.payload.block_number();
@@ -328,7 +344,10 @@ impl ConfigureEngineEvm<ExecutionData> for EthEvmConfig {
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload.payload.as_v2().map(|v2| Cow::Owned(v2.withdrawals.clone().into())),
+            withdrawals: payload
+                .payload
+                .as_v2()
+                .map(|v2| Cow::Owned(v2.withdrawals.clone().into())),
         }
     }
 

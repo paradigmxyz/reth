@@ -1170,7 +1170,6 @@ where
 impl<Node, EV> EngineValidatorBuilder<Node> for BasicEngineValidatorBuilder<EV>
 where
     Node: FullNodeComponents<
-        Types: NodeTypes<ChainSpec: EthereumHardforks>,
         Evm: ConfigureEngineEvm<
             <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
         >,

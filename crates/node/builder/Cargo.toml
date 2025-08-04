@@ -122,5 +122,4 @@ op = [
     "reth-engine-local/op",
     "reth-evm/op",
     "reth-primitives-traits/op",
-    "reth-engine-primitives/op",
 ]

@@ -36,8 +36,8 @@ pub struct CustomPayloadTypes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
-    inner: OpExecutionData,
-    extension: u64,
+    pub inner: OpExecutionData,
+    pub extension: u64,
 }
 
 impl ExecutionPayload for CustomExecutionData {

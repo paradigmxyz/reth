@@ -296,7 +296,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
-        macro_rules! ensure_ok_convert {
+        macro_rules! ensure_ok {
             ($expr:expr) => {
                 match $expr {
                     Ok(val) => val,
@@ -313,7 +313,7 @@ where
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
-            ensure_ok_convert!(self.state_provider_builder(parent_hash, ctx.state()))
+            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
@@ -323,11 +323,10 @@ where
             .into())
         };
 
-        let state_provider = ensure_ok_convert!(provider_builder.build());
+        let state_provider = ensure_ok!(provider_builder.build());
 
         // fetch parent block
-        let Some(parent_block) =
-            ensure_ok_convert!(self.sealed_header_by_hash(parent_hash, ctx.state()))
+        let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
                 self.convert_to_block(input)?.into_sealed_block(),
@@ -382,16 +381,16 @@ where
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
-                ensure_ok_convert!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
+                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
             // get allocated trie input if it exists
             let allocated_trie_input = self.payload_processor.take_trie_input();
 
             // Compute trie input
             let trie_input_start = Instant::now();
-            let trie_input = ensure_ok_convert!(self.compute_trie_input(
+            let trie_input = ensure_ok!(self.compute_trie_input(
                 persisting_kind,
-                ensure_ok_convert!(consistent_view.provider_ro()),
+                ensure_ok!(consistent_view.provider_ro()),
                 parent_hash,
                 ctx.state(),
                 allocated_trie_input,
@@ -434,11 +433,11 @@ where
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let (output, execution_finish) =
-                ensure_ok_convert!(self.execute_block(&state_provider, env, &input, &mut handle));
+                ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
             state_provider.record_total_latency();
             (output, execution_finish)
         } else {
-            ensure_ok_convert!(self.execute_block(&state_provider, env, &input, &mut handle))
+            ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
 
         // after executing the block we can stop executing transactions

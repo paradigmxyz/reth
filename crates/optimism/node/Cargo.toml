@@ -51,8 +51,6 @@ op-revm.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
-alloy-eips.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-engine.workspace = true
@@ -85,7 +83,6 @@ reth-network-api.workspace = true
 
 alloy-network.workspace = true
 futures.workspace = true
-alloy-eips.workspace = true
 op-alloy-network.workspace = true
 tempfile.workspace = true
 

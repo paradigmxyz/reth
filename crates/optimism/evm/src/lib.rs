@@ -13,18 +13,25 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::Decodable2718;
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::U256;
+use alloy_rpc_types_engine::PayloadError;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_engine_primitives::{ConfigureEngineEvm, ExecutableTxIterator};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
-use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader, SignedTransaction};
+use reth_payload_primitives::NewPayloadError;
+use reth_primitives_traits::{
+    NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, TxTy, WithEncoded,
+};
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -217,6 +224,76 @@ where
         }
     }
 }
+
+impl<ChainSpec, N, R> ConfigureEngineEvm<OpExecutionData> for OpEvmConfig<ChainSpec, N, R>
+where
+    ChainSpec: EthChainSpec<Header = Header> + OpHardforks,
+    N: NodePrimitives<
+        Receipt = R::Receipt,
+        SignedTx = R::Transaction,
+        BlockHeader = Header,
+        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+        Block = alloy_consensus::Block<R::Transaction>,
+    >,
+    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
+    R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
+    Self: Send + Sync + Unpin + Clone + 'static,
+{
+    fn evm_env_for_payload(&self, payload: &OpExecutionData) -> EvmEnvFor<Self> {
+        let timestamp = payload.payload.timestamp();
+        let block_number = payload.payload.block_number();
+
+        let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
+
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+        let blob_excess_gas_and_price = spec
+            .into_eth_spec()
+            .is_enabled_in(SpecId::CANCUN)
+            .then_some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 1 });
+
+        let block_env = BlockEnv {
+            number: U256::from(block_number),
+            beneficiary: payload.payload.as_v1().fee_recipient,
+            timestamp: U256::from(timestamp),
+            difficulty: if spec.into_eth_spec() >= SpecId::MERGE {
+                U256::ZERO
+            } else {
+                payload.payload.as_v1().prev_randao.into()
+            },
+            prevrandao: (spec.into_eth_spec() >= SpecId::MERGE)
+                .then(|| payload.payload.as_v1().prev_randao),
+            gas_limit: payload.payload.as_v1().gas_limit,
+            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price,
+        };
+
+        EvmEnv { cfg_env, block_env }
+    }
+
+    fn context_for_payload<'a>(&self, payload: &'a OpExecutionData) -> ExecutionCtxFor<'a, Self> {
+        OpBlockExecutionCtx {
+            parent_hash: payload.parent_hash(),
+            parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
+            extra_data: payload.payload.as_v1().extra_data.clone(),
+        }
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &OpExecutionData,
+    ) -> impl ExecutableTxIterator<Self> {
+        payload.payload.transactions().clone().into_iter().map(|encoded| {
+            let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
+                .map_err(Into::into)
+                .map_err(PayloadError::Decode)?;
+            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
+            Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

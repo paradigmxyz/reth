@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 # Reth
+reth-engine-primitives.workspace = true
+reth-payload-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-evm = { workspace = true, features = ["op"] }
 reth-primitives-traits.workspace = true
@@ -26,6 +28,8 @@ alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-op-evm.workspace = true
 op-alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
 # Optimism
