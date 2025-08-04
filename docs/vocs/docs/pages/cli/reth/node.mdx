@@ -233,6 +233,11 @@ Networking:
 
           [default: All]
 
+      --disable-tx-gossip
+          Disable transaction pool gossip
+
+          Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -731,7 +736,7 @@ Pruning:
           Prune receipts before the specified block number. The specified block number is not pruned
 
       --prune.receiptslogfilter <FILTER_CONFIG>
-          Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
       --prune.accounthistory.full
           Prunes all account history
