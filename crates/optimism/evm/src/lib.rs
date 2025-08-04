@@ -13,14 +13,14 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
-use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, EvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -215,6 +215,11 @@ where
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data,
         }
+    }
+
+    fn precompiles_for_timestamp(&self, timestamp: u64) -> PrecompilesMap {
+        let spec_id = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
+        self.evm_factory().create_precompiles(spec_id)
     }
 }
 #[cfg(test)]

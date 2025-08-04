@@ -2,7 +2,12 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
+use alloy_evm::{
+    eth::EthEvmContext,
+    precompiles::PrecompilesMap,
+    revm::precompile::{Precompile, PrecompileId, PrecompileSpecId},
+    EvmFactory,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
 use reth_ethereum::{
@@ -12,7 +17,6 @@ use reth_ethereum::{
         revm::{
             context::{Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
-            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
@@ -32,7 +36,7 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
-use std::sync::OnceLock;
+use std::{borrow::Cow, sync::OnceLock};
 
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
@@ -56,7 +60,7 @@ impl EvmFactory for MyEvmFactory {
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
+            .with_precompiles(self.create_precompiles(SpecId::default()));
 
         if spec == SpecId::PRAGUE {
             evm = evm.with_precompiles(PrecompilesMap::from_static(prague_custom()));
@@ -72,6 +76,10 @@ impl EvmFactory for MyEvmFactory {
         inspector: I,
     ) -> Self::Evm<DB, I> {
         EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+    }
+
+    fn create_precompiles(&self, spec_id: Self::Spec) -> PrecompilesMap {
+        PrecompilesMap::from_static(Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)))
     }
 }
 
@@ -99,13 +107,13 @@ pub fn prague_custom() -> &'static Precompiles {
     INSTANCE.get_or_init(|| {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
-        precompiles.extend([(
+        precompiles.extend([Precompile::new(
+            PrecompileId::Custom(Cow::Borrowed("custom-precompile")),
             address!("0x0000000000000000000000000000000000000999"),
             |_, _| -> PrecompileResult {
                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
             } as PrecompileFn,
-        )
-            .into()]);
+        )]);
         precompiles
     })
 }

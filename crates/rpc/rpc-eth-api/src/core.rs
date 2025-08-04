@@ -1,7 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        config::EthConfigSpec, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
+        FullEthApi,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -412,7 +415,7 @@ where
     /// Handler for: `eth_config`
     fn config(&self) -> RpcResult<EthConfig> {
         trace!(target: "rpc::eth", "Serving eth_config");
-        EthApiSpec::chain_config(self).to_rpc_result()
+        EthConfigSpec::chain_config(self).to_rpc_result()
     }
 
     /// Handler for: `eth_coinbase`

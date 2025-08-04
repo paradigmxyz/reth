@@ -113,7 +113,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -138,7 +138,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -233,7 +233,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -258,8 +258,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28de0dd1bbb0634ef7c3715e8e60176b77b82f8b6b15b2e35fe64cf6640f6550"
+source = "git+https://github.com/alloy-rs/evm?branch=fusaka-devnet-3#9b8940b6fc50107c7cdccc22d7c1b31d5630a6b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -278,7 +277,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -317,7 +316,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -331,7 +330,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -356,7 +355,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -368,8 +367,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0afe768962308a08b42fddef8a4296324f140b5a8dd0d4360038229885ce9434"
+source = "git+https://github.com/alloy-rs/evm?branch=fusaka-devnet-3#9b8940b6fc50107c7cdccc22d7c1b31d5630a6b3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -428,7 +426,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -473,7 +471,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -515,7 +513,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -540,7 +538,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -552,7 +550,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -563,7 +561,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -574,7 +572,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -584,7 +582,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -601,7 +599,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -610,7 +608,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -630,7 +628,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -651,7 +649,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -665,7 +663,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -678,7 +676,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -689,7 +687,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -700,7 +698,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -714,7 +712,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -801,7 +799,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -823,7 +821,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -837,7 +835,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -856,7 +854,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -893,7 +891,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.0.23"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#54c6c996f091704b5d921c3c5af6864b935a839f"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka-devnet-3-tmp#260ff3bef7cf910c2fd32c5dd763efc4e08f0d11"
 dependencies = [
  "alloy-primitives",
  "darling",
@@ -4400,7 +4398,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -6063,7 +6061,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -10654,7 +10652,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "27.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10672,7 +10670,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "bitvec",
  "once_cell",
@@ -10684,7 +10682,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10699,7 +10697,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "8.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10714,7 +10712,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10727,7 +10725,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "auto_impl",
  "either",
@@ -10739,7 +10737,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10757,7 +10755,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "auto_impl",
  "either",
@@ -10794,7 +10792,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "23.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10805,7 +10803,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "24.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10831,7 +10829,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10841,7 +10839,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#f9b12bc533ce342308d4b3552efafe3293d9e493"
 dependencies = [
  "bitflags 2.9.1",
  "revm-bytecode",

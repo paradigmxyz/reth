@@ -15,10 +15,8 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE,
-    eip7685::EMPTY_REQUESTS_HASH,
-    eip7892::BlobScheduleBlobParams,
-    eip7910::{EthBaseForkConfig, EthConfig},
+    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip7910::EthBaseForkConfig,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
