@@ -341,7 +341,7 @@ where
         }
     }
 
-    /// Returns pooled transactions for the given transaction hashe sthat are allowed to be propagated.
+    /// Returns pooled transactions for the given transaction hashes that are allowed to be propagated.
     pub fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
