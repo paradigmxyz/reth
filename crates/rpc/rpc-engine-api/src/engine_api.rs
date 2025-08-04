@@ -308,7 +308,7 @@ where
 
         let elapsed = start.elapsed();
         // TODO: update to V5
-        self.inner.metrics.latency.new_payload_v4.record(elapsed);
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
