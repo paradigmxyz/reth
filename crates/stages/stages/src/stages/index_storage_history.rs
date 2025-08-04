@@ -375,8 +375,6 @@ mod tests {
         almost_full_list.pop();
         let table = cast(db.table::<tables::StoragesHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), almost_full_list)]));
-
-        // verify initial state
     }
 
     #[tokio::test]
