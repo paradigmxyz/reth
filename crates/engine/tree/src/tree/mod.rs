@@ -2582,8 +2582,8 @@ pub enum BlockStatus {
 
 /// How a payload was inserted if it was valid.
 ///
-/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen(_)`] is
-/// returned, otherwise [`InsertPayloadOk::Inserted(_)`] is returned.
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen`] is
+/// returned, otherwise [`InsertPayloadOk::Inserted`] is returned.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InsertPayloadOk {
     /// The payload was valid, but we have already seen it.
