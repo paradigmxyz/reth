@@ -5,12 +5,14 @@ use alloy_eips::{
     eip2124::Head,
     eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract},
 };
+use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_errors::{RethError, RethResult};
 use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm};
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt};
-use std::collections::BTreeMap;
+use revm::precompile::PrecompileId;
+use std::{borrow::Borrow, collections::BTreeMap};
 
 use crate::RpcNodeCore;
 
@@ -111,27 +113,23 @@ fn base_to_fork_config<ChainSpec: EthChainSpec + EthereumHardforks>(
     config: EthBaseForkConfig,
     precompiles: PrecompilesMap,
 ) -> EthForkConfig {
-    let mut precompiles = Default::default();
     let mut system_contracts = BTreeMap::<SystemContract, Address>::default();
 
     if chain_spec.is_cancun_active_at_timestamp(config.activation_time) {
         system_contracts.extend(SystemContract::cancun());
-
-        // TODO: this is ugly af and is only intended to make the impl work.
-        // what we should do instead is to introduce an enum for precompiles to resolve their names.
-        // precompiles.extend([
-        //     (revm_precompile::secp256k1::ECRECOVER.address(), String::from("ECREC")),
-        //     (), // TODO:
-        // ])
     }
 
     if chain_spec.is_prague_active_at_timestamp(config.activation_time) {
         system_contracts
             .extend(SystemContract::prague(chain_spec.deposit_contract().map(|c| c.address)));
-
-        // TODO: this is ugly af and is only intended to make the impl work.
-        // what we should do instead is to introduce an enum for precompiles to resolve their names.
     }
+
+    let precompiles = precompiles
+        .addresses()
+        .filter_map(|address| {
+            Some((*address, precompile_to_str(precompiles.get(address)?.precompile_id())))
+        })
+        .collect();
 
     EthForkConfig {
         activation_time: config.activation_time,
@@ -140,4 +138,30 @@ fn base_to_fork_config<ChainSpec: EthChainSpec + EthereumHardforks>(
         precompiles,
         system_contracts,
     }
+}
+
+// TODO: move
+fn precompile_to_str<'a>(id: &PrecompileId) -> String {
+    let str = match id {
+        PrecompileId::EcRec => "ECREC",
+        PrecompileId::Sha256 => "SHA256",
+        PrecompileId::Ripemd160 => "RIPEMD160",
+        PrecompileId::Identity => "ID",
+        PrecompileId::ModExp => "MODEXP",
+        PrecompileId::Bn128Add => "BN254_ADD",
+        PrecompileId::Bn128Mul => "BN254_MUL",
+        PrecompileId::Bn128Pairing => "BN254_PAIRING",
+        PrecompileId::Blake2F => "BLAKE2F",
+        PrecompileId::KzgPointEvaluation => "KZG_POINT_EVALUATION",
+        PrecompileId::Bls12G1Add => "BLS12_G1ADD",
+        PrecompileId::Bls12G1Msm => "BLS12_G1MSM",
+        PrecompileId::Bls12G2Add => "BLS12_G2ADD",
+        PrecompileId::Bls12G2Msm => "BLS12_G2MSM",
+        PrecompileId::Bls12Pairing => "BLS12_PAIRING_CHECK",
+        PrecompileId::Bls12MapFpToGp1 => "BLS12_MAP_FP_TO_G1",
+        PrecompileId::Bls12MapFp2ToGp2 => "BLS12_MAP_FP2_TO_G2",
+        PrecompileId::P256Verify => "P256_VERIFY",
+        PrecompileId::Custom(custom) => custom.borrow(),
+    };
+    str.to_owned()
 }
