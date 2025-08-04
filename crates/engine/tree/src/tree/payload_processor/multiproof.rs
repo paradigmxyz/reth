@@ -521,6 +521,8 @@ where
                 ?proof_targets,
                 account_targets,
                 storage_targets,
+                ?added_removed_keys,
+                ?source,
                 "Starting multiproof calculation",
             );
 

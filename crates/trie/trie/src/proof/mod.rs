@@ -282,7 +282,7 @@ impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
-    K: AddedRemovedKeys,
+    K: AddedRemovedKeys + std::fmt::Debug,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
