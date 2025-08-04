@@ -1,5 +1,6 @@
 //! Pruning and full node arguments
 
+#[allow(rustdoc::broken_intra_doc_links)]
 use crate::{args::error::ReceiptsLogError, primitives::EthereumHardfork};
 use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
