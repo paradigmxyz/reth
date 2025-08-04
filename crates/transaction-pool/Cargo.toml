@@ -119,6 +119,11 @@ arbitrary = [
 ]
 
 [[bench]]
+name = "parked"
+required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
 name = "truncate"
 required-features = ["test-utils", "arbitrary"]
 harness = false
@@ -137,3 +142,5 @@ harness = false
 name = "canonical_state_change"
 required-features = ["test-utils", "arbitrary"]
 harness = false
+
+
