@@ -109,4 +109,17 @@ impl TrieInput {
         self.nodes.extend_ref(nodes);
         self.state.extend_ref(state);
     }
+
+    /// This method clears the trie input nodes, state, and prefix sets.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.state.clear();
+        self.prefix_sets.clear();
+    }
+
+    /// This method returns a cleared version of this trie input.
+    pub fn cleared(mut self) -> Self {
+        self.clear();
+        self
+    }
 }

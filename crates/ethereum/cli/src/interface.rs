@@ -1,12 +1,11 @@
 //! CLI definition and entrypoint to executable
 
 use crate::chainspec::EthereumChainSpecParser;
-use alloy_consensus::Header;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliNodeTypes},
+    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
@@ -14,7 +13,7 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_api::{NodePrimitives, NodeTypes};
+use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
@@ -125,10 +124,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
-            ChainSpec: Hardforks,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
@@ -182,9 +178,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
-        <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader: From<Header>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
@@ -246,7 +241,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]

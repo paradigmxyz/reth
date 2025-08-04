@@ -361,12 +361,30 @@ where
         }
 
         // Reject transactions over defined size to prevent DOS attacks
-        let tx_input_len = transaction.input().len();
-        if tx_input_len > self.max_tx_input_bytes {
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidPoolTransactionError::OversizedData(tx_input_len, self.max_tx_input_bytes),
-            ))
+        if transaction.is_eip4844() {
+            // Since blob transactions are pulled instead of pushed, and only the consensus data is
+            // kept in memory while the sidecar is cached on disk, there is no critical limit that
+            // should be enforced. Still, enforcing some cap on the input bytes. blob txs also must
+            // be executable right away when they enter the pool.
+            let tx_input_len = transaction.input().len();
+            if tx_input_len > self.max_tx_input_bytes {
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::OversizedData(
+                        tx_input_len,
+                        self.max_tx_input_bytes,
+                    ),
+                ))
+            }
+        } else {
+            // ensure the size of the non-blob transaction
+            let tx_size = transaction.encoded_length();
+            if tx_size > self.max_tx_input_bytes {
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::OversizedData(tx_size, self.max_tx_input_bytes),
+                ))
+            }
         }
 
         // Check whether the init code size has been exceeded.
@@ -1577,5 +1595,19 @@ mod tests {
         // unless the sender is specifically whitelisted in local_transactions_config
         let outcome = validator.validate_one(TransactionOrigin::Private, transaction);
         assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
+    }
+
+    #[test]
+    fn reject_oversized_tx() {
+        let mut transaction = get_transaction();
+        transaction.encoded_length = DEFAULT_MAX_TX_INPUT_BYTES + 1;
+        let provider = MockEthProvider::default();
+
+        // No minimum priority fee set (default is None)
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        let invalid = outcome.as_invalid().unwrap();
+        assert!(invalid.is_oversized());
     }
 }

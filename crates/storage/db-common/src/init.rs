@@ -572,7 +572,7 @@ where
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
-                    last_account_key = %state.last_account_key,
+                    last_account_key = %state.account_root_state.last_hashed_key,
                     updated_len,
                     total_flushed_updates,
                     "Flushing trie updates"

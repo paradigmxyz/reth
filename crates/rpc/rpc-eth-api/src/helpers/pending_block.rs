@@ -8,10 +8,11 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
 use reth_primitives_traits::{
@@ -154,7 +155,7 @@ pub trait LoadPendingBlock:
             }
 
             // no pending block from the CL yet, so we need to build it ourselves via txpool
-            let (sealed_block, receipts) = match self
+            let executed_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
                     this.build_block(&parent)
@@ -168,17 +169,20 @@ pub trait LoadPendingBlock:
                 }
             };
 
-            let sealed_block = Arc::new(sealed_block);
-            let receipts = Arc::new(receipts);
+            let block = executed_block.recovered_block;
 
-            let now = Instant::now();
-            *lock = Some(PendingBlock::new(
-                now + Duration::from_secs(1),
-                sealed_block.clone(),
-                receipts.clone(),
-            ));
+            let pending = PendingBlock::new(
+                Instant::now() + Duration::from_secs(1),
+                block.clone(),
+                Arc::new(
+                    executed_block.execution_output.receipts.iter().flatten().cloned().collect(),
+                ),
+            );
+            let receipts = pending.receipts.clone();
 
-            Ok(Some((sealed_block, receipts)))
+            *lock = Some(pending);
+
+            Ok(Some((block, receipts)))
         }
     }
 
@@ -188,14 +192,10 @@ pub trait LoadPendingBlock:
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
-    #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
-        Self::Error,
-    >
+    ) -> Result<ExecutedBlock<Self::Primitives>, Self::Error>
     where
         Self::Pool:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
@@ -322,10 +322,21 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
         }
 
-        let BlockBuilderOutcome { execution_result, block, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
-        Ok((block, execution_result.receipts))
+        let execution_outcome = ExecutionOutcome::new(
+            db.take_bundle(),
+            vec![execution_result.receipts],
+            block.number(),
+            vec![execution_result.requests],
+        );
+
+        Ok(ExecutedBlock {
+            recovered_block: block.into(),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(hashed_state),
+        })
     }
 }
 

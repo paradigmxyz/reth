@@ -3,11 +3,11 @@
 //! The structure of an Era1 file follows the specification:
 //! `Version | block-tuple* | other-entries* | Accumulator | BlockIndex`
 //!
-//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>.
 
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Entry, Version},
+    e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
@@ -43,13 +43,13 @@ impl Era1File {
 
     /// Get a block by its number, if present in this file
     pub fn get_block_by_number(&self, number: BlockNumber) -> Option<&BlockTuple> {
-        let index = (number - self.group.block_index.starting_number) as usize;
+        let index = (number - self.group.block_index.starting_number()) as usize;
         (index < self.group.blocks.len()).then(|| &self.group.blocks[index])
     }
 
     /// Get the range of block numbers contained in this file
     pub fn block_range(&self) -> std::ops::RangeInclusive<BlockNumber> {
-        let start = self.group.block_index.starting_number;
+        let start = self.group.block_index.starting_number();
         let end = start + (self.group.blocks.len() as u64) - 1;
         start..=end
     }
@@ -59,6 +59,7 @@ impl Era1File {
         self.block_range().contains(&number)
     }
 }
+
 /// Reader for Era1 files that builds on top of [`E2StoreReader`]
 #[derive(Debug)]
 pub struct Era1Reader<R: Read> {
@@ -215,8 +216,8 @@ impl<R: Read + Seek> Era1Reader<R> {
 
         let id = Era1Id::new(
             network_name,
-            block_index.starting_number,
-            block_index.offsets.len() as u32,
+            block_index.starting_number(),
+            block_index.offsets().len() as u32,
         );
 
         Ok(Era1File::new(group, id))
@@ -445,7 +446,7 @@ mod tests {
 
         let mut offsets = Vec::with_capacity(block_count);
         for i in 0..block_count {
-            offsets.push(i as i64 * 100);
+            offsets.push(i as u64 * 100);
         }
         let block_index = BlockIndex::new(start_block, offsets);
         let group = Era1Group::new(blocks, accumulator, block_index);

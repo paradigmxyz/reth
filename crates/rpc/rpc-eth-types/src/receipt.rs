@@ -1,5 +1,6 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use crate::EthApiError;
 use alloy_consensus::{ReceiptEnvelope, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
@@ -9,8 +10,6 @@ use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::{borrow::Cow, sync::Arc};
-
-use crate::EthApiError;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<N, E>(
@@ -88,8 +87,8 @@ where
     N: NodePrimitives<Receipt = Receipt>,
     ChainSpec: EthChainSpec + 'static,
 {
-    type Error = EthApiError;
     type RpcReceipt = TransactionReceipt;
+    type Error = EthApiError;
 
     fn convert_receipts(
         &self,
