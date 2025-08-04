@@ -248,13 +248,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .unwrap_or(0)
     }
 
-    fn get_sender_last_submission(&self, sender_id: SenderId) -> Option<u64> {
-        self.sender_id_last_submission
-            .binary_search_by_key(&sender_id, |ss| ss.sender_id())
-            .map(|idx| self.sender_id_last_submission[idx].submission_id())
-            .ok()
-    }
-
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
     ///
     /// This is done by first ordering senders by the last time they have submitted a transaction
