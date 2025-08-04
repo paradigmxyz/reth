@@ -1,4 +1,4 @@
-//! An integration of [`reth-trie`] with [`reth-db`].
+//! An integration of [`reth_trie`] with [`reth_db`].
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
