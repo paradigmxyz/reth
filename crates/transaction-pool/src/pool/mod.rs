@@ -341,7 +341,8 @@ where
         }
     }
 
-    /// Returns pooled transactions for the given transaction hashes that are allowed to be propagated.
+    /// Returns pooled transactions for the given transaction hashes that are allowed to be
+    /// propagated.
     pub fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
@@ -956,13 +957,15 @@ where
     /// Returns all the transactions belonging to the hashes that are propagatable.
     ///
     /// If no transaction exists, it is skipped.
-    fn get_all_propagatable(&self, txs: Vec<TxHash>) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+    fn get_all_propagatable(
+        &self,
+        txs: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if txs.is_empty() {
             return Vec::new()
         }
-        self.get_pool_data().get_all(txs).filter(|tx|tx.propagate).collect()
+        self.get_pool_data().get_all(txs).filter(|tx| tx.propagate).collect()
     }
-
 
     /// Notify about propagated transactions.
     pub fn on_propagated(&self, txs: PropagatedTransactions) {
