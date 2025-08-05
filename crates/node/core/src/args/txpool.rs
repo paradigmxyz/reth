@@ -411,6 +411,17 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Discard reorged transactions instead of re-injecting them into the mempool.
+    ///
+    /// When enabled, transactions from reorged blocks are permanently discarded rather
+    /// than being re-added to the transaction pool. This is useful for custom chains
+    /// that have different transaction validity rules or require strict control over
+    /// mempool contents after reorgs.
+    ///
+    /// Default: false (re-inject transactions to preserve standard Ethereum behavior)
+    #[arg(long = "txpool.discard-reorged-transactions")]
+    pub discard_reorged_transactions: bool,
 }
 
 impl TxPoolArgs {
@@ -496,6 +507,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            discard_reorged_transactions: false,
         }
     }
 }
@@ -625,6 +637,7 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            discard_reorged_transactions: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
