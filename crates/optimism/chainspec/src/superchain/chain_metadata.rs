@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(chain_config.extra_fields.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(chain_config.extra_fields.get("holoceneTime").unwrap(), 1736445601);
         assert_eq!(chain_config.extra_fields.get("isthmusTime").unwrap(), 1746806401);
-        assert_eq!(chain_config.extra_fields.get("jovian_time"), None);
+        assert_eq!(chain_config.extra_fields.get("jovianTime"), None);
 
         let optimism = chain_config.extra_fields.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
