@@ -8,10 +8,8 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_consensus::BlockHeader;
 use alloy_evm::{Database, RecoveredTx};
-use alloy_primitives::{keccak256, map::B256Set, TxHash, B256};
-use dashmap::DashMap;
+use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
@@ -356,6 +354,10 @@ where
                 break
             }
 
+            let coinbase_before = revm::Database::basic(evm.db_mut(), coinbase)
+                .unwrap_or_default() // This should be erroring
+                .unwrap_or_default();
+
             // create the tx env
             let start = Instant::now();
             let res = match evm.transact(&tx) {
@@ -390,14 +392,21 @@ where
                 })
                 .collect::<Vec<_>>();
 
-            let is_cacheable = !coinbase_balance_read && coinbase_storage_read;
+            let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
-            if is_cacheable {
-                debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
-                tx_cache.insert(tx_hash, (execution_trace, res));
+            let is_cacheable = !coinbase_balance_read && coinbase_storage_read;
+            if !is_cacheable {
+                debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
             }
 
-            let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+            let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
+                let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
+                let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
+                (coinbase, nonce_delta, balance_delta)
+            });
+
+            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+            tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
 
         // send a message to the main task to flag that we're done
