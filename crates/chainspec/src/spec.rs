@@ -19,7 +19,7 @@ use alloy_eips::{
     eip7910::EthBaseForkConfig,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_primitives::{address, b256, Address, BlockNumber, Bytes, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
 use derive_more::From;
@@ -333,10 +333,13 @@ impl ChainSpec {
     /// Returns base fork config for specific timestamp.
     /// Returns [`None`] if no blob params were found for this fork.
     pub fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+        // Fork config only exists for timestamp-based hardforks.
+        let head = Head { timestamp, number: u64::MAX, ..Default::default() };
         Some(EthBaseForkConfig {
             chain_id: alloy_primitives::U64::from(self.chain.id()),
             activation_time: timestamp,
             blob_schedule: self.blob_params_at_timestamp(timestamp)?,
+            fork_id: Bytes::from(self.fork_id(&head).hash.0),
         })
     }
 

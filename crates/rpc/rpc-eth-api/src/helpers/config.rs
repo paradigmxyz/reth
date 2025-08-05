@@ -1,10 +1,7 @@
 //! Loads chain configuration.
 
 use alloy_consensus::BlockHeader as _;
-use alloy_eips::{
-    eip2124::Head,
-    eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract},
-};
+use alloy_eips::eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
@@ -46,24 +43,8 @@ pub trait EthConfigSpec:
             .ok_or_else(|| RethError::msg("no base config for current fork"))?;
         let current_precompiles = evm_config.precompiles_for_timestamp(current_fork_timestamp);
         let current = base_to_fork_config(&chain_spec, current_base_config, current_precompiles);
-        let current_hash = current.fork_hash().map_err(RethError::other)?;
-        let current_fork_id = chain_spec.fork_id(&Head {
-            number: u64::MAX,
-            timestamp: current_fork_timestamp,
-            ..Default::default()
-        });
 
-        let mut config = EthConfig {
-            current,
-            current_hash,
-            current_fork_id: current_fork_id.hash,
-            next: None,
-            next_hash: None,
-            next_fork_id: None,
-            last: None,
-            last_hash: None,
-            last_fork_id: None,
-        };
+        let mut config = EthConfig { current, next: None, last: None };
 
         if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
             if let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied() {
@@ -73,15 +54,7 @@ pub trait EthConfigSpec:
                     let last_precompiles =
                         evm_config.precompiles_for_timestamp(last_fork_timestamp);
                     let last = base_to_fork_config(&chain_spec, last_base_config, last_precompiles);
-                    let last_hash = last.fork_hash().map_err(RethError::other)?;
-                    let last_fork_id = chain_spec.fork_id(&Head {
-                        number: u64::MAX,
-                        timestamp: last_fork_timestamp,
-                        ..Default::default()
-                    });
                     config.last = Some(last);
-                    config.last_hash = Some(last_hash);
-                    config.last_fork_id = Some(last_fork_id.hash);
                 }
             }
         }
@@ -91,15 +64,7 @@ pub trait EthConfigSpec:
             {
                 let next_precompiles = evm_config.precompiles_for_timestamp(next_fork_timestamp);
                 let next = base_to_fork_config(&chain_spec, next_base_config, next_precompiles);
-                let next_hash = next.fork_hash().map_err(RethError::other)?;
-                let next_fork_id = chain_spec.fork_id(&Head {
-                    number: u64::MAX,
-                    timestamp: next_fork_timestamp,
-                    ..Default::default()
-                });
                 config.next = Some(next);
-                config.next_hash = Some(next_hash);
-                config.next_fork_id = Some(next_fork_id.hash);
             }
         }
 
@@ -127,7 +92,7 @@ fn base_to_fork_config<ChainSpec: EthChainSpec + EthereumHardforks>(
     let precompiles = precompiles
         .addresses()
         .filter_map(|address| {
-            Some((*address, precompile_to_str(precompiles.get(address)?.precompile_id())))
+            Some((precompile_to_str(precompiles.get(address)?.precompile_id()), *address))
         })
         .collect();
 
@@ -135,13 +100,14 @@ fn base_to_fork_config<ChainSpec: EthChainSpec + EthereumHardforks>(
         activation_time: config.activation_time,
         blob_schedule: config.blob_schedule,
         chain_id: config.chain_id,
+        fork_id: config.fork_id,
         precompiles,
         system_contracts,
     }
 }
 
 // TODO: move
-fn precompile_to_str<'a>(id: &PrecompileId) -> String {
+fn precompile_to_str(id: &PrecompileId) -> String {
     let str = match id {
         PrecompileId::EcRec => "ECREC",
         PrecompileId::Sha256 => "SHA256",
