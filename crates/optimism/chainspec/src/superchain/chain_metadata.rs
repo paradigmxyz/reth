@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(value.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(value.get("holoceneTime").unwrap(), 1736445601);
         assert_eq!(value.get("isthmusTime").unwrap(), 1746806401);
-        assert_eq!(value.get("jovian_time"), None);
+        assert_eq!(value.get("jovianTime"), None);
         let optimism = value.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559DenominatorCanyon").unwrap(), 250);
     }
