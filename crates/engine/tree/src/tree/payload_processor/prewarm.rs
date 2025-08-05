@@ -8,15 +8,22 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_evm::{Database, RecoveredTx};
+use alloy_primitives::{keccak256, map::B256Set, TxHash, B256};
+use dashmap::DashMap;
 use metrics::{Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
-use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
+use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::BundleState,
+    state::{AccountInfo, Bytecode, EvmState},
+};
 use reth_trie::MultiProofTargets;
+use revm::context::result::{ExecResultAndState, HaltReason};
+use revm_primitives::{Address, U256};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,6 +33,8 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, trace};
+
+use super::TxCache;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -48,6 +57,7 @@ where
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    tx_cache: TxCache<Evm>,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -62,6 +72,7 @@ where
         execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
+        tx_cache: TxCache<Evm>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
         (
@@ -72,6 +83,7 @@ where
                 max_concurrency: 64,
                 to_multi_proof,
                 actions_rx,
+                tx_cache,
             },
             actions_tx,
         )
@@ -87,6 +99,7 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
 
+        let tx_cache = self.tx_cache.clone();
         self.executor.spawn_blocking(move || {
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
@@ -100,8 +113,9 @@ where
                     let ctx = ctx.clone();
                     let done_tx = done_tx.clone();
 
+                    let tx_cache = tx_cache.clone();
                     executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
+                        ctx.transact_batch(rx, tx_cache, sender, done_tx);
                     });
 
                     handles.push(tx);
@@ -231,7 +245,14 @@ where
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
-    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
+    fn evm_for_ctx(
+        self,
+    ) -> Option<(
+        EvmFor<Evm, EVMRecordingDatabase<impl Database>>,
+        PrewarmMetrics,
+        Arc<AtomicBool>,
+        mpsc::Receiver<AccessRecord>,
+    )> {
         let Self {
             env,
             evm_config,
@@ -261,6 +282,8 @@ where
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         let state_provider = StateProviderDatabase::new(state_provider);
+        let (traces_tx, traces_rx) = mpsc::channel();
+        let state_provider = EVMRecordingDatabase::new(state_provider, traces_tx);
 
         let mut evm_env = env.evm_env;
 
@@ -284,7 +307,7 @@ where
             });
         }
 
-        Some((evm, metrics, terminate_execution))
+        Some((evm, metrics, terminate_execution, traces_rx))
     }
 
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
@@ -297,13 +320,19 @@ where
     /// executed sequentially.
     fn transact_batch(
         self,
-        txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
+        txs: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        tx_cache: TxCache<Evm>,
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) {
-        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
+        let Some((mut evm, metrics, terminate_execution, recorded_traces)) = self.evm_for_ctx()
+        else {
+            return
+        };
 
         while let Ok(tx) = txs.recv() {
+            let tx_hash = *tx.as_executable().tx().tx_hash();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -319,8 +348,8 @@ where
                     trace!(
                         target: "engine::tree",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
-                        sender=%tx.signer(),
+                        %tx_hash,
+                        sender = %tx.as_executable().signer(),
                         "Error when executing prewarm transaction",
                     );
                     return
@@ -328,9 +357,13 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+            let (targets, storage_targets) = multiproof_targets_from_state(&res.state);
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
+
+            let execution_trace = recorded_traces.try_iter().collect::<Vec<_>>();
+
+            tx_cache.insert(tx_hash, (execution_trace, res));
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }
@@ -342,7 +375,7 @@ where
 
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+fn multiproof_targets_from_state(state: &EvmState) -> (MultiProofTargets, usize) {
     let mut targets = MultiProofTargets::with_capacity(state.len());
     let mut storage_targets = 0;
     for (addr, account) in state {
@@ -359,7 +392,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
 
         let mut storage_set =
             B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-        for (key, slot) in account.storage {
+        for (key, slot) in &account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
                 continue
@@ -395,6 +428,61 @@ pub(super) enum PrewarmTaskEvent {
         /// Number of transactions executed
         executed_transactions: usize,
     },
+}
+
+/// Captures state reads during transaction prewarming for cache validation.
+///
+/// Distinguishes:
+/// - `Account`: Account-level data (ETH balance, nonce, code hash, storage root). ETH balance
+///   doesn't affect storage root.
+/// - `Storage`: Contract storage slots (e.g., token balances). Changes affect storage root.
+///
+/// Used to validate and reuse prewarmed results, avoiding duplicate executions while ensuring
+/// correctness.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AccessRecord {
+    Account { address: Address, result: Option<AccountInfo> },
+    Storage { address: Address, index: U256, result: U256 },
+}
+
+/// revm database wrapper that records state access
+#[derive(Debug)]
+struct EVMRecordingDatabase<DB> {
+    inner_db: DB,
+    recorded_traces: mpsc::Sender<AccessRecord>,
+}
+
+impl<DB> EVMRecordingDatabase<DB> {
+    const fn new(inner_db: DB, recorded_traces: mpsc::Sender<AccessRecord>) -> Self {
+        Self { inner_db, recorded_traces }
+    }
+}
+
+impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let result = self.inner_db.basic(address)?;
+        let _ = self.recorded_traces.send(AccessRecord::Account {
+            address,
+            result: result.as_ref().map(|r| r.copy_without_code()),
+        });
+        Ok(result)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.inner_db.code_by_hash(code_hash)
+    }
+
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        let result = self.inner_db.storage(address, index)?;
+        let _ = self.recorded_traces.send(AccessRecord::Storage { address, index, result });
+        Ok(result)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.inner_db.block_hash(number)
+    }
 }
 
 /// Metrics for transactions prewarming.
