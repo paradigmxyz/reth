@@ -8416,7 +8416,6 @@ dependencies = [
  "derive_more",
  "parking_lot",
  "reth-chainspec",
- "reth-engine-primitives",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
@@ -9268,7 +9267,6 @@ dependencies = [
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
- "reth-engine-primitives",
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
@@ -14088,13 +14086,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "alloy-evm"
-version = "0.16.2"
-source = "git+https://github.com/alloy-rs/evm?rev=7e2c1db#7e2c1dbc8099daa6a125d22f446571f1770c5d44"
-
-[[patch.unused]]
-name = "alloy-op-evm"
-version = "0.16.2"
-source = "git+https://github.com/alloy-rs/evm?rev=7e2c1db#7e2c1dbc8099daa6a125d22f446571f1770c5d44"

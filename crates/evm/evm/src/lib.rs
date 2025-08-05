@@ -44,6 +44,9 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+mod engine;
+pub use engine::{ConfigureEngineEvm, ExecutableTxIterator};
+
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;

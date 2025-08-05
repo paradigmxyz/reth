@@ -5,14 +5,14 @@ use alloy_eips::eip7685::Requests;
 use alloy_evm::precompiles::PrecompilesMap;
 use alloy_rpc_types_engine::ExecutionData;
 use parking_lot::Mutex;
-use reth_engine_primitives::{ConfigureEngineEvm, ExecutableTxIterator};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     block::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
-    ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory, ExecutionCtxFor,
+    ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
+    ExecutableTxIterator, ExecutionCtxFor,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};

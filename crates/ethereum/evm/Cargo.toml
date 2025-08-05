@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # Reth
-reth-engine-primitives.workspace = true
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
@@ -57,7 +56,6 @@ std = [
     "reth-ethereum-primitives/std",
     "derive_more?/std",
     "alloy-rpc-types-engine/std",
-    "reth-engine-primitives/std",
 ]
 test-utils = [
     "dep:parking_lot",

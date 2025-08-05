@@ -29,11 +29,10 @@ use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_engine_primitives::{ConfigureEngineEvm, ExecutableTxIterator};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory, ExecutionCtxFor,
-    NextBlockEnvAttributes, TransactionEnv,
+    precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory,
+    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TransactionEnv,
 };
 use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};

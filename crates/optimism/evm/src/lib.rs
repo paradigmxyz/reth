@@ -23,8 +23,9 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_engine_primitives::{ConfigureEngineEvm, ExecutableTxIterator};
-use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
