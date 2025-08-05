@@ -715,7 +715,6 @@ vergen-git2 = "1.0.5"
 
 [patch.crates-io]
 alloy-trie = { git = "https://github.com/mediocregopher/alloy-rs-trie", branch = "mediocregopher/17571-leaf-update-removal-debug" }
-#alloy-trie = { path = "../alloy-rs-trie" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

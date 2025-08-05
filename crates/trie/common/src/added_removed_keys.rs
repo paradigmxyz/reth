@@ -45,8 +45,6 @@ impl AddedRemovedKeys for AddedRemovedKeysSet {
 }
 
 /// Tracks added and removed keys across account and storage tries.
-///
-/// TODO don't derive Clone
 #[derive(Debug, Default, Clone)]
 pub struct MultiAddedRemovedKeys {
     account: AddedRemovedKeysSet,

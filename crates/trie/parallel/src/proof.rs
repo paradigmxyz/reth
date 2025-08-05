@@ -56,7 +56,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    added_removed_keys: Option<MultiAddedRemovedKeys>,
+    added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
@@ -91,14 +91,11 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         self
     }
 
-    /// Configures the retainer to retain proofs for certain nodes which would otherwise fall
-    /// outside the target set, when those nodes might be required to calculate the state root when
-    /// keys have been added or removed to the trie.
-    ///
-    /// If None is given then retention of extra proofs is disabled.
+    /// Configure the `ParallelProof` with an [`AddedRemovedKeys`], allowing for retaining extra
+    /// proofs needed to add and remove leaf nodes from the tries.
     pub fn with_added_removed_keys(
         mut self,
-        added_removed_keys: Option<MultiAddedRemovedKeys>,
+        added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
         self.added_removed_keys = added_removed_keys;
         self

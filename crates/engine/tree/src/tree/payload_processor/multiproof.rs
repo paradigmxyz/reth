@@ -305,7 +305,7 @@ struct StorageMultiproofInput<Factory> {
     proof_targets: B256Set,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
-    added_removed_keys: MultiAddedRemovedKeys,
+    added_removed_keys: Arc<MultiAddedRemovedKeys>,
 }
 
 impl<Factory> StorageMultiproofInput<Factory> {
@@ -327,7 +327,7 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
-    added_removed_keys: Option<MultiAddedRemovedKeys>,
+    added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl<Factory> MultiproofInput<Factory> {
@@ -714,7 +714,7 @@ where
                     proof_targets: proof_targets_chunk,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    added_removed_keys: Some(MultiAddedRemovedKeys::default()),
+                    added_removed_keys: None,
                 }
                 .into(),
             );
@@ -823,6 +823,9 @@ where
             state_updates += 1;
         }
 
+        // Clone+Arc AddedRemovedKeys for sharing with the spawned multiproof tasks
+        let added_removed_keys = Arc::new(self.added_removed_keys.clone());
+
         // Process state updates in chunks.
         let mut chunks = 0;
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -839,7 +842,7 @@ where
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    added_removed_keys: Some(self.added_removed_keys.clone()), // TODO BAD
+                    added_removed_keys: Some(added_removed_keys.clone()),
                 }
                 .into(),
             );
