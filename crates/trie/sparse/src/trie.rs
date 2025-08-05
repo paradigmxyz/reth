@@ -419,7 +419,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        trace!(target: "sparse::trie", ?path, ?node, ?masks, "reveal_node called");
+        trace!(target: "trie::sparse", ?path, ?node, ?masks, "reveal_node called");
 
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
@@ -572,7 +572,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
-        trace!(target: "sparse::trie", ?full_path, ?value, "update_leaf called");
+        trace!(target: "trie::sparse", ?full_path, ?value, "update_leaf called");
 
         self.prefix_set.insert(full_path);
         let existing = self.values.insert(full_path, value);
@@ -710,7 +710,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
-        trace!(target: "sparse::trie", ?full_path, "remove_leaf called");
+        trace!(target: "trie::sparse", ?full_path, "remove_leaf called");
 
         if self.values.remove(full_path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {

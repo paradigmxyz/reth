@@ -25,7 +25,7 @@ use reth_trie::{
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
 use reth_trie_common::{
-    added_removed_keys::StorageAddedRemovedKeys,
+    added_removed_keys::AddedRemovedKeysSet,
     prefix_set::{PrefixSet, PrefixSetMut},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -406,7 +406,7 @@ pub struct StorageProofInput {
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    added_removed_keys: Option<StorageAddedRemovedKeys>,
+    added_removed_keys: Option<AddedRemovedKeysSet>,
 }
 
 impl StorageProofInput {
@@ -417,7 +417,7 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
-        added_removed_keys: Option<StorageAddedRemovedKeys>,
+        added_removed_keys: Option<AddedRemovedKeysSet>,
     ) -> Self {
         Self {
             hashed_address,

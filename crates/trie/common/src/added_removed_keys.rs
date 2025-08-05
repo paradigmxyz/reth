@@ -7,24 +7,7 @@ use alloy_primitives::{
 };
 use alloy_trie::{proof::AddedRemovedKeys, Nibbles, TrieMask};
 
-/// Tracks added and removed keys for accounts.
-///
-/// We don't yet track added keys for the accounts trie, and keys are never deleted, so this only
-/// serves to implement [`AddedRemovedKeys`].
-#[derive(Debug, Default, Clone)]
-pub struct AccountsAddedRemovedKeys;
-
-impl AddedRemovedKeys for AccountsAddedRemovedKeys {
-    fn is_prefix_added(&self, _prefix: &Nibbles) -> bool {
-        true
-    }
-
-    fn get_removed_mask(&self, _branch_path: &Nibbles) -> TrieMask {
-        TrieMask::default()
-    }
-}
-
-/// Tracks added and removed keys for a single storage trie.
+/// Tracks added and removed keys for a single account or storage trie.
 ///
 /// Implements [`AddedRemovedKeys`] in order to be used with a hash builder when generating
 /// multiproofs. It always returns true from `is_prefix_added`, because we are not able (yet) to
@@ -34,16 +17,16 @@ impl AddedRemovedKeys for AccountsAddedRemovedKeys {
 ///
 /// TODO don't derive Clone
 #[derive(Debug, Default, Clone)]
-pub struct StorageAddedRemovedKeys(B256Set);
+pub struct AddedRemovedKeysSet(B256Set);
 
-impl StorageAddedRemovedKeys {
+impl AddedRemovedKeysSet {
     /// TODO document
     pub fn is_removed(&self, path: &B256) -> bool {
         self.0.contains(path)
     }
 }
 
-impl AddedRemovedKeys for StorageAddedRemovedKeys {
+impl AddedRemovedKeys for AddedRemovedKeysSet {
     fn is_prefix_added(&self, _prefix: &Nibbles) -> bool {
         true
     }
@@ -61,13 +44,14 @@ impl AddedRemovedKeys for StorageAddedRemovedKeys {
     }
 }
 
-/// Tracks added and removed keys across storage tries.
-///
-/// We don't need to track account keys, because account keys are never deleted, only tombstoned.
+/// Tracks added and removed keys across account and storage tries.
 ///
 /// TODO don't derive Clone
 #[derive(Debug, Default, Clone)]
-pub struct MultiAddedRemovedKeys(B256Map<StorageAddedRemovedKeys>);
+pub struct MultiAddedRemovedKeys {
+    account: AddedRemovedKeysSet,
+    storages: B256Map<AddedRemovedKeysSet>,
+}
 
 impl MultiAddedRemovedKeys {
     /// Updates the set of removed keys based on a [`HashedPostState`].
@@ -76,12 +60,21 @@ impl MultiAddedRemovedKeys {
     /// set to any other value are removed from their respective account.
     pub fn update_with_state(&mut self, update: &HashedPostState) {
         for (hashed_address, storage) in &update.storages {
+            let account = update
+                .accounts
+                .get(hashed_address)
+                .map(|entry| entry.unwrap_or_default())
+                .unwrap_or_default();
+
             if storage.wiped {
-                self.0.remove(hashed_address);
+                self.storages.remove(hashed_address);
+                if account.is_empty() {
+                    self.account.0.insert(*hashed_address);
+                }
                 continue
             }
 
-            let storage_removed_keys = self.0.entry(*hashed_address).or_default();
+            let storage_removed_keys = self.storages.entry(*hashed_address).or_default();
 
             for (key, val) in &storage.storage {
                 if *val == U256::ZERO {
@@ -90,19 +83,22 @@ impl MultiAddedRemovedKeys {
                     storage_removed_keys.0.remove(key);
                 }
             }
+
+            if storage_removed_keys.0.is_empty() && account.is_empty() {
+                self.account.0.insert(*hashed_address);
+            } else {
+                self.account.0.remove(hashed_address);
+            }
         }
     }
 
-    /// Returns a [`StorageAddedRemovedKeys`] for the storage trie of a particular account.
-    pub fn get_storage(&self, hashed_address: &B256) -> StorageAddedRemovedKeys {
-        self.0.get(hashed_address).cloned().unwrap_or_default()
+    /// Returns a [`AddedRemovedKeysSet`] for the storage trie of a particular account.
+    pub fn get_storage(&self, hashed_address: &B256) -> AddedRemovedKeysSet {
+        self.storages.get(hashed_address).cloned().unwrap_or_default()
     }
 
-    /// Returns an [`AccountsAddedRemovedKeys`] for tracking account-level changes.
-    ///
-    /// Since accounts are never deleted (only tombstoned), this always returns
-    /// a default instance.
-    pub const fn get_accounts(&self) -> AccountsAddedRemovedKeys {
-        AccountsAddedRemovedKeys
+    /// Returns an [`AddedRemovedKeysSet`] for tracking account-level changes.
+    pub fn get_accounts(&self) -> AddedRemovedKeysSet {
+        self.account.clone()
     }
 }
