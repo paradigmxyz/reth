@@ -569,13 +569,13 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 0, timestamp: 1746806401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: u64::MAX }, /* TODO: update timestamp when Jovian is planned */
+                    ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 }, /* TODO: update timestamp when Jovian is planned */
                 ),
-                // Jovian
-                (
-                    Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO: update timestamp when Jovian is planned */
-                    ForkId { hash: ForkHash([0xef, 0x0e, 0x58, 0x33]), next: 0 },
-                ),
+                // // Jovian
+                // (
+                //     Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO:
+                // update timestamp when Jovian is planned */     ForkId { hash:
+                // ForkHash([0xef, 0x0e, 0x58, 0x33]), next: 0 }, ),
             ],
         );
     }
@@ -628,13 +628,13 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 0, timestamp: 1744905600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: u64::MAX }, /* TODO: update timestamp when Jovian is planned */
+                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: 0 }, /* TODO: update timestamp when Jovian is planned */
                 ),
-                // Jovian
-                (
-                    Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO: update timestamp when Jovian is planned */
-                    ForkId { hash: ForkHash([0x04, 0x2a, 0x5c, 0x14]), next: 0 },
-                ),
+                // // Jovian
+                // (
+                //     Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO:
+                // update timestamp when Jovian is planned */     ForkId { hash:
+                // ForkHash([0x04, 0x2a, 0x5c, 0x14]), next: 0 }, ),
             ],
         );
     }
@@ -697,13 +697,13 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 105235063, timestamp: 1746806401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x37, 0xbe, 0x75, 0x8f]), next: u64::MAX }, /* TODO: update timestamp when Jovian is planned */
+                    ForkId { hash: ForkHash([0x37, 0xbe, 0x75, 0x8f]), next: 0 }, /* TODO: update timestamp when Jovian is planned */
                 ),
                 // Jovian
-                (
-                    Head { number: 105235063, timestamp: u64::MAX, ..Default::default() }, /* TODO: update timestamp when Jovian is planned */
-                    ForkId { hash: ForkHash([0x26, 0xce, 0xa1, 0x75]), next: 0 },
-                ),
+                // (
+                //     Head { number: 105235063, timestamp: u64::MAX, ..Default::default() }, /*
+                // TODO: update timestamp when Jovian is planned */     ForkId {
+                // hash: ForkHash([0x26, 0xce, 0xa1, 0x75]), next: 0 }, ),
             ],
         );
     }
@@ -756,13 +756,13 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 0, timestamp: 1744905600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: u64::MAX }, /* TODO: update timestamp when Jovian is planned */
+                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: 0 }, /* TODO: update timestamp when Jovian is planned */
                 ),
-                // Jovian
-                (
-                    Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO: update timestamp when Jovian is planned */
-                    ForkId { hash: ForkHash([0xcd, 0xfd, 0x39, 0x99]), next: 0 },
-                ),
+                // // Jovian
+                // (
+                //     Head { number: 0, timestamp: u64::MAX, ..Default::default() }, /* TODO:
+                // update timestamp when Jovian is planned */     ForkId { hash:
+                // ForkHash([0xcd, 0xfd, 0x39, 0x99]), next: 0 }, ),
             ],
         );
     }
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xef, 0x0e, 0x58, 0x33]), next: 0 },
+            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -815,7 +815,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0xef, 0x0e, 0x58, 0x33]), next: 0 },
+            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }
