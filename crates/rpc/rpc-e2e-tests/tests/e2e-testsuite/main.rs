@@ -13,14 +13,14 @@ use reth_rpc_e2e_tests::rpc_compat::{InitializeFromExecutionApis, RunRpcCompatTe
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
-/// Test `eth_getLogs` RPC method compatibility with execution-apis test data
+/// Test repo-local RPC method compatibility with execution-apis test data
 ///
 /// This test:
 /// 1. Initializes a node with chain data from testdata (chain.rlp)
 /// 2. Applies the forkchoice state from headfcu.json
-/// 3. Runs all `eth_getLogs` test cases from the execution-apis test suite
+/// 3. Runs tests cases in the local repository, some of which are execution-api tests
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth_get_logs_compat() -> Result<()> {
+async fn test_local_rpc_tests_compat() -> Result<()> {
     reth_tracing::init_test_tracing();
 
     // Use local test data
@@ -69,7 +69,7 @@ async fn test_eth_get_logs_compat() -> Result<()> {
         )
         .with_action(MakeCanonical::new())
         .with_action(RunRpcCompatTests::new(
-            vec!["eth_getLogs".to_string()],
+            vec!["eth_getLogs".to_string(), "eth_syncing".to_string()],
             test_data_path.to_string_lossy(),
         ));
 
