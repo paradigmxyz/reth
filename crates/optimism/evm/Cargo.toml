@@ -73,6 +73,7 @@ std = [
     "op-revm/std",
     "reth-evm/std",
     "op-alloy-rpc-types-engine/std",
+    "reth-storage-errors/std",
 ]
 portable = ["reth-revm/portable"]
 rpc = ["reth-rpc-eth-api"]
