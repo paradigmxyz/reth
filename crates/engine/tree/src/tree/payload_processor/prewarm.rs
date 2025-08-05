@@ -363,6 +363,8 @@ where
 
             let execution_trace = recorded_traces.try_iter().collect::<Vec<_>>();
 
+            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Execution trace");
+
             tx_cache.insert(tx_hash, (execution_trace, res));
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
