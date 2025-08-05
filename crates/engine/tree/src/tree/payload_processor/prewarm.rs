@@ -397,6 +397,7 @@ where
             let is_cacheable = !coinbase_balance_read && coinbase_storage_read;
             if !is_cacheable {
                 debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
+                continue
             }
 
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
