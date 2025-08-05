@@ -8001,6 +8001,7 @@ dependencies = [
  "assert_matches",
  "codspeed-criterion-compat",
  "crossbeam-channel",
+ "dashmap 6.1.0",
  "derive_more",
  "eyre",
  "futures",
