@@ -8,6 +8,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
+use alloy_consensus::BlockHeader;
 use alloy_evm::{Database, RecoveredTx};
 use alloy_primitives::{keccak256, map::B256Set, TxHash, B256};
 use dashmap::DashMap;
@@ -22,7 +23,13 @@ use reth_revm::{
     state::{AccountInfo, Bytecode, EvmState},
 };
 use reth_trie::MultiProofTargets;
-use revm::context::result::{ExecResultAndState, HaltReason};
+use revm::{
+    bytecode::opcode,
+    context::ContextTr,
+    inspector::JournalExt,
+    interpreter::{interpreter_types::Jumps, Interpreter},
+    Inspector,
+};
 use revm_primitives::{Address, U256};
 use std::{
     sync::{
@@ -247,8 +254,9 @@ where
     /// execution.
     fn evm_for_ctx(
         self,
+        coinbase_balance_read: Arc<AtomicBool>,
     ) -> Option<(
-        EvmFor<Evm, EVMRecordingDatabase<impl Database>>,
+        EvmFor<Evm, EVMRecordingDatabase<impl Database>, CoinbaseBalanceEVMInspector>,
         PrewarmMetrics,
         Arc<AtomicBool>,
         mpsc::Receiver<AccessRecord>,
@@ -286,6 +294,7 @@ where
         let state_provider = EVMRecordingDatabase::new(state_provider, traces_tx);
 
         let mut evm_env = env.evm_env;
+        let coinbase_address = evm_env.block_env().beneficiary;
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
@@ -293,7 +302,11 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = evm_config.evm_with_env_and_inspector(
+            state_provider,
+            evm_env,
+            CoinbaseBalanceEVMInspector::new(coinbase_address, coinbase_balance_read),
+        );
 
         if !precompile_cache_disabled {
             // Only cache pure precompiles to avoid issues with stateful precompiles
@@ -325,10 +338,13 @@ where
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) {
-        let Some((mut evm, metrics, terminate_execution, recorded_traces)) = self.evm_for_ctx()
+        let coinbase_balance_read = Arc::new(AtomicBool::new(false));
+        let Some((mut evm, metrics, terminate_execution, recorded_traces)) =
+            self.evm_for_ctx(coinbase_balance_read.clone())
         else {
             return
         };
+        let coinbase = evm.block().beneficiary;
 
         while let Ok(tx) = txs.recv() {
             let tx_hash = *tx.as_executable().tx().tx_hash();
@@ -361,11 +377,25 @@ where
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
 
-            let execution_trace = recorded_traces.try_iter().collect::<Vec<_>>();
+            let coinbase_balance_read = coinbase_balance_read.swap(false, Ordering::Relaxed);
+            let mut coinbase_storage_read = false;
+            let execution_trace = recorded_traces
+                .try_iter()
+                .inspect(|trace| {
+                    if let AccessRecord::Storage { address, .. } = trace {
+                        if *address != coinbase {
+                            coinbase_storage_read = true;
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
 
-            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Execution trace");
+            let is_cacheable = !coinbase_balance_read && coinbase_storage_read;
 
-            tx_cache.insert(tx_hash, (execution_trace, res));
+            if is_cacheable {
+                debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+                tx_cache.insert(tx_hash, (execution_trace, res));
+            }
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }
@@ -484,6 +514,45 @@ impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         self.inner_db.block_hash(number)
+    }
+}
+
+#[derive(Debug)]
+struct CoinbaseBalanceEVMInspector {
+    coinbase: Address,
+    balance_read: Arc<AtomicBool>,
+}
+
+impl CoinbaseBalanceEVMInspector {
+    fn new(coinbase: Address, balance_read: Arc<AtomicBool>) -> Self {
+        Self { coinbase, balance_read }
+    }
+}
+
+impl<CTX> Inspector<CTX> for CoinbaseBalanceEVMInspector
+where
+    CTX: ContextTr<Journal: JournalExt>,
+{
+    fn step(&mut self, interpreter: &mut Interpreter, _context: &mut CTX) {
+        if self.balance_read.load(Ordering::Relaxed) {
+            return
+        }
+
+        match interpreter.bytecode.opcode() {
+            opcode::BALANCE => {
+                if let Ok(addr) = interpreter.stack.peek(0) {
+                    if Address::from_word(B256::from(addr.to_be_bytes())) == self.coinbase {
+                        self.balance_read.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            opcode::SELFBALANCE => {
+                if interpreter.input.target_address == self.coinbase {
+                    self.balance_read.store(true, Ordering::Relaxed);
+                }
+            }
+            _ => (),
+        }
     }
 }
 
