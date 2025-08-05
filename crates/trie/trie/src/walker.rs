@@ -170,24 +170,22 @@ impl<C: TrieCursor, K: AddedRemovedKeys + Default> TrieWalker<C, K> {
         let old = self.can_skip_current_node;
         self.can_skip_current_node = self.stack.last().is_some_and(|node| {
             // TODO doc
-            let sole_nonremoved_sibling_has_changes =
+            let key_is_only_nonremoved_child =
                 self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
-                    node.sole_nonremoved_full_key(added_removed_keys).is_some_and(
-                        |sibling_full_key| {
-                            let res = self.changes.contains(&sibling_full_key);
-                            trace!(
-                                target: "trie::walker",
-                                only_sibling_has_changes = res,
-                                ?sibling_full_key,
-                                "Checked for only sibling with changes",
-                            );
-                            res
-                        },
-                    )
+                    node.key_is_only_nonremoved_child(added_removed_keys)
                 });
+
+            let _full_key = node.full_key();
+            trace!(
+                target: "trie::walker",
+                ?key_is_only_nonremoved_child,
+                ?_full_key,
+                "Checked for only nonremoved child",
+            );
+
             !self.changes.contains(node.full_key()) &&
                 node.hash_flag() &&
-                !sole_nonremoved_sibling_has_changes
+                !key_is_only_nonremoved_child
         });
         trace!(
             target: "trie::walker",

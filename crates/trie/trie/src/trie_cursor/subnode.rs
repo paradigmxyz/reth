@@ -110,6 +110,19 @@ impl CursorSubNode {
         })
     }
 
+    /// TODO doc
+    pub fn key_is_only_nonremoved_child<K: AddedRemovedKeys>(
+        &self,
+        added_removed_keys: &K,
+    ) -> bool {
+        self.position.as_child().zip(self.node.as_ref()).is_some_and(|(nibble, node)| {
+            let full_key = self.full_key();
+            let removed_mask = added_removed_keys.get_removed_mask(full_key);
+            let nonremoved_mask = !removed_mask & node.state_mask;
+            nonremoved_mask.count_ones() == 1 && nonremoved_mask.is_bit_set(nibble)
+        })
+    }
+
     /// Updates the full key by replacing or appending a child nibble based on the old subnode
     /// position.
     #[inline]
