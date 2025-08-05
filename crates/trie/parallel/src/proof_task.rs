@@ -25,7 +25,7 @@ use reth_trie::{
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
 use reth_trie_common::{
-    added_removed_keys::AddedRemovedKeysSet,
+    added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -268,6 +268,8 @@ where
         );
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
+        let multi_added_removed_keys = input.multi_added_removed_keys.unwrap_or_default();
+        let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
 
         let span = tracing::trace_span!(
             target: "trie::proof_task",
@@ -281,6 +283,7 @@ where
 
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
+
         let raw_proof_result = StorageProof::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
@@ -288,7 +291,7 @@ where
         )
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
-        .with_added_removed_keys(input.added_removed_keys)
+        .with_added_removed_keys(added_removed_keys)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
@@ -430,7 +433,7 @@ pub struct StorageProofInput {
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    added_removed_keys: Option<AddedRemovedKeysSet>,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl StorageProofInput {
@@ -441,14 +444,14 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
-        added_removed_keys: Option<AddedRemovedKeysSet>,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
         Self {
             hashed_address,
             prefix_set,
             target_slots,
             with_branch_node_masks,
-            added_removed_keys,
+            multi_added_removed_keys,
         }
     }
 }

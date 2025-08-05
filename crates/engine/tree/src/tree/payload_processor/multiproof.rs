@@ -305,7 +305,7 @@ struct StorageMultiproofInput<Factory> {
     proof_targets: B256Set,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
-    added_removed_keys: Arc<MultiAddedRemovedKeys>,
+    multi_added_removed_keys: Arc<MultiAddedRemovedKeys>,
 }
 
 impl<Factory> StorageMultiproofInput<Factory> {
@@ -327,7 +327,7 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
-    added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl<Factory> MultiproofInput<Factory> {
@@ -439,7 +439,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            added_removed_keys,
+            multi_added_removed_keys,
         } = storage_multiproof_input;
 
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
@@ -463,7 +463,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .with_added_removed_keys(Some(added_removed_keys))
+            .with_multi_added_removed_keys(Some(multi_added_removed_keys))
             .decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -511,7 +511,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            added_removed_keys,
+            multi_added_removed_keys,
         } = multiproof_input;
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
@@ -525,7 +525,6 @@ where
                 ?proof_targets,
                 account_targets,
                 storage_targets,
-                ?added_removed_keys,
                 ?source,
                 "Starting multiproof calculation",
             );
@@ -539,7 +538,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .with_added_removed_keys(added_removed_keys)
+            .with_multi_added_removed_keys(multi_added_removed_keys)
             .decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -643,7 +642,7 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Tracks keys which have been added and removed throughout the entire block.
-    added_removed_keys: MultiAddedRemovedKeys,
+    multi_added_removed_keys: MultiAddedRemovedKeys,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -674,7 +673,7 @@ where
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            added_removed_keys: Default::default(),
+            multi_added_removed_keys: Default::default(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -714,7 +713,7 @@ where
                     proof_targets: proof_targets_chunk,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    added_removed_keys: None,
+                    multi_added_removed_keys: None,
                 }
                 .into(),
             );
@@ -805,12 +804,12 @@ where
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         // Update removed keys based on the state update.
-        self.added_removed_keys.update_with_state(&hashed_state_update);
+        self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
-            .partition_by_targets(&self.fetched_proof_targets, &self.added_removed_keys);
+            .partition_by_targets(&self.fetched_proof_targets, &self.multi_added_removed_keys);
 
         let mut state_updates = 0;
         // If there are any accounts or storage slots that we already fetched the proofs for,
@@ -823,15 +822,15 @@ where
             state_updates += 1;
         }
 
-        // Clone+Arc AddedRemovedKeys for sharing with the spawned multiproof tasks
-        let added_removed_keys = Arc::new(self.added_removed_keys.clone());
+        // Clone+Arc MultiAddedRemovedKeys for sharing with the spawned multiproof tasks
+        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         // Process state updates in chunks.
         let mut chunks = 0;
         let mut spawned_proof_targets = MultiProofTargets::default();
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             let proof_targets =
-                get_proof_targets(&chunk, &self.fetched_proof_targets, &self.added_removed_keys);
+                get_proof_targets(&chunk, &self.fetched_proof_targets, &multi_added_removed_keys);
             spawned_proof_targets.extend_ref(&proof_targets);
 
             self.multiproof_manager.spawn_or_queue(
@@ -842,7 +841,7 @@ where
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    added_removed_keys: Some(added_removed_keys.clone()),
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
                 }
                 .into(),
             );
@@ -1110,7 +1109,7 @@ where
 fn get_proof_targets(
     state_update: &HashedPostState,
     fetched_proof_targets: &MultiProofTargets,
-    added_removed_keys: &MultiAddedRemovedKeys,
+    multi_added_removed_keys: &MultiAddedRemovedKeys,
 ) -> MultiProofTargets {
     let mut targets = MultiProofTargets::default();
 
@@ -1124,13 +1123,13 @@ fn get_proof_targets(
     // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
         let fetched = fetched_proof_targets.get(hashed_address);
-        let storage_added_removed_keys = added_removed_keys.get_storage(hashed_address);
+        let storage_added_removed_keys = multi_added_removed_keys.get_storage(hashed_address);
         let mut changed_slots = storage
             .storage
             .keys()
             .filter(|slot| {
                 !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_removed(slot)
+                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 

@@ -56,7 +56,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
@@ -78,7 +78,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
-            added_removed_keys: None,
+            multi_added_removed_keys: None,
             storage_proof_task_handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
@@ -91,13 +91,13 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         self
     }
 
-    /// Configure the `ParallelProof` with an [`AddedRemovedKeys`], allowing for retaining extra
-    /// proofs needed to add and remove leaf nodes from the tries.
-    pub fn with_added_removed_keys(
+    /// Configure the `ParallelProof` with a [`MultiAddedRemovedKeys`], allowing for retaining
+    /// extra proofs needed to add and remove leaf nodes from the tries.
+    pub fn with_multi_added_removed_keys(
         mut self,
-        added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
-        self.added_removed_keys = added_removed_keys;
+        self.multi_added_removed_keys = multi_added_removed_keys;
         self
     }
 }
@@ -114,15 +114,12 @@ where
         prefix_set: PrefixSet,
         target_slots: B256Set,
     ) -> Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>> {
-        let storage_removed_keys =
-            self.added_removed_keys.as_ref().map(|keys| keys.get_storage(&hashed_address));
-
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
             target_slots,
             self.collect_branch_node_masks,
-            storage_removed_keys,
+            self.multi_added_removed_keys.clone(),
         );
 
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -239,7 +236,7 @@ where
         );
 
         let accounts_added_removed_keys =
-            self.added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+            self.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
 
         // Create the walker.
         let walker = TrieWalker::<_>::state_trie(

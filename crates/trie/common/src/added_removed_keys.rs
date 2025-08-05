@@ -26,7 +26,7 @@ impl AddedRemovedKeysSet {
     }
 }
 
-impl AddedRemovedKeys for AddedRemovedKeysSet {
+impl AddedRemovedKeys for &AddedRemovedKeysSet {
     fn is_prefix_added(&self, _prefix: &Nibbles) -> bool {
         true
     }
@@ -90,13 +90,13 @@ impl MultiAddedRemovedKeys {
         }
     }
 
-    /// Returns a [`AddedRemovedKeysSet`] for the storage trie of a particular account.
-    pub fn get_storage(&self, hashed_address: &B256) -> AddedRemovedKeysSet {
-        self.storages.get(hashed_address).cloned().unwrap_or_default()
+    /// Returns a [`AddedRemovedKeysSet`] for the storage trie of a particular account, if any.
+    pub fn get_storage(&self, hashed_address: &B256) -> Option<&AddedRemovedKeysSet> {
+        self.storages.get(hashed_address)
     }
 
     /// Returns an [`AddedRemovedKeysSet`] for tracking account-level changes.
-    pub fn get_accounts(&self) -> AddedRemovedKeysSet {
-        self.account.clone()
+    pub fn get_accounts(&self) -> &AddedRemovedKeysSet {
+        &self.account
     }
 }

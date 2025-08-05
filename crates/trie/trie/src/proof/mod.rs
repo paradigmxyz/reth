@@ -282,7 +282,7 @@ impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
-    K: AddedRemovedKeys + Clone,
+    K: AddedRemovedKeys + Copy,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
@@ -311,10 +311,10 @@ where
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, self.prefix_set.freeze())
-            .with_added_removed_keys(self.added_removed_keys.clone());
+            .with_added_removed_keys(self.added_removed_keys);
 
         let retainer = ProofRetainer::from_iter(target_nibbles)
-            .with_added_removed_keys(self.added_removed_keys.clone());
+            .with_added_removed_keys(self.added_removed_keys);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
