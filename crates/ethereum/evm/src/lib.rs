@@ -26,7 +26,7 @@ use alloy_evm::{
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{Bytes, U256};
-use alloy_rpc_types_engine::{ExecutionData, PayloadError};
+use alloy_rpc_types_engine::ExecutionData;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
@@ -34,8 +34,8 @@ use reth_evm::{
     precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory,
     ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TransactionEnv,
 };
-use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SignedTransaction, TxTy};
+use reth_storage_errors::any::AnyError;
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -352,11 +352,10 @@ where
 
     fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
         payload.payload.transactions().clone().into_iter().map(|tx| {
-            let tx = TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref())
-                .map_err(Into::into)
-                .map_err(PayloadError::Decode)?;
-            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
-            Ok::<_, NewPayloadError>(tx.with_signer(signer))
+            let tx =
+                TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
+            let signer = tx.try_recover().map_err(AnyError::new)?;
+            Ok::<_, AnyError>(tx.with_signer(signer))
         })
     }
 }

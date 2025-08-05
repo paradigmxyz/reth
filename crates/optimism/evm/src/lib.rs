@@ -17,7 +17,6 @@ use alloy_eips::Decodable2718;
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::U256;
-use alloy_rpc_types_engine::PayloadError;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types_engine::OpExecutionData;
@@ -29,10 +28,10 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
-use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{
     NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, TxTy, WithEncoded,
 };
+use reth_storage_errors::any::AnyError;
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -287,10 +286,9 @@ where
     ) -> impl ExecutableTxIterator<Self> {
         payload.payload.transactions().clone().into_iter().map(|encoded| {
             let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
-                .map_err(Into::into)
-                .map_err(PayloadError::Decode)?;
-            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
-            Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+                .map_err(AnyError::new)?;
+            let signer = tx.try_recover().map_err(AnyError::new)?;
+            Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
         })
     }
 }
