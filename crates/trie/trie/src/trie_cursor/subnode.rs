@@ -111,14 +111,21 @@ impl CursorSubNode {
     }
 
     /// TODO doc
-    pub fn key_is_only_nonremoved_child<K: AddedRemovedKeys>(
+    pub fn full_key_is_only_nonremoved_child<K: AddedRemovedKeys>(
         &self,
         added_removed_keys: &K,
     ) -> bool {
         self.position.as_child().zip(self.node.as_ref()).is_some_and(|(nibble, node)| {
-            let full_key = self.full_key();
-            let removed_mask = added_removed_keys.get_removed_mask(full_key);
+            let removed_mask = added_removed_keys.get_removed_mask(&self.key);
             let nonremoved_mask = !removed_mask & node.state_mask;
+            tracing::trace!(
+                target: "trie::walker",
+                key = ?self.key,
+                ?removed_mask,
+                ?nonremoved_mask,
+                ?nibble,
+                "Checking key_is_only_nonremoved_node",
+            );
             nonremoved_mask.count_ones() == 1 && nonremoved_mask.is_bit_set(nibble)
         })
     }

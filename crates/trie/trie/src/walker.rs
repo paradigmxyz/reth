@@ -172,7 +172,7 @@ impl<C: TrieCursor, K: AddedRemovedKeys + Default> TrieWalker<C, K> {
             // TODO doc
             let key_is_only_nonremoved_child =
                 self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
-                    node.key_is_only_nonremoved_child(added_removed_keys)
+                    node.full_key_is_only_nonremoved_child(added_removed_keys)
                 });
 
             let _full_key = node.full_key();
