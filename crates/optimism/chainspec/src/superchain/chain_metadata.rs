@@ -222,6 +222,8 @@ mod tests {
         assert_eq!(value.get("isthmusTime").unwrap(), 1746806401);
         assert_eq!(value.get("jovianTime"), None);
         let optimism = value.get("optimism").unwrap();
+        assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
+        assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
         assert_eq!(optimism.get("eip1559DenominatorCanyon").unwrap(), 250);
     }
 
