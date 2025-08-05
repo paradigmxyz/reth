@@ -173,7 +173,7 @@ where
     C: TrieCursor,
     H: HashedCursor,
     H::Value: Copy,
-    K: AddedRemovedKeys + Default,
+    K: AddedRemovedKeys,
 {
     /// Return the next trie node to be added to the hash builder.
     ///

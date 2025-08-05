@@ -115,7 +115,7 @@ where
         let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = targets.keys().map(Nibbles::unpack).collect::<ProofRetainer>();
+        let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
@@ -282,7 +282,7 @@ impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
-    K: AddedRemovedKeys + Clone + Default + std::fmt::Debug,
+    K: AddedRemovedKeys + Clone,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(

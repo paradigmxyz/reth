@@ -35,7 +35,7 @@ pub struct TrieWalker<C, K = EmptyAddedRemovedKeys> {
     metrics: WalkerMetrics,
 }
 
-impl<C: TrieCursor, K: AddedRemovedKeys + Default> TrieWalker<C, K> {
+impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
     pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         Self::from_stack(
@@ -75,7 +75,7 @@ impl<C: TrieCursor, K: AddedRemovedKeys + Default> TrieWalker<C, K> {
             stack,
             can_skip_current_node: false,
             removed_keys: None,
-            added_removed_keys: Default::default(),
+            added_removed_keys: None,
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };

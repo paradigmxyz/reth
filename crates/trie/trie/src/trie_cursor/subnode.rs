@@ -88,29 +88,10 @@ impl CursorSubNode {
         &self.full_key
     }
 
-    /// Returns None if:
-    /// - Position is a parent
-    /// - There is no branch node
-    /// - The branch node has more than one child not removed according to the [`AddedRemovedKeys`].
-    ///
-    /// Otherwise returns the full path of the branch node's child which is not removed.
-    pub fn sole_nonremoved_full_key<K: AddedRemovedKeys>(
-        &self,
-        added_removed_keys: &K,
-    ) -> Option<Nibbles> {
-        self.position.as_child().zip(self.node.as_ref()).and_then(|(_, node)| {
-            let mut key = self.key;
-            let removed_mask = added_removed_keys.get_removed_mask(&key);
-            let nonremoved_mask = !removed_mask & node.state_mask;
-            (nonremoved_mask.count_ones() == 1).then(|| {
-                let sibling_nibble = nonremoved_mask.trailing_zeros() as u8;
-                key.push(sibling_nibble);
-                key
-            })
-        })
-    }
-
-    /// TODO doc
+    /// Returns true if all of:
+    /// - Position is a child
+    /// - There is a branch node
+    /// - All children except the current are removed according to the [`AddedRemovedKeys`].
     pub fn full_key_is_only_nonremoved_child<K: AddedRemovedKeys>(
         &self,
         added_removed_keys: &K,
@@ -124,7 +105,7 @@ impl CursorSubNode {
                 ?removed_mask,
                 ?nonremoved_mask,
                 ?nibble,
-                "Checking key_is_only_nonremoved_node",
+                "Checking full_key_is_only_nonremoved_node",
             );
             nonremoved_mask.count_ones() == 1 && nonremoved_mask.is_bit_set(nibble)
         })

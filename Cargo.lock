@@ -900,7 +900,6 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.0"
-source = "git+https://github.com/mediocregopher/alloy-rs-trie?branch=mediocregopher%2F17571-leaf-update-removal-debug#dc8ec8309b258a2683796783eb83f55e80a9ffce"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
