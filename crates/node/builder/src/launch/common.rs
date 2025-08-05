@@ -37,7 +37,7 @@ use crate::{
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
-use eyre::{Context, OptionExt};
+use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
@@ -46,15 +46,13 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
-use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
-    args::{DefaultEraHost, InvalidBlockHookType},
+    args::DefaultEraHost,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
@@ -77,7 +75,6 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
-use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
@@ -1077,67 +1074,6 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
 {
-    /// Returns the [`InvalidBlockHook`] to use for the node.
-    pub async fn invalid_block_hook(
-        &self,
-    ) -> eyre::Result<Box<dyn InvalidBlockHook<<T::Types as NodeTypes>::Primitives>>> {
-        let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
-            return Ok(Box::new(NoopInvalidBlockHook::default()))
-        };
-        let healthy_node_rpc_client = self.get_healthy_node_client().await?;
-
-        let output_directory = self.data_dir().invalid_block_hooks();
-        let hooks = hook
-            .iter()
-            .copied()
-            .map(|hook| {
-                let output_directory = output_directory.join(hook.to_string());
-                fs::create_dir_all(&output_directory)?;
-
-                Ok(match hook {
-                    InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
-                        self.blockchain_db().clone(),
-                        self.components().evm_config().clone(),
-                        output_directory,
-                        healthy_node_rpc_client.clone(),
-                    )),
-                    InvalidBlockHookType::PreState | InvalidBlockHookType::Opcode => {
-                        eyre::bail!("invalid block hook {hook:?} is not implemented yet")
-                    }
-                } as Box<dyn InvalidBlockHook<_>>)
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Box::new(InvalidBlockHooks(hooks)))
-    }
-
-    /// Returns an RPC client for the healthy node, if configured in the node config.
-    async fn get_healthy_node_client(
-        &self,
-    ) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
-        let Some(url) = self.node_config().debug.healthy_node_rpc_url.as_ref() else {
-            return Ok(None);
-        };
-
-        let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
-
-        // Verify that the healthy node is running the same chain as the current node.
-        let chain_id = EthApiClient::<
-            alloy_rpc_types::TransactionRequest,
-            alloy_rpc_types::Transaction,
-            alloy_rpc_types::Block,
-            alloy_rpc_types::Receipt,
-            alloy_rpc_types::Header,
-        >::chain_id(&client)
-        .await?
-        .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
-
-        if chain_id.to::<u64>() != self.chain_id().id() {
-            eyre::bail!("invalid chain id for healthy node: {chain_id}")
-        }
-
-        Ok(Some(client))
-    }
 }
 
 /// Joins two attachments together, preserving access to both values.

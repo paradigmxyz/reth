@@ -45,6 +45,13 @@ impl TriePrefixSetsMut {
             destroyed_accounts: self.destroyed_accounts,
         }
     }
+
+    /// Clears the prefix sets and destroyed accounts map.
+    pub fn clear(&mut self) {
+        self.destroyed_accounts.clear();
+        self.storage_prefix_sets.clear();
+        self.account_prefix_set.clear();
+    }
 }
 
 /// Collection of trie prefix sets.

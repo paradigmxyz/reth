@@ -155,6 +155,7 @@ members = [
     "examples/exex-hello-world",
     "examples/exex-subscription",
     "examples/exex-test",
+    "examples/full-contract-state",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -510,12 +511,12 @@ alloy-transport-ws = { version = "1.0.23", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.16", default-features = false }
-alloy-op-hardforks = "0.2.2"
-op-alloy-rpc-types = { version = "0.18.12", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.18.12", default-features = false }
-op-alloy-network = { version = "0.18.12", default-features = false }
-op-alloy-consensus = { version = "0.18.12", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.18.12", default-features = false }
+alloy-op-hardforks = "0.2.13"
+op-alloy-rpc-types = { version = "0.18.14", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.18.14", default-features = false }
+op-alloy-network = { version = "0.18.14", default-features = false }
+op-alloy-consensus = { version = "0.18.14", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.18.14", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc

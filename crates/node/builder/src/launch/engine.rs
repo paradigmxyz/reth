@@ -3,7 +3,7 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
@@ -15,7 +15,7 @@ use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{BasicEngineValidator, TreeConfig},
+    tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -190,31 +190,30 @@ where
             jwt_secret,
             engine_events: event_sender.clone(),
         };
-        let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
+        let validator_builder = add_ons.engine_validator_builder();
 
+        // Build the engine validator with all required components
+        let engine_validator = validator_builder
+            .clone()
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
+            .await?;
+
+        // Create the consensus engine stream with optional reorg
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
             .maybe_reorg(
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
-                engine_payload_validator.clone(),
+                || validator_builder.build_tree_validator(&add_ons_ctx, engine_tree_config.clone()),
                 node_config.debug.reorg_frequency,
                 node_config.debug.reorg_depth,
             )
+            .await?
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
-
-        let engine_validator = BasicEngineValidator::new(
-            ctx.blockchain_db().clone(),
-            consensus.clone(),
-            ctx.components().evm_config().clone(),
-            engine_payload_validator,
-            engine_tree_config.clone(),
-            ctx.invalid_block_hook().await?,
-        );
 
         let mut engine_service = EngineService::new(
             consensus.clone(),
@@ -245,11 +244,11 @@ where
 
         ctx.task_executor().spawn_critical(
             "events task",
-            node::handle_events(
+            Box::pin(node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            ),
+            )),
         );
 
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
@@ -272,7 +271,7 @@ where
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical("consensus engine", async move {
+        ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
@@ -335,7 +334,7 @@ where
             }
 
             let _ = exit.send(res);
-        });
+        }));
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),

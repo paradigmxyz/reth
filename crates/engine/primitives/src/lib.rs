@@ -37,7 +37,7 @@ mod event;
 pub use event::*;
 
 mod invalid_block_hook;
-pub use invalid_block_hook::InvalidBlockHook;
+pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 
 pub mod config;
 pub use config::*;
@@ -104,8 +104,8 @@ pub trait EngineTypes:
         + 'static;
 }
 
-/// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: PayloadTypes>: PayloadValidator<Types> {
+/// Type that validates the payloads processed by the engine API.
+pub trait EngineApiValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(

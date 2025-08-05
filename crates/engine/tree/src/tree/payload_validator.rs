@@ -9,18 +9,19 @@ use crate::tree::{
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, PayloadHandle, PersistenceState,
-    PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_evm::{block::BlockExecutor, Evm};
+use alloy_eips::NumHash;
+use alloy_evm::Evm;
 use alloy_primitives::B256;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
-use reth_errors::ProviderResult;
-use reth_evm::{ConfigureEvm, SpecFor};
+use reth_errors::{BlockExecutionError, ProviderResult};
+use reth_evm::{block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, SpecFor};
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
@@ -36,7 +37,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -232,26 +233,23 @@ where
             };
         }
 
+        let parent_hash = block.parent_hash();
         let block_num_hash = block.num_hash();
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
-        // validate block consensus rules
-        ensure_ok!(self.validate_block_inner(&block));
-
-        trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
+        trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(block.parent_hash(), ctx.state()))
+            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err((
-                InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
-                    block.parent_hash().into(),
-                )),
+                InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(parent_hash.into())),
                 block,
             ))
         };
 
-        // now validate against the parent
+        let state_provider = ensure_ok!(provider_builder.build());
+
+        // fetch parent block
         let Some(parent_block) =
             ensure_ok!(self.sealed_header_by_hash(block.parent_hash(), ctx.state()))
         else {
@@ -263,14 +261,26 @@ where
             ))
         };
 
-        if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+        // todo: move to a separate task
         {
-            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err((e.into(), block))
+            trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
+            // validate block consensus rules
+            ensure_ok!(self.validate_block_inner(&block));
+
+            // now validate against the parent
+            if let Err(e) =
+                self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+            {
+                warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+                return Err((e.into(), block))
+            }
         }
 
-        let state_provider = ensure_ok!(provider_builder.build());
+        let env = ExecutionEnv {
+            evm_env: self.evm_config.evm_env(block.header()),
+            hash: block.hash(),
+            parent_hash: block.parent_hash(),
+        };
 
         // We only run the parallel state root if we are not currently persisting any blocks or
         // persisting blocks that are all ancestors of the one we are executing.
@@ -310,20 +320,27 @@ where
         );
 
         // use prewarming background task
-        let header = block.clone_sealed_header();
-        let txs = block.clone_transactions_recovered().collect();
+        let txs = block
+            .clone_transactions_recovered()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(Ok::<_, Infallible>);
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
                 ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
+
+            // get allocated trie input if it exists
+            let allocated_trie_input = self.payload_processor.take_trie_input();
 
             // Compute trie input
             let trie_input_start = Instant::now();
             let res = self.compute_trie_input(
                 persisting_kind,
                 ensure_ok!(consistent_view.provider_ro()),
-                block.header().parent_hash(),
+                parent_hash,
                 ctx.state(),
+                allocated_trie_input,
             );
             let trie_input = match res {
                 Ok(val) => val,
@@ -340,7 +357,7 @@ where
             // proof.
             if trie_input.prefix_sets.is_empty() {
                 self.payload_processor.spawn(
-                    header,
+                    env.clone(),
                     txs,
                     provider_builder,
                     consistent_view,
@@ -350,10 +367,10 @@ where
             } else {
                 debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
-                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
+                self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
             }
         } else {
-            self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
+            self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
         };
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -367,13 +384,11 @@ where
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+                ensure_ok!(self.execute_block(&state_provider, env, &block, &mut handle));
             state_provider.record_total_latency();
             (output, execution_finish)
         } else {
-            let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
-            (output, execution_finish)
+            ensure_ok!(self.execute_block(&state_provider, env, &block, &mut handle))
         };
 
         // after executing the block we can stop executing transactions
@@ -546,19 +561,24 @@ where
     }
 
     /// Executes a block with the given state provider
-    fn execute_block<S: StateProvider>(
+    fn execute_block<S: StateProvider, Err: core::error::Error + Send + Sync + 'static>(
         &mut self,
         state_provider: S,
+        env: ExecutionEnv<Evm>,
         block: &RecoveredBlock<N::Block>,
-        handle: &PayloadHandle,
+        handle: &mut PayloadHandle<impl OwnedExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind> {
-        debug!(target: "engine::tree", block=?block.num_hash(), "Executing block");
+        let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
+        debug!(target: "engine::tree", block=?num_hash, "Executing block");
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
             .without_state_clear()
             .build();
-        let mut executor = self.evm_config.executor_for_block(&mut db, block);
+
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let ctx = self.evm_config.context_for_block(block.sealed_block());
+        let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
@@ -570,21 +590,22 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    *self.evm_config.evm_env(block.header()).spec_id(),
+                    *env.evm_env.spec_id(),
                     Some(metrics),
                 )
             });
         }
 
         let execution_start = Instant::now();
+        let state_hook = Box::new(handle.state_hook());
         let output = self.metrics.executor.execute_metered(
             executor,
-            block,
-            Box::new(handle.state_hook()),
+            handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            state_hook,
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block.number(), "Executed block");
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
         Ok((output, execution_finish))
     }
 
@@ -610,6 +631,7 @@ where
             consistent_view.provider_ro()?,
             parent_hash,
             state,
+            None,
         )?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
@@ -706,8 +728,10 @@ where
         provider: TP,
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
+        allocated_trie_input: Option<TrieInput>,
     ) -> ProviderResult<TrieInput> {
-        let mut input = TrieInput::default();
+        // get allocated trie input or use a default trie input
+        let mut input = allocated_trie_input.unwrap_or_default();
 
         let best_block_number = provider.best_block_number()?;
 
