@@ -695,23 +695,30 @@ where
             state_hook,
             |db, tx_hash| {
                 tx_cache.get(&tx_hash).and_then(|res| {
-                    let (traces, result) = res.value();
+                    let (traces,  result, coinbase_deltas) = res.value();
 
                     for trace in traces {
                         let matches = match trace {
                             AccessRecord::Account { address, result } => {
-                                let db_account = db.basic(*address);
-                                let matches = if let Ok(account) = &db_account {
-                                    account == result
-                                } else {
-                                    false
-                                };
+                                match coinbase_deltas {
+                                    Some((coinbase, _, _)) if address == coinbase => {
+                                        true
+                                    }
+                                    _ => {
+                                        let db_account = db.basic(*address);
+                                        let matches = if let Ok(account) = &db_account {
+                                            account == result
+                                        } else {
+                                            false
+                                        };
 
-                                if !matches {
-                                    debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_account, "Can't re-use cached execution result");
+                                        if !matches {
+                                            debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_account, "Can't re-use cached execution result");
+                                        }
+
+                                        matches
+                                    }
                                 }
-
-                                matches
                             }
                             AccessRecord::Storage { address, index, result } => {
                                 let db_storage = db.storage(*address, *index);
@@ -734,8 +741,21 @@ where
                         }
                     }
 
-                    debug!(target: "engine::tree", ?tx_hash, "Re-using cached execution result");
-                    Some(result.clone())
+                    let mut result = result.clone();
+
+                    if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) = coinbase_deltas {
+                        if let Some(coinbase_account) = result.state.get_mut(coinbase) {
+                            if let Ok(Some(coinbase_db)) = db.basic(*coinbase) {
+                                coinbase_account.info.nonce = coinbase_db.nonce + coinbase_nonce_delta;
+                                coinbase_account.info.balance = coinbase_db.balance + coinbase_balance_delta;
+
+                                debug!(target: "engine::tree", ?tx_hash, "Re-using cached execution result");
+                                return Some(result)
+                            }
+                        }
+                    }
+
+                    None
                 })
             },
         )?;
