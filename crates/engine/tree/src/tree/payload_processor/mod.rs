@@ -10,7 +10,7 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{Address, TxHash, B256, U256};
 use dashmap::DashMap;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
@@ -53,8 +53,12 @@ pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
 
-pub type TxCache<Evm> =
-    Arc<DashMap<TxHash, (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>)>>;
+pub type TxCache<Evm> = Arc<
+    DashMap<
+        TxHash,
+        (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>, Option<(Address, u64, U256)>),
+    >,
+>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
