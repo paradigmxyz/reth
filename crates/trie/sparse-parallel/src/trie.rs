@@ -2454,7 +2454,7 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     path.get_byte_unchecked(0) as usize
 }
 
-/// Used by lower subtries to communicate updates to the the top-level [`SparseTrieUpdates`] set.
+/// Used by lower subtries to communicate updates to the top-level [`SparseTrieUpdates`] set.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum SparseTrieUpdatesAction {
     /// Remove the path from the `updated_nodes`, if it was present, and add it to `removed_nodes`.
