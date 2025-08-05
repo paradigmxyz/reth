@@ -1,11 +1,14 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        config::EthConfigSpec, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
+        FullEthApi,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListResult, eip7910::EthConfig, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
@@ -53,6 +56,10 @@ pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: 
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
+
+    /// Returns an object with data about recent and upcoming fork configurations.
+    #[method(name = "config")]
+    fn config(&self) -> RpcResult<EthConfig>;
 
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
@@ -403,6 +410,12 @@ where
     fn syncing(&self) -> RpcResult<SyncStatus> {
         trace!(target: "rpc::eth", "Serving eth_syncing");
         EthApiSpec::sync_status(self).to_rpc_result()
+    }
+
+    /// Handler for: `eth_config`
+    fn config(&self) -> RpcResult<EthConfig> {
+        trace!(target: "rpc::eth", "Serving eth_config");
+        EthConfigSpec::chain_config(self).to_rpc_result()
     }
 
     /// Handler for: `eth_coinbase`

@@ -3,7 +3,7 @@
 use alloy_primitives::Bytes;
 use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
-use revm::precompile::{PrecompileOutput, PrecompileResult};
+use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use schnellru::LruMap;
 use std::{
@@ -148,8 +148,12 @@ where
         spec_id: S,
         metrics: Option<CachedPrecompileMetrics>,
     ) -> DynPrecompile {
+        let precompile_id = precompile.precompile_id().clone();
         let wrapped = Self::new(precompile, cache, spec_id, metrics);
-        move |input: PrecompileInput<'_>| -> PrecompileResult { wrapped.call(input) }.into()
+        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
+            wrapped.call(input)
+        })
+            .into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
@@ -181,6 +185,10 @@ impl<S> Precompile for CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
+    fn precompile_id(&self) -> &PrecompileId {
+        self.precompile.precompile_id()
+    }
+
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         let key = CacheKeyRef::new(self.spec_id.clone(), input.data);
 
@@ -265,10 +273,11 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = |_input: PrecompileInput<'_>| -> PrecompileResult {
-            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
-        }
-        .into();
+        let dyn_precompile: DynPrecompile =
+            (PrecompileId::custom("custom"), |_input: PrecompileInput<'_>| -> PrecompileResult {
+                Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
+            })
+                .into();
 
         let cache =
             CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
@@ -300,7 +309,7 @@ mod tests {
         let mut cache_map = PrecompileCacheMap::default();
 
         // create the first precompile with a specific output
-        let precompile1: DynPrecompile = {
+        let precompile1: DynPrecompile = (PrecompileId::custom("custom"), {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
@@ -309,11 +318,11 @@ mod tests {
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
                 })
             }
-        }
-        .into();
+        })
+            .into();
 
         // create the second precompile with a different output
-        let precompile2: DynPrecompile = {
+        let precompile2: DynPrecompile = (PrecompileId::custom("custom"), {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
@@ -322,8 +331,8 @@ mod tests {
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
                 })
             }
-        }
-        .into();
+        })
+            .into();
 
         let wrapped_precompile1 = CachedPrecompile::wrap(
             precompile1,

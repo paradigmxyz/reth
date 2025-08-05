@@ -142,7 +142,7 @@ pub struct EthereumEthApiBuilder;
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec: EthereumHardforks>,
+        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
     EthRpcConverterFor<N>: RpcConvert<

@@ -7,6 +7,7 @@ use alloy_eips::{
     eip1559::BaseFeeParams,
     eip7594,
     eip7840::{self, BlobParams},
+    eip7910::EthBaseForkConfig,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
@@ -28,6 +29,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn chain_id(&self) -> u64 {
         self.chain().id()
     }
+
+    /// Returns fork configuration at specific timestamp.
+    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig>;
 
     /// Get the [`BaseFeeParams`] for the chain at the given block.
     fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams;
@@ -88,6 +92,10 @@ impl EthChainSpec for ChainSpec {
 
     fn chain(&self) -> Chain {
         self.chain
+    }
+
+    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+        self.fork_config_at_timestamp(timestamp)
     }
 
     fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {

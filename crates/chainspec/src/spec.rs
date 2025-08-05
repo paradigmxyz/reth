@@ -16,9 +16,10 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip7910::EthBaseForkConfig,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_primitives::{address, b256, Address, BlockNumber, Bytes, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
 use derive_more::From;
@@ -327,6 +328,19 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns base fork config for specific timestamp.
+    /// Returns [`None`] if no blob params were found for this fork.
+    pub fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+        // Fork config only exists for timestamp-based hardforks.
+        let head = Head { timestamp, number: u64::MAX, ..Default::default() };
+        Some(EthBaseForkConfig {
+            chain_id: alloy_primitives::U64::from(self.chain.id()),
+            activation_time: timestamp,
+            blob_schedule: self.blob_params_at_timestamp(timestamp)?,
+            fork_id: Bytes::from(self.fork_id(&head).hash.0),
+        })
     }
 
     /// Returns `true` if this chain contains Ethereum configuration.
@@ -768,6 +782,19 @@ impl Hardforks for ChainSpec {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.hardforks.forks_iter()
+    }
+
+    fn fork_timestamps(&self) -> Vec<u64> {
+        let mut timestamp_forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, cond)| cond.as_timestamp())
+            .chain(self.blob_params.scheduled.iter().map(|(activation, _)| *activation))
+            .collect::<Vec<_>>();
+        // sort because bpo can happen in-between
+        timestamp_forks.sort();
+        timestamp_forks.dedup();
+        timestamp_forks
     }
 
     fn fork_id(&self, head: &Head) -> ForkId {

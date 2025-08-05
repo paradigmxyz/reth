@@ -59,7 +59,7 @@ pub use reth_optimism_forks::*;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::{proofs::storage_root_unhashed, BlockHeader, Header};
-use alloy_eips::eip7840::BlobParams;
+use alloy_eips::{eip7840::BlobParams, eip7910::EthBaseForkConfig};
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
@@ -236,6 +236,10 @@ impl EthChainSpec for OpChainSpec {
         self.inner.chain()
     }
 
+    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+        self.inner.fork_config_at_timestamp(timestamp)
+    }
+
     fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_block(block_number)
     }
@@ -305,6 +309,10 @@ impl Hardforks for OpChainSpec {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
+    }
+
+    fn fork_timestamps(&self) -> Vec<u64> {
+        self.inner.fork_timestamps()
     }
 
     fn fork_id(&self, head: &Head) -> ForkId {

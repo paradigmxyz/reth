@@ -17,6 +17,7 @@
 pub mod block;
 pub mod blocking_task;
 pub mod call;
+pub mod config;
 pub mod estimate;
 pub mod fee;
 pub mod pending_block;
@@ -39,7 +40,7 @@ pub use state::{EthState, LoadState};
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction};
 
-use crate::FullEthApiTypes;
+use crate::{helpers::config::EthConfigSpec, FullEthApiTypes};
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt: LoadTransaction + LoadBlock + SpawnBlocking + Trace + Call {}
@@ -52,6 +53,7 @@ impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + Trace + Call {}
 pub trait FullEthApi:
     FullEthApiTypes
     + EthApiSpec
+    + EthConfigSpec
     + EthTransactions
     + EthBlocks
     + EthState
@@ -65,6 +67,7 @@ pub trait FullEthApi:
 impl<T> FullEthApi for T where
     T: FullEthApiTypes
         + EthApiSpec
+        + EthConfigSpec
         + EthTransactions
         + EthBlocks
         + EthState

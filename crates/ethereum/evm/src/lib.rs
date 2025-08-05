@@ -281,6 +281,12 @@ where
             withdrawals: attributes.withdrawals.map(Cow::Owned),
         }
     }
+
+    fn precompiles_for_timestamp(&self, timestamp: u64) -> PrecompilesMap {
+        let chain_spec = self.chain_spec();
+        let spec_id = revm_spec_by_timestamp_and_block_number(chain_spec, timestamp, u64::MAX);
+        self.evm_factory().create_precompiles(spec_id)
+    }
 }
 
 #[cfg(test)]

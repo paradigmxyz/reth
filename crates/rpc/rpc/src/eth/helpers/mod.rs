@@ -7,6 +7,7 @@ pub mod types;
 
 mod block;
 mod call;
+mod config;
 mod fees;
 mod pending_block;
 mod receipt;
