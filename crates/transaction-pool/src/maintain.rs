@@ -64,6 +64,16 @@ pub struct MaintainPoolConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_local_exemptions: bool,
+
+    /// Whether to discard reorged transactions instead of re-injecting them.
+    ///
+    /// When `true`, transactions from reorged blocks are permanently discarded.
+    /// When `false` (default), they are re-added to the transaction pool.
+    ///
+    /// Use cases:
+    /// - `true`: Custom chains with different validity rules or mempool policies
+    /// - `false`: Standard Ethereum behavior, preserves all potentially valid transactions
+    pub discard_reorged_transactions: bool,
 }
 
 impl Default for MaintainPoolConfig {
@@ -73,6 +83,7 @@ impl Default for MaintainPoolConfig {
             max_reload_accounts: 100,
             max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             no_local_exemptions: false,
+            discard_reorged_transactions: false,
         }
     }
 }
@@ -137,7 +148,13 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     Tasks: TaskSpawner + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
-    let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
+    let MaintainPoolConfig {
+        max_update_depth,
+        max_reload_accounts,
+        max_tx_lifetime,
+        no_local_exemptions,
+        discard_reorged_transactions,
+    } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
         let latest = SealedHeader::seal_slow(latest);
@@ -411,14 +428,22 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 };
                 pool.on_canonical_state_change(update);
 
-                // all transactions that were mined in the old chain but not in the new chain need
-                // to be re-injected
+                // Handle transactions that were mined in the old chain but not in the new chain.
+                // These transactions need to be re-injected unless configured to discard them.
                 //
                 // Note: we no longer know if the tx was local or external
                 // Because the transactions are not finalized, the corresponding blobs are still in
                 // blob store (if we previously received them from the network)
-                metrics.inc_reinserted_transactions(pruned_old_transactions.len());
-                let _ = pool.add_external_transactions(pruned_old_transactions).await;
+                if discard_reorged_transactions {
+                    debug!(
+                        target: "txpool",
+                        count = pruned_old_transactions.len(),
+                        "Discarding reorged transactions instead of re-injecting"
+                    );
+                } else {
+                    metrics.inc_reinserted_transactions(pruned_old_transactions.len());
+                    let _ = pool.add_external_transactions(pruned_old_transactions).await;
+                }
 
                 // keep track of new mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&new_blocks);
