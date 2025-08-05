@@ -700,18 +700,32 @@ where
                     for trace in traces {
                         let matches = match trace {
                             AccessRecord::Account { address, result } => {
-                                if let Ok(account) = db.basic(*address) {
-                                    &account == result
+                                let db_account = db.basic(*address);
+                                let matches = if let Ok(account) = &db_account {
+                                    account == result
                                 } else {
                                     false
+                                };
+
+                                if !matches {
+                                    debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_account, "Can't re-use cached execution result");
                                 }
+
+                                matches
                             }
                             AccessRecord::Storage { address, index, result } => {
-                                if let Ok(storage) = db.storage(*address, *index) {
-                                    &storage == result
+                                let db_storage = db.storage(*address, *index);
+                                let matches = if let Ok(storage) = &db_storage {
+                                    storage == result
                                 } else {
                                     false
+                                };
+
+                                if !matches {
+                                    debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_storage, "Can't re-use cached execution result");
                                 }
+
+                                matches
                             }
                         };
 
@@ -720,6 +734,7 @@ where
                         }
                     }
 
+                    debug!(target: "engine::tree", ?tx_hash, "Re-using cached execution result");
                     Some(result.clone())
                 })
             },
