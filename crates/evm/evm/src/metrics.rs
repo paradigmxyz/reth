@@ -74,6 +74,11 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Counter for number of execution results cached hits when executing the latest block.
+    pub execution_results_cache_hits: Counter,
+    /// The Counter for number of execution results cached misses when executing the latest block.
+    pub execution_results_cache_misses: Counter,
 }
 
 impl ExecutorMetrics {
@@ -132,12 +137,14 @@ impl ExecutorMetrics {
                 if let Some(result) =
                     get_cached_tx_result(executor.evm_mut().db_mut(), *executable_tx.tx().tx_hash())
                 {
+                    self.execution_results_cache_hits.increment(1);
                     executor.execute_transaction_with_cached_result(
                         executable_tx,
                         result,
                         |_| alloy_evm::block::CommitChanges::Yes,
                     )?;
                 } else {
+                    self.execution_results_cache_misses.increment(1);
                     executor.execute_transaction(executable_tx)?;
                 }
             }
