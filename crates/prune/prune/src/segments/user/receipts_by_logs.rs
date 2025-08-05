@@ -274,7 +274,7 @@ mod tests {
         for block in &blocks {
             receipts.reserve_exact(block.body().size());
             for (txi, transaction) in block.body().transactions.iter().enumerate() {
-                let mut receipt = random_receipt(&mut rng, transaction, Some(1));
+                let mut receipt = random_receipt(&mut rng, transaction, Some(1), None);
                 receipt.logs.push(random_log(
                     &mut rng,
                     (txi == (block.transaction_count() - 1)).then_some(deposit_contract_addr),
