@@ -4,6 +4,7 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
+use alloy_trie::proof::{AddedRemovedKeys, EmptyAddedRemovedKeys};
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
@@ -14,7 +15,7 @@ use crate::metrics::WalkerMetrics;
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
 /// if they have not changed.
 #[derive(Debug)]
-pub struct TrieWalker<C> {
+pub struct TrieWalker<C, K = EmptyAddedRemovedKeys> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
     pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
@@ -27,12 +28,14 @@ pub struct TrieWalker<C> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
+    /// TODO doc
+    added_removed_keys: Option<K>,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
     metrics: WalkerMetrics,
 }
 
-impl<C> TrieWalker<C> {
+impl<C: TrieCursor, K: AddedRemovedKeys + Default> TrieWalker<C, K> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
     pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         Self::from_stack(
@@ -72,6 +75,7 @@ impl<C> TrieWalker<C> {
             stack,
             can_skip_current_node: false,
             removed_keys: None,
+            added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };
@@ -85,6 +89,20 @@ impl<C> TrieWalker<C> {
             self.removed_keys = Some(HashSet::default());
         }
         self
+    }
+
+    /// TODO doc
+    pub fn with_added_removed_keys<K2>(self, added_removed_keys: Option<K2>) -> TrieWalker<C, K2> {
+        TrieWalker {
+            cursor: self.cursor,
+            stack: self.stack,
+            can_skip_current_node: self.can_skip_current_node,
+            changes: self.changes,
+            removed_keys: self.removed_keys,
+            added_removed_keys,
+            #[cfg(feature = "metrics")]
+            metrics: self.metrics,
+        }
     }
 
     /// Split the walker into stack and trie updates.
@@ -151,25 +169,25 @@ impl<C> TrieWalker<C> {
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
         self.can_skip_current_node = self.stack.last().is_some_and(|node| {
-            // This case is required to support the `with_leaf_additions_removals` option of the
-            // hash builder's proof retainer. When a branch has two children and one of them has
-            // changes while the other doesn't, it's possible the changed child is a removed leaf,
-            // and the other leaf will still be required in the proof.
-            //
-            // See documentation within the hash builder's proof retainer, specifically within
-            // `retain_branch_proof`, for more details on what this is intended to be handling.
-            let sole_sibling_has_changes =
-                node.sole_sibling_full_key().is_some_and(|sibling_full_key| {
-                    let res = self.changes.contains(&sibling_full_key);
-                    trace!(
-                        target: "trie::walker",
-                        only_sibling_has_changes = res,
-                        ?sibling_full_key,
-                        "Checked for only sibling with changes",
-                    );
-                    res
+            // TODO doc
+            let sole_nonremoved_sibling_has_changes =
+                self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
+                    node.sole_nonremoved_full_key(added_removed_keys).is_some_and(
+                        |sibling_full_key| {
+                            let res = self.changes.contains(&sibling_full_key);
+                            trace!(
+                                target: "trie::walker",
+                                only_sibling_has_changes = res,
+                                ?sibling_full_key,
+                                "Checked for only sibling with changes",
+                            );
+                            res
+                        },
+                    )
                 });
-            !self.changes.contains(node.full_key()) && node.hash_flag() && !sole_sibling_has_changes
+            !self.changes.contains(node.full_key()) &&
+                node.hash_flag() &&
+                !sole_nonremoved_sibling_has_changes
         });
         trace!(
             target: "trie::walker",
@@ -179,9 +197,6 @@ impl<C> TrieWalker<C> {
             "updated skip node flag"
         );
     }
-}
-
-impl<C: TrieCursor> TrieWalker<C> {
     /// Constructs a new [`TrieWalker`] for the state trie.
     pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
         Self::new(
@@ -215,6 +230,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
+            added_removed_keys: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: WalkerMetrics::new(trie_type),
         };

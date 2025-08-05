@@ -1,5 +1,6 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
+use alloy_trie::proof::AddedRemovedKeys;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -90,16 +91,19 @@ impl CursorSubNode {
     /// Returns None if:
     /// - Position is a parent
     /// - There is no branch node
-    /// - The branch node has more than 2 children
+    /// - The branch node has more than one child not removed according to the [`AddedRemovedKeys`].
     ///
-    /// Otherwise returns the full path of the branch node's child which is not the current one.
-    pub fn sole_sibling_full_key(&self) -> Option<Nibbles> {
-        self.position.as_child().zip(self.node.as_ref()).and_then(|(nibble, node)| {
-            let mut mask = node.state_mask;
-            mask.unset_bit(nibble);
-            (mask.count_ones() == 1).then(|| {
-                let sibling_nibble = mask.trailing_zeros() as u8;
-                let mut key = self.key;
+    /// Otherwise returns the full path of the branch node's child which is not removed.
+    pub fn sole_nonremoved_full_key<K: AddedRemovedKeys>(
+        &self,
+        added_removed_keys: &K,
+    ) -> Option<Nibbles> {
+        self.position.as_child().zip(self.node.as_ref()).and_then(|(_, node)| {
+            let mut key = self.key;
+            let removed_mask = added_removed_keys.get_removed_mask(&key);
+            let nonremoved_mask = !removed_mask & node.state_mask;
+            (nonremoved_mask.count_ones() == 1).then(|| {
+                let sibling_nibble = nonremoved_mask.trailing_zeros() as u8;
                 key.push(sibling_nibble);
                 key
             })

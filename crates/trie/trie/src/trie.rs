@@ -159,7 +159,7 @@ where
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
-                let walker = TrieWalker::state_trie_from_stack(
+                let walker = TrieWalker::<_>::state_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
@@ -411,7 +411,7 @@ where
 
         let mut tracker = TrieTracker::default();
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+        let walker = TrieWalker::<_>::storage_trie(trie_cursor, self.prefix_set)
             .with_deletions_retained(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);

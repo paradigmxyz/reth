@@ -241,15 +241,16 @@ where
             &self.state_sorted,
         );
 
+        let accounts_added_removed_keys =
+            self.added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
         // Create the walker.
-        let walker = TrieWalker::state_trie(
+        let walker = TrieWalker::<_>::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
+        .with_added_removed_keys(accounts_added_removed_keys.clone())
         .with_deletions_retained(true);
-
-        let accounts_added_removed_keys =
-            self.added_removed_keys.as_ref().map(|keys| keys.get_accounts());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets
