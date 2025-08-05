@@ -6,7 +6,7 @@ use crate::{
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     ops::{Bound::Unbounded, Deref},
     sync::Arc,
 };
@@ -29,16 +29,23 @@ pub struct ParkedPool<T: ParkedOrd> {
     sender_id_count: Vec<SenderCount>,
     /// Bitmap 2: [sender_id: u64][last_submission_id: u64] - tracks last submission per sender
     sender_id_last_submission: Vec<SenderSubmission>,
-    /// Efficient truncation path - only populated when needed
-    /// BTreeSet automatically maintains order by submission_id for efficient iteration
-    truncation_index: Option<BTreeSet<SenderSubmission>>,
 
-    /// Track when we need to rebuild the truncation index
-    truncation_index_dirty: bool,
+    // Only contains senders that have transactions
+    submission_order: Vec<SenderSubmission>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
+}
+
+impl<T: ParkedOrd> ParkedPool<T> {
+    /// Returns an iterator over sender submissions, ordered by last submission id descending.
+    pub fn get_senders_by_submission_id(&self) -> impl Iterator<Item = SenderSubmission> + '_ {
+        let mut submissions = self.sender_id_last_submission.clone();
+        // Sort by submission_id descending (most recent first)
+        submissions.sort_by_key(|ss| std::cmp::Reverse(ss.submission_id()));
+        submissions.into_iter()
+    }
 }
 
 /// Packed 128-bit value: [sender_id: u64][count: u64]
@@ -115,14 +122,6 @@ impl PartialOrd for SenderSubmission {
 // === impl ParkedPool ===
 
 impl<T: ParkedOrd> ParkedPool<T> {
-    /// Returns an iterator over sender submissions, ordered by last submission id descending.
-    pub fn get_senders_by_submission_id(&self) -> impl Iterator<Item = SenderSubmission> + '_ {
-        let mut submissions = self.sender_id_last_submission.clone();
-        // Sort by submission_id descending (most recent first)
-        submissions.sort_by_key(|ss| std::cmp::Reverse(ss.submission_id()));
-        submissions.into_iter()
-    }
-
     /// Adds a new transactions to the pending queue.
     ///
     /// # Panics
@@ -147,12 +146,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id.insert(id, transaction);
     }
 
-    /// Fast path: add to Vec structures (unchanged for performance)
+    /// Increments the count of transactions for the given sender and updates the tracked submission
+    /// id.
     fn add_sender_count(&mut self, sender: SenderId, submission_id: u64) {
-        // Binary search for sender in count vec
         let count_pos = self.sender_id_count.binary_search_by_key(&sender, |sc| sc.sender_id());
         let submission_pos =
             self.sender_id_last_submission.binary_search_by_key(&sender, |ss| ss.sender_id());
+
+        let new_submission = SenderSubmission::new(sender, submission_id);
 
         match count_pos {
             Ok(idx) => {
@@ -160,23 +161,65 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 let current_count = self.sender_id_count[idx].count();
                 self.sender_id_count[idx] = SenderCount::new(sender, current_count + 1);
 
-                // Update submission (should also exist)
                 if let Ok(sub_idx) = submission_pos {
-                    self.sender_id_last_submission[sub_idx] =
-                        SenderSubmission::new(sender, submission_id);
+                    let old_submission = self.sender_id_last_submission[sub_idx];
+                    self.sender_id_last_submission[sub_idx] = new_submission;
+
+                    // Update submission_order Vec
+                    self.update_submission_order(old_submission, new_submission);
                 }
             }
             Err(idx) => {
-                // New sender - insert at correct position to maintain sort order
+                // New sender
                 self.sender_id_count.insert(idx, SenderCount::new(sender, 1));
                 let sub_idx = submission_pos.unwrap_err();
-                self.sender_id_last_submission
-                    .insert(sub_idx, SenderSubmission::new(sender, submission_id));
+                self.sender_id_last_submission.insert(sub_idx, new_submission);
+
+                // Add to submission_order in correct position
+                self.insert_submission_order(new_submission);
+            }
+        }
+    }
+
+    fn update_submission_order(
+        &mut self,
+        old_submission: SenderSubmission,
+        new_submission: SenderSubmission,
+    ) {
+        // Remove old entry
+        if let Ok(idx) = self
+            .submission_order
+            .binary_search_by_key(&old_submission.submission_id(), |ss| ss.submission_id())
+        {
+            // Handle multiple entries with same submission_id
+            let start = idx;
+            let mut end = idx;
+            while end < self.submission_order.len() &&
+                self.submission_order[end].submission_id() == old_submission.submission_id()
+            {
+                end += 1;
+            }
+
+            // Find exact match
+            for i in start..end {
+                if self.submission_order[i].sender_id() == old_submission.sender_id() {
+                    self.submission_order.remove(i);
+                    break;
+                }
             }
         }
 
-        // Mark truncation index as dirty
-        self.truncation_index_dirty = true;
+        // Insert new entry
+        self.insert_submission_order(new_submission);
+    }
+
+    fn insert_submission_order(&mut self, submission: SenderSubmission) {
+        // Binary search to find insertion point by submission_id
+        let pos = self
+            .submission_order
+            .binary_search_by_key(&submission.submission_id(), |ss| ss.submission_id())
+            .unwrap_or_else(|pos| pos);
+        self.submission_order.insert(pos, submission);
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -185,18 +228,27 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ///
     /// Note: this does not update the tracked submission id for the sender, because we're only
     /// interested in the __last__ submission id when truncating the pool.
-    pub fn remove_sender_count(&mut self, sender_id: SenderId) {
+    fn remove_sender_count(&mut self, sender_id: SenderId) {
         let count_pos = self.sender_id_count.binary_search_by_key(&sender_id, |sc| sc.sender_id());
+        let submission_pos =
+            self.sender_id_last_submission.binary_search_by_key(&sender_id, |ss| ss.sender_id());
 
         match count_pos {
             Ok(idx) => {
                 let current_count = self.sender_id_count[idx].count();
 
                 if current_count == 1u64 {
-                    // Mark for lazy removal instead of expensive Vec::remove
-                    self.sender_id_count[idx] = SenderCount::new(sender_id, 0);
+                    // Remove sender completely
+                    self.sender_id_count.remove(idx);
+                    if let Ok(sub_idx) = submission_pos {
+                        let old_submission = self.sender_id_last_submission[sub_idx];
+                        self.sender_id_last_submission.remove(sub_idx);
+
+                        // Remove from submission_order
+                        self.remove_from_submission_order(old_submission);
+                    }
                 } else {
-                    // Decrement count
+                    // Just decrement count
                     self.sender_id_count[idx] = SenderCount::new(sender_id, current_count - 1);
                 }
             }
@@ -204,9 +256,30 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 unreachable!("sender count not found {:?}", sender_id);
             }
         }
+    }
 
-        // Mark truncation index as dirty
-        self.truncation_index_dirty = true;
+    fn remove_from_submission_order(&mut self, submission: SenderSubmission) {
+        if let Ok(idx) = self
+            .submission_order
+            .binary_search_by_key(&submission.submission_id(), |ss| ss.submission_id())
+        {
+            // Handle multiple entries with same submission_id
+            let start = idx;
+            let mut end = idx;
+            while end < self.submission_order.len() &&
+                self.submission_order[end].submission_id() == submission.submission_id()
+            {
+                end += 1;
+            }
+
+            // Find exact match and remove
+            for i in start..end {
+                if self.submission_order[i].sender_id() == submission.sender_id() {
+                    self.submission_order.remove(i);
+                    break;
+                }
+            }
+        }
     }
 
     /// Returns an iterator over all transactions in the pool
@@ -251,47 +324,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .unwrap_or(0)
     }
 
-    /// Build or rebuild the truncation index when needed
-    fn ensure_truncation_index(&mut self) {
-        if !self.truncation_index_dirty && self.truncation_index.is_some() {
-            return;
-        }
-
-        // Rebuild from current state, filtering out zero counts
-        let mut index = BTreeSet::new();
-
-        for submission in &self.sender_id_last_submission {
-            let sender_id = submission.sender_id();
-
-            // Check if sender still has transactions
-            if let Ok(count_idx) =
-                self.sender_id_count.binary_search_by_key(&sender_id, |sc| sc.sender_id())
-            {
-                if self.sender_id_count[count_idx].count() > 0 {
-                    index.insert(*submission);
-                }
-            }
-        }
-
-        self.truncation_index = Some(index);
-        self.truncation_index_dirty = false;
-
-        // Clean up Vec structures by removing zero entries
-        self.compact_sender_vectors();
-    }
-
-    /// Periodically clean up the Vec structures to prevent memory bloat
-    fn compact_sender_vectors(&mut self) {
-        // Remove entries with zero count
-        self.sender_id_count.retain(|sc| sc.count() > 0);
-
-        // Remove submissions for senders that no longer exist
-        let valid_senders: std::collections::HashSet<_> =
-            self.sender_id_count.iter().map(|sc| sc.sender_id()).collect();
-
-        self.sender_id_last_submission.retain(|ss| valid_senders.contains(&ss.sender_id()));
-    }
-
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
     ///
     /// This is done by first ordering senders by the last time they have submitted a transaction
@@ -312,73 +344,39 @@ impl<T: ParkedOrd> ParkedPool<T> {
         if !self.exceeds(&limit) {
             return Vec::new();
         }
-
-        // Build truncation index if needed - this is the only expensive operation
-        self.ensure_truncation_index();
+        let submission_order = self.submission_order.clone();
 
         let mut removed = Vec::new();
-        let target_to_remove = self.len().saturating_sub(limit.max_txs);
-        removed.reserve(target_to_remove.min(1024));
 
-        // Use the BTreeSet for efficient iteration in submission_id order
-        if let Some(ref truncation_index) = self.truncation_index {
-            // Collect sender_ids to remove in a separate vector to avoid borrow conflicts
-            let mut senders_to_remove = Vec::new();
+        // submission_order is already sorted by submission_id (oldest first)!
+        // Just iterate directly - O(k) where k = senders to process
+        for &submission in &submission_order {
+            if !limit.is_exceeded(self.len(), self.size()) {
+                break;
+            }
 
-            for submission in truncation_index.iter() {
-                if !limit.is_exceeded(self.len(), self.size()) {
+            let sender_id = submission.sender_id();
+
+            // Quick existence check using binary search - O(log n)
+            if self.get_sender_count(sender_id) == 0 {
+                continue;
+            }
+
+            let sender_txs = self.get_txs_by_sender(sender_id);
+
+            // Batch remove all transactions from this sender
+            for &tx_id in sender_txs.iter().rev() {
+                if let Some(tx) = self.remove_transaction(&tx_id) {
+                    removed.push(tx);
+                }
+
+                if !self.exceeds(&limit) {
                     break;
                 }
-
-                let sender_id = submission.sender_id();
-                let sender_txs = self.get_txs_by_sender(sender_id);
-
-                if sender_txs.is_empty() {
-                    continue;
-                }
-
-                // Batch remove all transactions from this sender
-                let mut batch_size = 0;
-                for &tx_id in sender_txs.iter().rev() {
-                    if let Some(parked_tx) = self.by_id.remove(&tx_id) {
-                        batch_size += parked_tx.transaction.size();
-                        removed.push(parked_tx.transaction.into());
-                    }
-                }
-
-                if batch_size > 0 {
-                    // Defer sender removal to avoid mutable borrow during iteration
-                    senders_to_remove.push((sender_id, batch_size));
-
-                    // Early exit check every few senders to avoid overhead
-                    if removed.len() >= target_to_remove {
-                        break;
-                    }
-                }
-            }
-
-            // Now perform the mutable removals
-            for (sender_id, batch_size) in senders_to_remove {
-                self.remove_sender_count_completely(sender_id);
-                self.size_of -= batch_size;
             }
         }
-
-        // Mark index as dirty since we removed senders
-        self.truncation_index_dirty = true;
 
         removed
-    }
-
-    /// Optimized removal that doesn't use Vec::remove
-    fn remove_sender_count_completely(&mut self, sender_id: SenderId) {
-        // Mark count as zero instead of removing (avoid Vec::remove)
-        if let Ok(idx) = self.sender_id_count.binary_search_by_key(&sender_id, |sc| sc.sender_id())
-        {
-            self.sender_id_count[idx] = SenderCount::new(sender_id, 0);
-        }
-
-        self.truncation_index_dirty = true;
     }
 
     const fn next_id(&mut self) -> u64 {
@@ -492,8 +490,7 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
             by_id: Default::default(),
             sender_id_count: Default::default(),
             sender_id_last_submission: Default::default(),
-            truncation_index: None,
-            truncation_index_dirty: false,
+            submission_order: Vec::new(),
             size_of: Default::default(),
         }
     }
