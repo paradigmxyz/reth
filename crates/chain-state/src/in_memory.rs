@@ -709,28 +709,7 @@ impl<N: NodePrimitives> BlockState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         self.chain().find_map(|block_state| {
-            block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-                .map(|(index, tx)| {
-                    let meta = TransactionMeta {
-                        tx_hash,
-                        index: index as u64,
-                        block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().recovered_block().number(),
-                        base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                        timestamp: block_state.block_ref().recovered_block().timestamp(),
-                        excess_blob_gas: block_state
-                            .block_ref()
-                            .recovered_block()
-                            .excess_blob_gas(),
-                    };
-                    (tx.clone(), meta)
-                })
+            block_state.find_indexed(tx_hash).map(|indexed| (indexed.tx.clone(), indexed.meta()))
         })
     }
 
