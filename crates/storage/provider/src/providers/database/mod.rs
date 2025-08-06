@@ -144,9 +144,9 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// you may encounter unexpected behavior.
     ///
     /// E.g. If the [`TableSet`] does not define the [`Headers`] table
-    /// identically to its specification in [`reth_db::tables`], then attempting
-    /// to access [`HeaderProvider`] methods may fail or produce incorrect
-    /// results.
+    /// identically to its specification in [`mod@reth_db::tables`], then
+    /// attempting to access [`HeaderProvider`] methods may fail or produce
+    /// incorrect results.
     ///
     /// [`Headers`]: reth_db::tables::Headers
     pub fn new_with_database_path_and_tables<P: AsRef<Path>, Ts: TableSet>(
