@@ -553,24 +553,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         for block_state in self.canonical_chain() {
-            if let Some((index, tx)) = block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-            {
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index: index as u64,
-                    block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().recovered_block().number(),
-                    base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                    timestamp: block_state.block_ref().recovered_block().timestamp(),
-                    excess_blob_gas: block_state.block_ref().recovered_block().excess_blob_gas(),
-                };
-                return Some((tx.clone(), meta))
+            if let Some(indexed) = block_state.find_indexed(tx_hash) {
+                return Some((indexed.tx.clone(), indexed.meta()));
             }
         }
         None
@@ -748,6 +732,62 @@ impl<N: NodePrimitives> BlockState<N> {
                     (tx.clone(), meta)
                 })
         })
+    }
+
+    /// Finds a transaction by hash and returns it with its index and block context.
+    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<Indexed<'_, N>> {
+        self.block_ref()
+            .recovered_block()
+            .body()
+            .transactions_iter()
+            .enumerate()
+            .find(|(_, tx)| tx.trie_hash() == tx_hash)
+            .map(|(index, tx)| Indexed { block: self.block_ref().recovered_block(), tx, index })
+    }
+}
+
+/// Transaction with its index and block reference for efficient metadata access.
+#[derive(Debug)]
+pub struct Indexed<'a, N: NodePrimitives> {
+    /// Recovered block containing the transaction
+    block: &'a RecoveredBlock<N::Block>,
+    /// Transaction matching the hash
+    tx: &'a N::SignedTx,
+    /// Index of the transaction in the block
+    index: usize,
+}
+
+impl<'a, N: NodePrimitives> Indexed<'a, N> {
+    /// Returns the transaction.
+    pub const fn tx(&self) -> &N::SignedTx {
+        self.tx
+    }
+    /// Returns the transaction hash.
+    pub fn tx_hash(&self) -> TxHash {
+        self.tx.trie_hash()
+    }
+
+    /// Returns the block hash.
+    pub fn block_hash(&self) -> B256 {
+        self.block.hash()
+    }
+
+    /// Returns the index of the transaction in the block.
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Builds a [`TransactionMeta`] for the indexed transaction.
+    pub fn meta(&self) -> TransactionMeta {
+        TransactionMeta {
+            tx_hash: self.tx.trie_hash(),
+            index: self.index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+            timestamp: self.block.timestamp(),
+            excess_blob_gas: self.block.excess_blob_gas(),
+        }
     }
 }
 
