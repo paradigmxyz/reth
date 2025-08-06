@@ -372,7 +372,7 @@ where
             metrics.total_runtime.record(start.elapsed());
 
             let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
-            let execution_trace = evm.db_mut().recorded_traces.drain(..).collect::<Vec<_>>();
+            let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
