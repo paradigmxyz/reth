@@ -32,7 +32,9 @@ pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
+pub use mdbx::{
+    create_db, init_db, init_db_for, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind,
+};
 
 pub use models::ClientVersion;
 pub use reth_db_api::*;

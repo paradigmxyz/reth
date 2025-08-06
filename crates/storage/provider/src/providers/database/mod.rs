@@ -12,7 +12,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db_for, mdbx::DatabaseArguments, DatabaseEnv, TableSet, Tables};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
@@ -123,8 +123,40 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
+        Self::new_with_database_path_and_tables::<_, Tables>(
+            path,
+            chain_spec,
+            args,
+            static_file_provider,
+        )
+    }
+
+    /// Create new database provider by passing a path and a specifying a
+    /// [`TableSet`] set of tables. [`ProviderFactory`] will own the database
+    /// instance.
+    ///
+    /// # Warning
+    ///
+    /// This will create the database at the specified path if it does not
+    /// exist. The database will be initialized with the tables defined in the
+    /// [`TableSet`] generic. Many trait implementations assume that
+    /// [`TableSet`] will be [`Tables`]. If you use a different [`TableSet`],
+    /// you may encounter unexpected behavior.
+    ///
+    /// E.g. If the [`TableSet`] does not define the [`Headers`] table
+    /// identically to its specification in [`reth_db::tables`], then attempting
+    /// to access [`HeaderProvider`] methods may fail or produce incorrect
+    /// results.
+    ///
+    /// [`Headers`]: reth_db::tables::Headers
+    pub fn new_with_database_path_and_tables<P: AsRef<Path>, Ts: TableSet>(
+        path: P,
+        chain_spec: Arc<N::ChainSpec>,
+        args: DatabaseArguments,
+        static_file_provider: StaticFileProvider<N::Primitives>,
+    ) -> RethResult<Self> {
         Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
+            db: Arc::new(init_db_for::<_, Ts>(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),
