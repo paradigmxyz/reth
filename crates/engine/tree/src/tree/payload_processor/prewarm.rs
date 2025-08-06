@@ -372,24 +372,11 @@ where
             metrics.total_runtime.record(start.elapsed());
 
             let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
-            let mut coinbase_storage_read = false;
-            let execution_trace = evm
-                .db_mut()
-                .recorded_traces
-                .drain(..)
-                .inspect(|trace| {
-                    if let AccessRecord::Storage { address, .. } = trace {
-                        if *address != coinbase {
-                            coinbase_storage_read = true;
-                        }
-                    }
-                })
-                .collect::<Vec<_>>();
+            let execution_trace = evm.db_mut().recorded_traces.drain(..).collect::<Vec<_>>();
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
-            let is_cacheable = !coinbase_balance_read && coinbase_storage_read;
-            if !is_cacheable {
+            if !coinbase_balance_read {
                 debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
                 continue
             }
