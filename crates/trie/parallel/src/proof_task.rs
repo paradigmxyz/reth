@@ -268,7 +268,9 @@ where
         );
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-        let multi_added_removed_keys = input.multi_added_removed_keys.unwrap_or_default();
+        let multi_added_removed_keys = input
+            .multi_added_removed_keys
+            .unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
         let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
 
         let span = tracing::trace_span!(

@@ -366,7 +366,7 @@ impl StateRootContext {
     where
         C: TrieCursor,
         H: HashedCursor,
-        K: AddedRemovedKeys,
+        K: AsRef<AddedRemovedKeys>,
     {
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
         self.trie_updates.removed_nodes.extend(walker_deleted_keys);
@@ -392,7 +392,7 @@ impl StateRootContext {
     where
         C: TrieCursor,
         H: HashedCursor,
-        K: AddedRemovedKeys,
+        K: AsRef<AddedRemovedKeys>,
     {
         (self.updated_storage_nodes +
             account_node_iter.walker.removed_keys_len() +

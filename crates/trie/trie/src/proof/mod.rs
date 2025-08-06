@@ -12,7 +12,7 @@ use alloy_primitives::{
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
-use alloy_trie::proof::{AddedRemovedKeys, EmptyAddedRemovedKeys};
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -184,7 +184,7 @@ where
 
 /// Generates storage merkle proofs.
 #[derive(Debug)]
-pub struct StorageProof<T, H, K = EmptyAddedRemovedKeys> {
+pub struct StorageProof<T, H, K = AddedRemovedKeys> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -282,7 +282,7 @@ impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
-    K: AddedRemovedKeys + Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
@@ -311,10 +311,10 @@ where
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::<_>::storage_trie(trie_cursor, self.prefix_set.freeze())
-            .with_added_removed_keys(self.added_removed_keys);
+            .with_added_removed_keys(self.added_removed_keys.as_ref());
 
         let retainer = ProofRetainer::from_iter(target_nibbles)
-            .with_added_removed_keys(self.added_removed_keys);
+            .with_added_removed_keys(self.added_removed_keys.as_ref());
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);

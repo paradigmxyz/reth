@@ -673,7 +673,7 @@ where
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            multi_added_removed_keys: Default::default(),
+            multi_added_removed_keys: MultiAddedRemovedKeys::new(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -1310,7 +1310,7 @@ mod tests {
         let state = create_get_proof_targets_state();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         // should return all accounts as targets since nothing was fetched before
         assert_eq!(targets.len(), state.accounts.len());
@@ -1324,7 +1324,7 @@ mod tests {
         let state = create_get_proof_targets_state();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         // verify storage slots are included for accounts with storage
         for (addr, storage) in &state.storages {
@@ -1352,7 +1352,7 @@ mod tests {
         // mark the account as already fetched
         fetched.insert(*fetched_addr, HashSet::default());
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         // should not include the already fetched account since it has no storage updates
         assert!(!targets.contains_key(fetched_addr));
@@ -1372,7 +1372,7 @@ mod tests {
         fetched_slots.insert(fetched_slot);
         fetched.insert(*addr, fetched_slots);
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         // should not include the already fetched storage slot
         let target_slots = &targets[addr];
@@ -1385,7 +1385,7 @@ mod tests {
         let state = HashedPostState::default();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         assert!(targets.is_empty());
     }
@@ -1412,7 +1412,7 @@ mod tests {
         fetched_slots.insert(slot1);
         fetched.insert(addr1, fetched_slots);
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         assert!(targets.contains_key(&addr2));
         assert!(!targets[&addr1].contains(&slot1));
@@ -1438,7 +1438,7 @@ mod tests {
         assert!(!state.accounts.contains_key(&addr));
         assert!(!fetched.contains_key(&addr));
 
-        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::new());
 
         // verify that we still get the storage slots for the unmodified account
         assert!(targets.contains_key(&addr));
@@ -1534,7 +1534,7 @@ mod tests {
     fn test_get_proof_targets_with_removed_storage_keys() {
         let mut state = HashedPostState::default();
         let mut fetched = MultiProofTargets::default();
-        let mut multi_added_removed_keys = MultiAddedRemovedKeys::default();
+        let mut multi_added_removed_keys = MultiAddedRemovedKeys::new();
 
         let addr = B256::random();
         let slot1 = B256::random();
@@ -1575,7 +1575,7 @@ mod tests {
     fn test_get_proof_targets_with_wiped_storage() {
         let mut state = HashedPostState::default();
         let fetched = MultiProofTargets::default();
-        let multi_added_removed_keys = MultiAddedRemovedKeys::default();
+        let multi_added_removed_keys = MultiAddedRemovedKeys::new();
 
         let addr = B256::random();
         let slot1 = B256::random();
@@ -1601,7 +1601,7 @@ mod tests {
     fn test_get_proof_targets_removed_keys_not_in_state_update() {
         let mut state = HashedPostState::default();
         let mut fetched = MultiProofTargets::default();
-        let mut multi_added_removed_keys = MultiAddedRemovedKeys::default();
+        let mut multi_added_removed_keys = MultiAddedRemovedKeys::new();
 
         let addr = B256::random();
         let slot1 = B256::random();

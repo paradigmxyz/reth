@@ -4,7 +4,7 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::HashSet, B256};
-use alloy_trie::proof::{AddedRemovedKeys, EmptyAddedRemovedKeys};
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
@@ -15,7 +15,7 @@ use crate::metrics::WalkerMetrics;
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
 /// if they have not changed.
 #[derive(Debug)]
-pub struct TrieWalker<C, K = EmptyAddedRemovedKeys> {
+pub struct TrieWalker<C, K = AddedRemovedKeys> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
     pub cursor: C,
     /// A vector containing the trie nodes that have been visited.
@@ -37,7 +37,7 @@ pub struct TrieWalker<C, K = EmptyAddedRemovedKeys> {
     metrics: WalkerMetrics,
 }
 
-impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
+impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
     pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         Self::from_stack(
@@ -178,7 +178,7 @@ impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
             // leaf removal.
             let key_is_only_nonremoved_child =
                 self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
-                    node.full_key_is_only_nonremoved_child(added_removed_keys)
+                    node.full_key_is_only_nonremoved_child(added_removed_keys.as_ref())
                 });
 
             let _full_key = node.full_key();
@@ -201,6 +201,7 @@ impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
             "updated skip node flag"
         );
     }
+
     /// Constructs a new [`TrieWalker`] for the state trie.
     pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
         Self::new(

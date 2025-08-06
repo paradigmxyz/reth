@@ -78,6 +78,7 @@ pub struct TrieNodeIter<C, H: HashedCursor, K> {
 impl<C, H: HashedCursor, K> TrieNodeIter<C, H, K>
 where
     H::Value: Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
     pub fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
@@ -173,7 +174,7 @@ where
     C: TrieCursor,
     H: HashedCursor,
     H::Value: Copy,
-    K: AddedRemovedKeys,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Return the next trie node to be added to the hash builder.
     ///

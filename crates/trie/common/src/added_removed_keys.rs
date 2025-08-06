@@ -1,55 +1,28 @@
 //! Tracking of keys having been added and removed from the tries.
 
 use crate::HashedPostState;
-use alloy_primitives::{
-    map::{B256Map, B256Set},
-    B256, U256,
-};
-use alloy_trie::{proof::AddedRemovedKeys, Nibbles, TrieMask};
-
-/// Tracks added and removed keys for a single account or storage trie.
-///
-/// Implements [`AddedRemovedKeys`] in order to be used with a hash builder when generating
-/// multiproofs. It always returns true from `is_prefix_added`, because we are not able (yet) to
-/// properly track added keys.
-///
-/// Note: Currently only removed keys are tracked. Added keys tracking is not yet implemented.
-#[derive(Debug, Default, Clone)]
-pub struct AddedRemovedKeysSet(B256Set);
-
-impl AddedRemovedKeysSet {
-    /// Returns true if the given key path is marked as removed.
-    pub fn is_removed(&self, path: &B256) -> bool {
-        self.0.contains(path)
-    }
-}
-
-impl AddedRemovedKeys for &AddedRemovedKeysSet {
-    fn is_prefix_added(&self, _prefix: &Nibbles) -> bool {
-        true
-    }
-
-    fn get_removed_mask(&self, branch_path: &Nibbles) -> TrieMask {
-        let mut mask = TrieMask::default();
-        for key in &self.0 {
-            let key_nibbles = Nibbles::unpack(key);
-            if key_nibbles.starts_with(branch_path) {
-                let child_bit = key_nibbles.get_unchecked(branch_path.len());
-                mask.set_bit(child_bit);
-            }
-        }
-        mask
-    }
-}
+use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_trie::proof::AddedRemovedKeys;
 
 /// Tracks added and removed keys across account and storage tries.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct MultiAddedRemovedKeys {
-    account: AddedRemovedKeysSet,
-    storages: B256Map<AddedRemovedKeysSet>,
+    account: AddedRemovedKeys,
+    storages: B256Map<AddedRemovedKeys>,
+}
+
+/// Returns [`AddedRemovedKeys`] with default parameters. This is necessary while we are not yet
+/// tracking added keys.
+fn default_added_removed_keys() -> AddedRemovedKeys {
+    AddedRemovedKeys::default().with_assume_added(true)
 }
 
 impl MultiAddedRemovedKeys {
+    /// Returns a new instance.
+    pub fn new() -> Self {
+        Self { account: default_added_removed_keys(), storages: Default::default() }
+    }
+
     /// Updates the set of removed keys based on a [`HashedPostState`].
     ///
     /// Storage keys set to [`U256::ZERO`] are added to the set for their respective account. Keys
@@ -65,41 +38,42 @@ impl MultiAddedRemovedKeys {
             if storage.wiped {
                 self.storages.remove(hashed_address);
                 if account.is_empty() {
-                    self.account.0.insert(*hashed_address);
+                    self.account.insert_removed(*hashed_address);
                 }
                 continue
             }
 
-            let storage_removed_keys = self.storages.entry(*hashed_address).or_default();
+            let storage_removed_keys =
+                self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
 
             for (key, val) in &storage.storage {
                 if *val == U256::ZERO {
-                    storage_removed_keys.0.insert(*key);
+                    storage_removed_keys.insert_removed(*key);
                 } else {
-                    storage_removed_keys.0.remove(key);
+                    storage_removed_keys.remove_removed(key);
                 }
             }
 
             if !account.is_empty() {
-                self.account.0.remove(hashed_address);
+                self.account.remove_removed(hashed_address);
             }
         }
     }
 
-    /// Returns a [`AddedRemovedKeysSet`] for the storage trie of a particular account, if any.
-    pub fn get_storage(&self, hashed_address: &B256) -> Option<&AddedRemovedKeysSet> {
+    /// Returns a [`AddedRemovedKeys`] for the storage trie of a particular account, if any.
+    pub fn get_storage(&self, hashed_address: &B256) -> Option<&AddedRemovedKeys> {
         self.storages.get(hashed_address)
     }
 
-    /// Returns an [`AddedRemovedKeysSet`] for tracking account-level changes.
-    pub const fn get_accounts(&self) -> &AddedRemovedKeysSet {
+    /// Returns an [`AddedRemovedKeys`] for tracking account-level changes.
+    pub const fn get_accounts(&self) -> &AddedRemovedKeys {
         &self.account
     }
 
     /// Marks an account as existing, and therefore having storage.
     pub fn touch_accounts(&mut self, addresses: impl Iterator<Item = B256>) {
         for address in addresses {
-            self.storages.entry(address).or_default();
+            self.storages.entry(address).or_insert_with(default_added_removed_keys);
         }
     }
 }
@@ -113,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_update_with_state_storage_keys_non_zero() {
-        let mut multi_keys = MultiAddedRemovedKeys::default();
+        let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
 
         let addr = B256::random();
@@ -147,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_update_with_state_wiped_storage() {
-        let mut multi_keys = MultiAddedRemovedKeys::default();
+        let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
 
         let addr = B256::random();
@@ -173,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_update_with_state_account_tracking() {
-        let mut multi_keys = MultiAddedRemovedKeys::default();
+        let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
 
         let addr = B256::random();
@@ -205,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_update_with_state_account_with_balance() {
-        let mut multi_keys = MultiAddedRemovedKeys::default();
+        let mut multi_keys = MultiAddedRemovedKeys::new();
         let mut update = HashedPostState::default();
 
         let addr = B256::random();

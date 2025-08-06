@@ -985,7 +985,7 @@ mod tests {
         let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
 
         let (with_targets, without_targets) =
-            state.partition_by_targets(&targets, &MultiAddedRemovedKeys::default());
+            state.partition_by_targets(&targets, &MultiAddedRemovedKeys::new());
 
         assert_eq!(
             with_targets,

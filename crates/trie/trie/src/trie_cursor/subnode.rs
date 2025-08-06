@@ -92,10 +92,7 @@ impl CursorSubNode {
     /// - Position is a child
     /// - There is a branch node
     /// - All children except the current are removed according to the [`AddedRemovedKeys`].
-    pub fn full_key_is_only_nonremoved_child<K: AddedRemovedKeys>(
-        &self,
-        added_removed_keys: &K,
-    ) -> bool {
+    pub fn full_key_is_only_nonremoved_child(&self, added_removed_keys: &AddedRemovedKeys) -> bool {
         self.position.as_child().zip(self.node.as_ref()).is_some_and(|(nibble, node)| {
             let removed_mask = added_removed_keys.get_removed_mask(&self.key);
             let nonremoved_mask = !removed_mask & node.state_mask;
