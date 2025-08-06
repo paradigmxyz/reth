@@ -376,7 +376,7 @@ where
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
-            if !coinbase_balance_read {
+            if coinbase_balance_read {
                 debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
                 continue
             }
