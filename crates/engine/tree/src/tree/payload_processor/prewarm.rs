@@ -387,7 +387,7 @@ where
                 (coinbase, nonce_delta, balance_delta)
             });
 
-            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), ?coinbase_deltas, "Caching execution result");
             tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
 
