@@ -50,8 +50,7 @@ pub struct BatchTxProcessor<Pool: TransactionPool> {
 
 impl<Pool> BatchTxProcessor<Pool>
 where
-    Pool: TransactionPool + Clone + Send + Sync + 'static,
-    Pool::Transaction: Send + Sync,
+    Pool: TransactionPool + 'static,
 {
     /// Create a new `BatchTxProcessor`
     pub fn new(
