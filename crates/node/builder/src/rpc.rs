@@ -6,7 +6,7 @@ pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, BeaconConsensusEngineEvent,
-    BeaconConsensusEngineHandle,
+    BeaconConsensusEngineHandle, ConfigureEngineEvm,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -14,8 +14,8 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns,
-    NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -1169,12 +1169,15 @@ where
 
 impl<Node, EV> EngineValidatorBuilder<Node> for BasicEngineValidatorBuilder<EV>
 where
-    Node: FullNodeComponents,
-    <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks + reth_chainspec::EthChainSpec,
+    Node: FullNodeComponents<
+        Evm: ConfigureEngineEvm<
+            <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
+        >,
+    >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<
         <Node::Types as NodeTypes>::Payload,
-        Block = <<Node::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block,
+        Block = BlockTy<Node::Types>,
     >,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
