@@ -384,10 +384,11 @@ where
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
                 let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
+                debug!(target: "engine::tree", ?tx_hash, ?coinbase_before, ?coinbase_after, ?nonce_delta, ?balance_delta, "Calculating coinbase deltas");
                 (coinbase, nonce_delta, balance_delta)
             });
 
-            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), ?coinbase_deltas, "Caching execution result");
+            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
             tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
 
