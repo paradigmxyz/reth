@@ -15,10 +15,10 @@ use crate::{
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
 use tracing::{debug, trace, trace_span};
-use alloy_trie::proof::{AddedRemovedKeys};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.

@@ -111,7 +111,6 @@ mod tests {
     use alloy_primitives::U256;
     use reth_primitives_traits::Account;
 
-
     #[test]
     fn test_update_with_state_storage_keys_non_zero() {
         let mut multi_keys = MultiAddedRemovedKeys::default();
@@ -163,8 +162,7 @@ mod tests {
 
         // Now wipe the storage
         let mut update2 = HashedPostState::default();
-        let mut wiped_storage = HashedStorage::default();
-        wiped_storage.wiped = true;
+        let wiped_storage = HashedStorage::new(true);
         update2.storages.insert(addr, wiped_storage);
         multi_keys.update_with_state(&update2);
 
@@ -213,12 +211,8 @@ mod tests {
         let addr = B256::random();
 
         // Add account with non-empty state (has balance)
-        let account = Account {
-            balance: U256::from(1000),
-            nonce: 0,
-            bytecode_hash: None,
-        };
-        update.accounts.insert(addr, Some(account.clone()));
+        let account = Account { balance: U256::from(1000), nonce: 0, bytecode_hash: None };
+        update.accounts.insert(addr, Some(account));
 
         // Add empty storage
         let storage = HashedStorage::default();
@@ -231,8 +225,7 @@ mod tests {
 
         // Now wipe the storage
         let mut update2 = HashedPostState::default();
-        let mut wiped_storage = HashedStorage::default();
-        wiped_storage.wiped = true;
+        let wiped_storage = HashedStorage::new(true);
         update2.storages.insert(addr, wiped_storage);
         update2.accounts.insert(addr, Some(account));
         multi_keys.update_with_state(&update2);

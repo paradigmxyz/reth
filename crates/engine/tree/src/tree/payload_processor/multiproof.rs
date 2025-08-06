@@ -1584,8 +1584,7 @@ mod tests {
         state.accounts.insert(addr, Some(Default::default()));
 
         // add wiped storage
-        let mut storage = HashedStorage::default();
-        storage.wiped = true;
+        let mut storage = HashedStorage::new(true);
         storage.storage.insert(slot1, U256::from(100));
         state.storages.insert(addr, storage);
 
