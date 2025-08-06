@@ -714,20 +714,20 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Finds a transaction by hash and returns it with its index and block context.
-    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<Indexed<'_, N>> {
+    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<IndexedTx<'_, N>> {
         self.block_ref()
             .recovered_block()
             .body()
             .transactions_iter()
             .enumerate()
             .find(|(_, tx)| tx.trie_hash() == tx_hash)
-            .map(|(index, tx)| Indexed { block: self.block_ref().recovered_block(), tx, index })
+            .map(|(index, tx)| IndexedTx { block: self.block_ref().recovered_block(), tx, index })
     }
 }
 
 /// Transaction with its index and block reference for efficient metadata access.
 #[derive(Debug)]
-pub struct Indexed<'a, N: NodePrimitives> {
+pub struct IndexedTx<'a, N: NodePrimitives> {
     /// Recovered block containing the transaction
     block: &'a RecoveredBlock<N::Block>,
     /// Transaction matching the hash
@@ -736,7 +736,7 @@ pub struct Indexed<'a, N: NodePrimitives> {
     index: usize,
 }
 
-impl<'a, N: NodePrimitives> Indexed<'a, N> {
+impl<'a, N: NodePrimitives> IndexedTx<'a, N> {
     /// Returns the transaction.
     pub const fn tx(&self) -> &N::SignedTx {
         self.tx
