@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p bsc-p2p
+//! cargo run -p example-bsc-p2p
 //! ```
 //!
 //! This launches a regular reth node overriding the engine api payload builder with our custom.

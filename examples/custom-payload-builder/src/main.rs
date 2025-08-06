@@ -4,7 +4,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p custom-payload-builder -- node
+//! cargo run -p example-custom-payload-builder -- node
 //! ```
 //!
 //! This launches a regular reth node overriding the engine api payload builder with our custom.
