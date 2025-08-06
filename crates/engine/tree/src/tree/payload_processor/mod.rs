@@ -323,6 +323,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+            to_multi_proof: to_multi_proof.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(

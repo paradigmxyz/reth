@@ -204,7 +204,7 @@ where
 }
 
 /// Context required by tx execution tasks.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(super) struct PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
@@ -214,6 +214,7 @@ where
     pub(super) evm_config: Evm,
     pub(super) cache: ProviderCaches,
     pub(super) cache_metrics: CachedStateMetrics,
+    pub(super) to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -221,6 +222,16 @@ where
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_disabled: bool,
     pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+}
+
+impl<N, P, Evm> std::fmt::Debug for PrewarmContext<N, P, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrewarmContext").finish_non_exhaustive()
+    }
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -242,6 +253,7 @@ where
             terminate_execution,
             precompile_cache_disabled,
             mut precompile_cache_map,
+            to_multi_proof,
         } = self;
 
         let state_provider = match provider.build() {
@@ -260,7 +272,8 @@ where
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
-        let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider =
+            StateAccessDatabase::new(StateProviderDatabase::new(state_provider), to_multi_proof);
 
         let mut evm_env = env.evm_env;
 
@@ -412,4 +425,60 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+}
+
+struct StateAccessDatabase<DB> {
+    database: DB,
+    sender: Option<Sender<MultiProofMessage>>,
+}
+
+impl<DB> std::fmt::Debug for StateAccessDatabase<DB> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StateAccessDatabase").finish_non_exhaustive()
+    }
+}
+
+impl<DB> StateAccessDatabase<DB> {
+    const fn new(database: DB, sender: Option<Sender<MultiProofMessage>>) -> Self {
+        Self { database, sender }
+    }
+}
+
+impl<DB: revm::Database> revm::Database for StateAccessDatabase<DB> {
+    type Error = DB::Error;
+
+    fn basic(
+        &mut self,
+        address: revm_primitives::Address,
+    ) -> Result<Option<revm::state::AccountInfo>, Self::Error> {
+        if let Some(tx) = &self.sender {
+            let _ = tx.send(MultiProofMessage::PrefetchProofs(MultiProofTargets::account(
+                keccak256(address),
+            )));
+        }
+        self.database.basic(address)
+    }
+
+    fn storage(
+        &mut self,
+        address: revm_primitives::Address,
+        index: revm_primitives::StorageKey,
+    ) -> Result<revm_primitives::StorageValue, Self::Error> {
+        if let Some(tx) = &self.sender {
+            let _ =
+                tx.send(MultiProofMessage::PrefetchProofs(MultiProofTargets::account_with_slots(
+                    keccak256(address),
+                    [keccak256(B256::new(index.to_be_bytes()))],
+                )));
+        }
+        self.database.storage(address, index)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::state::Bytecode, Self::Error> {
+        self.database.code_by_hash(code_hash)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.database.block_hash(number)
+    }
 }
