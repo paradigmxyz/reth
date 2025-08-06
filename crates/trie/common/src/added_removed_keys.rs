@@ -96,7 +96,14 @@ impl MultiAddedRemovedKeys {
     }
 
     /// Returns an [`AddedRemovedKeysSet`] for tracking account-level changes.
-    pub fn get_accounts(&self) -> &AddedRemovedKeysSet {
+    pub const fn get_accounts(&self) -> &AddedRemovedKeysSet {
         &self.account
+    }
+
+    /// Marks an account as existing, and therefore having storage.
+    pub fn touch_accounts(&mut self, addresses: impl Iterator<Item = B256>) {
+        for address in addresses {
+            self.storages.entry(address).or_default();
+        }
     }
 }

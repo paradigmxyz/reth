@@ -697,6 +697,14 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
+        // Make sure all target accounts have an `AddedRemovedKeySet` in the
+        // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
+        // we still want to optimistically fetch extension children for the leaf addition case.
+        self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
+
+        // Clone+Arc MultiAddedRemovedKeys for sharing with the spawned multiproof tasks
+        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+
         self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
@@ -713,7 +721,7 @@ where
                     proof_targets: proof_targets_chunk,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: None,
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
                 }
                 .into(),
             );
