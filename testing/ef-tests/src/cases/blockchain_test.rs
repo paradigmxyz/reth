@@ -381,7 +381,7 @@ pub fn should_skip(path: &Path) -> bool {
     let name = path.file_name().unwrap().to_str().unwrap();
     matches!(
         name,
-        // funky test with `bigint 0x00` value in json :) not possible to happen on mainnet and require
+        // funky test with `bigint 0x00` value in json, not possible to happen on mainnet and require
         // custom json parser. https://github.com/ethereum/tests/issues/971
         | "ValueOverflow.json"
         | "ValueOverflowParis.json"
