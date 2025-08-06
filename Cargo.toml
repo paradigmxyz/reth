@@ -304,6 +304,11 @@ panic = "unwind"
 codegen-units = 16
 
 # Use the `--profile profiling` flag to show symbols in release mode.
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
+
 # Include debug info in benchmarks too.
 [profile.bench]
 debug = "full"
