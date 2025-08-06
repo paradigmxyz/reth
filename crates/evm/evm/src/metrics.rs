@@ -243,6 +243,15 @@ mod tests {
             Ok(Some(0))
         }
 
+        fn execute_transaction_with_cached_result(
+            &mut self,
+            _tx: impl alloy_evm::block::ExecutableTx<Self>,
+            _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+        ) -> Result<Option<u64>, BlockExecutionError> {
+            Ok(Some(0))
+        }
+
         fn finish(
             self,
         ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
