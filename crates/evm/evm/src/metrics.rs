@@ -72,6 +72,9 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for the time it took to execute a transaction.
+    pub transaction_execution_latency: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -121,7 +124,9 @@ impl ExecutorMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
+                let start = Instant::now();
                 executor.execute_transaction(tx?)?;
+                self.transaction_execution_latency.record(start.elapsed());
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
