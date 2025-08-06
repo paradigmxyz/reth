@@ -178,6 +178,8 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
     }
+
+    /// Updates inclusion list for a specific Payload ID
     pub fn update_payload_with_inclusion_list(
         &self,
         payload_id: PayloadId,
@@ -455,36 +457,33 @@ where
                         inclusion_list,
                         tx,
                     ) => {
-                        let mut res = Ok(id);
-    
-                        let attributes = match this.payload_attributes(id) {
-                            Some(Ok(attr)) => Some(attr),
-                            Some(Err(_err)) => None,
-                            None => None,
-                        };
-                        if let Some(attr) = attributes {
-                            let attr = attr.clone_with_il(inclusion_list);
-                            let id = attr.payload_id();
-                            res = Ok(id);
-    
-                            match this.generator.new_payload_job(attr.clone()) {
-                                Ok(job) => {
-                                    info!(%id, "New payload job with updated IL created");
-                                    this.metrics.inc_initiated_jobs();
-                                    new_job = true;
-                                    this.payload_jobs.push((job, id));
-                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
-                                }
-                                Err(err) => {
-                                    this.metrics.inc_failed_jobs();
-                                    warn!(%err, %id, "Failed to create payload builder job with updated IL");
-                                    res = Err(err);
+                        let res = match this.payload_attributes(id) {
+                            Some(Ok(attr)) => {
+                                let attr = attr.clone_with_il(inclusion_list);
+                                let id = attr.payload_id();
+                                match this.generator.new_payload_job(attr.clone()) {
+                                    Ok(job) => {
+                                        info!(%id, "New payload job with updated IL created");
+                                        this.metrics.inc_initiated_jobs();
+                                        new_job = true;
+                                        this.payload_jobs.push((job, id));
+                                        this.payload_events
+                                            .send(Events::Attributes(attr.clone()))
+                                            .ok();
+                                        Ok(id)
+                                    }
+                                    Err(err) => {
+                                        this.metrics.inc_failed_jobs();
+                                        warn!(%err, %id, "Failed to create payload builder job with updated IL");
+                                        Err(err)
+                                    }
                                 }
                             }
-                        } else {
-                            debug!(%id, "Payload job for IL not found");
-                            res = Err(PayloadBuilderError::MissingPayload);
-                        }
+                            Some(Err(_)) | None => {
+                                debug!(%id, "Payload job for IL not found");
+                                Err(PayloadBuilderError::MissingPayload)
+                            }
+                        };
                         let _ = tx.send(res);
                     }
                 }

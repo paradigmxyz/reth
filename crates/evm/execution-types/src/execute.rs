@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::Recovered;
 use revm::database::BundleState;
@@ -23,7 +24,7 @@ impl<'a, Block> BlockExecutionInput<'a, Block> {
 
 impl<'a, Block> From<&'a Block> for BlockExecutionInput<'a, Block> {
     fn from(block: &'a Block) -> Self {
-        Self::new(block, vec![])
+        Self::new(block, Vec::new())
     }
 }
 

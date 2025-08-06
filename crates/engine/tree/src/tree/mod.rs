@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -675,7 +675,7 @@ where
         info!(target: "engine::tree", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
         self.payload_builder.update_payload_with_inclusion_list(payload_id, inclusion_list)
     }
-    
+
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.

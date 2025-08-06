@@ -1,6 +1,9 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, BeaconUpdatePayloadWithInclusionListError, EngineApiMessageVersion, ExecutionPayload, ForkchoiceStatus
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
+    BeaconUpdatePayloadWithInclusionListError, EngineApiMessageVersion, ExecutionPayload,
+    ForkchoiceStatus,
 };
+use alloc::vec::Vec;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -266,28 +269,28 @@ where
         });
         rx
     }
-    
+
     /// Sends a new inclusion list message to the beacon consensus engine.
-        pub async fn update_payload_with_inclusion_list(
-            &self,
-            payload_id: PayloadId,
-            inclusion_list: Vec<Bytes>,
-        ) -> Result<PayloadId, BeaconUpdatePayloadWithInclusionListError> {
-            let (tx, rx) = oneshot::channel();
-    
-            let _ = self.to_engine.send(BeaconEngineMessage::UpdatePayloadWithInclusionList {
-                payload_id,
-                inclusion_list,
-                tx,
-            });
-    
-            match rx.await {
-                Ok(rx) => match rx.await {
-                    Ok(Ok(res)) => Ok(res),
-                    Ok(Err(err)) => Err(BeaconUpdatePayloadWithInclusionListError::internal(err)),
-                    Err(_err) => Err(BeaconUpdatePayloadWithInclusionListError::EngineUnavailable),
-                },
+    pub async fn update_payload_with_inclusion_list(
+        &self,
+        payload_id: PayloadId,
+        inclusion_list: Vec<Bytes>,
+    ) -> Result<PayloadId, BeaconUpdatePayloadWithInclusionListError> {
+        let (tx, rx) = oneshot::channel();
+
+        let _ = self.to_engine.send(BeaconEngineMessage::UpdatePayloadWithInclusionList {
+            payload_id,
+            inclusion_list,
+            tx,
+        });
+
+        match rx.await {
+            Ok(rx) => match rx.await {
+                Ok(Ok(res)) => Ok(res),
+                Ok(Err(err)) => Err(BeaconUpdatePayloadWithInclusionListError::internal(err)),
                 Err(_err) => Err(BeaconUpdatePayloadWithInclusionListError::EngineUnavailable),
-            }
+            },
+            Err(_err) => Err(BeaconUpdatePayloadWithInclusionListError::EngineUnavailable),
         }
+    }
 }

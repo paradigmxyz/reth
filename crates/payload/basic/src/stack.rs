@@ -4,7 +4,7 @@ use crate::{
 };
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Address, B256, U256, Bytes};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;

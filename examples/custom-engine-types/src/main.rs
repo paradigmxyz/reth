@@ -151,6 +151,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
     }
+
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self {
+        Self(self.0.clone_with_il(il))
+    }
 }
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default

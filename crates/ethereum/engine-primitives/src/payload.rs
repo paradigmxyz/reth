@@ -411,7 +411,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         self.il.as_ref()
     }
-    
+
     fn clone_with_il(&self, il: Vec<Bytes>) -> Self {
         let attributes = PayloadAttributes {
             timestamp: self.timestamp,
