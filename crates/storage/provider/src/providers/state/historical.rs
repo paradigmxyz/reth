@@ -4,6 +4,8 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use parking_lot::Mutex;
+use reth_db::{PlainStorageState, StorageChangeSets};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -42,14 +44,22 @@ use std::fmt::Debug;
 /// - [`tables::StoragesHistory`]
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
-#[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, Provider> {
+pub struct HistoricalStateProviderRef<'b, Provider: DBProvider> {
     /// Database provider
     provider: &'b Provider,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    plain_cursor: Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>,
+    changesets_cursor:
+        Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<StorageChangeSets>)>>,
+}
+
+impl<Provider: DBProvider> std::fmt::Debug for HistoricalStateProviderRef<'_, Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoricalStateProviderRef").finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -65,7 +75,13 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            plain_cursor: Mutex::new(None),
+            changesets_cursor: Mutex::new(None),
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
@@ -75,7 +91,13 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            plain_cursor: Mutex::new(None),
+            changesets_cursor: Mutex::new(None),
+        }
     }
 
     /// Lookup an account in the `AccountsHistory` table
@@ -392,7 +414,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
     }
 }
 
-impl<Provider: StateCommitmentProvider> HashedPostStateProvider
+impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
@@ -413,25 +435,66 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+            HistoryInfo::InChangeset(changeset_block_number) => {
+                let mut cached = self.changesets_cursor.lock();
+
+                Ok(Some(if let Some((cached_address, cursor)) = cached.as_mut() {
+                    if *cached_address != address {
+                        *cached_address = address;
+                        *cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
+                    }
+
+                    cursor
+                        .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address,
+                            storage_key: Box::new(storage_key),
+                        })?
+                        .value
+                } else {
+                    let mut cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
+                    let result = cursor
+                        .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address,
+                            storage_key: Box::new(storage_key),
+                        })?
+                        .value;
+
+                    *cached = Some((address, cursor));
+                    result
+                }))
+            }
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let mut cached = self.plain_cursor.lock();
+
+                Ok(if let Some((cached_address, cursor)) = cached.as_mut() {
+                    if *cached_address != address {
+                        *cached_address = address;
+                        *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+                    }
+
+                    cursor
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO))
+                } else {
+                    let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+                    let result = cursor
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO));
+
+                    *cached = Some((address, cursor));
+                    result
+                })
+            }
         }
     }
 }
@@ -445,7 +508,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> BytecodeRe
     }
 }
 
-impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+impl<Provider: DBProvider + StateCommitmentProvider> StateCommitmentProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     type StateCommitment = Provider::StateCommitment;

@@ -1,8 +1,12 @@
+use std::fmt::Formatter;
+
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use parking_lot::Mutex;
+use reth_db::PlainStorageState;
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -24,13 +28,21 @@ use reth_trie_db::{
 /// State provider over latest state that takes tx reference.
 ///
 /// Wraps a [`DBProvider`] to get access to database.
-#[derive(Debug)]
-pub struct LatestStateProviderRef<'b, Provider>(&'b Provider);
+pub struct LatestStateProviderRef<'b, Provider: DBProvider>(
+    &'b Provider,
+    Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>,
+);
+
+impl<Provider: DBProvider> std::fmt::Debug for LatestStateProviderRef<'_, Provider> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LatestStateProviderRef").finish_non_exhaustive()
+    }
+}
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
     pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider)
+        Self(provider, Mutex::new(None))
     }
 
     fn tx(&self) -> &Provider::Tx {
@@ -45,7 +57,9 @@ impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider
     }
 }
 
-impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + BlockHashReader> BlockHashReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
         self.0.block_hash(number)
@@ -169,12 +183,32 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
-            if entry.key == storage_key {
-                return Ok(Some(entry.value))
+        let mut cached = self.1.lock();
+
+        if let Some((address, cursor)) = cached.as_mut() {
+            if *address != account {
+                *address = account;
+                *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
             }
-        }
+
+            if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
+                if entry.key == storage_key {
+                    return Ok(Some(entry.value))
+                }
+            }
+        } else {
+            let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+            let mut result = Ok(None);
+            if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
+                if entry.key == storage_key {
+                    result = Ok(Some(entry.value));
+                }
+            }
+
+            *cached = Some((account, cursor));
+            return result
+        };
+
         Ok(None)
     }
 }
@@ -188,7 +222,7 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeR
     }
 }
 
-impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+impl<Provider: DBProvider + StateCommitmentProvider> StateCommitmentProvider
     for LatestStateProviderRef<'_, Provider>
 {
     type StateCommitment = Provider::StateCommitment;
