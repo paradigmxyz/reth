@@ -24,6 +24,7 @@ use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
     DatabaseTrieWitness, StateCommitment,
 };
+use tracing::debug;
 
 /// State provider over latest state that takes tx reference.
 ///
@@ -189,6 +190,8 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
             if *address != account {
                 *address = account;
                 *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+            } else {
+                debug!(target: "provider::latest", ?account, "Storage cursor reuse hit!");
             }
 
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {

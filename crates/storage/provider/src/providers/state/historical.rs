@@ -32,6 +32,7 @@ use reth_trie_db::{
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
 use std::fmt::Debug;
+use tracing::debug;
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -442,6 +443,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
                     if *cached_address != address {
                         *cached_address = address;
                         *cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
+                    } else {
+                        debug!(target: "provider::storage", ?address, "Storage change sets cursor reuse hit!");
                     }
 
                     cursor
@@ -476,6 +479,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
                     if *cached_address != address {
                         *cached_address = address;
                         *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+                    } else {
+                        debug!(target: "provider::storage", ?address, "Storage plain state cursor reuse hit!");
                     }
 
                     cursor
