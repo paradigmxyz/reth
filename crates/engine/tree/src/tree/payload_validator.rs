@@ -694,14 +694,12 @@ where
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
             |db, tx_hash| {
-                tx_cache.get(&tx_hash).and_then(|res| {
-                    let (traces,  result, coinbase_deltas) = res.value();
-
+                tx_cache.remove(&tx_hash).and_then(|(_, (traces, mut result, coinbase_deltas))| {
                     for trace in traces {
-                        let matches = match trace {
+                        let matches = match &trace {
                             AccessRecord::Account { address, result } => {
                                 match coinbase_deltas {
-                                    Some((coinbase, _, _)) if address == coinbase => {
+                                    Some((coinbase, _, _)) if *address == coinbase => {
                                         true
                                     }
                                     _ => {
@@ -741,11 +739,9 @@ where
                         }
                     }
 
-                    let mut result = result.clone();
-
                     if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) = coinbase_deltas {
-                        if let Some(coinbase_account) = result.state.get_mut(coinbase) {
-                            if let Ok(Some(coinbase_db)) = db.basic(*coinbase) {
+                        if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
+                            if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
                                 coinbase_account.info.nonce = coinbase_db.nonce + coinbase_nonce_delta;
                                 coinbase_account.info.balance = coinbase_db.balance + coinbase_balance_delta;
 
