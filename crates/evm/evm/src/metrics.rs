@@ -14,7 +14,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{RecoveredBlock, SignedTransaction, Transaction};
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use revm::{
     context::result::ResultAndState,
     database::{states::bundle_state::BundleRetention, State},
