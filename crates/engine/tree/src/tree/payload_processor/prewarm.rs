@@ -389,6 +389,15 @@ where
             });
 
             debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+
+            if tx_hash ==
+                alloy_primitives::b256!(
+                    "0x9c6df45505e3410e4cdcf1eca5424d74d94e55f52854ffc2e971b74618aef3c8"
+                )
+            {
+                debug!(target: "engine::tree", ?execution_trace, ?res, "Execution trace");
+            }
+
             tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
 
