@@ -252,7 +252,6 @@ where
     /// execution.
     fn evm_for_ctx(
         self,
-        coinbase_balance_read: Arc<AtomicBool>,
     ) -> Option<(
         EvmFor<Evm, EVMRecordingDatabase<impl Database>, CoinbaseBalanceEVMInspector>,
         PrewarmMetrics,
@@ -301,7 +300,7 @@ where
         let mut evm = evm_config.evm_with_env_and_inspector(
             state_provider,
             evm_env,
-            CoinbaseBalanceEVMInspector::new(coinbase_address, coinbase_balance_read),
+            CoinbaseBalanceEVMInspector::new(coinbase_address),
         );
 
         if !precompile_cache_disabled {
@@ -334,12 +333,7 @@ where
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) {
-        let coinbase_balance_read = Arc::new(AtomicBool::new(false));
-        let Some((mut evm, metrics, terminate_execution)) =
-            self.evm_for_ctx(coinbase_balance_read.clone())
-        else {
-            return
-        };
+        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
         let coinbase = evm.block().beneficiary;
 
         while let Ok(tx) = txs.recv() {
@@ -377,7 +371,7 @@ where
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
 
-            let coinbase_balance_read = coinbase_balance_read.swap(false, Ordering::Relaxed);
+            let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
             let mut coinbase_storage_read = false;
             let execution_trace = evm
                 .db_mut()
@@ -530,12 +524,12 @@ impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
 #[derive(Debug)]
 struct CoinbaseBalanceEVMInspector {
     coinbase: Address,
-    balance_read: Arc<AtomicBool>,
+    balance_read: bool,
 }
 
 impl CoinbaseBalanceEVMInspector {
-    fn new(coinbase: Address, balance_read: Arc<AtomicBool>) -> Self {
-        Self { coinbase, balance_read }
+    const fn new(coinbase: Address) -> Self {
+        Self { coinbase, balance_read: false }
     }
 }
 
@@ -544,7 +538,7 @@ where
     CTX: ContextTr<Journal: JournalExt>,
 {
     fn step(&mut self, interpreter: &mut Interpreter, _context: &mut CTX) {
-        if self.balance_read.load(Ordering::Relaxed) {
+        if self.balance_read {
             return
         }
 
@@ -552,13 +546,13 @@ where
             opcode::BALANCE => {
                 if let Ok(addr) = interpreter.stack.peek(0) {
                     if Address::from_word(B256::from(addr.to_be_bytes())) == self.coinbase {
-                        self.balance_read.store(true, Ordering::Relaxed);
+                        self.balance_read = true;
                     }
                 }
             }
             opcode::SELFBALANCE => {
                 if interpreter.input.target_address == self.coinbase {
-                    self.balance_read.store(true, Ordering::Relaxed);
+                    self.balance_read = true;
                 }
             }
             _ => (),
