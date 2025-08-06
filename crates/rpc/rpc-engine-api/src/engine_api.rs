@@ -3,12 +3,12 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
+    eip2718::Encodable2718,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
-use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     AmsterdamPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
     ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
@@ -956,7 +956,7 @@ where
         requests: RequestsOrHash,
         il: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+        info!(target: "rpc::engine", il = %il.len(), "Serving engine_newPayloadV5");
 
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
@@ -1178,15 +1178,19 @@ where
         //
         // we may not be able to constrain the transactions that we can fetch from the transaction
         // pool by parent hash (for now)
-        let mut txs = self.inner.tx_pool.pending_transactions();
+        let txs = self.inner.tx_pool.all_transactions();
         let mut il = Vec::with_capacity(16);
         let mut il_size = 0;
 
         // sort the transactions from earliest timestamp to latest timestamp
-        txs.sort_by_key(|tx| tx.timestamp);
+        let mut pending = txs.pending;
+        pending.sort_by_key(|tx| tx.timestamp);
+        let mut queued = txs.queued;
+        queued.sort_by_key(|tx| tx.timestamp);
 
-        for tx in txs {
-            let tx_len = tx.encoded_length();
+        for tx in pending.iter().chain(queued.iter()) {
+            let tx = tx.to_consensus().into_inner();
+            let tx_len = tx.encode_2718_len();
 
             // if the transaction would cause the IL to exceed its maximum allowable size, then skip
             // to the next transaction.
@@ -1195,10 +1199,8 @@ where
             }
 
             // encode the transaction and append it to the IL
-            let mut buf = vec![0u8; tx_len];
-            let tx = tx.to_consensus();
-            tx.encode(&mut buf);
-            il.push(buf.into());
+            let encoded = tx.encoded_2718();
+            il.push(encoded.into());
 
             il_size += tx_len;
         }
@@ -1211,7 +1213,7 @@ where
         payload_id: PayloadId,
         inclusion_list: Vec<Bytes>,
     ) -> RpcResult<Option<PayloadId>> {
-        info!(target: "rpc::engine", "Serving engine_updatePayloadWithInclusionListV1");
+        info!(target: "rpc::engine", len = %inclusion_list.len(), "Serving engine_updatePayloadWithInclusionListV1");
         let len = inclusion_list.len();
         tracing::info!(target: "engine::api", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
 
