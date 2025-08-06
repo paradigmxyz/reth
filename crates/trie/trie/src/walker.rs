@@ -28,7 +28,9 @@ pub struct TrieWalker<C, K = EmptyAddedRemovedKeys> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
-    /// TODO doc
+    /// Provided when it's necessary to not skip certain nodes during proof generation.
+    /// Specifically we don't skip certain branch nodes even when they are not in the `PrefixSet`,
+    /// when they might be required to support leaf removal.
     added_removed_keys: Option<K>,
     #[cfg(feature = "metrics")]
     /// Walker metrics.
@@ -91,7 +93,8 @@ impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
         self
     }
 
-    /// TODO doc
+    /// Configures the walker to not skip certain branch nodes, even when they are not in the
+    /// `PrefixSet`, when they might be needed to support leaf removal.
     pub fn with_added_removed_keys<K2>(self, added_removed_keys: Option<K2>) -> TrieWalker<C, K2> {
         TrieWalker {
             cursor: self.cursor,
@@ -169,7 +172,10 @@ impl<C: TrieCursor, K: AddedRemovedKeys> TrieWalker<C, K> {
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
         self.can_skip_current_node = self.stack.last().is_some_and(|node| {
-            // TODO doc
+            // If the current key is not removed according to the [`AddedRemovedKeys`], and all of
+            // its siblings are removed, then we don't want to skip it. This allows the
+            // `ProofRetainer` to include this node in the returned proofs. Required to support
+            // leaf removal.
             let key_is_only_nonremoved_child =
                 self.added_removed_keys.as_ref().is_some_and(|added_removed_keys| {
                     node.full_key_is_only_nonremoved_child(added_removed_keys)

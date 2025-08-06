@@ -2797,15 +2797,15 @@ mod tests {
     {
         let mut account_rlp = Vec::new();
 
-        let mut hash_builder = HashBuilder::default().with_updates(true).with_proof_retainer(
-            ProofRetainer::from_iter(proof_targets).with_leaf_additions_removals(true),
-        );
+        let mut hash_builder = HashBuilder::default()
+            .with_updates(true)
+            .with_proof_retainer(ProofRetainer::from_iter(proof_targets));
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
-        let walker =
-            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze())
+            .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))

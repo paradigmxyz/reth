@@ -243,7 +243,7 @@ where
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
-        .with_added_removed_keys(accounts_added_removed_keys.clone())
+        .with_added_removed_keys(accounts_added_removed_keys)
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.

@@ -14,13 +14,11 @@ use alloy_trie::{proof::AddedRemovedKeys, Nibbles, TrieMask};
 /// properly track added keys.
 ///
 /// Note: Currently only removed keys are tracked. Added keys tracking is not yet implemented.
-///
-/// TODO don't derive Clone
 #[derive(Debug, Default, Clone)]
 pub struct AddedRemovedKeysSet(B256Set);
 
 impl AddedRemovedKeysSet {
-    /// TODO document
+    /// Returns true if the given key path is marked as removed.
     pub fn is_removed(&self, path: &B256) -> bool {
         self.0.contains(path)
     }

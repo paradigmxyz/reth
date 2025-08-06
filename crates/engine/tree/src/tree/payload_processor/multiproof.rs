@@ -1310,7 +1310,7 @@ mod tests {
         let state = create_get_proof_targets_state();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         // should return all accounts as targets since nothing was fetched before
         assert_eq!(targets.len(), state.accounts.len());
@@ -1324,7 +1324,7 @@ mod tests {
         let state = create_get_proof_targets_state();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         // verify storage slots are included for accounts with storage
         for (addr, storage) in &state.storages {
@@ -1352,7 +1352,7 @@ mod tests {
         // mark the account as already fetched
         fetched.insert(*fetched_addr, HashSet::default());
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         // should not include the already fetched account since it has no storage updates
         assert!(!targets.contains_key(fetched_addr));
@@ -1372,7 +1372,7 @@ mod tests {
         fetched_slots.insert(fetched_slot);
         fetched.insert(*addr, fetched_slots);
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         // should not include the already fetched storage slot
         let target_slots = &targets[addr];
@@ -1385,7 +1385,7 @@ mod tests {
         let state = HashedPostState::default();
         let fetched = MultiProofTargets::default();
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         assert!(targets.is_empty());
     }
@@ -1412,7 +1412,7 @@ mod tests {
         fetched_slots.insert(slot1);
         fetched.insert(addr1, fetched_slots);
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         assert!(targets.contains_key(&addr2));
         assert!(!targets[&addr1].contains(&slot1));
@@ -1438,7 +1438,7 @@ mod tests {
         assert!(!state.accounts.contains_key(&addr));
         assert!(!fetched.contains_key(&addr));
 
-        let targets = get_proof_targets(&state, &fetched);
+        let targets = get_proof_targets(&state, &fetched, &MultiAddedRemovedKeys::default());
 
         // verify that we still get the storage slots for the unmodified account
         assert!(targets.contains_key(&addr));
@@ -1528,5 +1528,113 @@ mod tests {
             *prefetch_proof_targets.get(&addr2).unwrap(),
             vec![slot2].into_iter().collect::<B256Set>()
         );
+    }
+
+    #[test]
+    fn test_get_proof_targets_with_removed_storage_keys() {
+        let mut state = HashedPostState::default();
+        let mut fetched = MultiProofTargets::default();
+        let mut multi_added_removed_keys = MultiAddedRemovedKeys::default();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        // add account to state
+        state.accounts.insert(addr, Some(Default::default()));
+
+        // add storage updates
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::from(100));
+        storage.storage.insert(slot2, U256::from(200));
+        state.storages.insert(addr, storage);
+
+        // mark slot1 as already fetched
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot1);
+        fetched.insert(addr, fetched_slots);
+
+        // update multi_added_removed_keys to mark slot1 as removed
+        let mut removed_state = HashedPostState::default();
+        let mut removed_storage = HashedStorage::default();
+        removed_storage.storage.insert(slot1, U256::ZERO); // U256::ZERO marks as removed
+        removed_state.storages.insert(addr, removed_storage);
+        multi_added_removed_keys.update_with_state(&removed_state);
+
+        let targets = get_proof_targets(&state, &fetched, &multi_added_removed_keys);
+
+        // slot1 should be included despite being fetched, because it's marked as removed
+        assert!(targets.contains_key(&addr));
+        let target_slots = &targets[&addr];
+        assert_eq!(target_slots.len(), 2);
+        assert!(target_slots.contains(&slot1)); // included because it's removed
+        assert!(target_slots.contains(&slot2)); // included because it's not fetched
+    }
+
+    #[test]
+    fn test_get_proof_targets_with_wiped_storage() {
+        let mut state = HashedPostState::default();
+        let fetched = MultiProofTargets::default();
+        let multi_added_removed_keys = MultiAddedRemovedKeys::default();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+
+        // add account to state
+        state.accounts.insert(addr, Some(Default::default()));
+
+        // add wiped storage
+        let mut storage = HashedStorage::default();
+        storage.wiped = true;
+        storage.storage.insert(slot1, U256::from(100));
+        state.storages.insert(addr, storage);
+
+        let targets = get_proof_targets(&state, &fetched, &multi_added_removed_keys);
+
+        // account should be included because storage is wiped and account wasn't fetched
+        assert!(targets.contains_key(&addr));
+        let target_slots = &targets[&addr];
+        assert_eq!(target_slots.len(), 1);
+        assert!(target_slots.contains(&slot1));
+    }
+
+    #[test]
+    fn test_get_proof_targets_removed_keys_not_in_state_update() {
+        let mut state = HashedPostState::default();
+        let mut fetched = MultiProofTargets::default();
+        let mut multi_added_removed_keys = MultiAddedRemovedKeys::default();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        let slot3 = B256::random();
+
+        // add account to state
+        state.accounts.insert(addr, Some(Default::default()));
+
+        // add storage updates for slot1 and slot2 only
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::from(100));
+        storage.storage.insert(slot2, U256::from(200));
+        state.storages.insert(addr, storage);
+
+        // mark all slots as already fetched
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot1);
+        fetched_slots.insert(slot2);
+        fetched_slots.insert(slot3); // slot3 is fetched but not in state update
+        fetched.insert(addr, fetched_slots);
+
+        // mark slot3 as removed (even though it's not in the state update)
+        let mut removed_state = HashedPostState::default();
+        let mut removed_storage = HashedStorage::default();
+        removed_storage.storage.insert(slot3, U256::ZERO);
+        removed_state.storages.insert(addr, removed_storage);
+        multi_added_removed_keys.update_with_state(&removed_state);
+
+        let targets = get_proof_targets(&state, &fetched, &multi_added_removed_keys);
+
+        // only slots in the state update can be included, so slot3 should not appear
+        assert!(!targets.contains_key(&addr));
     }
 }
