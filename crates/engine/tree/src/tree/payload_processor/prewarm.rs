@@ -257,7 +257,6 @@ where
         EvmFor<Evm, EVMRecordingDatabase<impl Database>, CoinbaseBalanceEVMInspector>,
         PrewarmMetrics,
         Arc<AtomicBool>,
-        mpsc::Receiver<AccessRecord>,
     )> {
         let Self {
             env,
@@ -288,8 +287,7 @@ where
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         let state_provider = StateProviderDatabase::new(state_provider);
-        let (traces_tx, traces_rx) = mpsc::channel();
-        let state_provider = EVMRecordingDatabase::new(state_provider, traces_tx);
+        let state_provider = EVMRecordingDatabase::new(state_provider);
 
         let mut evm_env = env.evm_env;
         let coinbase_address = evm_env.block_env().beneficiary;
@@ -318,7 +316,7 @@ where
             });
         }
 
-        Some((evm, metrics, terminate_execution, traces_rx))
+        Some((evm, metrics, terminate_execution))
     }
 
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
@@ -337,7 +335,7 @@ where
         done_tx: Sender<()>,
     ) {
         let coinbase_balance_read = Arc::new(AtomicBool::new(false));
-        let Some((mut evm, metrics, terminate_execution, recorded_traces)) =
+        let Some((mut evm, metrics, terminate_execution)) =
             self.evm_for_ctx(coinbase_balance_read.clone())
         else {
             return
@@ -381,8 +379,10 @@ where
 
             let coinbase_balance_read = coinbase_balance_read.swap(false, Ordering::Relaxed);
             let mut coinbase_storage_read = false;
-            let execution_trace = recorded_traces
-                .try_iter()
+            let execution_trace = evm
+                .db_mut()
+                .recorded_traces
+                .drain(..)
                 .inspect(|trace| {
                     if let AccessRecord::Storage { address, .. } = trace {
                         if *address != coinbase {
@@ -491,12 +491,12 @@ pub enum AccessRecord {
 #[derive(Debug)]
 struct EVMRecordingDatabase<DB> {
     inner_db: DB,
-    recorded_traces: mpsc::Sender<AccessRecord>,
+    recorded_traces: Vec<AccessRecord>,
 }
 
 impl<DB> EVMRecordingDatabase<DB> {
-    const fn new(inner_db: DB, recorded_traces: mpsc::Sender<AccessRecord>) -> Self {
-        Self { inner_db, recorded_traces }
+    const fn new(inner_db: DB) -> Self {
+        Self { inner_db, recorded_traces: Vec::new() }
     }
 }
 
@@ -505,7 +505,7 @@ impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let result = self.inner_db.basic(address)?;
-        let _ = self.recorded_traces.send(AccessRecord::Account {
+        self.recorded_traces.push(AccessRecord::Account {
             address,
             result: result.as_ref().map(|r| r.copy_without_code()),
         });
@@ -518,7 +518,7 @@ impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         let result = self.inner_db.storage(address, index)?;
-        let _ = self.recorded_traces.send(AccessRecord::Storage { address, index, result });
+        self.recorded_traces.push(AccessRecord::Storage { address, index, result });
         Ok(result)
     }
 
