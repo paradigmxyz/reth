@@ -371,15 +371,15 @@ where
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
 
-            let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
-            let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
-
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
+            let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
             if coinbase_balance_read {
                 debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
                 continue
             }
+
+            let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
 
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
@@ -389,14 +389,6 @@ where
             });
 
             debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
-
-            if tx_hash ==
-                alloy_primitives::b256!(
-                    "0x9c6df45505e3410e4cdcf1eca5424d74d94e55f52854ffc2e971b74618aef3c8"
-                )
-            {
-                debug!(target: "engine::tree", ?execution_trace, ?res, "Execution trace");
-            }
 
             tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
