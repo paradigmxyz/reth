@@ -9,13 +9,17 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
-use alloy_evm::block::StateChangeSource;
+use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
+use reth_engine_primitives::ExecutableTxIterator;
+use reth_evm::{
+    execute::{ExecutableTxFor, WithTxEnv},
+    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -153,7 +157,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<I::Tx, I::Error>
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -241,7 +245,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<I::Tx, I::Error>
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader
             + StateProviderFactory
@@ -265,16 +269,20 @@ where
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
-    ) -> (mpsc::Receiver<I::Tx>, mpsc::Receiver<Result<I::Tx, I::Error>>) {
+    ) -> (
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
+    ) {
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            for transaction in transactions {
+            for tx in transactions {
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx });
                 // only send Ok(_) variants to prewarming task
-                if let Ok(tx) = &transaction {
+                if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(transaction);
+                let _ = execute_tx.send(tx);
             }
         });
 
@@ -285,7 +293,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
@@ -565,26 +573,6 @@ where
             parent_hash: Default::default(),
         }
     }
-}
-
-/// Iterator over executable transactions.
-pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
-{
-    /// The executable transaction type iterator yields.
-    type Tx: OwnedExecutableTxFor<Evm>;
-    /// Errors that may occur while recovering or decoding transactions.
-    type Error: core::error::Error + Send + 'static;
-}
-
-impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
-where
-    Tx: OwnedExecutableTxFor<Evm>,
-    Err: core::error::Error + Send + 'static,
-    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
-{
-    type Tx = Tx;
-    type Error = Err;
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use crate::{
     chainspec::CustomChainSpec,
+    evm::CustomEvmConfig,
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
     CustomNode,
 };
@@ -35,8 +36,8 @@ pub struct CustomPayloadTypes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
-    inner: OpExecutionData,
-    extension: u64,
+    pub inner: OpExecutionData,
+    pub extension: u64,
 }
 
 impl ExecutionPayload for CustomExecutionData {
@@ -298,7 +299,7 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<Types = CustomNode>,
+    N: FullNodeComponents<Types = CustomNode, Evm = CustomEvmConfig>,
 {
     type Validator = CustomEngineValidator<N::Provider>;
 
