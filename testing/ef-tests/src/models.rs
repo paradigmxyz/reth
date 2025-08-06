@@ -81,7 +81,7 @@ pub struct Header {
     pub excess_blob_gas: Option<U256>,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
-    /// Requests root.
+    /// Root hash of the requests trie.
     pub requests_hash: Option<B256>,
     /// Target blobs per block.
     pub target_blobs_per_block: Option<U256>,
