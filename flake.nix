@@ -43,8 +43,6 @@
           cargo = rustPkg;
         };
 
-        cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
-
         linuxNative = pkgs.lib.optionals pkgs.stdenv.isLinux (
           with pkgs;
           [
@@ -88,7 +86,6 @@
 
         devShell = pkgs.mkShell {
           buildInputs = [
-            cargoDeps
             rustPkg
             nightly.rust-analyzer
             nightly.clippy
