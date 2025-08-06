@@ -17,6 +17,7 @@ use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
+use revm_primitives::map::AddressMap;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -430,6 +431,9 @@ pub(crate) struct PrewarmMetrics {
 struct StateAccessDatabase<DB> {
     database: DB,
     sender: Option<Sender<MultiProofMessage>>,
+    batch_limit: usize,
+    batch: AddressMap<B256Set>,
+    batch_size: usize,
 }
 
 impl<DB> std::fmt::Debug for StateAccessDatabase<DB> {
@@ -439,8 +443,33 @@ impl<DB> std::fmt::Debug for StateAccessDatabase<DB> {
 }
 
 impl<DB> StateAccessDatabase<DB> {
-    const fn new(database: DB, sender: Option<Sender<MultiProofMessage>>) -> Self {
-        Self { database, sender }
+    fn new(database: DB, sender: Option<Sender<MultiProofMessage>>) -> Self {
+        Self {
+            database,
+            sender,
+            batch_limit: 10,
+            batch: AddressMap::with_capacity_and_hasher(0, Default::default()),
+            batch_size: 0,
+        }
+    }
+
+    fn maybe_send_multiproofs(&mut self) {
+        if self.batch_size < self.batch_limit {
+            return
+        }
+
+        self.batch_size = 0;
+        let batch = std::mem::take(&mut self.batch);
+        if let Some(tx) = &self.sender {
+            let _ = tx.send(MultiProofMessage::PrefetchProofs(
+                batch
+                    .into_iter()
+                    .map(|(address, slots)| {
+                        (keccak256(address), slots.into_iter().map(keccak256).collect())
+                    })
+                    .collect::<MultiProofTargets>(),
+            ));
+        }
     }
 }
 
@@ -451,10 +480,10 @@ impl<DB: revm::Database> revm::Database for StateAccessDatabase<DB> {
         &mut self,
         address: revm_primitives::Address,
     ) -> Result<Option<revm::state::AccountInfo>, Self::Error> {
-        if let Some(tx) = &self.sender {
-            let _ = tx.send(MultiProofMessage::PrefetchProofs(MultiProofTargets::account(
-                keccak256(address),
-            )));
+        if !self.batch.contains_key(&address) {
+            self.batch_size += 1;
+            self.batch.insert(address, B256Set::with_capacity_and_hasher(0, Default::default()));
+            self.maybe_send_multiproofs();
         }
         self.database.basic(address)
     }
@@ -464,12 +493,9 @@ impl<DB: revm::Database> revm::Database for StateAccessDatabase<DB> {
         address: revm_primitives::Address,
         index: revm_primitives::StorageKey,
     ) -> Result<revm_primitives::StorageValue, Self::Error> {
-        if let Some(tx) = &self.sender {
-            let _ =
-                tx.send(MultiProofMessage::PrefetchProofs(MultiProofTargets::account_with_slots(
-                    keccak256(address),
-                    [keccak256(B256::new(index.to_be_bytes()))],
-                )));
+        if self.batch.entry(address).or_default().insert(B256::new(index.to_be_bytes())) {
+            self.batch_size += 1;
+            self.maybe_send_multiproofs();
         }
         self.database.storage(address, index)
     }
