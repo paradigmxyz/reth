@@ -36,10 +36,7 @@
         packageVersion = cargoTOML.workspace.package.version;
         rustVersion = cargoTOML.workspace.package."rust-version";
 
-        rustStable = (fenix.packages.${system}.toolchainOf {
-          channel = rustVersion;
-          sha256 = "sha256-X/4ZBHO3iW0fOenQ3foEvscgAPJYl2abspaBThDOukI=";
-        }).withComponents [
+        rustStable = fenix.packages.${system}.stable.withComponents [
           "cargo" "rustc" "rust-src"
         ];
 
