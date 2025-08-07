@@ -5,10 +5,10 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction, PoolUpdateKind,
+    BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
@@ -24,6 +24,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+// #[cfg(feature = "serde_json")]
+// use serde_json;
 use std::{
     borrow::Borrow,
     collections::HashSet,
@@ -36,6 +38,9 @@ use tokio::{
     time::{self, Duration},
 };
 use tracing::{debug, error, info, trace, warn};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// Maximum amount of time non-executable transaction are queued.
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
@@ -601,8 +606,8 @@ where
     Ok(res)
 }
 
-/// Loads transactions from a file, decodes them from the RLP format, and inserts them
-/// into the transaction pool on node boot up.
+/// Loads transactions from a file, decodes them from the JSON or RLP format, and
+/// inserts them into the transaction pool on node boot up.
 /// The file is removed after the transactions have been successfully processed.
 async fn load_and_reinsert_transactions<P>(
     pool: P,
@@ -622,23 +627,56 @@ where
         return Ok(())
     }
 
-    let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
-        alloy_rlp::Decodable::decode(&mut data.as_slice())?;
+    let pool_transactions: Vec<(TransactionOrigin, <P as TransactionPool>::Transaction)> =
+        if let Ok(tx_backups) = serde_json::from_slice::<Vec<TxBackup>>(&data) {
+            tx_backups
+                .into_iter()
+                .filter_map(|backup| {
+                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
+                        &mut backup.rlp.as_slice(),
+                    )
+                    .ok()?;
+                    let recovered = tx_signed.try_clone_into_recovered().ok()?;
+                    let pool_tx =
+                        <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
 
-    let pool_transactions = txs_signed
-        .into_iter()
-        .filter_map(|tx| tx.try_clone_into_recovered().ok())
-        .filter_map(|tx| {
-            // Filter out errors
-            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
-        })
-        .collect();
+                    Some((backup.origin, pool_tx))
+                })
+                .collect()
+        } else {
+            let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
+                alloy_rlp::Decodable::decode(&mut data.as_slice())?;
 
-    let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
+            txs_signed
+                .into_iter()
+                .filter_map(|tx| tx.try_clone_into_recovered().ok())
+                .filter_map(|tx| {
+                    // Filter out errors
+                    <P::Transaction as PoolTransaction>::try_from_consensus(tx)
+                        .ok()
+                        .map(|pool_tx| (TransactionOrigin::Local, pool_tx))
+                })
+                .collect()
+        };
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
+    let num_txs = pool_transactions.len();
+
+    for (origin, pool_tx) in pool_transactions {
+        let _ = pool.add_transaction(origin, pool_tx).await;
+    }
+
+    info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Successfully reinserted local transactions from file");
     reth_fs_util::remove_file(file_path)?;
     Ok(())
+}
+
+/// A transaction backup that is saved as json to a file for
+/// reinsertion into the pool
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+struct TxBackup {
+    rlp: Vec<u8>,
+    origin: TransactionOrigin,
+    propagate: bool,
 }
 
 fn save_local_txs_backup<P>(pool: P, file_path: &Path)
@@ -653,16 +691,27 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.transaction.clone_into_consensus().into_inner())
+        .map(|tx| {
+            let consensus_tx = tx.transaction.clone_into_consensus().into_inner();
+            let mut rlp_data = Vec::new();
+            consensus_tx.encode(&mut rlp_data);
+            TxBackup { rlp: rlp_data, origin: tx.origin, propagate: false }
+        })
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
-    let mut buf = Vec::new();
-    alloy_rlp::encode_list(&local_transactions, &mut buf);
+    let json_data = match serde_json::to_vec(&local_transactions) {
+        Ok(data) => data,
+        Err(err) => {
+            warn!(target: "txpool", %err, txs_file=?file_path, "failed to serialize local transactions to json");
+            return
+        }
+    };
+
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
-    match parent_dir.map(|_| reth_fs_util::write(file_path, buf)) {
+    match parent_dir.map(|_| reth_fs_util::write(file_path, json_data)) {
         Ok(_) => {
             info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
         }
@@ -678,6 +727,9 @@ pub enum TransactionsBackupError {
     /// Error during RLP decoding of transactions
     #[error("failed to apply transactions backup. Encountered RLP decode error: {0}")]
     Decode(#[from] alloy_rlp::Error),
+    /// Error during json decoding of transactions
+    #[error("failed to apply transactions backup. Encountered JSON decode error: {0}")]
+    Json(#[from] serde_json::Error),
     /// Error during file upload
     #[error("failed to apply transactions backup. Encountered file error: {0}")]
     FsPath(#[from] FsPathError),
@@ -721,7 +773,7 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
+    use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
@@ -734,7 +786,7 @@ mod tests {
         assert!(changed_acc.eq(&ChangedAccountEntry(copy)));
     }
 
-    const EXTENSION: &str = "rlp";
+    const EXTENSION: &str = "json";
     const FILENAME: &str = "test_transactions_backup";
 
     #[tokio::test(flavor = "multi_thread")]
@@ -779,8 +831,7 @@ mod tests {
 
         let data = fs::read(transactions_path).unwrap();
 
-        let txs: Vec<TransactionSigned> =
-            alloy_rlp::Decodable::decode(&mut data.as_slice()).unwrap();
+        let txs: Vec<TxBackup> = serde_json::from_slice::<Vec<TxBackup>>(&data).unwrap();
         assert_eq!(txs.len(), 1);
 
         temp_dir.close().unwrap();
