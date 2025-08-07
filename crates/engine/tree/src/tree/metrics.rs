@@ -42,6 +42,10 @@ pub(crate) struct EngineMetrics {
     pub(crate) pipeline_runs: Counter,
     /// The total count of forkchoice updated messages received.
     pub(crate) forkchoice_updated_messages: Counter,
+    /// The total count of forkchoice updated messages with payload received.
+    pub(crate) forkchoice_with_attributes_updated_messages: Counter,
+    /// Newly arriving block hash is not present in executed blocks cache storage
+    pub(crate) executed_new_block_cache_miss: Counter,
     /// The total count of new payload messages received.
     pub(crate) new_payload_messages: Counter,
     /// Histogram of persistence operation durations (in seconds)
