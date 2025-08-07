@@ -1,5 +1,3 @@
-use std::fmt::Formatter;
-
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
@@ -25,6 +23,7 @@ use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
     DatabaseTrieWitness, StateCommitment,
 };
+use std::{fmt::Formatter, ops::DerefMut, sync::Arc};
 use tracing::debug;
 
 /// State provider over latest state that takes tx reference.
@@ -32,7 +31,7 @@ use tracing::debug;
 /// Wraps a [`DBProvider`] to get access to database.
 pub struct LatestStateProviderRef<'b, Provider: DBProvider>(
     &'b Provider,
-    Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>,
+    Arc<Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>>,
 );
 
 impl<Provider: DBProvider> std::fmt::Debug for LatestStateProviderRef<'_, Provider> {
@@ -43,8 +42,15 @@ impl<Provider: DBProvider> std::fmt::Debug for LatestStateProviderRef<'_, Provid
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
-    pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider, Mutex::new(None))
+    pub fn new(provider: &'b Provider) -> Self {
+        Self(provider, Arc::new(Mutex::new(None)))
+    }
+
+    pub const fn new_with_cursor(
+        provider: &'b Provider,
+        cursor: Arc<Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>>,
+    ) -> Self {
+        Self(provider, cursor)
     }
 
     fn tx(&self) -> &Provider::Tx {
@@ -237,23 +243,33 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateCommitmentProvider
 }
 
 /// State provider for the latest state.
-#[derive(Debug)]
-pub struct LatestStateProvider<Provider>(Provider);
+pub struct LatestStateProvider<Provider: DBProvider>(
+    Provider,
+    Arc<Mutex<Option<(Address, <Provider::Tx as DbTx>::DupCursor<PlainStorageState>)>>>,
+);
+
+impl<Provider: DBProvider> std::fmt::Debug for LatestStateProvider<Provider> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LatestStateProvider").finish_non_exhaustive()
+    }
+}
 
 impl<Provider: DBProvider + StateCommitmentProvider> LatestStateProvider<Provider> {
     /// Create new state provider
-    pub const fn new(db: Provider) -> Self {
-        Self(db)
+    pub fn new(db: Provider) -> Self {
+        Self(db, Arc::new(Mutex::new(None)))
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
-        LatestStateProviderRef::new(&self.0)
+    fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+        LatestStateProviderRef::new_with_cursor(&self.0, self.1.clone())
     }
 }
 
-impl<Provider: StateCommitmentProvider> StateCommitmentProvider for LatestStateProvider<Provider> {
+impl<Provider: DBProvider + StateCommitmentProvider> StateCommitmentProvider
+    for LatestStateProvider<Provider>
+{
     type StateCommitment = Provider::StateCommitment;
 }
 
