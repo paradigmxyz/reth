@@ -18,7 +18,6 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::BatchTxProcessor;
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.
@@ -346,11 +345,6 @@ where
             }),
         );
 
-        // Create tx pool insertion batcher
-        let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
-
         EthApiInner::new(
             components,
             eth_cache,
@@ -366,7 +360,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
-            tx_batch_sender,
+            max_batch_size,
         )
     }
 

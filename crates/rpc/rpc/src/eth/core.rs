@@ -29,7 +29,8 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, AddedTransactionOutcome, BatchTxRequest, TransactionPool,
+    noop::NoopTransactionPool, AddedTransactionOutcome, BatchTxProcessor, BatchTxRequest,
+    TransactionPool,
 };
 use tokio::sync::{broadcast, mpsc, Mutex};
 
@@ -149,9 +150,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
-        tx_batch_sender: mpsc::UnboundedSender<
-            BatchTxRequest<<N::Pool as TransactionPool>::Transaction>,
-        >,
+        max_batch_size: usize,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -166,7 +165,7 @@ where
             proof_permits,
             rpc_converter,
             (),
-            tx_batch_sender,
+            max_batch_size,
         );
 
         Self { inner: Arc::new(inner) }
@@ -322,9 +321,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        tx_batch_sender: mpsc::UnboundedSender<
-            BatchTxRequest<<N::Pool as TransactionPool>::Transaction>,
-        >,
+        max_batch_size: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -339,6 +336,11 @@ where
         );
 
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+
+        // Create tx pool insertion batcher
+        let (processor, tx_batch_sender) =
+            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
+        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
         Self {
             components,
