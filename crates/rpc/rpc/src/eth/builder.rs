@@ -41,7 +41,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
-    max_batch_size: Option<usize>,
+    max_batch_size: usize,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -125,7 +125,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
-            max_batch_size: None,
+            max_batch_size: 1,
         }
     }
 }
@@ -292,7 +292,7 @@ where
 
     /// Sets the max batch size for batching transaction insertions.
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
-        self.max_batch_size = Some(max_batch_size);
+        self.max_batch_size = max_batch_size;
         self
     }
 
@@ -346,14 +346,10 @@ where
             }),
         );
 
-        // Create tx pool insertion batcher if configured
-        let tx_batch_sender = max_batch_size.map(|batch_size| {
-            let (processor, request_tx) =
-                BatchTxProcessor::new(components.pool().clone(), batch_size);
-
-            task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
-            request_tx
-        });
+        // Create tx pool insertion batcher
+        let (processor, tx_batch_sender) =
+            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
+        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
         EthApiInner::new(
             components,

@@ -28,7 +28,9 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use reth_transaction_pool::{noop::NoopTransactionPool, BatchTxRequest, TransactionPool};
+use reth_transaction_pool::{
+    noop::NoopTransactionPool, AddedTransactionOutcome, BatchTxRequest, TransactionPool,
+};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
@@ -147,6 +149,9 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
+        tx_batch_sender: mpsc::UnboundedSender<
+            BatchTxRequest<<N::Pool as TransactionPool>::Transaction>,
+        >,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -161,7 +166,7 @@ where
             proof_permits,
             rpc_converter,
             (),
-            None,
+            tx_batch_sender,
         );
 
         Self { inner: Arc::new(inner) }
@@ -218,21 +223,6 @@ where
     #[inline]
     fn cache(&self) -> &EthStateCache<N::Primitives> {
         self.inner.cache()
-    }
-}
-
-impl<N, Rpc> EthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert,
-{
-    /// Returns the transaction batch sender if configured
-    #[inline]
-    pub fn tx_batch_sender(
-        &self,
-    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
-    {
-        self.inner.tx_batch_sender()
     }
 }
 
@@ -307,9 +297,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
 
-    /// Optional transaction batch sender for batching tx insertions
+    /// Transaction batch sender for batching tx insertions
     tx_batch_sender:
-        Option<mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
+        mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -332,8 +322,8 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        tx_batch_sender: Option<
-            mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+        tx_batch_sender: mpsc::UnboundedSender<
+            BatchTxRequest<<N::Pool as TransactionPool>::Transaction>,
         >,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -498,13 +488,28 @@ where
         let _ = self.raw_tx_sender.send(raw_tx);
     }
 
-    /// Returns the transaction batch sender if configured
+    /// Returns the transaction batch sender
     #[inline]
-    pub const fn tx_batch_sender(
+    const fn tx_batch_sender(
         &self,
-    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
-    {
-        self.tx_batch_sender.as_ref()
+    ) -> &mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
+        &self.tx_batch_sender
+    }
+
+    /// Adds an _unvalidated_ transaction into the pool via the transaction batch sender.
+    #[inline]
+    pub async fn add_pool_transaction(
+        &self,
+        transaction: <N::Pool as TransactionPool>::Transaction,
+    ) -> Result<AddedTransactionOutcome, EthApiError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let request = reth_transaction_pool::BatchTxRequest::new(transaction, response_tx);
+
+        self.tx_batch_sender()
+            .send(request)
+            .map_err(|_| reth_rpc_eth_types::EthApiError::BatchTxSendError)?;
+
+        Ok(response_rx.await??)
     }
 }
 

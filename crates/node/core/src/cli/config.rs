@@ -88,6 +88,6 @@ pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
 
-    /// Returns max batch size if batching is enabled.
-    fn max_batch_size(&self) -> Option<usize>;
+    /// Returns max batch size for transaction batch insertion.
+    fn max_batch_size(&self) -> usize;
 }

@@ -18,6 +18,7 @@ use reth_node_api::{
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
+    cli::config::RethTransactionPoolConfig,
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
@@ -863,7 +864,8 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
+        let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
+        let ctx = EthApiCtx { components: &node, config: eth_config, cache };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1040,6 +1042,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
+            .max_batch_size(self.config.max_batch_size)
     }
 }
 
