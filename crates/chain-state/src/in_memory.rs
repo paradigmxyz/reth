@@ -5,7 +5,7 @@ use crate::{
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -13,7 +13,8 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
-    BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
+    BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -553,24 +554,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         for block_state in self.canonical_chain() {
-            if let Some((index, tx)) = block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-            {
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index: index as u64,
-                    block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().recovered_block().number(),
-                    base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                    timestamp: block_state.block_ref().recovered_block().timestamp(),
-                    excess_blob_gas: block_state.block_ref().recovered_block().excess_blob_gas(),
-                };
-                return Some((tx.clone(), meta))
+            if let Some(indexed) = block_state.find_indexed(tx_hash) {
+                return Some((indexed.tx().clone(), indexed.meta()));
             }
         }
         None
@@ -725,29 +710,13 @@ impl<N: NodePrimitives> BlockState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         self.chain().find_map(|block_state| {
-            block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-                .map(|(index, tx)| {
-                    let meta = TransactionMeta {
-                        tx_hash,
-                        index: index as u64,
-                        block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().recovered_block().number(),
-                        base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                        timestamp: block_state.block_ref().recovered_block().timestamp(),
-                        excess_blob_gas: block_state
-                            .block_ref()
-                            .recovered_block()
-                            .excess_blob_gas(),
-                    };
-                    (tx.clone(), meta)
-                })
+            block_state.find_indexed(tx_hash).map(|indexed| (indexed.tx().clone(), indexed.meta()))
         })
+    }
+
+    /// Finds a transaction by hash and returns it with its index and block context.
+    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<IndexedTx<'_, N::Block>> {
+        self.block_ref().recovered_block().find_indexed(tx_hash)
     }
 }
 

@@ -1,17 +1,26 @@
 use crate::{
     chainspec::CustomChainSpec,
+    engine::CustomExecutionData,
     evm::{alloy::CustomEvmFactory, CustomBlockAssembler},
-    primitives::{Block, CustomHeader, CustomNodePrimitives},
+    primitives::{Block, CustomHeader, CustomNodePrimitives, CustomTransaction},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip2718::WithEncoded, Decodable2718};
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_rpc_types_engine::PayloadError;
 use op_revm::OpSpecId;
+use reth_engine_primitives::ExecutableTxIterator;
 use reth_ethereum::{
     node::api::ConfigureEvm,
     primitives::{SealedBlock, SealedHeader},
 };
-use reth_op::node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_node_builder::{ConfigureEngineEvm, NewPayloadError};
+use reth_op::{
+    evm::primitives::{EvmEnvFor, ExecutionCtxFor},
+    node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
+    primitives::SignedTransaction,
+};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -79,5 +88,31 @@ impl ConfigureEvm for CustomEvmConfig {
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data,
         }
+    }
+}
+
+impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
+    fn evm_env_for_payload(&self, payload: &CustomExecutionData) -> EvmEnvFor<Self> {
+        self.inner.evm_env_for_payload(&payload.inner)
+    }
+
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a CustomExecutionData,
+    ) -> ExecutionCtxFor<'a, Self> {
+        self.inner.context_for_payload(&payload.inner)
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &CustomExecutionData,
+    ) -> impl ExecutableTxIterator<Self> {
+        payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+            let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
+                .map_err(Into::into)
+                .map_err(PayloadError::Decode)?;
+            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
+            Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+        })
     }
 }
