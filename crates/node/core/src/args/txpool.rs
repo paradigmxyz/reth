@@ -133,7 +133,7 @@ pub struct TxPoolArgs {
     )]
     pub disable_transactions_backup: bool,
 
-    /// Max batch size for transaction pool insertions (default: 1).
+    /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = 1)]
     pub max_batch_size: usize,
 }
