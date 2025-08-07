@@ -38,6 +38,7 @@ reth-trie-db = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
 reth-tasks = { workspace = true, optional = true }
 reth-cli-util = { workspace = true, optional = true }
+reth-engine-local = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
@@ -126,6 +127,7 @@ node = [
     "node-api",
     "dep:reth-node-ethereum",
     "dep:reth-node-builder",
+    "dep:reth-engine-local",
     "rpc",
     "trie-db",
 ]

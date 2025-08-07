@@ -11,6 +11,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
+use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
@@ -179,7 +180,8 @@ where
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
-            return self.apply_with_import::<N>(env, &rlp_path).await;
+            // Note: this future is quite large so we box it
+            return Box::pin(self.apply_with_import::<N>(env, &rlp_path)).await;
         }
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
@@ -351,6 +353,15 @@ where
             "Environment initialized with {} nodes, starting from block {} (hash: {})",
             self.network.node_count, initial_block_info.number, initial_block_info.hash
         );
+
+        // In test environments, explicitly set sync state to Idle after initialization
+        // This ensures that eth_syncing returns false as expected by tests
+        if let Some(import_result) = &self.import_result_holder {
+            for (idx, node_ctx) in import_result.nodes.iter().enumerate() {
+                debug!("Setting sync state to Idle for node {}", idx);
+                node_ctx.inner.network.update_sync_state(SyncState::Idle);
+            }
+        }
 
         Ok(())
     }

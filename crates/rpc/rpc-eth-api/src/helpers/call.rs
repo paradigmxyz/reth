@@ -13,11 +13,11 @@ use alloy_evm::{
     call::caller_gas_allowance,
     overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
 };
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    transaction::TransactionRequest,
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
@@ -26,20 +26,20 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
+use reth_node_api::BlockBody;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
 };
-use reth_rpc_convert::{RpcConvert, RpcTypes};
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context_interface::{
         result::{ExecutionResult, ResultAndState},
@@ -59,7 +59,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
@@ -72,7 +72,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
     fn simulate_v1(
         &self,
-        payload: SimulatePayload,
+        payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
@@ -144,9 +144,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let chain_id = evm_env.cfg_env.chain_id;
 
                     let default_gas_limit = {
-                        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
+                        let total_specified_gas =
+                            calls.iter().filter_map(|tx| tx.as_ref().gas_limit()).sum::<u64>();
                         let txs_without_gas_limit =
-                            calls.iter().filter(|tx| tx.gas.is_none()).count();
+                            calls.iter().filter(|tx| tx.as_ref().gas_limit().is_none()).count();
 
                         if total_specified_gas > block_gas_limit {
                             return Err(EthApiError::Other(Box::new(
@@ -192,17 +193,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     };
 
+                    parent = result.block.clone_sealed_header();
+
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
                         return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
-
-                    parent = SealedHeader::new(
-                        block.inner.header.inner.clone(),
-                        block.inner.header.hash,
-                    );
 
                     blocks.push(block);
                 }
@@ -216,7 +214,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// Executes the call request (`eth_call`) and returns the output
     fn call(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
@@ -232,7 +230,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// optionality of state overrides
     fn call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>>,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<Vec<Vec<EthCallResponse>>, Self::Error>> + Send {
@@ -348,11 +346,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         }
     }
 
-    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`RpcTxReq`] at the given
     /// [`BlockId`], or latest block.
     fn create_access_list_at(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
@@ -370,13 +368,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         }
     }
 
-    /// Creates [`AccessListResult`] for the [`TransactionRequest`] at the given
+    /// Creates [`AccessListResult`] for the [`RpcTxReq`] at the given
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
         at: BlockId,
-        mut request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state_override: Option<StateOverride>,
     ) -> Result<AccessListResult, Self::Error>
     where
@@ -403,14 +401,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // Disabled because eth_createAccessList is sometimes used with non-eoa senders
         evm_env.cfg_env.disable_eip3607 = true;
 
-        if request.gas.is_none() && tx_env.gas_price() > 0 {
+        if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
             let cap = caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
             tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
         }
 
         // can consume the list since we're not using the request anymore
-        let initial = request.access_list.take().unwrap_or_default();
+        let initial = request.as_ref().access_list().cloned().unwrap_or_default();
 
         let mut inspector = AccessListInspector::new(initial);
 
@@ -455,16 +453,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
-        RpcConvert: RpcConvert<
-            TxEnv = TxEnvFor<Self::Evm>,
-            Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
-        >,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
@@ -526,7 +515,7 @@ pub trait Call:
     /// Executes the call request at the given [`BlockId`].
     fn transact_call_at(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>> + Send
@@ -555,10 +544,10 @@ pub trait Call:
         })
     }
 
-    /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
+    /// Prepares the state and env for the given [`RpcTxReq`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [`EvmEnv`] for the given [`TransactionRequest`] at
+    /// This returns the configured [`EvmEnv`] for the given [`RpcTxReq`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
     ///
     /// This is primarily used by `eth_call`.
@@ -572,7 +561,7 @@ pub trait Call:
     /// instead, where blocking IO is less problematic.
     fn spawn_with_call_at<F, R>(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         overrides: EvmOverrides,
         f: F,
@@ -694,26 +683,25 @@ pub trait Call:
         Ok(index)
     }
 
-    /// Configures a new `TxEnv`  for the [`TransactionRequest`]
     ///
-    /// All `TxEnv` fields are derived from the given [`TransactionRequest`], if fields are
+    /// All `TxEnv` fields are derived from the given [`RpcTxReq`], if fields are
     /// `None`, they fall back to the [`EvmEnv`]'s settings.
     fn create_txn_env(
         &self,
         evm_env: &EvmEnv<SpecFor<Self::Evm>>,
-        mut request: TransactionRequest,
+        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
-        if request.nonce.is_none() {
-            request.nonce.replace(
-                db.basic(request.from.unwrap_or_default())
-                    .map_err(Into::into)?
-                    .map(|acc| acc.nonce)
-                    .unwrap_or_default(),
-            );
+        if request.as_ref().nonce().is_none() {
+            let nonce = db
+                .basic(request.as_ref().from().unwrap_or_default())
+                .map_err(Into::into)?
+                .map(|acc| acc.nonce)
+                .unwrap_or_default();
+            request.as_mut().set_nonce(nonce);
         }
 
-        Ok(self.tx_resp_builder().tx_env(request.into(), &evm_env.cfg_env, &evm_env.block_env)?)
+        Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
     }
 
     /// Prepares the [`EvmEnv`] for execution of calls.
@@ -733,7 +721,7 @@ pub trait Call:
     fn prepare_call_env<DB>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
-        mut request: TransactionRequest,
+        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         db: &mut DB,
         overrides: EvmOverrides,
     ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>), Self::Error>
@@ -741,7 +729,7 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
-        if request.gas > Some(self.call_gas_limit()) {
+        if request.as_ref().gas_limit() > Some(self.call_gas_limit()) {
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
@@ -761,7 +749,7 @@ pub trait Call:
         evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.nonce = None;
+        request.as_mut().take_nonce();
 
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
@@ -771,8 +759,13 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
-        let request_gas = request.gas;
+        let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
+
+        // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
+        if tx_env.gas_price() == 0 {
+            evm_env.block_env.basefee = 0;
+        }
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit

@@ -1,5 +1,4 @@
 import { promises as fs } from 'fs';
-import { join, relative } from 'path';
 import { glob } from 'glob';
 
 const CARGO_DOCS_PATH = '../../target/doc';
@@ -41,6 +40,22 @@ async function injectCargoDocs() {
   for (const file of htmlFiles) {
     let content = await fs.readFile(file, 'utf-8');
     
+    // Extract the current crate name and module path from the file path
+    // Remove the base path to get the relative path within the docs
+    const relativePath = file.startsWith('./') ? file.slice(2) : file;
+    const docsRelativePath = relativePath.replace(/^docs\/dist\/docs\//, '');
+    const pathParts = docsRelativePath.split('/');
+    const fileName = pathParts[pathParts.length - 1];
+    
+    // Determine if this is the root index
+    const isRootIndex = pathParts.length === 1 && fileName === 'index.html';
+    
+    // Extract crate name - it's the first directory in the docs-relative path
+    const crateName = isRootIndex ? null : pathParts[0];
+    
+    // Build the current module path (everything between crate and filename)
+    const modulePath = pathParts.slice(1, -1).join('/');
+    
     // Fix static file references
     content = content
       // CSS and JS in static.files
@@ -56,8 +71,37 @@ async function injectCargoDocs() {
       // Fix crate navigation links
       .replace(/href="\.\/([^/]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
       .replace(/href="\.\.\/([^/]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
-      // Fix simple crate links (without ./ or ../)
-      .replace(/href="([^/:"]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
+      // Fix module links within the same crate (relative paths without ./ or ../)
+      // These need to include the current crate name in the path
+      .replace(/href="([^/:"\.](?:[^/:"]*)?)\/index\.html"/g, (match, moduleName) => {
+        // Skip if it's already an absolute path or contains a protocol
+        if (moduleName.startsWith('/') || moduleName.includes('://')) {
+          return match;
+        }
+        // For the root index page, these are crate links, not module links
+        if (isRootIndex) {
+          return `href="${BASE_PATH}/${moduleName}/index.html"`;
+        }
+        // For module links within a crate, we need to build the full path
+        // If we're in a nested module, we need to go up to the crate root then down to the target
+        const fullPath = modulePath ? `${crateName}/${modulePath}/${moduleName}` : `${crateName}/${moduleName}`;
+        return `href="${BASE_PATH}/${fullPath}/index.html"`;
+      })
+      
+      // Also fix other relative links (structs, enums, traits) that don't have index.html
+      .replace(/href="([^/:"\.#][^/:"#]*\.html)"/g, (match, pageName) => {
+        // Skip if it's already an absolute path or contains a protocol
+        if (pageName.startsWith('/') || pageName.includes('://')) {
+          return match;
+        }
+        // Skip for root index page as it shouldn't have such links
+        if (isRootIndex) {
+          return match;
+        }
+        // For other doc pages in nested modules, build the full path
+        const fullPath = modulePath ? `${crateName}/${modulePath}/${pageName}` : `${crateName}/${pageName}`;
+        return `href="${BASE_PATH}/${fullPath}"`;
+      })
       
       // Fix root index.html links
       .replace(/href="\.\/index\.html"/g, `href="${BASE_PATH}/index.html"`)
@@ -86,6 +130,23 @@ async function injectCargoDocs() {
     await fs.writeFile(file, content, 'utf-8');
   }
 
+  // Find the actual search JS filename from the HTML files
+  let actualSearchJsFile = '';
+  for (const htmlFile of htmlFiles) {
+    const htmlContent = await fs.readFile(htmlFile, 'utf-8');
+    const searchMatch = htmlContent.match(/data-search-js="[^"]*\/([^"]+)"/);
+    if (searchMatch && searchMatch[1]) {
+      actualSearchJsFile = searchMatch[1];
+      console.log(`Found search JS file: ${actualSearchJsFile} in ${htmlFile}`);
+      break;
+    }
+  }
+  
+  if (!actualSearchJsFile) {
+    console.error('Could not detect search JS filename from HTML files');
+    process.exit(1);
+  }
+  
   // Also fix paths in JavaScript files
   const jsFiles = await glob(`${VOCS_DIST_PATH}/**/*.js`);
   
@@ -120,9 +181,10 @@ async function injectCargoDocs() {
       );
       
       // Fix the search-js variable to return just the filename
+      // Use the detected search filename
       content = content.replace(
         /getVar\("search-js"\)/g,
-        `"search-f7877310.js"`
+        `"${actualSearchJsFile}"`
       );
       
       // Fix the search index loading path

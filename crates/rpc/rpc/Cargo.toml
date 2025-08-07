@@ -18,7 +18,6 @@ reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
@@ -90,18 +89,17 @@ serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
-reth-evm-ethereum.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 
-alloy-consensus.workspace = true
 rand.workspace = true
 
-jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]

@@ -10,20 +10,66 @@ use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPa
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::ForkchoiceStatus;
+use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
-use reth_node_ethereum::EthereumEngineValidator;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
 use reth_trie::HashedPostState;
 use std::{
     collections::BTreeMap,
     str::FromStr,
     sync::mpsc::{channel, Sender},
 };
+
+/// Mock engine validator for tests
+#[derive(Debug, Clone)]
+struct MockEngineValidator;
+
+impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
+    type Block = Block;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<
+        reth_primitives_traits::RecoveredBlock<Self::Block>,
+        reth_payload_primitives::NewPayloadError,
+    > {
+        // For tests, convert the execution payload to a block
+        let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
+            reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
+        })?;
+        let sealed = block.seal_slow();
+        sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
+    }
+}
+
+impl EngineApiValidator<EthEngineTypes> for MockEngineValidator {
+    fn validate_version_specific_fields(
+        &self,
+        _version: reth_payload_primitives::EngineApiMessageVersion,
+        _payload_or_attrs: reth_payload_primitives::PayloadOrAttributes<
+            '_,
+            alloy_rpc_types_engine::ExecutionData,
+            alloy_rpc_types_engine::PayloadAttributes,
+        >,
+    ) -> Result<(), reth_payload_primitives::EngineObjectValidationError> {
+        // Mock implementation - always valid
+        Ok(())
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        _version: reth_payload_primitives::EngineApiMessageVersion,
+        _attributes: &alloy_rpc_types_engine::PayloadAttributes,
+    ) -> Result<(), reth_payload_primitives::EngineObjectValidationError> {
+        // Mock implementation - always valid
+        Ok(())
+    }
+}
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
 ///
@@ -83,7 +129,7 @@ struct TestHarness {
         EthPrimitives,
         MockEthProvider,
         EthEngineTypes,
-        EthereumEngineValidator,
+        BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
     to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
@@ -117,7 +163,7 @@ impl TestHarness {
 
         let provider = MockEthProvider::default();
 
-        let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
+        let payload_validator = MockEngineValidator;
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
 
@@ -131,11 +177,19 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
+        let engine_validator = BasicEngineValidator::new(
+            provider.clone(),
+            consensus.clone(),
+            evm_config.clone(),
+            payload_validator,
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+        );
 
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,
-            payload_validator,
+            engine_validator,
             from_tree_tx,
             engine_api_tree_state,
             canonical_in_memory_state,

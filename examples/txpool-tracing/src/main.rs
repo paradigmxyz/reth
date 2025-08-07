@@ -21,6 +21,8 @@ use reth_ethereum::{
     rpc::eth::primitives::TransactionRequest,
 };
 
+mod submit;
+
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {

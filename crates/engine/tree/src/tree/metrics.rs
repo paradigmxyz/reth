@@ -15,13 +15,13 @@ pub(crate) struct EngineApiMetrics {
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
-    pub(crate) tree: TreeMetrics,
+    pub tree: TreeMetrics,
 }
 
 /// Metrics for the entire blockchain tree
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree")]
-pub(super) struct TreeMetrics {
+pub(crate) struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
     /// The number of reorgs
@@ -71,6 +71,10 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
+    /// Payload conversion and validation latency
+    pub(crate) payload_validation_duration: Gauge,
+    /// Histogram of payload validation latency
+    pub(crate) payload_validation_histogram: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -80,6 +84,13 @@ impl BlockValidationMetrics {
             .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
+    }
+
+    /// Records a new payload validation time, updating both the histogram and the payload
+    /// validation gauge
+    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
+        self.payload_validation_duration.set(elapsed_as_secs);
+        self.payload_validation_histogram.record(elapsed_as_secs);
     }
 }
 

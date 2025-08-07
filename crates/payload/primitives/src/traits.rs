@@ -9,7 +9,9 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
+
+use crate::PayloadBuilderError;
 
 /// Represents a successfully built execution payload (block).
 ///
@@ -44,11 +46,11 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
 ///
 /// Extends basic payload attributes with additional context needed during the
 /// building process, tracking in-progress payload jobs and their parameters.
-pub trait PayloadBuilderAttributes: Send + Sync + fmt::Debug {
+pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
     /// The external payload attributes format this type can be constructed from.
-    type RpcPayloadAttributes;
+    type RpcPayloadAttributes: Send + Sync + 'static;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: core::error::Error;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     /// Constructs new builder attributes from external payload attributes.
     ///
@@ -143,4 +145,16 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Constructs new payload attributes for the given timestamp.
     fn build(&self, timestamp: u64) -> Attributes;
+}
+
+/// Trait to build the EVM environment for the next block from the given payload attributes.
+///
+/// Accepts payload attributes from CL, parent header and additional payload builder context.
+pub trait BuildNextEnv<Attributes, Header, Ctx>: Sized {
+    /// Builds the EVM environment for the next block from the given payload attributes.
+    fn build_next_env(
+        attributes: &Attributes,
+        parent: &SealedHeader<Header>,
+        ctx: &Ctx,
+    ) -> Result<Self, PayloadBuilderError>;
 }

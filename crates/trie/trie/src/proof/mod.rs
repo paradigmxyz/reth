@@ -17,8 +17,8 @@ use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
 };
 
-mod blinded;
-pub use blinded::*;
+mod trie_node;
+pub use trie_node::*;
 
 /// A struct for generating merkle proofs.
 ///

@@ -2,7 +2,6 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
@@ -138,11 +137,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -230,8 +225,11 @@ where
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::debug_execution_witness(healthy_node_client, block.number().into())
-                    .await
+                DebugApiClient::<()>::debug_execution_witness(
+                    healthy_node_client,
+                    block.number().into(),
+                )
+                .await
             })?;
 
             let healthy_path = self.save_file(
@@ -363,11 +361,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(

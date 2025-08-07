@@ -136,7 +136,7 @@ export const sidebar: SidebarItem[] = [
         items: [
             {
                 text: "Overview",
-                link: "/sdk/overview"
+                link: "/sdk"
             },
             {
                 text: "Typesystem",

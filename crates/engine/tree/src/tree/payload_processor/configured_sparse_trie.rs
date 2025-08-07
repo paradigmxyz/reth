@@ -3,8 +3,8 @@
 use alloy_primitives::B256;
 use reth_trie::{Nibbles, TrieNode};
 use reth_trie_sparse::{
-    blinded::BlindedProvider, errors::SparseTrieResult, LeafLookup, LeafLookupError,
-    SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
+    RevealedSparseNode, SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::borrow::Cow;
@@ -31,6 +31,12 @@ impl From<SerialSparseTrie> for ConfiguredSparseTrie {
 impl From<ParallelSparseTrie> for ConfiguredSparseTrie {
     fn from(trie: ParallelSparseTrie) -> Self {
         Self::Parallel(Box::new(trie))
+    }
+}
+
+impl Default for ConfiguredSparseTrie {
+    fn default() -> Self {
+        Self::Serial(Default::default())
     }
 }
 
@@ -77,7 +83,14 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         }
     }
 
-    fn update_leaf<P: BlindedProvider>(
+    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        match self {
+            Self::Serial(trie) => trie.reveal_nodes(nodes),
+            Self::Parallel(trie) => trie.reveal_nodes(nodes),
+        }
+    }
+
+    fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
@@ -89,7 +102,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         }
     }
 
-    fn remove_leaf<P: BlindedProvider>(
+    fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
         provider: P,

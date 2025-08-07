@@ -18,7 +18,8 @@ use reth_ethereum::{
     evm::{
         primitives::{
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-            Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+            Database, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
+            NextBlockEnvAttributes, OnStateHook,
         },
         revm::{
             context::{result::ExecutionResult, TxEnv},
@@ -29,13 +30,14 @@ use reth_ethereum::{
         EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
     node::{
-        api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
         builder::{components::ExecutorBuilder, BuilderContext},
         node::EthereumAddOns,
         EthereumNode,
     },
     primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
+    rpc::types::engine::ExecutionData,
     Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
@@ -154,6 +156,20 @@ impl ConfigureEvm for CustomEvmConfig {
         attributes: Self::NextBlockEnvCtx,
     ) -> EthBlockExecutionCtx<'_> {
         self.inner.context_for_next_block(parent, attributes)
+    }
+}
+
+impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
+        self.inner.evm_env_for_payload(payload)
+    }
+
+    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self> {
+        self.inner.context_for_payload(payload)
+    }
+
+    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
+        self.inner.tx_iterator_for_payload(payload)
     }
 }
 

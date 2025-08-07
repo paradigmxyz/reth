@@ -8,12 +8,13 @@ use alloy_rpc_types_eth::{
 };
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
+use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
-    RpcNodeCore, RpcNodeCoreExt, RpcTransaction,
+    RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -22,7 +23,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider, TransactionsProvider,
+    ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -70,6 +71,12 @@ const BLOOM_ADJUSTMENT_MIN_BLOCKS: u64 = 100;
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
+
+/// Threshold for enabling parallel processing in range mode
+const PARALLEL_PROCESSING_THRESHOLD: u64 = 1000;
+
+/// Default concurrency for parallel processing
+const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
 
 /// `Eth` filter RPC implementation.
 ///
@@ -304,13 +311,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes
-        + RpcNodeCoreExt<
-            Provider: BlockIdReader,
-            Primitives: NodePrimitives<
-                SignedTx = <<Eth as RpcNodeCore>::Provider as TransactionsProvider>::Transaction,
-            >,
-        > + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -437,9 +438,7 @@ where
     }
 
     /// Access the underlying [`EthStateCache`].
-    fn eth_cache(
-        &self,
-    ) -> &EthStateCache<ProviderBlock<Eth::Provider>, ProviderReceipt<Eth::Provider>> {
+    fn eth_cache(&self) -> &EthStateCache<Eth::Primitives> {
         self.eth_api.cache()
     }
 
@@ -1047,6 +1046,20 @@ impl<
             range_headers.push(next_header);
         }
 
+        // Check if we should use parallel processing for large ranges
+        let remaining_headers = self.iter.len() + range_headers.len();
+        if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD as usize {
+            self.process_large_range(range_headers).await
+        } else {
+            self.process_small_range(range_headers).await
+        }
+    }
+
+    /// Process small range headers
+    async fn process_small_range(
+        &mut self,
+        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         // Process each header individually to avoid queuing for all receipts
         for header in range_headers {
             // First check if already cached to avoid unnecessary provider calls
@@ -1078,19 +1091,85 @@ impl<
 
         Ok(self.next.pop_front())
     }
+
+    /// Process large range headers
+    async fn process_large_range(
+        &mut self,
+        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
+        // Split headers into chunks
+        let chunk_size = std::cmp::max(range_headers.len() / DEFAULT_PARALLEL_CONCURRENCY, 1);
+        let header_chunks = range_headers
+            .into_iter()
+            .chunks(chunk_size)
+            .into_iter()
+            .map(|chunk| chunk.collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        // Process chunks in parallel
+        let mut tasks = Vec::new();
+        for chunk_headers in header_chunks {
+            let filter_inner = self.filter_inner.clone();
+            let task = tokio::task::spawn_blocking(move || {
+                let mut chunk_results = Vec::new();
+
+                for header in chunk_headers {
+                    // Fetch directly from provider - RangeMode is used for older blocks unlikely to
+                    // be cached
+                    let receipts =
+                        match filter_inner.provider().receipts_by_block(header.hash().into())? {
+                            Some(receipts) => Arc::new(receipts),
+                            None => continue, // No receipts found
+                        };
+
+                    if !receipts.is_empty() {
+                        chunk_results.push(ReceiptBlockResult {
+                            receipts,
+                            recovered_block: None,
+                            header,
+                        });
+                    }
+                }
+
+                Ok::<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>(chunk_results)
+            });
+            tasks.push(task);
+        }
+
+        let results = futures::future::join_all(tasks).await;
+        for result in results {
+            match result {
+                Ok(Ok(chunk_results)) => {
+                    for result in chunk_results {
+                        self.next.push_back(result);
+                    }
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(_join_err) => {
+                    return Err(EthFilterError::InternalError);
+                }
+            }
+        }
+
+        Ok(self.next.pop_front())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_network::Ethereum;
     use alloy_primitives::FixedBytes;
     use rand::Rng;
-    use reth_chainspec::ChainSpecProvider;
+    use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_ethereum_primitives::TxType;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_convert::RpcConverter;
+    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -1119,9 +1198,13 @@ mod tests {
     }
 
     // Helper function to create a test EthApi instance
+    #[expect(clippy::type_complexity)]
     fn build_test_eth_api(
         provider: MockEthProvider,
-    ) -> EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    ) -> EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+    > {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
