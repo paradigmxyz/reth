@@ -4,6 +4,7 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
+use alloy_eips::eip4844::TARGET_BLOBS_PER_BLOCK_DENCUN;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use parking_lot::Mutex;
 use reth_db::PlainStorageState;
@@ -192,6 +193,7 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
             if *address != account {
                 *address = account;
                 *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+                debug!(target: "provider::latest", ?account, "Storage cursor reused!");
             } else {
                 debug!(target: "provider::latest", ?account, "Storage cursor reuse hit!");
             }
@@ -202,6 +204,7 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
                 }
             }
         } else {
+            debug!(target: "provider::latest", ?account, "Storage cursor not set");
             let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
             let mut result = Ok(None);
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
