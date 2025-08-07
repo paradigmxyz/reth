@@ -434,6 +434,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
         address: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        debug!(target: "provider::historical", ?address, ?storage_key, "Storage historical provider");
+
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => {
@@ -444,7 +446,7 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
                         *cached_address = address;
                         *cursor = self.tx().cursor_dup_read::<tables::StorageChangeSets>()?;
                     } else {
-                        debug!(target: "provider::storage", ?address, "Storage change sets cursor reuse hit!");
+                        debug!(target: "provider::historical", ?address, "Storage change sets cursor reuse hit!");
                     }
 
                     cursor
@@ -480,7 +482,7 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
                         *cached_address = address;
                         *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
                     } else {
-                        debug!(target: "provider::storage", ?address, "Storage plain state cursor reuse hit!");
+                        debug!(target: "provider::historical", ?address, "Storage plain state cursor reuse hit!");
                     }
 
                     cursor
