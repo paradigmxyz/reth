@@ -591,7 +591,7 @@ where
 mod tests {
     use crate::tree::{
         payload_processor::{
-            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
+            process_and_convert_evm_state, executor::WorkloadExecutor, PayloadProcessor,
         },
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
@@ -610,7 +610,7 @@ mod tests {
         ChainSpecProvider, HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
+    use reth_trie::{added_removed_keys::MultiAddedRemovedKeys, test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -699,8 +699,9 @@ mod tests {
             provider_rw.commit().expect("failed to commit changes");
         }
 
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
         for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
+            hashed_state.extend(process_and_convert_evm_state(update.clone(), &mut added_removed_keys));
 
             for (address, account) in update {
                 let storage: HashMap<B256, U256> = account

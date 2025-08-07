@@ -5,7 +5,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
     map::{B256Set, HashSet},
-    B256,
+    B256, U256,
 };
 use derive_more::derive::Deref;
 use metrics::Histogram;
@@ -216,7 +216,18 @@ impl Drop for StateHookSender {
     }
 }
 
-pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+/// Converts an EVM state update to a hashed post state while tracking added and removed keys.
+///
+/// This function processes each account and storage change in the EVM state,
+/// updating the added/removed keys tracking for use in proof generation.
+///
+/// Keys are marked as:
+/// - Added: When an account is created or a storage slot goes from zero to non-zero
+/// - Removed: When an account is destroyed or a storage slot goes from non-zero to zero
+pub fn process_and_convert_evm_state(
+    update: EvmState,
+    added_removed_keys: &mut MultiAddedRemovedKeys,
+) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
@@ -225,18 +236,51 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
+            let created = account.is_created();
             let info = if destroyed { None } else { Some(account.info.into()) };
+
+            // Update account added/removed keys
+            if destroyed {
+                added_removed_keys.get_accounts_mut().insert_removed(hashed_address);
+            } else if created {
+                // Account is newly created (wasn't destroyed and is created)
+                added_removed_keys.get_accounts_mut().insert_added(hashed_address);
+            } else {
+                // Account exists but isn't newly created, just remove from removed set if it was
+                // there
+                added_removed_keys.get_accounts_mut().remove_removed(&hashed_address);
+            }
+
             hashed_state.accounts.insert(hashed_address, info);
 
             let mut changed_storage_iter = account
                 .storage
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .map(|(slot, value)| {
+                    let hashed_slot = keccak256(B256::from(slot));
+
+                    // Update storage added/removed keys
+                    let storage_keys = added_removed_keys.get_storage_mut(hashed_address);
+                    if value.present_value == U256::ZERO {
+                        // Storage slot removed (non-zero to zero)
+                        storage_keys.insert_removed(hashed_slot);
+                    } else if value.original_value == U256::ZERO {
+                        // Storage slot added (zero to non-zero)
+                        storage_keys.insert_added(hashed_slot);
+                    } else {
+                        // Storage slot changed but neither added nor removed
+                        storage_keys.remove_removed(&hashed_slot);
+                    }
+
+                    (hashed_slot, value.present_value)
+                })
                 .peekable();
 
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+                // Clear the storage keys tracking for destroyed accounts
+                added_removed_keys.remove_storage(&hashed_address);
             } else if changed_storage_iter.peek().is_some() {
                 hashed_state
                     .storages
@@ -702,9 +746,6 @@ where
         // we still want to optimistically fetch extension children for the leaf addition case.
         self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the spawned multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
-
         self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
@@ -721,7 +762,7 @@ where
                     proof_targets: proof_targets_chunk,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    multi_added_removed_keys: None,
                 }
                 .into(),
             );
@@ -809,10 +850,10 @@ where
     ///
     /// Returns a number of proofs that were spawned.
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-
-        // Update removed keys based on the state update.
-        self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+        let hashed_state_update = process_and_convert_evm_state(
+            update,
+            &mut self.multi_added_removed_keys,
+        );
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
@@ -1137,7 +1178,8 @@ fn get_proof_targets(
             .keys()
             .filter(|slot| {
                 !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                    storage_added_removed_keys
+                        .is_some_and(|k| k.is_removed(slot) || k.is_added(slot))
             })
             .peekable();
 
@@ -1635,5 +1677,373 @@ mod tests {
 
         // only slots in the state update can be included, so slot3 should not appear
         assert!(!targets.contains_key(&addr));
+    }
+
+    // Tests for process_and_convert_evm_state function
+
+    #[test]
+    fn test_convert_evm_state_storage_keys_non_zero() {
+        use alloy_primitives::{keccak256, Address};
+        use revm_state::{Account as EvmAccount, AccountStatus, EvmState, EvmStorageSlot};
+
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
+        let mut evm_state = EvmState::default();
+
+        let addr = Address::random();
+        let hashed_addr = keccak256(addr);
+        let slot1 = U256::from(1);
+        let slot2 = U256::from(2);
+        let hashed_slot1 = keccak256(B256::from(slot1));
+        let hashed_slot2 = keccak256(B256::from(slot2));
+
+        // First mark slots as removed (zero values)
+        let mut account = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account.storage.insert(slot1, EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 0));
+        account.storage.insert(slot2, EvmStorageSlot::new_changed(U256::from(200), U256::ZERO, 0));
+        evm_state.insert(addr, account);
+
+        let hashed_state =
+            process_and_convert_evm_state(evm_state, &mut added_removed_keys);
+
+        // Verify they are marked as removed
+        assert!(added_removed_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot1));
+        assert!(added_removed_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot2));
+
+        // Verify hashed state contains the changes
+        assert_eq!(
+            hashed_state.storages.get(&hashed_addr).unwrap().storage.get(&hashed_slot1),
+            Some(&U256::ZERO)
+        );
+        assert_eq!(
+            hashed_state.storages.get(&hashed_addr).unwrap().storage.get(&hashed_slot2),
+            Some(&U256::ZERO)
+        );
+
+        // Now update with non-zero values
+        let mut evm_state2 = EvmState::default();
+        let mut account2 = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account2.storage.insert(slot1, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        account2.storage.insert(slot2, EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 0));
+        evm_state2.insert(addr, account2);
+
+        let hashed_state2 =
+            process_and_convert_evm_state(evm_state2, &mut added_removed_keys);
+
+        // Slots should no longer be marked as removed
+        let storage_keys = added_removed_keys.get_storage(&hashed_addr).unwrap();
+        assert!(!storage_keys.is_removed(&hashed_slot1));
+        assert!(!storage_keys.is_removed(&hashed_slot2));
+
+        // Verify hashed state contains the new values
+        assert_eq!(
+            hashed_state2.storages.get(&hashed_addr).unwrap().storage.get(&hashed_slot1),
+            Some(&U256::from(100))
+        );
+        assert_eq!(
+            hashed_state2.storages.get(&hashed_addr).unwrap().storage.get(&hashed_slot2),
+            Some(&U256::from(200))
+        );
+    }
+
+    #[test]
+    fn test_convert_evm_state_wiped_storage() {
+        use alloy_primitives::{keccak256, Address};
+        use revm_state::{Account as EvmAccount, AccountStatus, EvmState, EvmStorageSlot};
+
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
+        let mut evm_state = EvmState::default();
+
+        let addr = Address::random();
+        let hashed_addr = keccak256(addr);
+        let slot1 = U256::from(1);
+        let _hashed_slot1 = keccak256(B256::from(slot1));
+
+        // First add some storage with removed keys
+        let mut account = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account.storage.insert(slot1, EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 0));
+        evm_state.insert(addr, account);
+
+        let _ = process_and_convert_evm_state(evm_state, &mut added_removed_keys);
+        assert!(added_removed_keys.get_storage(&hashed_addr).is_some());
+
+        // Now self-destruct the account
+        let mut evm_state2 = EvmState::default();
+        let destroyed_account = EvmAccount {
+            status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+            ..Default::default()
+        };
+        evm_state2.insert(addr, destroyed_account);
+
+        let hashed_state =
+            process_and_convert_evm_state(evm_state2, &mut added_removed_keys);
+
+        // Storage should be removed and account should be marked as removed
+        assert!(added_removed_keys.get_storage(&hashed_addr).is_none());
+        assert!(added_removed_keys.get_accounts().is_removed(&hashed_addr));
+
+        // Verify hashed state shows wiped storage
+        assert!(hashed_state.storages.get(&hashed_addr).unwrap().wiped);
+        assert!(hashed_state.accounts.get(&hashed_addr).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_convert_evm_state_account_tracking() {
+        use alloy_primitives::{keccak256, Address};
+        use revm_state::{Account as EvmAccount, AccountStatus, EvmState, EvmStorageSlot};
+
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
+        let mut evm_state = EvmState::default();
+
+        let addr = Address::random();
+        let hashed_addr = keccak256(addr);
+        let slot = U256::from(1);
+        let hashed_slot = keccak256(B256::from(slot));
+
+        // Add storage with zero value and empty account
+        let mut account = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account.storage.insert(slot, EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 0));
+        evm_state.insert(addr, account);
+
+        let _ = process_and_convert_evm_state(evm_state, &mut added_removed_keys);
+
+        // Storage should have removed keys but account should not be removed (it exists)
+        assert!(added_removed_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot));
+        assert!(!added_removed_keys.get_accounts().is_removed(&hashed_addr));
+
+        // Now clear all removed storage keys and keep account with balance
+        let mut evm_state2 = EvmState::default();
+        let mut account2 = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account2.info.balance = U256::from(1000);
+        account2.storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        evm_state2.insert(addr, account2);
+
+        let hashed_state =
+            process_and_convert_evm_state(evm_state2, &mut added_removed_keys);
+
+        // Account should not be marked as removed still
+        assert!(!added_removed_keys.get_accounts().is_removed(&hashed_addr));
+        assert!(!added_removed_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot));
+
+        // Verify account has balance in hashed state
+        assert!(hashed_state.accounts.get(&hashed_addr).unwrap().is_some());
+        assert_eq!(
+            hashed_state.accounts.get(&hashed_addr).unwrap().as_ref().unwrap().balance,
+            U256::from(1000)
+        );
+    }
+
+    #[test]
+    fn test_convert_evm_state_account_with_balance() {
+        use alloy_primitives::{keccak256, Address};
+        use revm_state::{Account as EvmAccount, AccountStatus, EvmState};
+
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
+        let mut evm_state = EvmState::default();
+
+        let addr = Address::random();
+        let hashed_addr = keccak256(addr);
+
+        // Add account with non-empty state (has balance and code)
+        let mut account = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account.info.balance = U256::from(1000);
+        account.info.nonce = 5;
+        account.info.code_hash = B256::from([1u8; 32]); // non-empty code hash
+        evm_state.insert(addr, account.clone());
+
+        let hashed_state =
+            process_and_convert_evm_state(evm_state, &mut added_removed_keys);
+
+        // Account should not be marked as removed because it has balance
+        assert!(!added_removed_keys.get_accounts().is_removed(&hashed_addr));
+
+        // Verify account info in hashed state
+        let hashed_account = hashed_state.accounts.get(&hashed_addr).unwrap().as_ref().unwrap();
+        assert_eq!(hashed_account.balance, U256::from(1000));
+        assert_eq!(hashed_account.nonce, 5);
+        assert_eq!(hashed_account.bytecode_hash, Some(B256::from([1u8; 32])));
+
+        // Now self-destruct the account
+        let mut evm_state2 = EvmState::default();
+        let mut destroyed_account = account;
+        destroyed_account.status = AccountStatus::Touched | AccountStatus::SelfDestructed;
+        evm_state2.insert(addr, destroyed_account);
+
+        let hashed_state2 =
+            process_and_convert_evm_state(evm_state2, &mut added_removed_keys);
+
+        // Account should be removed after self-destruct
+        assert!(added_removed_keys.get_accounts().is_removed(&hashed_addr));
+        assert!(hashed_state2.accounts.get(&hashed_addr).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_proof_targets_with_added_storage_keys() {
+        let mut state = HashedPostState::default();
+        let mut fetched = MultiProofTargets::default();
+        let mut multi_added_removed_keys = MultiAddedRemovedKeys::new();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        // add account to state
+        state.accounts.insert(addr, Some(Default::default()));
+
+        // add storage updates
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::from(100));
+        storage.storage.insert(slot2, U256::from(200));
+        state.storages.insert(addr, storage);
+
+        // mark both slots as already fetched
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot1);
+        fetched_slots.insert(slot2);
+        fetched.insert(addr, fetched_slots);
+
+        // mark slot1 as added (it was previously zero and is now non-zero)
+        let mut added_state = HashedPostState::default();
+        let mut added_storage = HashedStorage::default();
+        added_storage.storage.insert(slot1, U256::from(100)); // non-zero value with added flag
+        added_state.storages.insert(addr, added_storage);
+
+        // Manually mark slot1 as added
+        multi_added_removed_keys.get_storage_mut(addr).insert_added(slot1);
+
+        let targets = get_proof_targets(&state, &fetched, &multi_added_removed_keys);
+
+        // slot1 should be included despite being fetched, because it's marked as added
+        assert!(targets.contains_key(&addr));
+        let target_slots = &targets[&addr];
+        assert_eq!(target_slots.len(), 1);
+        assert!(target_slots.contains(&slot1)); // included because it's added
+        assert!(!target_slots.contains(&slot2)); // not included because it's fetched and not added
+    }
+
+    #[test]
+    fn test_convert_evm_state_tracks_added_keys() {
+        use alloy_primitives::{keccak256, Address};
+        use revm_state::{Account as EvmAccount, AccountStatus, EvmState, EvmStorageSlot};
+
+        let mut added_removed_keys = MultiAddedRemovedKeys::new();
+
+        // Test 1: Account creation
+        let addr1 = Address::random();
+        let hashed_addr1 = keccak256(addr1);
+
+        let mut evm_state1 = EvmState::default();
+        let mut new_account = EvmAccount {
+            status: AccountStatus::Touched | AccountStatus::Created,
+            ..Default::default()
+        };
+        new_account.info.balance = U256::from(1000);
+        evm_state1.insert(addr1, new_account);
+
+        let _ = process_and_convert_evm_state(evm_state1, &mut added_removed_keys);
+
+        // Verify account is marked as added
+        assert!(added_removed_keys.get_accounts().is_added(&hashed_addr1));
+        assert!(!added_removed_keys.get_accounts().is_removed(&hashed_addr1));
+
+        // Test 2: Storage slot creation (zero to non-zero)
+        let addr2 = Address::random();
+        let hashed_addr2 = keccak256(addr2);
+        let slot1 = U256::from(42);
+        let slot2 = U256::from(43);
+        let hashed_slot1 = keccak256(B256::from(slot1));
+        let hashed_slot2 = keccak256(B256::from(slot2));
+
+        let mut evm_state2 = EvmState::default();
+        let mut account2 = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        // Slot 1: zero to non-zero (added)
+        account2.storage.insert(slot1, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        // Slot 2: non-zero to different non-zero (changed but not added)
+        account2
+            .storage
+            .insert(slot2, EvmStorageSlot::new_changed(U256::from(50), U256::from(150), 0));
+        evm_state2.insert(addr2, account2);
+
+        let _ = process_and_convert_evm_state(evm_state2, &mut added_removed_keys);
+
+        // Verify slot1 is marked as added, slot2 is not
+        let storage_keys = added_removed_keys.get_storage(&hashed_addr2).unwrap();
+        assert!(storage_keys.is_added(&hashed_slot1));
+        assert!(!storage_keys.is_removed(&hashed_slot1));
+        assert!(!storage_keys.is_added(&hashed_slot2));
+        assert!(!storage_keys.is_removed(&hashed_slot2));
+
+        // Test 3: Storage slot removal then re-addition
+        let addr3 = Address::random();
+        let hashed_addr3 = keccak256(addr3);
+        let slot3 = U256::from(44);
+        let hashed_slot3 = keccak256(B256::from(slot3));
+
+        // First remove the slot (non-zero to zero)
+        let mut evm_state3a = EvmState::default();
+        let mut account3a = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account3a
+            .storage
+            .insert(slot3, EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 0));
+        evm_state3a.insert(addr3, account3a);
+
+        let _ = process_and_convert_evm_state(evm_state3a, &mut added_removed_keys);
+
+        // Verify slot is marked as removed
+        let storage_keys = added_removed_keys.get_storage(&hashed_addr3).unwrap();
+        assert!(storage_keys.is_removed(&hashed_slot3));
+        assert!(!storage_keys.is_added(&hashed_slot3));
+
+        // Then add it back (zero to non-zero)
+        let mut evm_state3b = EvmState::default();
+        let mut account3b = EvmAccount { status: AccountStatus::Touched, ..Default::default() };
+        account3b
+            .storage
+            .insert(slot3, EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 0));
+        evm_state3b.insert(addr3, account3b);
+
+        let _ = process_and_convert_evm_state(evm_state3b, &mut added_removed_keys);
+
+        // Verify slot is now marked as added (not removed)
+        let storage_keys = added_removed_keys.get_storage(&hashed_addr3).unwrap();
+        assert!(storage_keys.is_added(&hashed_slot3));
+        assert!(!storage_keys.is_removed(&hashed_slot3));
+
+        // Test 4: Account destruction clears added storage tracking
+        let addr4 = Address::random();
+        let hashed_addr4 = keccak256(addr4);
+        let slot4 = U256::from(45);
+        let hashed_slot4 = keccak256(B256::from(slot4));
+
+        // First add account with storage
+        let mut evm_state4a = EvmState::default();
+        let mut account4a = EvmAccount {
+            status: AccountStatus::Touched | AccountStatus::Created,
+            ..Default::default()
+        };
+        account4a
+            .storage
+            .insert(slot4, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        evm_state4a.insert(addr4, account4a);
+
+        let _ = process_and_convert_evm_state(evm_state4a, &mut added_removed_keys);
+
+        // Verify both account and storage are added
+        assert!(added_removed_keys.get_accounts().is_added(&hashed_addr4));
+        assert!(added_removed_keys.get_storage(&hashed_addr4).unwrap().is_added(&hashed_slot4));
+
+        // Then destroy the account
+        let mut evm_state4b = EvmState::default();
+        let account4b = EvmAccount {
+            status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+            ..Default::default()
+        };
+        evm_state4b.insert(addr4, account4b);
+
+        let _ = process_and_convert_evm_state(evm_state4b, &mut added_removed_keys);
+
+        // Verify account is removed and storage tracking is cleared
+        assert!(added_removed_keys.get_accounts().is_removed(&hashed_addr4));
+        assert!(!added_removed_keys.get_accounts().is_added(&hashed_addr4));
+        assert!(added_removed_keys.get_storage(&hashed_addr4).is_none());
     }
 }

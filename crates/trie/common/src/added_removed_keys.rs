@@ -5,22 +5,16 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use alloy_trie::proof::AddedRemovedKeys;
 
 /// Tracks added and removed keys across account and storage tries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MultiAddedRemovedKeys {
     account: AddedRemovedKeys,
     storages: B256Map<AddedRemovedKeys>,
 }
 
-/// Returns [`AddedRemovedKeys`] with default parameters. This is necessary while we are not yet
-/// tracking added keys.
-fn default_added_removed_keys() -> AddedRemovedKeys {
-    AddedRemovedKeys::default().with_assume_added(true)
-}
-
 impl MultiAddedRemovedKeys {
     /// Returns a new instance.
     pub fn new() -> Self {
-        Self { account: default_added_removed_keys(), storages: Default::default() }
+        Self::default()
     }
 
     /// Updates the set of removed keys based on a [`HashedPostState`].
@@ -43,8 +37,7 @@ impl MultiAddedRemovedKeys {
                 continue
             }
 
-            let storage_removed_keys =
-                self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
+            let storage_removed_keys = self.storages.entry(*hashed_address).or_default();
 
             for (key, val) in &storage.storage {
                 if *val == U256::ZERO {
@@ -65,16 +58,32 @@ impl MultiAddedRemovedKeys {
         self.storages.get(hashed_address)
     }
 
+    /// Returns a mutable reference to [`AddedRemovedKeys`] for the storage trie of a particular
+    /// account, creating it with default parameters if it doesn't exist.
+    pub fn get_storage_mut(&mut self, hashed_address: B256) -> &mut AddedRemovedKeys {
+        self.storages.entry(hashed_address).or_default()
+    }
+
     /// Returns an [`AddedRemovedKeys`] for tracking account-level changes.
     pub const fn get_accounts(&self) -> &AddedRemovedKeys {
         &self.account
     }
 
+    /// Returns a mutable reference to [`AddedRemovedKeys`] for tracking account-level changes.
+    pub const fn get_accounts_mut(&mut self) -> &mut AddedRemovedKeys {
+        &mut self.account
+    }
+
     /// Marks an account as existing, and therefore having storage.
     pub fn touch_accounts(&mut self, addresses: impl Iterator<Item = B256>) {
         for address in addresses {
-            self.storages.entry(address).or_insert_with(default_added_removed_keys);
+            self.storages.entry(address).or_default();
         }
+    }
+
+    /// Removes the storage tracking for a given account.
+    pub fn remove_storage(&mut self, hashed_address: &B256) {
+        self.storages.remove(hashed_address);
     }
 }
 

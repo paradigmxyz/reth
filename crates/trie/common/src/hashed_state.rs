@@ -223,7 +223,7 @@ impl HashedPostState {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
                         if storage_in_targets.contains(&slot) &&
-                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
+                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot) || k.is_added(&slot))
                         {
                             return true
                         }
