@@ -1022,6 +1022,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "arb-reth"
+version = "0.1.0"
+dependencies = [
+ "reth-cli-util",
+ "tracing",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7238,6 +7246,30 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "reth-arbitrum-chainspec"
+version = "0.1.0"
+
+[[package]]
+name = "reth-arbitrum-evm"
+version = "0.1.0"
+
+[[package]]
+name = "reth-arbitrum-node"
+version = "0.1.0"
+
+[[package]]
+name = "reth-arbitrum-payload"
+version = "0.1.0"
+
+[[package]]
+name = "reth-arbitrum-primitives"
+version = "0.1.0"
+
+[[package]]
+name = "reth-arbitrum-rpc"
+version = "0.1.0"
 
 [[package]]
 name = "reth-basic-payload-builder"
