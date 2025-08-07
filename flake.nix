@@ -1,12 +1,8 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/24.11";
     utils.url = "github:numtide/flake-utils";
-
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
 
     fenix = {
       url = "github:nix-community/fenix";
@@ -18,81 +14,117 @@
     {
       nixpkgs,
       utils,
-      rust-overlay,
+      crane,
       fenix,
       ...
     }:
     utils.lib.eachDefaultSystem (
       system:
       let
-        overlays = [
-          (import rust-overlay)
-          fenix.overlays.default
-        ];
-        pkgs = import nixpkgs { inherit system overlays; };
+        pkgs = import nixpkgs { inherit system; };
+
+        # A useful helper for folding a list of `prevSet -> newSet` functions
+        # into an attribute set.
+        composeAttrOverrides = defaultAttrs: overrides: builtins.foldl'
+            (acc: f: acc // (f acc)) defaultAttrs overrides;
+
+        cargoTarget = pkgs.stdenv.hostPlatform.rust.rustcTargetSpec;
+        cargoTargetEnvVar = builtins.replaceStrings ["-"] ["_"]
+            (pkgs.lib.toUpper cargoTarget);
 
         cargoTOML = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         packageVersion = cargoTOML.workspace.package.version;
         rustVersion = cargoTOML.workspace.package."rust-version";
 
-        rustPkg = pkgs.rust-bin.stable."${rustVersion}".default;
-        nightly = pkgs.fenix.latest;
+        rustStable = (fenix.packages.${system}.toolchainOf {
+          channel = rustVersion;
+          sha256 = "sha256-X/4ZBHO3iW0fOenQ3foEvscgAPJYl2abspaBThDOukI=";
+        }).withComponents [
+          "cargo" "rustc" "rust-src"
+        ];
 
-        rustPlatform = pkgs.makeRustPlatform {
-          rustc = rustPkg;
-          cargo = rustPkg;
+        rustNightly = fenix.packages.${system}.latest;
+
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustStable;
+
+        nativeBuildInputs = [
+          pkgs.pkg-config
+          pkgs.libgit2
+          pkgs.perl
+        ];
+
+        withClang = prev: {
+          buildInputs = prev.buildInputs or [] ++ [
+            pkgs.clang
+          ];
+          LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
         };
 
-        linuxNative = pkgs.lib.optionals pkgs.stdenv.isLinux (
-          with pkgs;
-          [
-            llvmPackages.libclang
-            llvmPackages.libcxxClang
-          ]
-        );
+        withMaxPerf = prev: {
+          cargoBuildCommand = "cargo build --profile=maxperf";
+          cargoExtraArgs = prev.cargoExtraArgs or "" + " --features=jemalloc,asm-keccak";
+          RUSTFLAGS = prev.RUSTFLAGS or [] ++ [
+            "-Ctarget-cpu=native"
+          ];
+        };
 
-        commonArgs = name: {
-          pname = name;
+        withMold = prev: {
+          buildInputs = prev.buildInputs or [] ++ [
+            pkgs.mold
+          ];
+          "CARGO_TARGET_${cargoTargetEnvVar}_LINKER" = "${pkgs.llvmPackages.clangUseLLVM}/bin/clang";
+          RUSTFLAGS = prev.RUSTFLAGS or [] ++ [
+            "-Clink-arg=-fuse-ld=${pkgs.mold}/bin/mold"
+          ];
+        };
+
+        withOp = prev: {
+          cargoExtraArgs = prev.cargoExtraArgs or "" + " -p op-reth --bin=op-reth";
+        };
+
+        mkReth = overrides: craneLib.buildPackage (composeAttrOverrides {
+          pname = "reth";
           version = packageVersion;
           src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.perl ] ++ linuxNative;
-          RUSTFLAGS = "-C target-cpu=native";
-          buildType = "maxperf";
-          buildFeatures = [
-            "jemalloc"
-            "asm-keccak"
-          ];
+          inherit nativeBuildInputs;
           doCheck = false;
-        };
+        } overrides);
+
       in
       {
         packages = rec {
-          reth = rustPlatform.buildRustPackage (commonArgs "reth");
 
-          op-reth = rustPlatform.buildRustPackage (
-            commonArgs "op-reth"
-            // {
-              buildAndTestSubdir = "crates/optimism/bin";
-              cargoBuildFlags = [
-                "--bin"
-                "op-reth"
-              ];
-            }
-          );
+          reth = mkReth ([
+            withClang
+            withMaxPerf
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            withMold
+          ]);
+
+          op-reth = mkReth ([
+            withClang
+            withMaxPerf
+            withOp
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            withMold
+          ]);
 
           default = reth;
         };
 
-        devShell = pkgs.mkShell {
-          buildInputs = [
-            rustPkg
-            nightly.rust-analyzer
-            nightly.clippy
-            nightly.rustfmt
-          ]
-          ++ linuxNative;
-        };
+        devShell = let
+          overrides = [
+            withClang
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            withMold
+          ];
+        in craneLib.devShell (composeAttrOverrides {
+          packages = nativeBuildInputs ++ [
+            rustNightly.rust-analyzer
+            rustNightly.clippy
+            rustNightly.rustfmt
+          ];
+        } overrides);
       }
     );
 }
