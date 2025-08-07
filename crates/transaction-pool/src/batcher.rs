@@ -79,8 +79,7 @@ where
 
 impl<Pool> Future for BatchTxProcessor<Pool>
 where
-    Pool: TransactionPool + Clone + Send + Sync + 'static,
-    Pool::Transaction: Send + Sync,
+    Pool: TransactionPool + 'static,
 {
     type Output = ();
 
