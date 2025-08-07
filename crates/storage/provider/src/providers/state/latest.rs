@@ -191,17 +191,12 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        debug!(target: "provider::latest", ?account, ?storage_key, "Latest historical provider");
-
         let mut cached = self.1.lock();
 
         if let Some((address, cursor)) = cached.as_mut() {
             if *address != account {
                 *address = account;
                 *cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-                debug!(target: "provider::latest", ?account, "Storage cursor reused!");
-            } else {
-                debug!(target: "provider::latest", ?account, "Storage cursor reuse hit!");
             }
 
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
@@ -210,7 +205,6 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
                 }
             }
         } else {
-            debug!(target: "provider::latest", ?account, "Storage cursor not set");
             let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
             let mut result = Ok(None);
             if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
