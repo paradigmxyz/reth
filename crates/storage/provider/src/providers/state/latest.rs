@@ -184,6 +184,8 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
+        debug!(target: "provider::latest", ?account, ?storage_key, "Latest historical provider");
+
         let mut cached = self.1.lock();
 
         if let Some((address, cursor)) = cached.as_mut() {
