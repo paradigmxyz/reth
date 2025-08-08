@@ -5,5 +5,11 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = ["std"]
+std = [
+    "alloy-consensus/std",
+]
+
 [dependencies]
-# Keep empty for now; will add arb-alloy linkage in a later PR.
+alloy-consensus = { version = "1", default-features = false, features = ["std"] }

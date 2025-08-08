@@ -1,3 +1,5 @@
+
+
 [package]
 name = "reth-arbitrum-evm"
 version = "0.1.0"
@@ -5,5 +7,34 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = ["std"]
+std = [
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-evm/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-evm/std",
+    "reth-arbitrum-chainspec/std",
+]
+
 [dependencies]
-# placeholder; will mirror optimism/evm deps when implementing
+# Reth
+reth-evm = { path = "../../evm/evm", default-features = false, features = ["std"] }
+reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std"] }
+reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
+reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
+
+# arb-alloy
+arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc", "std"] }
+arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false, features = ["alloc"] }
+arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features = false, features = ["alloc"] }
+
+# alloy
+alloy-consensus = { version = "1", default-features = false, features = ["std"] }
+alloy-primitives = { version = "1", default-features = false, features = ["std"] }
+alloy-evm = { version = "0.7", default-features = false, features = ["std"] }
+alloy-eips = { version = "0.7", default-features = false, features = ["std"] }
