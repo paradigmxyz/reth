@@ -143,6 +143,7 @@ impl PredeployHandler for ArbSys {
             }
             s if s == get_tx_call_value => {
                 (encode_u256(U256::ZERO), gas_limit, true)
+            }
             s if s == arb_chain_id => {
                 let out = encode_u256(ctx.chain_id);
                 (out, gas_limit, true)
@@ -151,8 +152,6 @@ impl PredeployHandler for ArbSys {
                 let base = 56u64;
                 let out = encode_u256(U256::from(base.saturating_add(ctx.os_version)));
                 (out, gas_limit, true)
-            }
-
             }
 
             s if s == send_tx_to_l1 => (Bytes::default(), gas_limit, true),
