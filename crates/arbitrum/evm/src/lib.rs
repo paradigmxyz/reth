@@ -114,16 +114,16 @@ impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
         Ok(EvmEnv { cfg_env, block_env })
     }
 }
-use reth_evm::ConfigureEngineEvm;
+use reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor};
 use reth_primitives_traits::{TxTy, WithEncoded};
 use reth_storage_errors::any::AnyError;
+use reth_arbitrum_payload::ArbExecutionData;
 
-impl<ChainSpec, N, R> ConfigureEngineEvm<crate::arbitrum::payload::ArbExecutionData>
-    for ArbEvmConfig<ChainSpec, N, R>
+impl<ChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
 {
     fn evm_env_for_payload(
         &self,
-        payload: &crate::arbitrum::payload::ArbExecutionData,
+        payload: &ArbExecutionData,
     ) -> EvmEnvFor<Self> {
         let cfg_env = CfgEnv::new().with_chain_id(0).with_spec(SpecId::LATEST);
         let block_env = BlockEnv {
@@ -141,7 +141,7 @@ impl<ChainSpec, N, R> ConfigureEngineEvm<crate::arbitrum::payload::ArbExecutionD
 
     fn context_for_payload<'a>(
         &self,
-        payload: &'a crate::arbitrum::payload::ArbExecutionData,
+        payload: &'a ArbExecutionData,
     ) -> ExecutionCtxFor<'a, Self> {
         ArbBlockExecutionCtx {
             parent_hash: payload.parent_hash(),
@@ -152,7 +152,7 @@ impl<ChainSpec, N, R> ConfigureEngineEvm<crate::arbitrum::payload::ArbExecutionD
 
     fn tx_iterator_for_payload(
         &self,
-        payload: &crate::arbitrum::payload::ArbExecutionData,
+        payload: &ArbExecutionData,
     ) -> impl ExecutableTxIterator<Self> {
         payload
             .payload
