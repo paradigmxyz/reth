@@ -213,12 +213,25 @@ impl PredeployHandler for ArbRetryableTx {
             Bytes::from(out.to_vec())
         }
 
+        fn read_ticket_id(input: &Bytes) -> [u8; 32] {
+            let mut id = [0u8; 32];
+            if input.len() >= 4 + 32 {
+                id.copy_from_slice(&input[4..36]);
+            }
+            id
+        }
+
         match sel {
             s if s == redeem => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let tid = read_ticket_id(input);
+                let _ = retryables.redeem_retryable(&crate::retryables::RetryableTicketId(tid));
+                (abi_zero_word(), gas_limit, true)
             }
-            s if s == cancel => (Bytes::default(), gas_limit, true),
+            s if s == cancel => {
+                let tid = read_ticket_id(input);
+                let _ = retryables.cancel_retryable(&crate::retryables::RetryableTicketId(tid));
+                (Bytes::default(), gas_limit, true)
+            }
             s if s == get_lifetime => {
                 let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
                 let mut out = [0u8; 32];
@@ -231,10 +244,28 @@ impl PredeployHandler for ArbRetryableTx {
                 U256::from(timeout).to_be_bytes(&mut out);
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
-            s if s == keepalive => (abi_zero_word(), gas_limit, true),
+            s if s == keepalive => {
+                let tid = read_ticket_id(input);
+                let _ = retryables.keepalive_retryable(&crate::retryables::RetryableTicketId(tid));
+                (abi_zero_word(), gas_limit, true)
+            }
             s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
             s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
-            s if s == submit_retryable => (abi_zero_word(), gas_limit, false),
+            s if s == submit_retryable => {
+                let params = crate::retryables::RetryableCreateParams {
+                    sender: Address::ZERO,
+                    beneficiary: Address::ZERO,
+                    call_to: Address::ZERO,
+                    call_data: Bytes::default(),
+                    l1_base_fee: ctx.basefee,
+                    submission_fee: U256::ZERO,
+                    max_submission_cost: U256::MAX,
+                    max_gas: U256::ZERO,
+                    gas_price_bid: U256::ZERO,
+                };
+                let _ = retryables.create_retryable(params);
+                (abi_zero_word(), gas_limit, false)
+            }
             _ => (Bytes::default(), gas_limit, true),
         }
 }
