@@ -33,6 +33,7 @@ alloy-eips = { version = "1", default-features = false }
 alloy-rlp = { version = "0.3", default-features = false, features = ["derive"] }
 alloy-primitives = { version = "1.3", default-features = false, features = ["rlp"] }
 serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+bytes = { version = "1", default-features = false }
 
 # arb-alloy consensus types
 arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false }

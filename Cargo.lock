@@ -7481,6 +7481,14 @@ name = "reth-arbitrum-primitives"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus 1.0.24",
+ "alloy-eips 1.0.24",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arb-alloy-consensus",
+ "bytes",
+ "reth-codecs",
+ "reth-primitives-traits",
+ "serde",
 ]
 
 [[package]]

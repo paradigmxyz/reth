@@ -18,7 +18,8 @@ use core::ops::Deref;
 use reth_primitives_traits::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction};
 use reth_primitives_traits::crypto::secp256k1::{recover_signer, recover_signer_unchecked};
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ArbReceipt {
     Legacy(AlloyReceipt),
     Eip1559(AlloyReceipt),
@@ -297,8 +298,7 @@ impl alloy_rlp::Decodable for ArbReceipt {
 
 
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArbTypedTransaction {
     Deposit(arb_alloy_consensus::tx::ArbDepositTx),
     Unsigned(arb_alloy_consensus::tx::ArbUnsignedTx),
@@ -343,13 +343,15 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
     }
 }
 
-#[derive(Clone, Debug, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbTransactionSigned {
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     hash: reth_primitives_traits::sync::OnceLock<TxHash>,
     signature: Signature,
+    #[cfg_attr(feature = "serde", serde(skip))]
     transaction: ArbTypedTransaction,
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     input_cache: reth_primitives_traits::sync::OnceLock<Bytes>,
 }
 
@@ -427,69 +429,6 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
     }
 }
 
-impl alloy_consensus::TxReceipt for ArbReceipt {
-    type Log = alloy_primitives::Log;
-
-    fn status_or_post_state(&self) -> alloy_consensus::Eip658Value {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.status_or_post_state(),
-            ArbReceipt::Deposit(_) => alloy_consensus::Eip658Value::Eip658(true),
-        }
-    }
-
-    fn status(&self) -> bool {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.status(),
-            ArbReceipt::Deposit(_) => true,
-        }
-    }
-
-    fn bloom(&self) -> alloy_primitives::Bloom {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.bloom(),
-            ArbReceipt::Deposit(_) => alloy_primitives::Bloom::ZERO,
-        }
-    }
-
-    fn cumulative_gas_used(&self) -> u64 {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.cumulative_gas_used(),
-            ArbReceipt::Deposit(_) => 0,
-        }
-    }
-
-    fn logs(&self) -> &[Self::Log] {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.logs(),
-            ArbReceipt::Deposit(_) => &[],
-        }
-    }
-
-    fn into_logs(self) -> alloc::vec::Vec<Self::Log> {
-        match self {
-            ArbReceipt::Legacy(r)
-            | ArbReceipt::Eip2930(r)
-            | ArbReceipt::Eip1559(r)
-            | ArbReceipt::Eip7702(r) => r.logs,
-            ArbReceipt::Deposit(_) => alloc::vec::Vec::new(),
-        }
-    }
-}
 
 impl SignedTransaction for ArbTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
@@ -529,17 +468,11 @@ impl reth_codecs::Compact for ArbTransactionSigned {
         end.saturating_sub(start)
     }
 
-    fn from_compact<B>(buf: &mut B) -> Result<Self, reth_codecs::CompactError>
-    where
-        B: bytes::Buf + AsRef<[u8]>,
-    {
-        let bytes = buf.chunk();
-        let mut slice: &[u8] = bytes;
-        let decoded = alloy_rlp::Decodable::decode(&mut slice)
-            .map_err(|_| reth_codecs::CompactError::Decode)?;
-        let consumed = bytes.len() - slice.len();
-        buf.advance(consumed);
-        Ok(decoded)
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (head, tail) = buf.split_at(len);
+        let mut slice: &[u8] = head;
+        let decoded = alloy_rlp::Decodable::decode(&mut slice).expect("compact decode");
+        (decoded, tail)
     }
 }
 
@@ -566,12 +499,24 @@ impl alloy_consensus::Typed2718 for ArbTransactionSigned {
     fn is_legacy(&self) -> bool {
         matches!(self.transaction, ArbTypedTransaction::Legacy(_))
     }
+    fn ty(&self) -> u8 {
+        match &self.transaction {
+            ArbTypedTransaction::Legacy(_) => 0u8,
+            ArbTypedTransaction::Deposit(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx.as_u8(),
+            ArbTypedTransaction::Unsigned(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx.as_u8(),
+            ArbTypedTransaction::Contract(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx.as_u8(),
+            ArbTypedTransaction::Retry(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx.as_u8(),
+            ArbTypedTransaction::SubmitRetryable(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx.as_u8(),
+            ArbTypedTransaction::Internal(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8(),
+        }
+    }
 }
 
 impl Encodable2718 for ArbTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
         match &self.transaction {
             ArbTypedTransaction::Legacy(_) => None,
+
             _ => Some(match &self.transaction {
                 ArbTypedTransaction::Deposit(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx.as_u8(),
                 ArbTypedTransaction::Unsigned(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx.as_u8(),
@@ -824,11 +769,11 @@ impl ConsensusTx for ArbTransactionSigned {
         None
     }
 
-    fn blob_versioned_hashes(&self) -> Option<&alloc::vec::Vec<B256>> {
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
         None
     }
 
-    fn authorization_list(&self) -> Option<&alloc::vec::Vec<alloy_eips::eip7702::SignedAuthorization>> {
+    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
         None
     }
 }
