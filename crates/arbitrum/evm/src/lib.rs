@@ -13,6 +13,8 @@ pub mod execute;
 
 pub mod receipts;
 pub use receipts::*;
+mod predeploys;
+pub use predeploys::*;
 
 #[derive(Debug)]
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder> {
