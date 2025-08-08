@@ -199,12 +199,12 @@ impl PredeployHandler for ArbRetryableTx {
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
         let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
-        let get_lifetime = pre::selector("getLifetime()");
-        let get_timeout = pre::selector("getTimeout(bytes32)");
-        let keepalive = pre::selector("keepalive(bytes32)");
-        let get_beneficiary = pre::selector("getBeneficiary(bytes32)");
-        let get_current_redeemer = pre::selector("getCurrentRedeemer()");
-        let submit_retryable = pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)");
+        let get_lifetime = pre::selector(pre::SIG_RETRY_GET_LIFETIME);
+        let get_timeout = pre::selector(pre::SIG_RETRY_GET_TIMEOUT);
+        let keepalive = pre::selector(pre::SIG_RETRY_KEEPALIVE);
+        let get_beneficiary = pre::selector(pre::SIG_RETRY_GET_BENEFICIARY);
+        let get_current_redeemer = pre::selector(pre::SIG_RETRY_GET_CURRENT_REDEEMER);
+        let submit_retryable = pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE);
 
         fn abi_zero_word() -> Bytes {
             let out = [0u8; 32];
@@ -757,12 +757,12 @@ mod tests {
 
         let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
         let _ = call(pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET));
-        let _ = call(pre::selector("getLifetime()"));
-        let _ = call(pre::selector("getTimeout(bytes32)"));
-        let _ = call(pre::selector("keepalive(bytes32)"));
-        let _ = call(pre::selector("getBeneficiary(bytes32)"));
-        let _ = call(pre::selector("getCurrentRedeemer()"));
-        let (_out, _gas, success) = call(pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)"));
+        let _ = call(pre::selector(pre::SIG_RETRY_GET_LIFETIME));
+        let _ = call(pre::selector(pre::SIG_RETRY_GET_TIMEOUT));
+        let _ = call(pre::selector(pre::SIG_RETRY_KEEPALIVE));
+        let _ = call(pre::selector(pre::SIG_RETRY_GET_BENEFICIARY));
+        let _ = call(pre::selector(pre::SIG_RETRY_GET_CURRENT_REDEEMER));
+        let (_out, _gas, success) = call(pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
         assert!(!success);
     #[test]
     fn arb_retryable_tx_get_lifetime_returns_constant() {
@@ -773,7 +773,7 @@ mod tests {
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
         let mut input = alloc::vec::Vec::with_capacity(4);
-        input.extend_from_slice(&pre::selector("getLifetime()"));
+        input.extend_from_slice(&pre::selector(pre::SIG_RETRY_GET_LIFETIME));
         let (out, _gas, success) = reg
             .dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
             .expect("dispatch");
@@ -789,7 +789,7 @@ mod tests {
         let mut ctx = mk_ctx();
         ctx.time = 1_000_000;
         let mut input = alloc::vec::Vec::with_capacity(4);
-        input.extend_from_slice(&arb_alloy_predeploys::selector("getTimeout(bytes32)"));
+        input.extend_from_slice(&arb_alloy_predeploys::selector(pre::SIG_RETRY_GET_TIMEOUT));
         let (out, _gas, ok) = reg.dispatch(&ctx, addr_retry, &Bytes::from(input), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok);
         assert_eq!(out.len(), 32);
