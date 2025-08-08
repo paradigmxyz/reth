@@ -1,8 +1,50 @@
 [package]
 name = "reth-arbitrum-node"
-version = "0.1.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
+# reth core
+reth-chainspec.workspace = true
+reth-primitives-traits = { workspace = true, features = ["secp256k1", "rayon"] }
+reth-payload-builder.workspace = true
+reth-consensus.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-network.workspace = true
+reth-evm.workspace = true
+reth-trie-db.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tasks = { workspace = true, optional = true }
+reth-trie-common.workspace = true
+reth-node-core.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-engine-local.workspace = true
+reth-rpc-api.workspace = true
+
+# arbitrum-specific crates
+reth-arbitrum-evm = { workspace = true }
+reth-arbitrum-rpc = { workspace = true }
+reth-arbitrum-payload = { workspace = true }
+reth-arbitrum-chainspec = { workspace = true }
+
+# ethereum/alloy types
+alloy-primitives.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+
+# misc
+clap.workspace = true
+serde.workspace = true
+eyre.workspace = true

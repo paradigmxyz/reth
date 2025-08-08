@@ -1,7 +1,13 @@
 #![allow(unused)]
-pub struct ArbNode;
+use super::args::RollupArgs;
+
+#[derive(Debug, Clone, Default)]
+pub struct ArbNode {
+    pub args: RollupArgs,
+}
+
 impl ArbNode {
-    pub fn new(_rollup_args: super::args::RollupArgs) -> Self {
-        Self
+    pub fn new(rollup_args: RollupArgs) -> Self {
+        Self { args: rollup_args }
     }
 }
