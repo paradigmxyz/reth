@@ -12,6 +12,36 @@ impl ArbRethReceiptBuilder {
     }
 }
 
+use alloy_evm::eth::receipt_builder::ReceiptBuilderCtx;
+use reth_evm::Evm;
+
+pub trait ArbReceiptBuilder {
+    type Transaction;
+    type Receipt;
+
+    fn build_receipt<'a, E: Evm>(
+        &self,
+        ctx: ReceiptBuilderCtx<'a, Self::Transaction, E>,
+    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, Self::Transaction, E>>;
+}
+
+impl ArbReceiptBuilder for ArbRethReceiptBuilder {
+    type Transaction = ();
+    type Receipt = AlloyReceipt;
+
+    fn build_receipt<'a, E: Evm>(
+        &self,
+        ctx: ReceiptBuilderCtx<'a, Self::Transaction, E>,
+    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, Self::Transaction, E>> {
+        let receipt = AlloyReceipt {
+            status: Eip658Value::Eip658(ctx.result.is_success()),
+            cumulative_gas_used: ctx.cumulative_gas_used,
+            logs: ctx.result.into_logs(),
+        };
+        Ok(receipt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
