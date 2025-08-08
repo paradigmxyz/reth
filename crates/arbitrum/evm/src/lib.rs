@@ -322,6 +322,7 @@ mod tests {
             block_number: 100,
             block_hashes: alloc::vec::Vec::new(),
             chain_id: U256::from(42161u64),
+            os_version: 0,
             time: 0,
             origin: Address::ZERO,
             caller: Address::ZERO,

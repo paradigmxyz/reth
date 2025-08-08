@@ -6,6 +6,7 @@ pub struct PredeployCallContext {
     pub block_number: u64,
     pub block_hashes: alloc::vec::Vec<B256>,
     pub chain_id: U256,
+    pub os_version: u64,
     pub time: u64,
     pub origin: Address,
     pub caller: Address,
@@ -76,6 +77,8 @@ impl PredeployHandler for ArbSys {
         let get_block_number = pre::selector(pre::SIG_GET_BLOCK_NUMBER);
         let get_block_hash = pre::selector(pre::SIG_GET_BLOCK_HASH);
         let get_storage_at = pre::selector(pre::SIG_GET_STORAGE_AT);
+        let arb_chain_id = pre::selector(pre::SIG_ARB_CHAIN_ID);
+        let arb_os_version = pre::selector(pre::SIG_ARB_OS_VERSION);
 
         fn encode_u256(x: U256) -> Bytes {
             let mut out = [0u8; 32];
