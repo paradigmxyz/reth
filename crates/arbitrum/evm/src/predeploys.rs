@@ -610,6 +610,8 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, callvalue);
+    }
+
     #[test]
     fn gasinfo_is_registered_in_default_registry() {
         use alloy_primitives::address;
@@ -617,7 +619,5 @@ mod tests {
         let gi = address!("000000000000000000000000000000000000006c");
         let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
-    }
-    }
     }
 }
