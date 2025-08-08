@@ -422,7 +422,11 @@ impl PredeployHandler for ArbGasInfo {
             s if s == gi_l1_basefee_inertia => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_rate => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_recipient => (abi_zero_word(), gas_limit, true),
-            s if s == gi_l1_gas_price_estimate => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_gas_price_estimate => {
+                let mut out = [0u8; 32];
+                _ctx.basefee.to_be_bytes(&mut out);
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
             s if s == gi_current_tx_l1_fees => {
                 let mut out = alloc::vec::Vec::with_capacity(96);
                 out.extend_from_slice(&[0u8; 32]);
