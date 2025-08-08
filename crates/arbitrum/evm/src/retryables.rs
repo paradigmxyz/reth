@@ -30,6 +30,8 @@ pub trait Retryables {
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
+
+    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address>;
 }
 
 #[derive(Clone)]
@@ -92,6 +94,10 @@ impl Retryables for DefaultRetryables {
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
         RetryableAction::KeptAlive { ticket_id: RetryableTicketId(ticket_id.0) }
     }
+    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address> {
+        self.tickets.get(&ticket_id.0).map(|t| t.beneficiary)
+    }
+
 }
 
 #[cfg(test)]
@@ -153,5 +159,29 @@ mod tests {
             }
             _ => panic!("expected Redeemed"),
         }
+    #[test]
+    fn get_beneficiary_returns_set_address() {
+        let mut r = DefaultRetryables::default();
+        let beneficiary = Address::from([5u8; 20]);
+        let params = RetryableCreateParams {
+            sender: Address::from([1u8; 20]),
+            beneficiary,
+            call_to: Address::from([3u8; 20]),
+            call_data: Bytes::from(vec![0xab, 0xcd]),
+            l1_base_fee: U256::from(100u64),
+            submission_fee: U256::ZERO,
+            max_submission_cost: U256::from(u128::MAX),
+            max_gas: U256::ZERO,
+            gas_price_bid: U256::ZERO,
+        };
+        let created = r.create_retryable(params);
+        let id = match created {
+            RetryableAction::Created { ticket_id, .. } => ticket_id,
+            _ => panic!("expected Created"),
+        };
+        let got = r.get_beneficiary(&id);
+        assert_eq!(got, Some(beneficiary));
+    }
+
     }
 }

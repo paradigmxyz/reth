@@ -265,7 +265,15 @@ impl PredeployHandler for ArbRetryableTx {
                 let _ = retryables.keepalive_retryable(&crate::retryables::RetryableTicketId(tid));
                 (abi_zero_word(), gas_limit, true)
             }
-            s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
+            s if s == get_beneficiary => {
+                let tid = read_ticket_id(input);
+                let addr = retryables
+                    .get_beneficiary(&crate::retryables::RetryableTicketId(tid))
+                    .unwrap_or(Address::ZERO);
+                let mut out = [0u8; 32];
+                out[12..].copy_from_slice(addr.as_slice());
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
             s if s == submit_retryable => {
                 let params = crate::retryables::RetryableCreateParams {
