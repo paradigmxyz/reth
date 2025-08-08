@@ -120,12 +120,12 @@ mod tests {
     impl Evm for DummyEvm {}
 
     #[test]
-    fn gas_charging_applies_retryable_submission_fee_math() {
+    fn gas_charging_applies_poster_data_cost_with_padding() {
         let hooks = DefaultArbOsHooks::default();
         let mut state = ArbTxProcessorState::default();
 
         let basefee = U256::from(1_000u64);
-        let calldata = vec![0u8; 100]; // 100 bytes
+        let calldata = vec![0u8; 100];
         let ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
             calldata: calldata.clone(),
@@ -138,8 +138,9 @@ mod tests {
         let (_tip, res) = hooks.gas_charging(&mut evm, &mut state, &ctx);
         assert!(res.is_ok());
 
-        let expected_units = U256::from(1400u64) + U256::from(6u64) * U256::from(calldata.len() as u64);
-        let expected_fee = expected_units * basefee;
+        let units = arb_alloy_util::l1_pricing::L1PricingState::poster_units_from_brotli_len(calldata.len() as u64);
+        let padded = arb_alloy_util::l1_pricing::L1PricingState::apply_estimation_padding(units);
+        let expected_fee = U256::from(padded) * basefee;
         assert_eq!(state.poster_fee, expected_fee);
 
         let expected_gas: u64 = (expected_fee / basefee).try_into().unwrap();
