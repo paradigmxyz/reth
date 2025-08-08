@@ -353,6 +353,7 @@ impl PredeployRegistry {
         reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(Address::from(pre::ARB_RETRYABLE_TX))));
         reg.register(alloc::boxed::Box::new(ArbOwner::new(Address::from(pre::ARB_OWNER))));
         reg.register(alloc::boxed::Box::new(ArbAddressTable::new(Address::from(pre::ARB_ADDRESS_TABLE))));
+        reg.register(alloc::boxed::Box::new(NodeInterface::new(Address::from(pre::NODE_INTERFACE))));
         reg
     }
 }
@@ -400,5 +401,14 @@ mod tests {
 
         let unknown = address!("00000000000000000000000000000000000000ff");
         assert!(reg.dispatch(&ctx, unknown, &mk_bytes(), 1, U256::ZERO).is_none());
+    #[test]
+    fn node_interface_is_registered_in_default_registry() {
+        use alloy_primitives::address;
+        let reg = PredeployRegistry::with_default_addresses();
+        let ni = address!("00000000000000000000000000000000000000c8");
+        let out = reg.dispatch(&mk_ctx(), ni, &mk_bytes(), 21_000, U256::ZERO);
+        assert!(out.is_some());
+    }
+
     }
 }
