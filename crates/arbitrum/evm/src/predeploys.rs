@@ -194,7 +194,7 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
@@ -223,7 +223,13 @@ impl PredeployHandler for ArbRetryableTx {
                 U256::from(secs).to_be_bytes(&mut out);
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
-            s if s == get_timeout => (abi_zero_word(), gas_limit, true),
+            s if s == get_timeout => {
+                let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
+                let timeout = U256::from(ctx.time).saturating_add(U256::from(secs));
+                let mut out = [0u8; 32];
+                timeout.to_be_bytes(&mut out);
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == keepalive => (abi_zero_word(), gas_limit, true),
             s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
             s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
@@ -775,6 +781,25 @@ mod tests {
         assert_eq!(out.len(), 32);
 
         let mut buf = [0u8; 32];
+    #[test]
+    fn arb_retryable_tx_get_timeout_uses_ctx_time_plus_lifetime() {
+        use alloy_primitives::address;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+        let mut ctx = mk_ctx();
+        ctx.time = 1_000_000;
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&arb_alloy_predeploys::selector("getTimeout(bytes32)"));
+        let (out, _gas, ok) = reg.dispatch(&ctx, addr_retry, &Bytes::from(input), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok);
+        assert_eq!(out.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out[..32]);
+        let got = U256::from_be_bytes(buf);
+        let expected = U256::from(ctx.time) + U256::from(arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS);
+        assert_eq!(got, expected);
+    }
+
         buf.copy_from_slice(&out[..32]);
         let got = U256::from_be_bytes(buf);
 
