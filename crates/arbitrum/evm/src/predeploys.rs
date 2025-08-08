@@ -589,6 +589,8 @@ mod tests {
 
         let got_os_ver = call_and_decode_u256(pre::selector(pre::SIG_ARB_OS_VERSION));
         assert_eq!(got_os_ver, U256::from(56u64 + 1u64));
+}
+
     #[test]
     fn arbsys_blockhash_queries_return_expected_values() {
         use alloy_primitives::{address, Bytes, B256, U256};
@@ -668,6 +670,8 @@ mod tests {
         let gi = address!("000000000000000000000000000000000000006c");
         let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
+}
+
     #[test]
     fn arb_retryable_tx_basic_selectors_dispatch() {
         use alloy_primitives::address;
@@ -676,14 +680,27 @@ mod tests {
         let reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
-        let mut call = |sel: [u8;4]| {
+        let call = |sel: [u8;4]| {
             let mut input = alloc::vec::Vec::with_capacity(4);
             input.extend_from_slice(&sel);
             reg.dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
                 .expect("dispatch")
+        };
+
+        let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
+        let _ = call(pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET));
+        let _ = call(pre::selector("getLifetime()"));
+        let _ = call(pre::selector("getTimeout(bytes32)"));
+        let _ = call(pre::selector("keepalive(bytes32)"));
+        let _ = call(pre::selector("getBeneficiary(bytes32)"));
+        let _ = call(pre::selector("getCurrentRedeemer()"));
+        let (_out, _gas, success) = call(pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)"));
+        assert!(!success);
+    }
+
     #[test]
     fn arb_owner_basic_selectors_dispatch() {
-        use alloy_primitives::{address, Bytes as ABytes};
+        use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
         let reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
@@ -700,20 +717,6 @@ mod tests {
         assert!(ok2);
     }
 
-        };
-
-        let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
-        let _ = call(pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET));
-        let _ = call(pre::selector("getLifetime()"));
-        let _ = call(pre::selector("getTimeout(bytes32)"));
-        let _ = call(pre::selector("keepalive(bytes32)"));
-        let _ = call(pre::selector("getBeneficiary(bytes32)"));
-        let _ = call(pre::selector("getCurrentRedeemer()"));
-        let (_out, _gas, success) = call(pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)"));
-        assert!(!success);
-    }
-    }
-}
     #[test]
     fn arb_owner_is_registered_in_default_registry() {
         use alloy_primitives::address;
