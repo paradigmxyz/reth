@@ -82,7 +82,9 @@ impl ArbOsHooks for DefaultArbOsHooks {
     }
 
     fn end_tx<E: Evm>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, _ctx: &ArbEndTxContext) {
-        let _ = state.poster_fee;
+        state.compute_hold_gas = state.compute_hold_gas.saturating_add(state.poster_gas);
+        state.poster_fee = U256::ZERO;
+        state.poster_gas = 0;
     }
 
     fn nonrefundable_gas(&self, state: &ArbTxProcessorState) -> u64 {
@@ -120,12 +122,12 @@ mod tests {
     impl Evm for DummyEvm {}
 
     #[test]
-    fn gas_charging_applies_retryable_submission_fee_math() {
+    fn gas_charging_applies_poster_data_cost_with_padding() {
         let hooks = DefaultArbOsHooks::default();
         let mut state = ArbTxProcessorState::default();
 
         let basefee = U256::from(1_000u64);
-        let calldata = vec![0u8; 100]; // 100 bytes
+        let calldata = vec![0u8; 100];
         let ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
             calldata: calldata.clone(),
@@ -138,12 +140,35 @@ mod tests {
         let (_tip, res) = hooks.gas_charging(&mut evm, &mut state, &ctx);
         assert!(res.is_ok());
 
-        let expected_units = U256::from(1400u64) + U256::from(6u64) * U256::from(calldata.len() as u64);
-        let expected_fee = expected_units * basefee;
+        let units = arb_alloy_util::l1_pricing::L1PricingState::poster_units_from_brotli_len(calldata.len() as u64);
+        let padded = arb_alloy_util::l1_pricing::L1PricingState::apply_estimation_padding(units);
+        let expected_fee = U256::from(padded) * basefee;
         assert_eq!(state.poster_fee, expected_fee);
 
         let expected_gas: u64 = (expected_fee / basefee).try_into().unwrap();
         assert_eq!(state.poster_gas, expected_gas);
+    }
+
+    #[test]
+    fn end_tx_accumulates_hold_gas_and_resets_poster_fields() {
+        let hooks = DefaultArbOsHooks::default();
+        let mut state = ArbTxProcessorState::default();
+        state.poster_fee = U256::from(12345u64);
+        state.poster_gas = 6789u64;
+        let before_hold = state.compute_hold_gas;
+
+        let mut evm = DummyEvm;
+        let ctx = ArbEndTxContext {
+            success: true,
+            gas_left: 0,
+            gas_limit: 1_000_000,
+            basefee: U256::from(1_000u64),
+        };
+        hooks.end_tx(&mut evm, &mut state, &ctx);
+
+        assert_eq!(state.compute_hold_gas, before_hold.saturating_add(6789u64));
+        assert_eq!(state.poster_fee, U256::ZERO);
+        assert_eq!(state.poster_gas, 0);
     }
 
     #[test]

@@ -194,7 +194,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> fo
             .clone()
             .into_iter()
             .map(|encoded| {
-                let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
                 let signer = tx.try_recover().map_err(AnyError::new)?;
                 Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
@@ -259,10 +259,9 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
             .clone()
             .into_iter()
             .map(|encoded| {
-                let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
-                let signed = reth_arbitrum_primitives::ArbTransactionSigned::from_envelope(&env);
-                Ok::<_, AnyError>((encoded, signed))
+                Ok::<_, AnyError>((encoded, tx))
             })
     }
 }
@@ -271,15 +270,10 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
 
 
 
-impl reth_arbitrum_primitives::ArbTransactionSigned {
-    pub fn from_envelope(env: &arb_alloy_consensus::ArbTxEnvelope) -> Self {
-        let ty = reth_arbitrum_primitives::ArbTxType::from(env);
-        reth_arbitrum_primitives::ArbTransactionSigned { ty }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Address;
 
     #[test]
     fn arb_evm_config_default_constructs() {
@@ -325,7 +319,18 @@ mod tests {
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
         let reg = cfg.default_predeploy_registry();
         let sys = address!("0000000000000000000000000000000000000064");
-        let out = reg.dispatch(sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
+        let ctx = crate::predeploys::PredeployCallContext {
+            block_number: 100,
+            block_hashes: alloc::vec::Vec::new(),
+            chain_id: U256::from(42161u64),
+            os_version: 0,
+            time: 0,
+            origin: alloy_primitives::Address::ZERO,
+            caller: alloy_primitives::Address::ZERO,
+            depth: 1,
+            basefee: U256::ZERO,
+        };
+        let out = reg.dispatch(&ctx, sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
         assert!(out.is_some());
     }
     #[test]
@@ -363,12 +368,100 @@ mod tests {
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
         let got: Vec<_> = cfg.arb_tx_iterator_for_payload(&payload)
             .map(|r| r.expect("ok"))
-            .map(|(_enc, s)| s.ty)
+            .map(|(_enc, s)| s.tx_type())
             .collect();
         assert_eq!(got, vec![
             reth_arbitrum_primitives::ArbTxType::Deposit,
             reth_arbitrum_primitives::ArbTxType::Unsigned,
         ]);
+    }
+    #[test]
+    fn maps_all_envelope_variants_to_tx_types() {
+        use arb_alloy_consensus::tx::{
+            ArbDepositTx, ArbUnsignedTx, ArbContractTx, ArbRetryTx, ArbSubmitRetryableTx, ArbInternalTx,
+        };
+        use alloy_primitives::{address, b256, U256};
+
+        let dep = arb_alloy_consensus::ArbTxEnvelope::Deposit(ArbDepositTx {
+            chain_id: U256::from(42161u64),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            from: address!("00000000000000000000000000000000000000aa"),
+            to: address!("00000000000000000000000000000000000000bb"),
+            value: U256::from(1u64),
+        });
+        let uns = arb_alloy_consensus::ArbTxEnvelope::Unsigned(ArbUnsignedTx {
+            chain_id: U256::from(42161u64),
+            from: address!("0000000000000000000000000000000000000003"),
+            nonce: 7,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::ZERO,
+            data: Vec::new(),
+        });
+        let con = arb_alloy_consensus::ArbTxEnvelope::Contract(ArbContractTx {
+            chain_id: U256::from(42161u64),
+            nonce: 1,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: Some(address!("0000000000000000000000000000000000000004")),
+            value: U256::ZERO,
+            data: Vec::new(),
+        });
+        let rty = arb_alloy_consensus::ArbTxEnvelope::Retry(ArbRetryTx {
+            chain_id: U256::from(42161u64),
+            from: address!("0000000000000000000000000000000000000005"),
+            nonce: 2,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: Some(address!("0000000000000000000000000000000000000006")),
+            value: U256::ZERO,
+            data: Vec::new(),
+            ticket_id: b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            refund_to: address!("0000000000000000000000000000000000000007"),
+        });
+        let srt = arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(ArbSubmitRetryableTx {
+            chain_id: U256::from(42161u64),
+            request_id: b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+            l1_base_fee: U256::from(1u64),
+            deposit: U256::from(2u64),
+            callvalue: U256::from(3u64),
+            gas_fee_cap: U256::from(4u64),
+            gas_limit: 21000,
+            max_submission_fee: U256::from(5u64),
+            fee_refund_address: address!("0000000000000000000000000000000000000008"),
+            beneficiary: address!("0000000000000000000000000000000000000009"),
+            to: address!("000000000000000000000000000000000000000a"),
+            data: Vec::new(),
+        });
+        let itx = arb_alloy_consensus::ArbTxEnvelope::Internal(ArbInternalTx {
+            chain_id: U256::from(42161u64),
+            caller: address!("000000000000000000000000000000000000000b"),
+            to: address!("000000000000000000000000000000000000000c"),
+            gas: 100000,
+            data: Vec::new(),
+        });
+        let leg = arb_alloy_consensus::ArbTxEnvelope::Legacy(alloy_consensus::TxLegacy {
+            chain_id: Some(42161),
+            nonce: 0,
+            gas_price: 1.into(),
+            gas_limit: 21000,
+            to: Some(address!("000000000000000000000000000000000000000d")),
+            value: 0.into(),
+            input: Vec::new().into(),
+        });
+
+        fn map(env: &arb_alloy_consensus::ArbTxEnvelope) -> reth_arbitrum_primitives::ArbTxType {
+            reth_arbitrum_primitives::ArbTxType::from(env)
+        }
+
+        assert_eq!(map(&dep), reth_arbitrum_primitives::ArbTxType::Deposit);
+        assert_eq!(map(&uns), reth_arbitrum_primitives::ArbTxType::Unsigned);
+        assert_eq!(map(&con), reth_arbitrum_primitives::ArbTxType::Contract);
+        assert_eq!(map(&rty), reth_arbitrum_primitives::ArbTxType::Retry);
+        assert_eq!(map(&srt), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
+        assert_eq!(map(&itx), reth_arbitrum_primitives::ArbTxType::Internal);
+        assert_eq!(map(&leg), reth_arbitrum_primitives::ArbTxType::Legacy);
     }
 }
 
