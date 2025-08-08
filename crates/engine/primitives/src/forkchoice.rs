@@ -172,7 +172,7 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
     }
 }
 
-/// A helper type to check represent hashes of a [`ForkchoiceState`]
+/// A helper type to represent hashes of a [`ForkchoiceState`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkchoiceStateHash {
     /// Head hash of the [`ForkchoiceState`].
