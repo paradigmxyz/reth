@@ -891,6 +891,61 @@ mod tests {
         assert_ne!(buf, [0u8; 32]);
     }
 
+    #[test]
+    fn arb_retryable_tx_get_beneficiary_after_submit_retryable() {
+        use alloy_primitives::{address, U256, Bytes};
+        use arb_alloy_predeploys as pre;
+
+        let mut reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
+        let (out, _gas, success) = reg
+            .dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 100_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(success);
+        assert_eq!(out.len(), 32);
+        let mut id = [0u8; 32];
+        id.copy_from_slice(&out[..32]);
+
+        let mut input2 = alloc::vec::Vec::with_capacity(4 + 32);
+        input2.extend_from_slice(&pre::selector(pre::SIG_RETRY_GET_BENEFICIARY));
+        input2.extend_from_slice(&id);
+        let (out2, _gas2, success2) = reg
+            .dispatch(&mk_ctx(), addr_retry, &Bytes::from(input2), 50_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(success2);
+        assert_eq!(out2.len(), 32);
+    }
+
+    #[test]
+    fn arb_retryable_tx_get_current_redeemer_is_ctx_caller() {
+        use alloy_primitives::{address, U256, Bytes};
+        use arb_alloy_predeploys as pre;
+
+        let mut reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+
+        let ctx = {
+            let mut c = mk_ctx();
+            c.caller = address!("00000000000000000000000000000000000000ff");
+            c
+        };
+
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_RETRY_GET_CURRENT_REDEEMER));
+        let (out, _gas, success) = reg
+            .dispatch(&ctx, addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(success);
+        assert_eq!(out.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out[..32]);
+        let got = alloy_primitives::U256::from_be_bytes(buf);
+        assert_ne!(got, alloy_primitives::U256::ZERO);
+    }
+
     }
 
     #[test]
