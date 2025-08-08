@@ -1262,6 +1262,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     where
         RpcMiddleware: RethRpcMiddleware,
     {
+        // Validate that all configured modules have registered methods
+        modules.validate_configured_modules();
+
         let mut http_handle = None;
         let mut ws_handle = None;
         let mut ipc_handle = None;
@@ -1709,7 +1712,7 @@ impl TransportRpcModules {
     /// Returns all unique endpoints installed for the given module.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+    pub fn methods_by_module(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
@@ -1956,6 +1959,73 @@ impl TransportRpcModules {
         self.add_or_replace_ws(other.clone())?;
         self.add_or_replace_ipc(other)?;
         Ok(())
+    }
+
+    /// Validates that all configured modules have been registered with actual RPC methods.
+    ///
+    /// This method checks for configured but unregistered modules (especially custom/Other modules)
+    /// and logs warnings for any modules that were configured but never had methods registered.
+    ///
+    /// Returns a list of unregistered module names for each transport (http, ws, ipc).
+    pub fn validate_configured_modules(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
+        use tracing::warn;
+
+        let mut unregistered_http = Vec::new();
+        let mut unregistered_ws = Vec::new();
+        let mut unregistered_ipc = Vec::new();
+
+        // Check HTTP modules
+        if let Some(http_config) = self.config.http() {
+            for module in http_config.iter_selection() {
+                // Check if this module has any registered methods
+                let methods = self.methods_by_module(module.clone());
+                if methods.method_names().count() == 0 {
+                    let module_name = module.as_str().to_string();
+                    warn!(
+                        module = %module_name,
+                        transport = "HTTP",
+                        "RPC module configured but no methods registered"
+                    );
+                    unregistered_http.push(module_name);
+                }
+            }
+        }
+
+        // Check WS modules
+        if let Some(ws_config) = self.config.ws() {
+            for module in ws_config.iter_selection() {
+                // Check if this module has any registered methods
+                let methods = self.methods_by_module(module.clone());
+                if methods.method_names().count() == 0 {
+                    let module_name = module.as_str().to_string();
+                    warn!(
+                        module = %module_name,
+                        transport = "WS",
+                        "RPC module configured but no methods registered"
+                    );
+                    unregistered_ws.push(module_name);
+                }
+            }
+        }
+
+        // Check IPC modules
+        if let Some(ipc_config) = self.config.ipc() {
+            for module in ipc_config.iter_selection() {
+                // Check if this module has any registered methods
+                let methods = self.methods_by_module(module.clone());
+                if methods.method_names().count() == 0 {
+                    let module_name = module.as_str().to_string();
+                    warn!(
+                        module = %module_name,
+                        transport = "IPC",
+                        "RPC module configured but no methods registered"
+                    );
+                    unregistered_ipc.push(module_name);
+                }
+            }
+        }
+
+        (unregistered_http, unregistered_ws, unregistered_ipc)
     }
 }
 
@@ -2479,5 +2549,121 @@ mod tests {
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+    }
+
+    #[test]
+    fn test_validate_configured_modules_with_unregistered_standard_module() {
+        // Create a config with eth module configured but no methods registered
+        let config = TransportRpcModuleConfig::default()
+            .with_http([RethRpcModule::Eth])
+            .with_ws([RethRpcModule::Debug])
+            .with_ipc([RethRpcModule::Admin]);
+
+        // Create modules with the config but without any actual methods
+        let modules = TransportRpcModules::default().with_config(config);
+
+        // Validate - should detect unregistered modules
+        let (http_unregistered, ws_unregistered, ipc_unregistered) =
+            modules.validate_configured_modules();
+
+        assert_eq!(http_unregistered, vec!["eth"]);
+        assert_eq!(ws_unregistered, vec!["debug"]);
+        assert_eq!(ipc_unregistered, vec!["admin"]);
+    }
+
+    #[test]
+    fn test_validate_configured_modules_with_unregistered_custom_module() {
+        // Create a config with custom modules configured
+        let config = TransportRpcModuleConfig::default()
+            .with_http([RethRpcModule::Eth, RethRpcModule::Other("myCustomModule".to_string())])
+            .with_ws([RethRpcModule::Other("anotherCustom".to_string())]);
+
+        // Create modules with config and initialize transports
+        let mut modules = TransportRpcModules::default()
+            .with_config(config)
+            .with_http(RpcModule::new(()))
+            .with_ws(RpcModule::new(()));
+
+        // Create and register methods for eth module (must start with "eth_")
+        let mut eth_module = RpcModule::new(());
+        eth_module.register_method("eth_blockNumber", |_, _, _| "0x123").unwrap();
+        modules.merge_http(eth_module).unwrap();
+
+        // Validate - should detect the custom modules as unregistered
+        let (http_unregistered, ws_unregistered, ipc_unregistered) =
+            modules.validate_configured_modules();
+
+        // myCustomModule should be unregistered on HTTP (eth is registered because we added eth_
+        // methods)
+        assert_eq!(http_unregistered, vec!["myCustomModule"]);
+        // anotherCustom should be unregistered on WS
+        assert_eq!(ws_unregistered, vec!["anotherCustom"]);
+        // No IPC modules configured
+        assert_eq!(ipc_unregistered, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_validate_configured_modules_all_registered() {
+        // Create a config with modules
+        let config = TransportRpcModuleConfig::default()
+            .with_http([RethRpcModule::Eth, RethRpcModule::Other("custom".to_string())])
+            .with_ws([RethRpcModule::Debug]);
+
+        // Initialize modules with empty RpcModules for each transport first
+        let mut modules = TransportRpcModules::default()
+            .with_config(config)
+            .with_http(RpcModule::new(()))
+            .with_ws(RpcModule::new(()));
+
+        // Register methods for all configured modules
+        // Method names must start with the module prefix for detection to work
+        let mut rpc_module = RpcModule::new(());
+        rpc_module.register_method("eth_blockNumber", |_, _, _| "0x123").unwrap();
+        rpc_module.register_method("eth_getBalance", |_, _, _| "0x456").unwrap();
+        rpc_module.register_method("custom_method", |_, _, _| "custom").unwrap();
+        rpc_module.register_method("debug_traceTransaction", |_, _, _| "trace").unwrap();
+
+        modules.merge_http(rpc_module.clone()).unwrap();
+        modules.merge_ws(rpc_module).unwrap();
+
+        // Validate - should find no unregistered modules
+        let (http_unregistered, ws_unregistered, ipc_unregistered) =
+            modules.validate_configured_modules();
+
+        assert!(http_unregistered.is_empty());
+        assert!(ws_unregistered.is_empty());
+        assert!(ipc_unregistered.is_empty());
+    }
+
+    #[test]
+    fn test_validate_configured_modules_with_selection_all() {
+        // Test with "All" selection - should check all standard modules
+        let config = TransportRpcModuleConfig::default().with_http(RpcModuleSelection::All);
+
+        let modules = TransportRpcModules::default().with_config(config);
+
+        // Validate - should detect all standard modules as unregistered
+        let (http_unregistered, _, _) = modules.validate_configured_modules();
+
+        // Should detect all standard modules as unregistered
+        assert!(http_unregistered.contains(&"eth".to_string()));
+        assert!(http_unregistered.contains(&"admin".to_string()));
+        assert!(http_unregistered.contains(&"debug".to_string()));
+        assert!(http_unregistered.contains(&"net".to_string()));
+        // Check that the count matches the expected number of standard modules
+        assert_eq!(http_unregistered.len(), RethRpcModule::variant_count());
+    }
+
+    #[test]
+    fn test_validate_configured_modules_no_config() {
+        // Test with no configuration - should return empty vectors
+        let modules = TransportRpcModules::default();
+
+        let (http_unregistered, ws_unregistered, ipc_unregistered) =
+            modules.validate_configured_modules();
+
+        assert!(http_unregistered.is_empty());
+        assert!(ws_unregistered.is_empty());
+        assert!(ipc_unregistered.is_empty());
     }
 }
