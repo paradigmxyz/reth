@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
-use alloy_rlp::Encodable;
+use alloy_rlp::{Bytes, Encodable};
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -629,20 +629,14 @@ where
                 .into_iter()
                 .filter_map(|backup| {
                     let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
-                        &mut backup.rlp.as_slice(),
+                        &mut backup.rlp.as_ref(),
                     )
                     .ok()?;
                     let recovered = tx_signed.try_clone_into_recovered().ok()?;
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
 
-                    let origin = if backup.propagate {
-                        TransactionOrigin::Local
-                    } else {
-                        TransactionOrigin::Private
-                    };
-
-                    Some((origin, pool_tx))
+                    Some((backup.origin, pool_tx))
                 })
                 .collect()
         } else {
@@ -674,10 +668,10 @@ where
 
 /// A transaction backup that is saved as json to a file for
 /// reinsertion into the pool
-#[derive(Deserialize, Serialize)]
-struct TxBackup {
-    rlp: Vec<u8>,
-    propagate: bool,
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TxBackup {
+    rlp: Bytes,
+    origin: TransactionOrigin,
 }
 
 fn save_local_txs_backup<P>(pool: P, file_path: &Path)
@@ -697,10 +691,7 @@ where
             let mut rlp_data = Vec::new();
             consensus_tx.encode(&mut rlp_data);
 
-            let propagate =
-                matches!(tx.origin, TransactionOrigin::Local | TransactionOrigin::External);
-
-            TxBackup { rlp: rlp_data, propagate }
+            TxBackup { rlp: rlp_data.into(), origin: tx.origin }
         })
         .collect::<Vec<_>>();
 
