@@ -445,6 +445,35 @@ impl reth_primitives_traits::NodePrimitives for ArbPrimitives {
     type Receipt = ArbReceipt;
 }
 
+    #[test]
+    fn decode_2718_exact_roundtrip_for_unsigned_tx() {
+        use arb_alloy_consensus::tx::{ArbTxType as AType, ArbUnsignedTx};
+        use alloy_primitives::{address, U256};
+        use alloy_rlp::Encodable as RlpEncodable;
+
+        let tx = ArbUnsignedTx {
+            chain_id: U256::from(42161u64),
+            from: address!("00000000000000000000000000000000000000aa"),
+            nonce: 7,
+            gas_fee_cap: U256::from(1_000_000u64),
+            gas: 21000,
+            to: Some(address!("00000000000000000000000000000000000000bb")),
+            value: U256::from(123u64),
+            data: alloc::vec::Vec::new(),
+        };
+
+        let mut enc = alloc::vec::Vec::with_capacity(1 + tx.length());
+        enc.push(AType::ArbitrumUnsignedTx.as_u8());
+        tx.encode(&mut enc);
+
+        let signed = ArbTransactionSigned::decode_2718_exact(enc.as_slice()).expect("typed decode ok");
+        assert_eq!(signed.tx_type(), ArbTxType::Unsigned);
+        assert_eq!(signed.chain_id(), Some(42161));
+        assert_eq!(signed.nonce(), 7);
+        assert_eq!(signed.gas_limit(), 21000);
+        assert_eq!(signed.value(), U256::from(123u64));
+    }
+
 #[cfg(test)]
 mod tests {
     use super::*;
