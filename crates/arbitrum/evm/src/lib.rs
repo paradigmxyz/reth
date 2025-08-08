@@ -246,6 +246,33 @@ mod tests {
     fn arb_block_assembler_and_factory_construct() {
         let cs = alloc::sync::Arc::new(());
         let _asm = ArbBlockAssembler::new(cs.clone());
+    #[test]
+    fn decode_arb_envelope_deposit_roundtrip() {
+        use arb_alloy_consensus::tx::ArbDepositTx;
+        use alloy_primitives::{address, B256, U256};
+        let dep = ArbDepositTx {
+            chain_id: U256::from(42161u64),
+            l1_request_id: B256::from([0x11u8; 32]),
+            from: address!("00000000000000000000000000000000000000aa"),
+            to: address!("00000000000000000000000000000000000000bb"),
+            value: U256::from(12345u64),
+        };
+        let env = arb_alloy_consensus::ArbTxEnvelope::Deposit(dep.clone());
+        let encoded = env.encode_typed();
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let decoded = cfg.decode_arb_envelope(&encoded).expect("decode ok");
+        match decoded {
+            arb_alloy_consensus::ArbTxEnvelope::Deposit(inner) => {
+                assert_eq!(inner.chain_id, dep.chain_id);
+                assert_eq!(inner.l1_request_id, dep.l1_request_id);
+                assert_eq!(inner.from, dep.from);
+                assert_eq!(inner.to, dep.to);
+                assert_eq!(inner.value, dep.value);
+            }
+            _ => panic!("expected deposit envelope"),
+        }
+    }
+
         let _fac = ArbBlockExecutorFactory::new(ArbRethReceiptBuilder, cs);
     }
 }
