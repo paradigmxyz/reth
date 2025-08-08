@@ -211,6 +211,24 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
         Ok(env)
     }
 }
+impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
+    pub fn tx_envelopes_for_payload(
+        &self,
+        payload: &ArbExecutionData,
+    ) -> impl Iterator<Item = Result<(alloy_primitives::Bytes, arb_alloy_consensus::ArbTxEnvelope), AnyError>> + '_ {
+        payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
+                    .map_err(AnyError::new)?;
+                Ok((encoded, env))
+            })
+    }
+}
+
 
 
 
