@@ -463,6 +463,38 @@ mod tests {
         assert_eq!(map(&itx), reth_arbitrum_primitives::ArbTxType::Internal);
         assert_eq!(map(&leg), reth_arbitrum_primitives::ArbTxType::Legacy);
     }
+    #[test]
+    fn arb_tx_iterator_recovers_signer_for_non_legacy() {
+        use arb_alloy_consensus::tx::ArbUnsignedTx;
+        use alloy_primitives::{address, Bytes, U256};
+        let env = arb_alloy_consensus::ArbTxEnvelope::Unsigned(ArbUnsignedTx {
+            chain_id: U256::from(42161u64),
+            from: address!("00000000000000000000000000000000000000aa"),
+            nonce: 7,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::ZERO,
+            data: Vec::new(),
+        });
+        let enc = env.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let mut it = cfg.tx_iterator_for_payload(&payload);
+        let item = it.next().expect("one").expect("ok");
+        let signed = item.inner();
+        let signer = signed.try_recover().expect("recover");
+        assert_eq!(signer, address!("00000000000000000000000000000000000000aa"));
+    }
+
 }
 
 #[cfg(test)]
