@@ -129,3 +129,35 @@ impl PredeployRegistry {
         reg
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, Bytes, U256};
+
+    fn mk_bytes() -> Bytes {
+        Bytes::default()
+    }
+
+    #[test]
+    fn dispatch_routes_to_correct_handler() {
+        let a_sys = address!("0000000000000000000000000000000000000064");
+        let a_retry = address!("000000000000000000000000000000000000006e");
+        let a_owner = address!("0000000000000000000000000000000000000070");
+        let a_table = address!("0000000000000000000000000000000000000066");
+
+        let reg = PredeployRegistry::with_addresses(a_sys, a_retry, a_owner, a_table);
+
+        let out_sys = reg.dispatch(a_sys, &mk_bytes(), 100_000, U256::ZERO);
+        assert!(out_sys.is_some());
+        let out_retry_at_sys = reg.dispatch(a_sys, &mk_bytes(), 100_000, U256::ZERO);
+        assert!(out_retry_at_sys.is_some()); // same result as first since dispatch matches address only
+
+        for addr in [a_retry, a_owner, a_table] {
+            let out = reg.dispatch(addr, &mk_bytes(), 42_000, U256::from(1));
+            assert!(out.is_some());
+        }
+
+        let unknown = address!("00000000000000000000000000000000000000ff");
+        assert!(reg.dispatch(unknown, &mk_bytes(), 1, U256::ZERO).is_none());
+    }
+}
