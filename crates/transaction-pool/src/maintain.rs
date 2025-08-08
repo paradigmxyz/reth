@@ -24,8 +24,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-// #[cfg(feature = "serde_json")]
-// use serde_json;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     collections::HashSet,
@@ -38,9 +37,6 @@ use tokio::{
     time::{self, Duration},
 };
 use tracing::{debug, error, info, trace, warn};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 /// Maximum amount of time non-executable transaction are queued.
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
@@ -640,7 +636,13 @@ where
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
 
-                    Some((backup.origin, pool_tx))
+                    let origin = if backup.propagate {
+                        TransactionOrigin::Local
+                    } else {
+                        TransactionOrigin::Private
+                    };
+
+                    Some((origin, pool_tx))
                 })
                 .collect()
         } else {
@@ -672,10 +674,9 @@ where
 
 /// A transaction backup that is saved as json to a file for
 /// reinsertion into the pool
-#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[derive(Deserialize, Serialize)]
 struct TxBackup {
     rlp: Vec<u8>,
-    origin: TransactionOrigin,
     propagate: bool,
 }
 
@@ -695,7 +696,11 @@ where
             let consensus_tx = tx.transaction.clone_into_consensus().into_inner();
             let mut rlp_data = Vec::new();
             consensus_tx.encode(&mut rlp_data);
-            TxBackup { rlp: rlp_data, origin: tx.origin, propagate: false }
+
+            let propagate =
+                matches!(tx.origin, TransactionOrigin::Local | TransactionOrigin::External);
+
+            TxBackup { rlp: rlp_data, propagate }
         })
         .collect::<Vec<_>>();
 
