@@ -2,6 +2,7 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, sync::Arc};
+use std::sync::Mutex;
 use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
 use alloy_primitives::{address, Address, Bytes, U256, B256};
 use reth_evm_ethereum::{
@@ -37,7 +38,7 @@ use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, 
 pub struct ArbBlockExecutorFactory<R, CS> {
     receipt_builder: R,
     spec: Arc<CS>,
-    predeploys: Arc<PredeployRegistry>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
     evm_factory: ArbEvmFactory,
 }
 
@@ -56,7 +57,7 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB> {
 
 impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
     pub fn new(receipt_builder: R, spec: Arc<CS>) -> Self {
-        let predeploys = Arc::new(PredeployRegistry::with_default_addresses());
+        let predeploys = Arc::new(Mutex::new(PredeployRegistry::with_default_addresses()));
         let evm_factory = ArbEvmFactory { predeploys: predeploys.clone() };
         Self { receipt_builder, spec, predeploys, evm_factory }
     }
@@ -146,7 +147,7 @@ where
  
 #[derive(Debug, Clone, Default)]
 pub struct ArbEvmFactory {
-    predeploys: Arc<PredeployRegistry>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
 }
 
 impl EvmFactory for ArbEvmFactory {
@@ -172,7 +173,7 @@ impl EvmFactory for ArbEvmFactory {
         let reg = self.predeploys.clone();
 
         fn mk_handler(
-            reg: Arc<PredeployRegistry>,
+            reg: Arc<Mutex<PredeployRegistry>>,
             addr: Address,
         ) -> (Address, PrecompileFn) {
             let f = move |input: &[u8], ctx: &mut EthEvmContext<_>| -> PrecompileResult {
@@ -193,8 +194,10 @@ impl EvmFactory for ArbEvmFactory {
                     basefee: block.basefee,
                 };
                 let bytes = Bytes::copy_from_slice(input);
-                let (ret, gas_left, success) =
-                    reg.dispatch(&call_ctx, addr, &bytes, gas_limit, value).unwrap_or_default();
+                let (ret, gas_left, success) = {
+                    let mut guard = reg.lock().expect("lock predeploy registry");
+                    guard.dispatch(&call_ctx, addr, &bytes, gas_limit, value).unwrap_or_default()
+                };
                 let out = PrecompileOutput::new(gas_left, ret);
                 if success {
                     PrecompileResult::Ok(out)

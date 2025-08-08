@@ -523,13 +523,17 @@ impl PredeployHandler for ArbGasInfo {
 #[derive(Clone)]
 pub struct ArbAddressTable {
     pub addr: Address,
-    addrs: alloc::vec::Vec<Address>,
-    index: alloc::collections::BTreeMap<Address, u64>,
+    addrs: alloc::rc::Rc<core::cell::RefCell<alloc::vec::Vec<Address>>>,
+    index: alloc::rc::Rc<core::cell::RefCell<alloc::collections::BTreeMap<Address, u64>>>,
 }
 
 impl ArbAddressTable {
     pub fn new(addr: Address) -> Self {
-        Self { addr, addrs: alloc::vec::Vec::new(), index: alloc::collections::BTreeMap::new() }
+        Self {
+            addr,
+            addrs: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::vec::Vec::new())),
+            index: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::collections::BTreeMap::new())),
+        }
     }
 }
 
@@ -582,31 +586,35 @@ impl PredeployHandler for ArbAddressTable {
         match sel {
             s if s == at_exists => {
                 let addr = decode_address(input);
-                let exists = self.index.contains_key(&addr);
+                let exists = self.index.borrow().contains_key(&addr);
                 (encode_u256(U256::from(exists as u64)), gas_limit, true)
             },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
             s if s == at_lookup => {
                 let addr = decode_address(input);
-                let idx = self.index.get(&addr).copied().unwrap_or(0);
+                let idx = self.index.borrow().get(&addr).copied().unwrap_or(0);
                 (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_lookup_index => {
                 let idx = decode_index(input);
-                let addr = self.addrs.get(idx as usize).copied().unwrap_or(Address::ZERO);
+                let addr = self.addrs.borrow().get(idx as usize).copied().unwrap_or(Address::ZERO);
                 (encode_address(addr), gas_limit, true)
             },
             s if s == at_register => {
                 let addr = decode_address(input);
-                if let Some(&idx) = self.index.get(&addr) {
+                if let Some(&idx) = self.index.borrow().get(&addr) {
                     return (encode_u256(U256::from(idx)), gas_limit, true)
                 }
-                let idx = self.addrs.len() as u64;
+                let mut addrs = self.addrs.borrow_mut();
+                let mut index = self.index.borrow_mut();
+                let idx = addrs.len() as u64;
+                addrs.push(addr);
+                index.insert(addr, idx);
                 (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_size => {
-                (encode_u256(U256::from(self.addrs.len() as u64)), gas_limit, true)
+                (encode_u256(U256::from(self.addrs.borrow().len() as u64)), gas_limit, true)
             },
             _ => (Bytes::default(), gas_limit, true),
         }
