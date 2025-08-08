@@ -325,9 +325,10 @@ mod tests {
             chain_id: U256::from(42161u64),
             os_version: 0,
             time: 0,
-            origin: Address::ZERO,
-            caller: Address::ZERO,
+            origin: alloy_primitives::Address::ZERO,
+            caller: alloy_primitives::Address::ZERO,
             depth: 1,
+            basefee: U256::ZERO,
         };
         let out = reg.dispatch(&ctx, sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
         assert!(out.is_some());
