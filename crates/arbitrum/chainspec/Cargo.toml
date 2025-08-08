@@ -10,3 +10,4 @@ default = ["std"]
 std = []
 
 [dependencies]
+revm = { version = "15", default-features = false, features = ["std"] }
