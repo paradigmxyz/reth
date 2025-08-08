@@ -47,18 +47,15 @@ impl Retryables for DefaultRetryables {
     }
 
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::Redeemed { ticket_id: RetryableTicketId([0u8; 32]), success: false }
+        RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false }
     }
 
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::Canceled { ticket_id: RetryableTicketId([0u8; 32]) }
+        RetryableAction::Canceled { ticket_id: RetryableTicketId(ticket_id.0) }
     }
 
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::KeptAlive { ticket_id: RetryableTicketId([0u8; 32]) }
+        RetryableAction::KeptAlive { ticket_id: RetryableTicketId(ticket_id.0) }
     }
 }
 
