@@ -142,7 +142,7 @@ impl PredeployHandler for ArbSys {
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
             s if s == get_tx_call_value => {
-                (encode_u256(U256::ZERO), gas_limit, true)
+                (encode_u256(_value), gas_limit, true)
             }
             s if s == arb_chain_id => {
                 let out = encode_u256(ctx.chain_id);
