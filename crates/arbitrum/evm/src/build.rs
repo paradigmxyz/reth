@@ -95,12 +95,16 @@ where
         let calldata_len = calldata.len();
         let gas_limit = tx.tx().gas_limit();
 
+        let block_env = self.evm().block();
+        let block_basefee = block_env.basefee;
+        let block_coinbase = block_env.beneficiary;
+
         let start_ctx = ArbStartTxContext {
             sender,
             nonce,
-            l1_base_fee: U256::ZERO,
+            l1_base_fee: block_basefee,
             calldata_len,
-            coinbase: Address::ZERO,
+            coinbase: block_coinbase,
             executed_on_chain: true,
             is_eth_call: false,
         };
@@ -109,7 +113,7 @@ where
         let gas_ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
             calldata,
-            basefee: U256::ZERO,
+            basefee: block_basefee,
             is_executed_on_chain: true,
             skip_l1_charging: false,
         };
@@ -121,7 +125,7 @@ where
             success: res.is_ok(),
             gas_left: 0,
             gas_limit,
-            basefee: U256::ZERO,
+            basefee: block_basefee,
         };
         self.hooks.end_tx(self.evm_mut(), &mut self.tx_state, &end_ctx);
 
