@@ -318,7 +318,16 @@ mod tests {
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
         let reg = cfg.default_predeploy_registry();
         let sys = address!("0000000000000000000000000000000000000064");
-        let out = reg.dispatch(sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
+        let ctx = crate::predeploys::PredeployCallContext {
+            block_number: 100,
+            block_hashes: alloc::vec::Vec::new(),
+            chain_id: U256::from(42161u64),
+            time: 0,
+            origin: Address::ZERO,
+            caller: Address::ZERO,
+            depth: 1,
+        };
+        let out = reg.dispatch(&ctx, sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
         assert!(out.is_some());
     }
     #[test]
