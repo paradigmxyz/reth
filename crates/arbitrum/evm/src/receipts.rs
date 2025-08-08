@@ -95,7 +95,20 @@ mod tests {
         impl Evm for DummyEvm {}
 
         let builder = ArbRethReceiptBuilder::default();
-        let tx = ArbTransactionSigned { ty: ArbTxType::Deposit };
+        use arb_alloy_consensus::tx::ArbDepositTx;
+        use alloy_primitives::{address, b256, U256, Signature};
+        use reth_arbitrum_primitives::ArbTypedTransaction;
+        let dep = ArbDepositTx {
+            chain_id: U256::from(42161u64),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            from: address!("00000000000000000000000000000000000000aa"),
+            to: address!("00000000000000000000000000000000000000bb"),
+            value: U256::ZERO,
+        };
+        let tx = reth_arbitrum_primitives::ArbTransactionSigned::new_unhashed(
+            ArbTypedTransaction::Deposit(dep),
+            Signature::default(),
+        );
         let mut evm = DummyEvm;
         let ctx = ReceiptBuilderCtx {
             tx: &tx,

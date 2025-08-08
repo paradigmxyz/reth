@@ -53,11 +53,11 @@ impl Deref for ArbTransactionSigned {
 
 impl ArbTransactionSigned {
     pub fn new(transaction: ArbTypedTransaction, signature: Signature, hash: B256) -> Self {
-        Self { hash: hash.into(), signature, transaction }
+        Self { hash: hash.into(), signature, transaction, input_cache: Default::default() }
     }
 
     pub fn new_unhashed(transaction: ArbTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+        Self { hash: Default::default(), signature, transaction, input_cache: Default::default() }
     }
 
     pub const fn tx_type(&self) -> ArbTxType {
