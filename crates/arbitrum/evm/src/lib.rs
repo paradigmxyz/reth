@@ -273,6 +273,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Address;
 
     #[test]
     fn arb_evm_config_default_constructs() {

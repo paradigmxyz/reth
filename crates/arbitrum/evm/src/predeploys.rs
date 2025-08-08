@@ -318,6 +318,6 @@ mod tests {
         }
 
         let unknown = address!("00000000000000000000000000000000000000ff");
-        assert!(reg.dispatch(unknown, &mk_bytes(), 1, U256::ZERO).is_none());
+        assert!(reg.dispatch(&ctx, unknown, &mk_bytes(), 1, U256::ZERO).is_none());
     }
 }
