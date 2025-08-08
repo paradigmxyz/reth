@@ -51,8 +51,24 @@ impl PredeployHandler for ArbSys {
         self.addr
     }
 
-    fn call(&self, _input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
-        (Bytes::default(), gas_limit, true)
+    fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+        let _send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
+        let _withdraw_eth = pre::selector(pre::SIG_WITHDRAW_ETH);
+        let _create_retryable = pre::selector(pre::SIG_CREATE_RETRYABLE_TICKET);
+        let _redeem = pre::selector(pre::SIG_RETRY_REDEEM);
+        let _cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let _block_number = pre::selector(pre::SIG_ARB_BLOCK_NUMBER);
+        let _block_hash = pre::selector(pre::SIG_ARB_BLOCK_HASH);
+        let _get_tx_call_value = pre::selector(pre::SIG_GET_TX_CALL_VALUE);
+        let _get_tx_origin = pre::selector(pre::SIG_GET_TX_ORIGIN);
+        let _get_block_number = pre::selector(pre::SIG_GET_BLOCK_NUMBER);
+        let _get_block_hash = pre::selector(pre::SIG_GET_BLOCK_HASH);
+        let _get_storage_at = pre::selector(pre::SIG_GET_STORAGE_AT);
+        match sel {
+            _ => (Bytes::default(), gas_limit, true),
+        }
     }
 }
 
@@ -72,8 +88,14 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-    fn call(&self, _input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
-        (Bytes::default(), gas_limit, true)
+    fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+        let _redeem = pre::selector(pre::SIG_RETRY_REDEEM);
+        let _cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        match sel {
+            _ => (Bytes::default(), gas_limit, true),
+        }
     }
 }
 
@@ -93,7 +115,8 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(&self, _input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        let _sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         (Bytes::default(), gas_limit, true)
     }
 }
@@ -114,8 +137,19 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(&self, _input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
-        (Bytes::default(), gas_limit, true)
+    fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+        let _at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
+        let _at_compress = pre::selector(pre::SIG_AT_COMPRESS);
+        let _at_decompress = pre::selector(pre::SIG_AT_DECOMPRESS);
+        let _at_lookup = pre::selector(pre::SIG_AT_LOOKUP);
+        let _at_lookup_index = pre::selector(pre::SIG_AT_LOOKUP_INDEX);
+        let _at_register = pre::selector(pre::SIG_AT_REGISTER);
+        let _at_size = pre::selector(pre::SIG_AT_SIZE);
+        match sel {
+            _ => (Bytes::default(), gas_limit, true),
+        }
     }
 }
 
