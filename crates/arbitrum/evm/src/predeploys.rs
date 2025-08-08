@@ -282,18 +282,24 @@ impl PredeployHandler for ArbRetryableTx {
             },
             s if s == submit_retryable => {
                 let params = crate::retryables::RetryableCreateParams {
-                    sender: Address::ZERO,
+                    sender: ctx.caller,
                     beneficiary: Address::ZERO,
                     call_to: Address::ZERO,
-                    call_data: Bytes::default(),
+                    call_data: input.clone(),
                     l1_base_fee: ctx.basefee,
                     submission_fee: U256::ZERO,
                     max_submission_cost: U256::MAX,
                     max_gas: U256::ZERO,
                     gas_price_bid: U256::ZERO,
                 };
-                let _ = retryables.create_retryable(params);
-                (abi_zero_word(), gas_limit, false)
+                match retryables.create_retryable(params) {
+                    crate::retryables::RetryableAction::Created { ticket_id, .. } => {
+                        let mut out = [0u8; 32];
+                        out.copy_from_slice(&ticket_id.0);
+                        (Bytes::from(out.to_vec()), gas_limit, true)
+                    }
+                    _ => (abi_zero_word(), gas_limit, false),
+                }
             }
             _ => (Bytes::default(), gas_limit, true),
         }
