@@ -940,8 +940,7 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn clear(&mut self) {
-        self.nodes.clear();
-        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        core::mem::replace(&mut self.root, Box::new(SparseNode::Empty));
 
         self.branch_node_tree_masks.clear();
         self.branch_node_hash_masks.clear();
