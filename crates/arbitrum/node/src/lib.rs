@@ -15,8 +15,3 @@ pub mod version;
 pub use version::ARB_NAME_CLIENT;
 
 pub use reth_arbitrum_evm::*;
-
-
-#![cfg_attr(not(feature = "std"), no_std)]
-
-pub struct ArbNode;
