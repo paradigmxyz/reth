@@ -87,17 +87,17 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
         &self.block_assembler
     }
 
-    fn evm_env(&self, _header: &Header) -> EvmEnv<SpecId> {
+    fn evm_env(&self, header: &Header) -> EvmEnv<SpecId> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(SpecId::LATEST);
         let block_env = BlockEnv {
-            number: U256::ZERO,
-            beneficiary: Default::default(),
-            timestamp: U256::ZERO,
-            difficulty: U256::ZERO,
-            prevrandao: None,
-            gas_limit: 0,
-            basefee: 0,
+            number: U256::from(header.number),
+            beneficiary: header.beneficiary,
+            timestamp: U256::from(header.timestamp),
+            difficulty: U256::from(header.difficulty),
+            prevrandao: header.mix_hash, // Nitro uses prevRandao; alloy header exposes mix_hash/prev_randao interchangeably in some builds
+            gas_limit: header.gas_limit as u64,
+            basefee: header.base_fee_per_gas.unwrap_or_default(),
             blob_excess_gas_and_price: None,
         };
         EvmEnv { cfg_env, block_env }
@@ -105,19 +105,23 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
 
     fn next_evm_env(
         &self,
-        _parent: &Header,
-        _attributes: &Self::NextBlockEnvCtx,
+        parent: &Header,
+        attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<SpecId>, Self::Error> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(SpecId::LATEST);
+        let next_number = parent.number.saturating_add(1);
         let block_env = BlockEnv {
-            number: U256::ZERO,
-            beneficiary: Default::default(),
-            timestamp: U256::ZERO,
+            number: U256::from(next_number),
+            beneficiary: attributes.suggested_fee_recipient,
+            timestamp: U256::from(attributes.timestamp),
             difficulty: U256::ZERO,
-            prevrandao: None,
-            gas_limit: 0,
-            basefee: 0,
+            prevrandao: Some(attributes.prev_randao),
+            gas_limit: attributes.gas_limit,
+            basefee: attributes
+                .max_fee_per_gas
+                .unwrap_or_default()
+                .to(),
             blob_excess_gas_and_price: None,
         };
         Ok(EvmEnv { cfg_env, block_env })
