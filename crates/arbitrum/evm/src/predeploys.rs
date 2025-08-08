@@ -11,6 +11,7 @@ pub struct PredeployCallContext {
     pub origin: Address,
     pub caller: Address,
     pub depth: u64,
+    pub basefee: U256,
 }
 
 pub trait PredeployHandler {
@@ -413,7 +414,11 @@ impl PredeployHandler for ArbGasInfo {
                 (Bytes::from(out), gas_limit, true)
             }
             s if s == gi_min_gas_price => (abi_zero_word(), gas_limit, true),
-            s if s == gi_l1_basefee_estimate => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_basefee_estimate => {
+                let mut out = [0u8; 32];
+                _ctx.basefee.to_be_bytes(&mut out);
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
             s if s == gi_l1_basefee_inertia => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_rate => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_recipient => (abi_zero_word(), gas_limit, true),
@@ -523,6 +528,7 @@ mod tests {
             origin: Address::ZERO,
             caller: Address::ZERO,
             depth: 1,
+            basefee: U256::ZERO,
         }
     }
 
@@ -670,6 +676,27 @@ mod tests {
 
     #[test]
     fn gasinfo_is_registered_in_default_registry() {
+    #[test]
+    fn arb_gasinfo_l1_basefee_estimate_returns_ctx_basefee() {
+        use alloy_primitives::{address, U256};
+        let mut ctx = mk_ctx();
+        ctx.basefee = U256::from(1_234_567u64);
+        let reg = PredeployRegistry::with_default_addresses();
+        let gi = address!("000000000000000000000000000000000000006c");
+        let (out, _gas, ok) = reg.dispatch(&ctx, gi, &mk_bytes(), 21_000, U256::ZERO).expect("dispatch");
+        assert!(ok);
+        use arb_alloy_predeploys as pre;
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_GI_GET_L1_BASEFEE_ESTIMATE));
+        let (out2, _gas2, ok2) = reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
+        assert!(ok2);
+        assert_eq!(out2.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out2[..32]);
+        let got = U256::from_be_bytes(buf);
+        assert_eq!(got, ctx.basefee);
+    }
+
         use alloy_primitives::address;
         let reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
