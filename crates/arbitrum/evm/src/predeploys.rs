@@ -725,6 +725,40 @@ mod tests {
         assert_eq!(got, expected);
     }
 
+    #[test]
+    fn arbsys_os_version_and_chain_id_return_expected_values() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let sys_addr = address!("0000000000000000000000000000000000000064");
+
+        let mut ctx = mk_ctx();
+        ctx.chain_id = U256::from(42161u64);
+        ctx.os_version = 5;
+
+        let mk = |sel: [u8;4]| {
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (out_os, _gas_os, ok_os) = reg.dispatch(&ctx, sys_addr, &mk(pre::selector(pre::SIG_ARB_OS_VERSION)), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok_os);
+        assert_eq!(out_os.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out_os[..32]);
+        let got_os = U256::from_be_bytes(buf);
+        assert_eq!(got_os, U256::from(56u64 + ctx.os_version));
+
+        let (out_chain, _gas_chain, ok_chain) = reg.dispatch(&ctx, sys_addr, &mk(pre::selector(pre::SIG_ARB_CHAIN_ID)), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok_chain);
+        let mut buf2 = [0u8; 32];
+        buf2.copy_from_slice(&out_chain[..32]);
+        let got_chain = U256::from_be_bytes(buf2);
+        assert_eq!(got_chain, ctx.chain_id);
+    }
+
     }
 
     #[test]
