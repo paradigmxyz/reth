@@ -579,10 +579,11 @@ impl SparseTrieInterface for SerialSparseTrie {
         }
 
         let mut current = Nibbles::default();
-        while let Some(node) = self.nodes.get_mut(&current) {
-            match node {
+        let node = &mut self.root;
+        loop {
+            match node.as_mut() {
                 SparseNode::Empty => {
-                    *node = SparseNode::new_leaf(full_path);
+                    *node = Box::new(SparseNode::new_leaf(full_path));
                     break
                 }
                 &mut SparseNode::Hash(hash) => {
@@ -599,31 +600,23 @@ impl SparseTrieInterface for SerialSparseTrie {
                     // find the common prefix
                     let common = current.common_prefix_length(&full_path);
 
+                    // create a branch node and corresponding leaves
+                    let new_leaf = SparseNode::new_leaf(full_path.slice(common + 1..));
+                    let old_leaf = SparseNode::new_leaf(current.slice(common + 1..));
+                    let branch = SparseNode::new_split_branch(
+                        current.get_unchecked(common),
+                        Box::new(old_leaf),
+                        full_path.get_unchecked(common),
+                        Box::new(new_leaf),
+                    );
+
                     // update existing node
                     let new_ext_key = current.slice(current.len() - current_key.len()..common);
-                    *node = SparseNode::new_ext(new_ext_key);
-
-                    // create a branch node and corresponding leaves
-                    self.nodes.reserve(3);
-                    self.nodes.insert(
-                        current.slice(..common),
-                        SparseNode::new_split_branch(
-                            current.get_unchecked(common),
-                            full_path.get_unchecked(common),
-                        ),
-                    );
-                    self.nodes.insert(
-                        full_path.slice(..=common),
-                        SparseNode::new_leaf(full_path.slice(common + 1..)),
-                    );
-                    self.nodes.insert(
-                        current.slice(..=common),
-                        SparseNode::new_leaf(current.slice(common + 1..)),
-                    );
+                    *node = Box::new(SparseNode::new_ext(new_ext_key, Box::new(branch)));
 
                     break;
                 }
-                SparseNode::Extension { key, .. } => {
+                SparseNode::Extension { key, child, .. } => {
                     current.extend(key);
 
                     if !full_path.starts_with(&current) {
@@ -636,7 +629,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         // correctly.
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
-                            if self.nodes.get(&current).unwrap().is_hash() {
+                            if child.is_hash() {
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                     provider.trie_node(&current)?
                                 {
@@ -660,33 +653,34 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
-                        self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(
-                            current.get_unchecked(common),
-                            full_path.get_unchecked(common),
-                        );
-                        self.nodes.insert(current.slice(..common), branch);
 
-                        // create new leaf
-                        let new_leaf = SparseNode::new_leaf(full_path.slice(common + 1..));
-                        self.nodes.insert(full_path.slice(..=common), new_leaf);
-
-                        // recreate extension to previous child if needed
                         let key = current.slice(common + 1..);
+                        let taken_node = core::mem::replace(node, Box::new(SparseNode::Empty));
+                        let old_child =
+                        // recreate extension to previous child if needed
                         if !key.is_empty() {
-                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
-                        }
+                            Box::new(SparseNode::new_ext(key, taken_node))
+                        } else {
+                            taken_node
+                        };
+
+                        *node = Box::new(SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            old_child,
+                            full_path.get_unchecked(common),
+                            Box::new(SparseNode::new_leaf(full_path.slice(common + 1..))),
+                        ));
 
                         break;
                     }
                 }
-                SparseNode::Branch { state_mask, .. } => {
+                SparseNode::Branch { state_mask, children, .. } => {
                     let nibble = full_path.get_unchecked(current.len());
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
                         state_mask.set_bit(nibble);
-                        let new_leaf = SparseNode::new_leaf(full_path.slice(current.len()..));
-                        self.nodes.insert(current, new_leaf);
+                        children[nibble as usize] =
+                            Some(Box::new(SparseNode::new_leaf(full_path.slice(current.len()..))));
                         break;
                     }
                 }
@@ -1775,17 +1769,25 @@ impl SparseNode {
     }
 
     /// Create new [`SparseNode::Branch`] with two bits set.
-    pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
+    pub fn new_split_branch(
+        bit_a: u8,
+        child_a: Box<SparseNode>,
+        bit_b: u8,
+        child_b: Box<SparseNode>,
+    ) -> Self {
         let state_mask = TrieMask::new(
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        let mut children = core::array::from_fn(|_| None);
+        children[bit_a as usize] = Some(child_a);
+        children[bit_b as usize] = Some(child_b);
+        Self::Branch { state_mask, hash: None, store_in_db_trie: None, children }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
-    pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None, store_in_db_trie: None }
+    pub const fn new_ext(key: Nibbles, child: Box<SparseNode>) -> Self {
+        Self::Extension { key, hash: None, store_in_db_trie: None, child }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
