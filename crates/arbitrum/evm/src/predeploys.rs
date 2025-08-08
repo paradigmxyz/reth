@@ -455,5 +455,47 @@ mod tests {
 
         let got_os_ver = call_and_decode_u256(pre::selector(pre::SIG_ARB_OS_VERSION));
         assert_eq!(got_os_ver, U256::from(56u64 + 1u64));
+    #[test]
+    fn arbsys_blockhash_queries_return_expected_values() {
+        use alloy_primitives::{address, Bytes, B256, U256};
+        use arb_alloy_predeploys as pre;
+
+        let mut ctx = mk_ctx();
+        ctx.block_number = 105;
+        // block_hashes[0] corresponds to block 104, [1] -> 103, ...
+        ctx.block_hashes = alloc::vec![
+            B256::from_slice(&[1u8; 32]),
+            B256::from_slice(&[2u8; 32]),
+            B256::from_slice(&[3u8; 32]),
+        ];
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let sys_addr = address!("0000000000000000000000000000000000000064");
+
+        let call_hash = |selector: [u8;4], block_num: u64| -> B256 {
+            let mut input = alloc::vec::Vec::with_capacity(4 + 32);
+            input.extend_from_slice(&selector);
+            let mut bn = [0u8; 32];
+            U256::from(block_num).to_be_bytes(&mut bn);
+            input.extend_from_slice(&bn);
+            let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
+            assert!(success);
+            assert_eq!(out.len(), 32);
+            let mut buf = [0u8; 32];
+            buf.copy_from_slice(&out[..32]);
+            B256::from(buf)
+        };
+
+        let h_104 = call_hash(pre::selector(pre::SIG_ARB_BLOCK_HASH), 104);
+        assert_eq!(h_104, B256::from_slice(&[1u8; 32]));
+
+        let h_103 = call_hash(pre::selector(pre::SIG_ARB_BLOCK_HASH), 103);
+        assert_eq!(h_103, B256::from_slice(&[2u8; 32]));
+
+        let h_105 = call_hash(pre::selector(pre::SIG_ARB_BLOCK_HASH), 105);
+        assert_eq!(h_105, B256::ZERO);
+        let h_far = call_hash(pre::selector(pre::SIG_ARB_BLOCK_HASH), 0);
+        assert_eq!(h_far, B256::ZERO);
+    }
     }
 }
