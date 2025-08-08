@@ -871,6 +871,26 @@ mod tests {
         let (out, _gas, success) = call(pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
         assert!(success);
         assert_eq!(out.len(), 32);
+    #[test]
+    fn arb_retryable_tx_submit_returns_ticket_id_word() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let mut reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
+        let (out, _gas, success) = reg
+            .dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(success);
+        assert_eq!(out.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out[..32]);
+        assert_ne!(buf, [0u8; 32]);
+    }
+
     }
 
     #[test]
