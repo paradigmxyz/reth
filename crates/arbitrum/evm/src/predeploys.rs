@@ -128,6 +128,18 @@ impl PredeployRegistry {
         reg.register(alloc::boxed::Box::new(ArbAddressTable::new(arb_address_table)));
         reg
     }
+impl PredeployRegistry {
+    pub fn with_default_addresses() -> Self {
+        use arb_alloy_predeploys as pre;
+        let mut reg = Self::new();
+        reg.register(alloc::boxed::Box::new(ArbSys::new(pre::addresses::ARB_SYS)));
+        reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(pre::addresses::ARB_RETRYABLE_TX)));
+        reg.register(alloc::boxed::Box::new(ArbOwner::new(pre::addresses::ARB_OWNER)));
+        reg.register(alloc::boxed::Box::new(ArbAddressTable::new(pre::addresses::ARB_ADDRESS_TABLE)));
+        reg
+    }
+}
+
 }
 #[cfg(test)]
 mod tests {
