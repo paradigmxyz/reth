@@ -249,7 +249,7 @@ impl PredeployHandler for NodeInterface {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -268,6 +268,12 @@ impl PredeployHandler for NodeInterface {
             let out = [0u8; 32];
             Bytes::from(out.to_vec())
         }
+        fn encode_u256(x: U256) -> Bytes {
+            let mut out = [0u8; 32];
+            x.to_be_bytes(&mut out);
+            Bytes::from(out.to_vec())
+        }
+
 
         match sel {
             s if s == ni_nitro_genesis => (abi_zero_word(), gas_limit, true),
@@ -285,7 +291,7 @@ impl PredeployHandler for NodeInterface {
                 out.extend_from_slice(&[0u8; 32]);
                 (Bytes::from(out), gas_limit, true)
             }
-            s if s == ni_gas_l1_component => (abi_zero_word(), gas_limit, true),
+            s if s == ni_gas_l1_component => (encode_u256(ctx.basefee), gas_limit, true),
             s if s == ni_estimate_retryable => (abi_zero_word(), gas_limit, true),
             s if s == ni_construct_outbox_proof => (Bytes::default(), gas_limit, true),
             s if s == ni_find_batch => (abi_zero_word(), gas_limit, true),
@@ -856,6 +862,18 @@ mod tests {
             .expect("dispatch");
         assert!(ok);
         assert!(out.len() == 0 || out.len() == 32);
+
+        let mut ctx = mk_ctx();
+        ctx.basefee = U256::from(123_456u64);
+        let (out2, _gas2, ok2) = reg
+            .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT), 200_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(ok2);
+        assert_eq!(out2.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out2[..32]);
+        let got = U256::from_be_bytes(buf);
+        assert_eq!(got, ctx.basefee);
     }
 
     }

@@ -51,7 +51,8 @@ fn run() -> eyre::Result<()> {
             ctx,
             FnLauncher::new::<ArbChainSpecParser, RollupArgs>(async move |builder, rollup_args| {
                 let handle = builder.node(ArbNode::new(rollup_args)).launch_with_debug_capabilities().await?;
-                handle.node_exit_future.await
+                handle.node_exit_future.await;
+                Ok(())
             }),
         )
         .await
