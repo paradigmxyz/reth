@@ -57,3 +57,19 @@ where
         self.executor_factory.spec()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arb_evm_config_default_constructs() {
+        let _cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+    }
+
+    #[test]
+    fn arb_block_assembler_and_factory_construct() {
+        let cs = alloc::sync::Arc::new(());
+        let _asm = ArbBlockAssembler::new(cs.clone());
+        let _fac = ArbBlockExecutorFactory::new(ArbRethReceiptBuilder, cs);
+    }
+}
