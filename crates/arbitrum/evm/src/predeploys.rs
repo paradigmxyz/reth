@@ -497,5 +497,34 @@ mod tests {
         let h_far = call_hash(pre::selector(pre::SIG_ARB_BLOCK_HASH), 0);
         assert_eq!(h_far, B256::ZERO);
     }
+    #[test]
+    fn arbsys_origin_and_callvalue_return_expected_values() {
+        use alloy_primitives::{address, Bytes, U256};
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let sys_addr = address!("0000000000000000000000000000000000000064");
+
+        let mut ctx = mk_ctx();
+        ctx.origin = address!("00000000000000000000000000000000000000aa");
+
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_GET_TX_ORIGIN));
+        let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
+        assert!(success);
+        assert_eq!(out.len(), 32);
+        assert_eq!(&out[12..], ctx.origin.as_slice());
+
+        let mut input2 = alloc::vec::Vec::with_capacity(4);
+        input2.extend_from_slice(&pre::selector(pre::SIG_GET_TX_CALL_VALUE));
+        let callvalue = U256::from(123456u64);
+        let (out2, _gas_left2, success2) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input2), 100_000, callvalue).expect("dispatch");
+        assert!(success2);
+        assert_eq!(out2.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out2[..32]);
+        let got = U256::from_be_bytes(buf);
+        assert_eq!(got, callvalue);
+    }
     }
 }
