@@ -463,8 +463,6 @@ mod tests {
         assert_eq!(map(&itx), reth_arbitrum_primitives::ArbTxType::Internal);
         assert_eq!(map(&leg), reth_arbitrum_primitives::ArbTxType::Legacy);
     }
-
-    }
 }
 
 #[cfg(test)]
