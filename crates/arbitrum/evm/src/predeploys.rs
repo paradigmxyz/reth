@@ -28,6 +28,9 @@ impl PredeployRegistry {
         }
         None
     }
+
+
+
 }
 
 /* Minimal handler stubs; logic to be filled to match Nitro precompiles */
@@ -117,14 +120,12 @@ impl PredeployHandler for ArbAddressTable {
 }
 
 impl PredeployRegistry {
-    pub fn with_default_arbitrum(addresses: &[Address]) -> Self {
+    pub fn with_addresses(arb_sys: Address, arb_retryable_tx: Address, arb_owner: Address, arb_address_table: Address) -> Self {
         let mut reg = Self::new();
-        for addr in addresses {
-            reg.register(alloc::boxed::Box::new(ArbSys::new(*addr)));
-            reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(*addr)));
-            reg.register(alloc::boxed::Box::new(ArbOwner::new(*addr)));
-            reg.register(alloc::boxed::Box::new(ArbAddressTable::new(*addr)));
-        }
+        reg.register(alloc::boxed::Box::new(ArbSys::new(arb_sys)));
+        reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(arb_retryable_tx)));
+        reg.register(alloc::boxed::Box::new(ArbOwner::new(arb_owner)));
+        reg.register(alloc::boxed::Box::new(ArbAddressTable::new(arb_address_table)));
         reg
     }
 }
