@@ -878,23 +878,26 @@ impl SparseTrieInterface for SerialSparseTrie {
                 }
             };
 
+            child = RemovedSparseNode {
+                path: removed_path,
+                node: new_node.clone(),
+                unset_branch_nibble: None,
+            };
             trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
-            child =
-                RemovedSparseNode { path: removed_path, node: new_node, unset_branch_nibble: None };
             match removed_nodes.last_mut() {
                 Some(node) => match node.node.as_mut() {
                     SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
                         unreachable!()
                     }
-                    SparseNode::Extension { child, .. } => *child = removed_node.node,
+                    SparseNode::Extension { child, .. } => *child = new_node,
                     SparseNode::Branch { children, .. } => {
                         *children.get_mut(removed_path.last().unwrap() as usize).unwrap() =
-                            Some(removed_node.node)
+                            Some(new_node)
                     }
                 },
                 None => {
                     debug_assert!(removed_path.is_empty());
-                    self.root = removed_node.node;
+                    self.root = new_node;
                 }
             }
         }
