@@ -463,6 +463,15 @@ reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-feat
 reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
+# arbitrum crates
+reth-arbitrum-chainspec = { path = "crates/arbitrum/chainspec", default-features = false }
+reth-arbitrum-evm = { path = "crates/arbitrum/evm", default-features = false }
+reth-arbitrum-payload = { path = "crates/arbitrum/payload", default-features = false }
+reth-arbitrum-primitives = { path = "crates/arbitrum/primitives", default-features = false }
+reth-arbitrum-node = { path = "crates/arbitrum/node" }
+reth-arbitrum-rpc = { path = "crates/arbitrum/rpc" }
+reth-arbitrum-stf-wasm = { path = "crates/arbitrum/stf-wasm" }
+
 # revm
 revm = { version = "27.0.3", default-features = false }
 revm-bytecode = { version = "6.0.1", default-features = false }
