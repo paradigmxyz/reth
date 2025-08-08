@@ -198,6 +198,17 @@ impl PredeployHandler for ArbRetryableTx {
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
         let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let get_lifetime = pre::selector("getLifetime()");
+        let get_timeout = pre::selector("getTimeout(bytes32)");
+        let keepalive = pre::selector("keepalive(bytes32)");
+        let get_beneficiary = pre::selector("getBeneficiary(bytes32)");
+        let get_current_redeemer = pre::selector("getCurrentRedeemer()");
+        let submit_retryable = pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)");
+
+        fn abi_zero_word() -> Bytes {
+            let out = [0u8; 32];
+            Bytes::from(out.to_vec())
+        }
 
         match sel {
             s if s == redeem => {
@@ -205,6 +216,12 @@ impl PredeployHandler for ArbRetryableTx {
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
             s if s == cancel => (Bytes::default(), gas_limit, true),
+            s if s == get_lifetime => (abi_zero_word(), gas_limit, true),
+            s if s == get_timeout => (abi_zero_word(), gas_limit, true),
+            s if s == keepalive => (abi_zero_word(), gas_limit, true),
+            s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
+            s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
+            s if s == submit_retryable => (Bytes::default(), gas_limit, false),
             _ => (Bytes::default(), gas_limit, true),
         }
 }
@@ -619,5 +636,30 @@ mod tests {
         let gi = address!("000000000000000000000000000000000000006c");
         let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
+    #[test]
+    fn arb_retryable_tx_basic_selectors_dispatch() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+
+        let mut call = |sel: [u8;4]| {
+            let mut input = alloc::vec::Vec::with_capacity(4);
+            input.extend_from_slice(&sel);
+            reg.dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
+                .expect("dispatch")
+        };
+
+        let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
+        let _ = call(pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET));
+        let _ = call(pre::selector("getLifetime()"));
+        let _ = call(pre::selector("getTimeout(bytes32)"));
+        let _ = call(pre::selector("keepalive(bytes32)"));
+        let _ = call(pre::selector("getBeneficiary(bytes32)"));
+        let _ = call(pre::selector("getCurrentRedeemer()"));
+        let (_out, _gas, success) = call(pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)"));
+        assert!(!success);
+    }
     }
 }
