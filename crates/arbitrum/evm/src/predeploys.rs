@@ -378,11 +378,19 @@ impl PredeployHandler for NodeInterface {
 #[derive(Clone)]
 pub struct ArbOwner {
     pub addr: Address,
+    owners: alloc::rc::Rc<core::cell::RefCell<alloc::collections::BTreeSet<Address>>>,
+    network_fee: alloc::rc::Rc<core::cell::RefCell<Address>>,
+    infra_fee: alloc::rc::Rc<core::cell::RefCell<Address>>,
 }
 
 impl ArbOwner {
     pub fn new(addr: Address) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            owners: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::collections::BTreeSet::new())),
+            network_fee: alloc::rc::Rc::new(core::cell::RefCell::new(Address::ZERO)),
+            infra_fee: alloc::rc::Rc::new(core::cell::RefCell::new(Address::ZERO)),
+        }
     }
 }
 
@@ -391,13 +399,28 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
-        fn abi_zero_word() -> Bytes {
-            let out = [0u8; 32];
+        fn encode_address(addr: Address) -> Bytes {
+            let mut out = [0u8; 32];
+            out[12..].copy_from_slice(addr.as_slice());
             Bytes::from(out.to_vec())
+        }
+        fn encode_u256(x: U256) -> Bytes {
+            let mut out = [0u8; 32];
+            x.to_be_bytes(&mut out);
+            Bytes::from(out.to_vec())
+        }
+        fn read_address(input: &Bytes) -> Address {
+            if input.len() >= 4 + 32 {
+                let mut a = [0u8; 20];
+                a.copy_from_slice(&input[4 + 12..4 + 32]);
+                Address::from(a)
+            } else {
+                Address::ZERO
+            }
         }
 
         let add_owner = pre::selector(pre::SIG_OWNER_ADD_CHAIN_OWNER);
@@ -410,20 +433,45 @@ impl PredeployHandler for ArbOwner {
         let set_infra_fee = pre::selector(pre::SIG_OWNER_SET_INFRA_FEE_ACCOUNT);
 
         match sel {
-            s if s == add_owner => (Bytes::default(), gas_limit, true),
-            s if s == remove_owner => (Bytes::default(), gas_limit, true),
-            s if s == is_owner => (abi_zero_word(), gas_limit, true),
-            s if s == all_owners => (Bytes::default(), gas_limit, true),
+            s if s == add_owner => {
+                let addr = read_address(input);
+                let mut owners = self.owners.borrow_mut();
+                owners.insert(addr);
+                (Bytes::default(), gas_limit, true)
+            }
+            s if s == remove_owner => {
+                let addr = read_address(input);
+                let mut owners = self.owners.borrow_mut();
+                owners.remove(&addr);
+                (Bytes::default(), gas_limit, true)
+            }
+            s if s == is_owner => {
+                let addr = read_address(input);
+                let owners = self.owners.borrow();
+                let exists = owners.contains(&addr) as u64;
+                (encode_u256(U256::from(exists)), gas_limit, true)
+            }
+            s if s == all_owners => {
+                (Bytes::default(), gas_limit, true)
+            }
             s if s == get_net_fee => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let addr = *self.network_fee.borrow();
+                (encode_address(addr), gas_limit, true)
             }
             s if s == get_infra_fee => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let addr = *self.infra_fee.borrow();
+                (encode_address(addr), gas_limit, true)
             }
-            s if s == set_net_fee => (Bytes::default(), gas_limit, true),
-            s if s == set_infra_fee => (Bytes::default(), gas_limit, true),
+            s if s == set_net_fee => {
+                let addr = read_address(input);
+                *self.network_fee.borrow_mut() = addr;
+                (Bytes::default(), gas_limit, true)
+            }
+            s if s == set_infra_fee => {
+                let addr = read_address(input);
+                *self.infra_fee.borrow_mut() = addr;
+                (Bytes::default(), gas_limit, true)
+            }
             _ => (Bytes::default(), gas_limit, true),
         }
     }
