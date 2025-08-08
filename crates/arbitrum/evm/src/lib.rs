@@ -126,7 +126,6 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
                 .max_fee_per_gas
                 .unwrap_or_default()
                 .to(),
-                .to(),
             blob_excess_gas_and_price: None,
         };
         Ok(EvmEnv { cfg_env, block_env })
