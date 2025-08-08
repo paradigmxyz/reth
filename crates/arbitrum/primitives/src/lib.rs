@@ -115,6 +115,10 @@ impl SignedTransaction for ArbTransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 }
+    fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
+    }
+
 
 impl Hash for ArbTransactionSigned {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -155,6 +159,13 @@ impl Decodable for ArbTransactionSigned {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Self::network_decode(buf).map_err(Into::into)
     }
+}
+impl alloy_consensus::Typed2718 for ArbTransactionSigned {
+    fn is_legacy(&self) -> bool {
+        matches!(self.transaction, ArbTypedTransaction::Legacy(_))
+    }
+}
+
 }
 
 impl Encodable2718 for ArbTransactionSigned {
@@ -294,18 +305,18 @@ impl ConsensusTx for ArbTransactionSigned {
 
     fn gas_price(&self) -> Option<u128> {
         match &self.transaction {
-            ArbTypedTransaction::Legacy(tx) => Some(tx.gas_price.to()),
+            ArbTypedTransaction::Legacy(tx) => Some(tx.gas_price.into()),
             _ => None,
         }
     }
 
     fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction {
-            ArbTypedTransaction::Legacy(tx) => tx.gas_price.to(),
-            ArbTypedTransaction::Unsigned(tx) => tx.gas_fee_cap.to(),
-            ArbTypedTransaction::Contract(tx) => tx.gas_fee_cap.to(),
-            ArbTypedTransaction::Retry(tx) => tx.gas_fee_cap.to(),
-            ArbTypedTransaction::SubmitRetryable(tx) => tx.gas_fee_cap.to(),
+            ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
+            ArbTypedTransaction::Unsigned(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::Contract(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::Retry(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::SubmitRetryable(tx) => tx.gas_fee_cap.into(),
             _ => 0,
         }
     }
@@ -324,7 +335,7 @@ impl ConsensusTx for ArbTransactionSigned {
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match &self.transaction {
-            ArbTypedTransaction::Legacy(tx) => tx.gas_price.to(),
+            ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
             _ => {
                 let cap = self.max_fee_per_gas();
                 match base_fee {
@@ -346,24 +357,24 @@ impl ConsensusTx for ArbTransactionSigned {
     fn kind(&self) -> TxKind {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => match tx.to {
-                Some(_) => TxKind::Call,
+                Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
-            ArbTypedTransaction::Deposit(tx) => if tx.to == Address::ZERO { TxKind::Create } else { TxKind::Call },
+            ArbTypedTransaction::Deposit(tx) => if tx.to == Address::ZERO { TxKind::Create } else { TxKind::Call(tx.to) },
             ArbTypedTransaction::Unsigned(tx) => match tx.to {
-                Some(_) => TxKind::Call,
+                Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
             ArbTypedTransaction::Contract(tx) => match tx.to {
-                Some(_) => TxKind::Call,
+                Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
             ArbTypedTransaction::Retry(tx) => match tx.to {
-                Some(_) => TxKind::Call,
+                Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
             ArbTypedTransaction::SubmitRetryable(tx) => match tx.retry_to {
-                Some(_) => TxKind::Call,
+                Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
             ArbTypedTransaction::Internal(_) => TxKind::Call,

@@ -1,6 +1,7 @@
 #![allow(unused)]
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{keccak256, Address, Bytes, U256};
+use std::collections::HashMap;
 
 pub struct RetryableTicketId(pub [u8; 32]);
 
@@ -29,10 +30,25 @@ pub trait Retryables {
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction;
+
+    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address>;
 }
 
-#[derive(Default, Clone)]
-pub struct DefaultRetryables;
+#[derive(Clone)]
+pub struct DefaultRetryables {
+    tickets: HashMap<[u8; 32], TicketState>,
+}
+impl Default for DefaultRetryables {
+    fn default() -> Self {
+        Self { tickets: HashMap::new() }
+    }
+}
+
+struct TicketState {
+    escrowed: U256,
+    beneficiary: Address,
+    active: bool,
+}
 
 impl Retryables for DefaultRetryables {
     fn create_retryable(&mut self, params: RetryableCreateParams) -> RetryableAction {
@@ -42,24 +58,46 @@ impl Retryables for DefaultRetryables {
             arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base_fee_wei);
         let submission_fee = U256::from(computed_submission_fee);
         let escrowed = submission_fee.min(params.max_submission_cost);
-        let ticket_id = RetryableTicketId([0u8; 32]);
+
+        let mut preimage = Vec::with_capacity(20 + 20 + params.call_data.len());
+        preimage.extend_from_slice(params.sender.as_slice());
+        preimage.extend_from_slice(params.call_to.as_slice());
+        preimage.extend_from_slice(&params.call_data);
+        let id = keccak256(preimage);
+        let ticket_id = RetryableTicketId(id.0);
+
+        self.tickets.insert(
+            ticket_id.0,
+            TicketState { escrowed, beneficiary: params.beneficiary, active: true },
+        );
+
         RetryableAction::Created { ticket_id, escrowed }
     }
 
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::Redeemed { ticket_id: RetryableTicketId([0u8; 32]), success: false }
+        if let Some(t) = self.tickets.get_mut(&ticket_id.0) {
+            if t.active {
+                t.active = false;
+                return RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false };
+            }
+        }
+        RetryableAction::Redeemed { ticket_id: RetryableTicketId(ticket_id.0), success: false }
     }
 
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::Canceled { ticket_id: RetryableTicketId([0u8; 32]) }
+        if let Some(t) = self.tickets.get_mut(&ticket_id.0) {
+            t.active = false;
+        }
+        RetryableAction::Canceled { ticket_id: RetryableTicketId(ticket_id.0) }
     }
 
     fn keepalive_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        let _ = ticket_id;
-        RetryableAction::KeptAlive { ticket_id: RetryableTicketId([0u8; 32]) }
+        RetryableAction::KeptAlive { ticket_id: RetryableTicketId(ticket_id.0) }
     }
+    fn get_beneficiary(&self, ticket_id: &RetryableTicketId) -> Option<Address> {
+        self.tickets.get(&ticket_id.0).map(|t| t.beneficiary)
+    }
+
 }
 
 #[cfg(test)]
@@ -92,5 +130,58 @@ mod tests {
             }
             _ => panic!("expected Created"),
         }
+    }
+
+    #[test]
+    fn lifecycle_cancel_marks_inactive() {
+        let mut r = DefaultRetryables::default();
+        let params = RetryableCreateParams {
+            sender: Address::from([1u8; 20]),
+            beneficiary: Address::from([2u8; 20]),
+            call_to: Address::from([3u8; 20]),
+            call_data: Bytes::from(vec![0xde, 0xad]),
+            l1_base_fee: U256::from(1000u64),
+            submission_fee: U256::ZERO,
+            max_submission_cost: U256::from(u128::MAX),
+            max_gas: U256::ZERO,
+            gas_price_bid: U256::ZERO,
+        };
+        let created = r.create_retryable(params);
+        let id = match created {
+            RetryableAction::Created { ticket_id, .. } => ticket_id,
+            _ => panic!("expected Created"),
+        };
+        let _ = r.cancel_retryable(&id);
+        let res = r.redeem_retryable(&id);
+        match res {
+            RetryableAction::Redeemed { success, .. } => {
+                assert!(!success);
+            }
+            _ => panic!("expected Redeemed"),
+        }
+    #[test]
+    fn get_beneficiary_returns_set_address() {
+        let mut r = DefaultRetryables::default();
+        let beneficiary = Address::from([5u8; 20]);
+        let params = RetryableCreateParams {
+            sender: Address::from([1u8; 20]),
+            beneficiary,
+            call_to: Address::from([3u8; 20]),
+            call_data: Bytes::from(vec![0xab, 0xcd]),
+            l1_base_fee: U256::from(100u64),
+            submission_fee: U256::ZERO,
+            max_submission_cost: U256::from(u128::MAX),
+            max_gas: U256::ZERO,
+            gas_price_bid: U256::ZERO,
+        };
+        let created = r.create_retryable(params);
+        let id = match created {
+            RetryableAction::Created { ticket_id, .. } => ticket_id,
+            _ => panic!("expected Created"),
+        };
+        let got = r.get_beneficiary(&id);
+        assert_eq!(got, Some(beneficiary));
+    }
+
     }
 }

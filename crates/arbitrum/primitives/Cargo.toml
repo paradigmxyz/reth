@@ -12,4 +12,14 @@ std = [
 ]
 
 [dependencies]
+# alloy core crates used in primitives
 alloy-consensus = { version = "1", default-features = false, features = ["std"] }
+alloy-eips = { version = "1", default-features = false }
+alloy-rlp = { version = "0.3", default-features = false, features = ["derive"] }
+alloy-primitives = { version = "1.3", default-features = false, features = ["rlp"] }
+
+# arb-alloy consensus types
+arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false }
+
+# reth primitives traits from workspace
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false, package = "reth-primitives-traits" }

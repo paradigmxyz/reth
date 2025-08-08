@@ -317,7 +317,7 @@ mod tests {
     fn default_predeploy_registry_dispatches_known_address() {
         use alloy_primitives::address;
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
-        let reg = cfg.default_predeploy_registry();
+        let mut reg = cfg.default_predeploy_registry();
         let sys = address!("0000000000000000000000000000000000000064");
         let ctx = crate::predeploys::PredeployCallContext {
             block_number: 100,
@@ -463,6 +463,146 @@ mod tests {
         assert_eq!(map(&itx), reth_arbitrum_primitives::ArbTxType::Internal);
         assert_eq!(map(&leg), reth_arbitrum_primitives::ArbTxType::Legacy);
     }
+    #[test]
+    fn arb_tx_iterator_recovers_signer_for_non_legacy() {
+        use arb_alloy_consensus::tx::ArbUnsignedTx;
+        use alloy_primitives::{address, Bytes, U256};
+        let env = arb_alloy_consensus::ArbTxEnvelope::Unsigned(ArbUnsignedTx {
+            chain_id: U256::from(42161u64),
+            from: address!("00000000000000000000000000000000000000aa"),
+            nonce: 7,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::ZERO,
+            data: Vec::new(),
+        });
+        let enc = env.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let mut it = cfg.tx_iterator_for_payload(&payload);
+        let item = it.next().expect("one").expect("ok");
+        let signed = item.inner();
+        let signer = signed.try_recover().expect("recover");
+        assert_eq!(signer, address!("00000000000000000000000000000000000000aa"));
+    }
+    #[test]
+    fn arb_tx_iterator_recovers_signer_for_contract() {
+        use arb_alloy_consensus::tx::ArbContractTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
+
+        let env = arb_alloy_consensus::ArbTxEnvelope::Contract(ArbContractTx {
+            chain_id: U256::from(42161u64),
+            request_id: B256::from([0x22u8; 32]),
+            from: address!("00000000000000000000000000000000000000ab"),
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::ZERO,
+            data: Vec::new(),
+        });
+        let enc = env.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let mut it = cfg.tx_iterator_for_payload(&payload);
+        let item = it.next().expect("one").expect("ok");
+        let signed = item.inner();
+        let signer = signed.try_recover().expect("recover");
+        assert_eq!(signer, address!("00000000000000000000000000000000000000ab"));
+    }
+
+    #[test]
+    fn arb_tx_iterator_recovers_signer_for_retry() {
+        use arb_alloy_consensus::tx::ArbRetryTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
+
+        let env = arb_alloy_consensus::ArbTxEnvelope::Retry(ArbRetryTx {
+            chain_id: U256::from(42161u64),
+            nonce: 1,
+            from: address!("00000000000000000000000000000000000000ac"),
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::ZERO,
+            data: Vec::new(),
+            ticket_id: B256::from([0x33u8; 32]),
+            refund_to: address!("00000000000000000000000000000000000000ff"),
+            max_refund: U256::ZERO,
+            submission_fee_refund: U256::ZERO,
+        });
+        let enc = env.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let mut it = cfg.tx_iterator_for_payload(&payload);
+        let item = it.next().expect("one").expect("ok");
+        let signed = item.inner();
+        let signer = signed.try_recover().expect("recover");
+        assert_eq!(signer, address!("00000000000000000000000000000000000000ac"));
+    }
+
+    #[test]
+    fn arb_tx_iterator_recovers_signer_for_submit_retryable() {
+        use arb_alloy_consensus::tx::ArbSubmitRetryableTx;
+        use alloy_primitives::{address, Bytes, U256, B256};
+
+        let env = arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(ArbSubmitRetryableTx {
+            chain_id: U256::from(42161u64),
+            request_id: B256::from([0x44u8; 32]),
+            from: address!("00000000000000000000000000000000000000ad"),
+            l1_base_fee: U256::from(1u64),
+            deposit_value: U256::from(2u64),
+            gas_fee_cap: U256::from(3u64),
+            gas: 21000,
+            retry_to: None,
+            retry_value: U256::ZERO,
+            beneficiary: address!("00000000000000000000000000000000000000ee"),
+            max_submission_fee: U256::from(4u64),
+            fee_refund_addr: address!("00000000000000000000000000000000000000dd"),
+            retry_data: Vec::new(),
+        });
+        let enc = env.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let mut it = cfg.tx_iterator_for_payload(&payload);
+        let item = it.next().expect("one").expect("ok");
+        let signed = item.inner();
+        let signer = signed.try_recover().expect("recover");
+        assert_eq!(signer, address!("00000000000000000000000000000000000000ad"));
+    }
+
+
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, sync::Arc};
+use std::sync::Mutex;
 use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
 use alloy_primitives::{address, Address, Bytes, U256, B256};
 use reth_evm_ethereum::{
@@ -31,12 +32,13 @@ use reth_evm::OnStateHook;
 use reth_evm_ethereum::revm::context::result::ExecutionResult;
 
 use crate::predeploys::{PredeployCallContext, PredeployRegistry};
+use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext};
 
 #[derive(Debug, Clone)]
 pub struct ArbBlockExecutorFactory<R, CS> {
     receipt_builder: R,
     spec: Arc<CS>,
-    predeploys: Arc<PredeployRegistry>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
     evm_factory: ArbEvmFactory,
 }
 
@@ -49,11 +51,13 @@ pub struct ArbBlockExecutionCtx {
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<CS>, &'a RB>,
+    hooks: DefaultArbOsHooks,
+    tx_state: ArbTxProcessorState,
 }
 
 impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
     pub fn new(receipt_builder: R, spec: Arc<CS>) -> Self {
-        let predeploys = Arc::new(PredeployRegistry::with_default_addresses());
+        let predeploys = Arc::new(Mutex::new(PredeployRegistry::with_default_addresses()));
         let evm_factory = ArbEvmFactory { predeploys: predeploys.clone() };
         Self { receipt_builder, spec, predeploys, evm_factory }
     }
@@ -85,7 +89,47 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let sender = *tx.signer();
+        let nonce = tx.tx().nonce();
+        let calldata = tx.tx().input().clone();
+        let calldata_len = calldata.len();
+        let gas_limit = tx.tx().gas_limit();
+
+        let block_env = self.evm().block();
+        let block_basefee = block_env.basefee;
+        let block_coinbase = block_env.beneficiary;
+
+        let start_ctx = ArbStartTxContext {
+            sender,
+            nonce,
+            l1_base_fee: block_basefee,
+            calldata_len,
+            coinbase: block_coinbase,
+            executed_on_chain: true,
+            is_eth_call: false,
+        };
+        self.hooks.start_tx(self.evm_mut(), &mut self.tx_state, &start_ctx);
+
+        let gas_ctx = ArbGasChargingContext {
+            intrinsic_gas: 21_000,
+            calldata,
+            basefee: block_basefee,
+            is_executed_on_chain: true,
+            skip_l1_charging: false,
+        };
+        let _ = self.hooks.gas_charging(self.evm_mut(), &mut self.tx_state, &gas_ctx);
+
+        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+
+        let end_ctx = ArbEndTxContext {
+            success: res.is_ok(),
+            gas_left: 0,
+            gas_limit,
+            basefee: block_basefee,
+        };
+        self.hooks.end_tx(self.evm_mut(), &mut self.tx_state, &end_ctx);
+
+        res
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
@@ -107,7 +151,7 @@ where
  
 #[derive(Debug, Clone, Default)]
 pub struct ArbEvmFactory {
-    predeploys: Arc<PredeployRegistry>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
 }
 
 impl EvmFactory for ArbEvmFactory {
@@ -133,7 +177,7 @@ impl EvmFactory for ArbEvmFactory {
         let reg = self.predeploys.clone();
 
         fn mk_handler(
-            reg: Arc<PredeployRegistry>,
+            reg: Arc<Mutex<PredeployRegistry>>,
             addr: Address,
         ) -> (Address, PrecompileFn) {
             let f = move |input: &[u8], ctx: &mut EthEvmContext<_>| -> PrecompileResult {
@@ -151,10 +195,13 @@ impl EvmFactory for ArbEvmFactory {
                     origin: ctx.env.tx().caller(),
                     caller: ctx.env.tx().caller(),
                     depth: ctx.depth as u64,
+                    basefee: block.basefee,
                 };
                 let bytes = Bytes::copy_from_slice(input);
-                let (ret, gas_left, success) =
-                    reg.dispatch(&call_ctx, addr, &bytes, gas_limit, value).unwrap_or_default();
+                let (ret, gas_left, success) = {
+                    let mut guard = reg.lock().expect("lock predeploy registry");
+                    guard.dispatch(&call_ctx, addr, &bytes, gas_limit, value).unwrap_or_default()
+                };
                 let out = PrecompileOutput::new(gas_left, ret);
                 if success {
                     PrecompileResult::Ok(out)
@@ -218,6 +265,8 @@ impl<R: Clone, CS> BlockExecutorFactory for ArbBlockExecutorFactory<R, CS> {
                 &self.spec,
                 &self.receipt_builder,
             ),
+            hooks: Default::default(),
+            tx_state: Default::default(),
         }
     }
 }
