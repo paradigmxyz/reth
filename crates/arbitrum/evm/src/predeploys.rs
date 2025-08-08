@@ -1057,6 +1057,41 @@ mod tests {
             let mut v = alloc::vec::Vec::with_capacity(4);
             v.extend_from_slice(&sel);
             Bytes::from(v)
+    #[test]
+    fn arb_address_table_selector_abi_shapes() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_at = address!("0000000000000000000000000000000000000066");
+
+        let mk = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (o_exists, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_ADDRESS_EXISTS), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok1);
+        assert!(o_exists.is_empty() || o_exists.len() == 32);
+
+        let (o_lookup, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok2);
+        assert!(o_lookup.is_empty() || o_lookup.len() == 32);
+
+        let (o_lookup_index, _g3, ok3) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_LOOKUP_INDEX), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok3);
+        assert!(o_lookup_index.is_empty() || o_lookup_index.len() == 32);
+
+        let (o_register, _g4, ok4) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_REGISTER), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok4);
+        assert!(o_register.is_empty() || o_register.len() == 32);
+
+        let (o_size, _g5, ok5) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_SIZE), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok5);
+        assert!(o_size.is_empty() || o_size.len() == 32);
+    }
+
         };
         for sig in [
             pre::SIG_AT_ADDRESS_EXISTS,
