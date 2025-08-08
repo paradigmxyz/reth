@@ -1,6 +1,6 @@
 #![allow(unused)]
 use alloc::sync::Arc;
-use alloy_eips::eip4895::Withdrawals;
+use alloy_consensus::eip4895::Withdrawals;
 use alloy_primitives::{Address, B256, Bytes, U256};
 
 #[derive(Debug, Clone)]

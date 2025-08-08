@@ -37,4 +37,3 @@ arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features 
 alloy-consensus = { version = "1", default-features = false, features = ["std"] }
 alloy-primitives = { version = "1", default-features = false, features = ["std"] }
 alloy-evm = { version = "0.7", default-features = false, features = ["std"] }
-alloy-eips = { version = "0.7", default-features = false, features = ["std"] }
