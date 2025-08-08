@@ -36,7 +36,7 @@ use crate::predeploys::{PredeployCallContext, PredeployRegistry};
 pub struct ArbBlockExecutorFactory<R, CS> {
     receipt_builder: R,
     spec: Arc<CS>,
-    predeploys: PredeployRegistry,
+    predeploys: Arc<PredeployRegistry>,
     evm_factory: ArbEvmFactory,
 }
 
@@ -53,7 +53,7 @@ pub struct ArbBlockExecutor<'a, Evm, CS, RB> {
 
 impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
     pub fn new(receipt_builder: R, spec: Arc<CS>) -> Self {
-        let predeploys = PredeployRegistry::with_default_addresses();
+        let predeploys = Arc::new(PredeployRegistry::with_default_addresses());
         let evm_factory = ArbEvmFactory { predeploys: predeploys.clone() };
         Self { receipt_builder, spec, predeploys, evm_factory }
     }
@@ -107,7 +107,7 @@ where
  
 #[derive(Debug, Clone, Default)]
 pub struct ArbEvmFactory {
-    predeploys: PredeployRegistry,
+    predeploys: Arc<PredeployRegistry>,
 }
 
 impl EvmFactory for ArbEvmFactory {
@@ -133,7 +133,7 @@ impl EvmFactory for ArbEvmFactory {
         let reg = self.predeploys.clone();
 
         fn mk_handler(
-            reg: PredeployRegistry,
+            reg: Arc<PredeployRegistry>,
             addr: Address,
         ) -> (Address, PrecompileFn) {
             let f = move |input: &[u8], ctx: &mut EthEvmContext<_>| -> PrecompileResult {
