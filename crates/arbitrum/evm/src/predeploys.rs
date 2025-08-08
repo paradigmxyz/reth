@@ -918,6 +918,55 @@ mod tests {
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(123_456u64);
 
+    #[test]
+    fn node_interface_trivial_selectors_return_expected_abi() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let ni_addr = address!("00000000000000000000000000000000000000c8");
+
+        let mk = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (out_gen, _g1, ok_gen) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_NITRO_GENESIS_BLOCK), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok_gen);
+        assert_eq!(out_gen.len(), 32);
+
+        let (out_b1, _g2, ok_b1) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_BLOCK_L1_NUM), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok_b1);
+        assert!(out_b1.is_empty() || out_b1.len() == 32);
+
+        let (out_range, _g3, ok_range) = reg.dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_L2_BLOCK_RANGE_FOR_L1), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok_range);
+        assert_eq!(out_range.len(), 64);
+    }
+
+    #[test]
+    fn arb_owner_getters_return_words() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_owner = address!("0000000000000000000000000000000000000070");
+
+        let call = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+        let (o1, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok1);
+        assert!(o1.is_empty() || o1.len() == 32);
+
+        let (o2, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::SIG_OWNER_GET_INFRA_FEE_ACCOUNT), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok2);
+        assert!(o2.is_empty() || o2.len() == 32);
+    }
+
         let (out, _gas, ok) = reg
             .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_COMPONENTS), 200_000, U256::ZERO)
             .expect("dispatch");
