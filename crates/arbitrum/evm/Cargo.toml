@@ -29,7 +29,7 @@ reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, fea
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
 
 # arb-alloy
-arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc", "std"] }
+arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc"] }
 arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false, features = ["alloc"] }
 arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features = false, features = ["alloc"] }
 
