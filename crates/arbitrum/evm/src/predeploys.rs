@@ -691,8 +691,6 @@ mod tests {
     }
 
     #[test]
-    fn gasinfo_is_registered_in_default_registry() {
-    #[test]
     fn arb_gasinfo_l1_basefee_estimate_returns_ctx_basefee() {
         use alloy_primitives::{address, U256};
         let mut ctx = mk_ctx();
@@ -732,12 +730,14 @@ mod tests {
 
     }
 
-        use alloy_primitives::address;
+    #[test]
+    fn gasinfo_is_registered_in_default_registry() {
+        use alloy_primitives::{address, U256};
         let reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
         let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
-}
+    }
 
     #[test]
     fn arb_retryable_tx_basic_selectors_dispatch() {
