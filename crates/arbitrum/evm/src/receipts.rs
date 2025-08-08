@@ -85,9 +85,6 @@ mod tests {
         let logs: Vec<Log> = Vec::new();
         let base = ArbRethReceiptBuilder::core_receipt(true, 1, logs);
         let _ = ArbReceipt::Legacy(base.clone());
-    let _ = ArbReceipt::Legacy(base.clone());
-
-        let _ = ArbReceipt::Legacy(base.clone());
         let _ = ArbReceipt::Legacy(base);
     }
 
