@@ -207,6 +207,9 @@ impl PredeployHandler for ArbRetryableTx {
             s if s == cancel => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
+}
+}
+
 #[derive(Clone)]
 pub struct NodeInterface {
     pub addr: Address,
@@ -269,10 +272,6 @@ impl PredeployHandler for NodeInterface {
         }
     }
 }
-
-    }
-}
-
 #[derive(Clone)]
 pub struct ArbOwner {
     pub addr: Address,
@@ -414,6 +413,8 @@ mod tests {
 
         let unknown = address!("00000000000000000000000000000000000000ff");
         assert!(reg.dispatch(&ctx, unknown, &mk_bytes(), 1, U256::ZERO).is_none());
+    }
+
     #[test]
     fn node_interface_is_registered_in_default_registry() {
         use alloy_primitives::address;
@@ -421,7 +422,5 @@ mod tests {
         let ni = address!("00000000000000000000000000000000000000c8");
         let out = reg.dispatch(&mk_ctx(), ni, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
-    }
-
     }
 }
