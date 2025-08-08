@@ -232,7 +232,7 @@ impl PredeployHandler for ArbRetryableTx {
             s if s == keepalive => (abi_zero_word(), gas_limit, true),
             s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
             s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
-            s if s == submit_retryable => (Bytes::default(), gas_limit, false),
+            s if s == submit_retryable => (abi_zero_word(), gas_limit, false),
             _ => (Bytes::default(), gas_limit, true),
         }
 }
