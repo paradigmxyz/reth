@@ -252,9 +252,18 @@ impl PredeployHandler for ArbAddressTable {
             },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
-            s if s == at_lookup => (Bytes::default(), gas_limit, true),
-            s if s == at_lookup_index => (Bytes::default(), gas_limit, true),
-            s if s == at_register => (Bytes::default(), gas_limit, true),
+            s if s == at_lookup => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
+            s if s == at_lookup_index => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
+            s if s == at_register => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == at_size => {
                 let mut out = [0u8; 32];
                 (Bytes::from(out.to_vec()), gas_limit, true)
