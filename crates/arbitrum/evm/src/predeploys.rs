@@ -154,10 +154,19 @@ impl PredeployHandler for ArbSys {
                 (out, gas_limit, true)
             }
 
-            s if s == send_tx_to_l1 => (Bytes::default(), gas_limit, true),
+            s if s == send_tx_to_l1 => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
             s if s == withdraw_eth => (Bytes::default(), gas_limit, true),
-            s if s == create_retryable => (Bytes::default(), gas_limit, true),
-            s if s == redeem => (Bytes::default(), gas_limit, true),
+            s if s == create_retryable => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
+            s if s == redeem => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
             s if s == cancel => (Bytes::default(), gas_limit, true),
             s if s == get_storage_at => {
                 let mut out = [0u8; 32];
