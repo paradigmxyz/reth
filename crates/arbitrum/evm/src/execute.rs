@@ -82,7 +82,9 @@ impl ArbOsHooks for DefaultArbOsHooks {
     }
 
     fn end_tx<E: Evm>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, _ctx: &ArbEndTxContext) {
-        let _ = state.poster_fee;
+        state.compute_hold_gas = state.compute_hold_gas.saturating_add(state.poster_gas);
+        state.poster_fee = U256::ZERO;
+        state.poster_gas = 0;
     }
 
     fn nonrefundable_gas(&self, state: &ArbTxProcessorState) -> u64 {
