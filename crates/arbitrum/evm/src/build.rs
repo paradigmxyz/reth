@@ -190,6 +190,7 @@ impl EvmFactory for ArbEvmFactory {
                     origin: ctx.env.tx().caller(),
                     caller: ctx.env.tx().caller(),
                     depth: ctx.depth as u64,
+                    basefee: block.basefee,
                 };
                 let bytes = Bytes::copy_from_slice(input);
                 let (ret, gas_left, success) =
