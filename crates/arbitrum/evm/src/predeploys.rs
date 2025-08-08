@@ -663,3 +663,22 @@ mod tests {
     }
     }
 }
+    #[test]
+    fn arb_owner_is_registered_in_default_registry() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_owner = address!("0000000000000000000000000000000000000070");
+        let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_owner, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
+        assert!(success);
+    }
+
+    #[test]
+    fn arb_address_table_is_registered_in_default_registry() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_at = address!("0000000000000000000000000000000000000066");
+        let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
+        assert!(success);
+    }
