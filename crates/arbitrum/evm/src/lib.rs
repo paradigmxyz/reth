@@ -99,7 +99,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
             number: U256::from(header.number),
             beneficiary: header.beneficiary,
             timestamp: U256::from(header.timestamp),
-            difficulty: U256::from(header.difficulty),
+            difficulty: header.difficulty,
             prevrandao: header.mix_hash,
             gas_limit: header.gas_limit as u64,
             basefee: header.base_fee_per_gas.unwrap_or_default(),
@@ -124,7 +124,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
             difficulty: U256::ZERO,
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
-            basefee: attributes.max_fee_per_gas.unwrap_or_default().to(),
+            basefee: attributes.max_fee_per_gas.unwrap_or_default(),
             blob_excess_gas_and_price: None,
         };
         Ok(EvmEnv { cfg_env, block_env })
@@ -167,7 +167,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> fo
             difficulty: U256::ZERO,
             prevrandao: Some(payload.payload.as_v1().prev_randao),
             gas_limit: payload.payload.as_v1().gas_limit,
-            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
+            basefee: payload.payload.as_v1().base_fee_per_gas,
             blob_excess_gas_and_price: None,
         };
         EvmEnv { cfg_env, block_env }
@@ -369,6 +369,9 @@ mod tests {
             reth_arbitrum_primitives::ArbTxType::Deposit,
             reth_arbitrum_primitives::ArbTxType::Unsigned,
         ]);
+    }
+}
+
 #[cfg(test)]
 mod env_tests {
     use super::*;
@@ -433,9 +436,4 @@ mod env_tests {
         assert_eq!(env.block_env.gas_limit, 20_000_000u64);
         assert_eq!(env.block_env.basefee, U256::from(42u64));
     }
-}
-
-    }
-
-
 }
