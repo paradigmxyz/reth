@@ -372,7 +372,7 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -424,7 +424,7 @@ impl PredeployHandler for ArbGasInfo {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -517,7 +517,7 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
