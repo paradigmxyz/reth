@@ -8,7 +8,7 @@ use alloy_consensus::Header;
 use alloy_primitives::U256;
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor};
-use reth_primitives_traits::{TxTy, WithEncoded};
+use reth_primitives_traits::{TxTy, WithEncoded, SealedBlock, SealedHeader, NodePrimitives};
 use reth_storage_errors::any::AnyError;
 use reth_arbitrum_payload::ArbExecutionData;
 use reth_arbitrum_chainspec::ArbitrumChainSpec;
@@ -126,10 +126,31 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
                 .max_fee_per_gas
                 .unwrap_or_default()
                 .to(),
+                .to(),
             blob_excess_gas_and_price: None,
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
+    fn context_for_block(&self, block: &'_ SealedBlock<<Self as ConfigureEvm>::Primitives::Block>) -> ArbBlockExecutionCtx {
+        ArbBlockExecutionCtx {
+            parent_hash: block.header().parent_hash(),
+            parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            extra_data: block.header().extra_data().clone(),
+        }
+    }
+
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<<Self as ConfigureEvm>::Primitives::BlockHeader>,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> ArbBlockExecutionCtx {
+        ArbBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            extra_data: attributes.extra_data,
+        }
+    }
+
 }
 
 impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
