@@ -224,10 +224,9 @@ impl PredeployHandler for ArbRetryableTx {
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
             s if s == get_timeout => {
-                let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
-                let timeout = U256::from(ctx.time).saturating_add(U256::from(secs));
+                let timeout = arb_alloy_util::retryables::retryable_timeout_from(ctx.time);
                 let mut out = [0u8; 32];
-                timeout.to_be_bytes(&mut out);
+                U256::from(timeout).to_be_bytes(&mut out);
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
             s if s == keepalive => (abi_zero_word(), gas_limit, true),
