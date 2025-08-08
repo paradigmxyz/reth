@@ -70,7 +70,9 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
-impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
+use reth_arbitrum_chainspec::ArbitrumChainSpec;
+
+impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
     type Primitives = N;
     type Error = core::convert::Infallible;
     type NextBlockEnvCtx = ArbNextBlockEnvAttributes;
@@ -86,7 +88,8 @@ impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
     }
 
     fn evm_env(&self, _header: &Header) -> EvmEnv<SpecId> {
-        let cfg_env = CfgEnv::new().with_chain_id(0).with_spec(SpecId::LATEST);
+        let chain_id = self.chain_spec().chain_id() as u64;
+        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(SpecId::LATEST);
         let block_env = BlockEnv {
             number: U256::ZERO,
             beneficiary: Default::default(),
@@ -105,7 +108,8 @@ impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
         _parent: &Header,
         _attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<SpecId>, Self::Error> {
-        let cfg_env = CfgEnv::new().with_chain_id(0).with_spec(SpecId::LATEST);
+        let chain_id = self.chain_spec().chain_id() as u64;
+        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(SpecId::LATEST);
         let block_env = BlockEnv {
             number: U256::ZERO,
             beneficiary: Default::default(),
@@ -124,13 +128,14 @@ use reth_primitives_traits::{TxTy, WithEncoded};
 use reth_storage_errors::any::AnyError;
 use reth_arbitrum_payload::ArbExecutionData;
 
-impl<ChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
+impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
 {
     fn evm_env_for_payload(
         &self,
         payload: &ArbExecutionData,
     ) -> EvmEnvFor<Self> {
-        let cfg_env = CfgEnv::new().with_chain_id(0).with_spec(SpecId::LATEST);
+        let chain_id = self.chain_spec().chain_id() as u64;
+        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(SpecId::LATEST);
         let block_env = BlockEnv {
             number: U256::from(payload.payload.block_number()),
             beneficiary: payload.payload.as_v1().fee_recipient,
