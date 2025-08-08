@@ -114,6 +114,60 @@ impl<ChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
         Ok(EvmEnv { cfg_env, block_env })
     }
 }
+use reth_evm::ConfigureEngineEvm;
+use reth_primitives_traits::{TxTy, WithEncoded};
+use reth_storage_errors::any::AnyError;
+
+impl<ChainSpec, N, R> ConfigureEngineEvm<crate::arbitrum::payload::ArbExecutionData>
+    for ArbEvmConfig<ChainSpec, N, R>
+{
+    fn evm_env_for_payload(
+        &self,
+        payload: &crate::arbitrum::payload::ArbExecutionData,
+    ) -> EvmEnvFor<Self> {
+        let cfg_env = CfgEnv::new().with_chain_id(0).with_spec(SpecId::LATEST);
+        let block_env = BlockEnv {
+            number: U256::from(payload.payload.block_number()),
+            beneficiary: payload.payload.as_v1().fee_recipient,
+            timestamp: U256::from(payload.payload.timestamp()),
+            difficulty: U256::ZERO,
+            prevrandao: Some(payload.payload.as_v1().prev_randao),
+            gas_limit: payload.payload.as_v1().gas_limit,
+            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
+            blob_excess_gas_and_price: None,
+        };
+        EvmEnv { cfg_env, block_env }
+    }
+
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a crate::arbitrum::payload::ArbExecutionData,
+    ) -> ExecutionCtxFor<'a, Self> {
+        ArbBlockExecutionCtx {
+            parent_hash: payload.parent_hash(),
+            parent_beacon_block_root: payload.sidecar.parent_beacon_block_root,
+            extra_data: payload.payload.as_v1().extra_data.clone(),
+        }
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &crate::arbitrum::payload::ArbExecutionData,
+    ) -> impl ExecutableTxIterator<Self> {
+        payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
+                    .map_err(AnyError::new)?;
+                let signer = tx.try_recover().map_err(AnyError::new)?;
+                Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+            })
+    }
+}
+
 
 }
 #[cfg(test)]
