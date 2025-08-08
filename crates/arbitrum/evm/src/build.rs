@@ -31,6 +31,7 @@ use reth_evm::OnStateHook;
 use reth_evm_ethereum::revm::context::result::ExecutionResult;
 
 use crate::predeploys::{PredeployCallContext, PredeployRegistry};
+use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext};
 
 #[derive(Debug, Clone)]
 pub struct ArbBlockExecutorFactory<R, CS> {
@@ -49,6 +50,8 @@ pub struct ArbBlockExecutionCtx {
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<CS>, &'a RB>,
+    hooks: DefaultArbOsHooks,
+    tx_state: ArbTxProcessorState,
 }
 
 impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
@@ -85,7 +88,43 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        let sender = *tx.signer();
+        let nonce = tx.tx().nonce();
+        let calldata = tx.tx().input().clone();
+        let calldata_len = calldata.len();
+        let gas_limit = tx.tx().gas_limit();
+
+        let start_ctx = ArbStartTxContext {
+            sender,
+            nonce,
+            l1_base_fee: U256::ZERO,
+            calldata_len,
+            coinbase: Address::ZERO,
+            executed_on_chain: true,
+            is_eth_call: false,
+        };
+        self.hooks.start_tx(self.evm_mut(), &mut self.tx_state, &start_ctx);
+
+        let gas_ctx = ArbGasChargingContext {
+            intrinsic_gas: 21_000,
+            calldata,
+            basefee: U256::ZERO,
+            is_executed_on_chain: true,
+            skip_l1_charging: false,
+        };
+        let _ = self.hooks.gas_charging(self.evm_mut(), &mut self.tx_state, &gas_ctx);
+
+        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+
+        let end_ctx = ArbEndTxContext {
+            success: res.is_ok(),
+            gas_left: 0,
+            gas_limit,
+            basefee: U256::ZERO,
+        };
+        self.hooks.end_tx(self.evm_mut(), &mut self.tx_state, &end_ctx);
+
+        res
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
@@ -218,6 +257,8 @@ impl<R: Clone, CS> BlockExecutorFactory for ArbBlockExecutorFactory<R, CS> {
                 &self.spec,
                 &self.receipt_builder,
             ),
+            hooks: Default::default(),
+            tx_state: Default::default(),
         }
     }
 }
