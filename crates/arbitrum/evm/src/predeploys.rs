@@ -922,6 +922,30 @@ mod tests {
 
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(123_456u64);
+        use alloy_primitives::U256;
+        let (out, _gas, ok) = reg
+            .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_COMPONENTS), 200_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(ok);
+        assert_eq!(out.len(), 128);
+
+        let w0 = &out[0..32];
+        let w1 = &out[32..64];
+        let w2 = &out[64..96];
+        let w3 = &out[96..128];
+
+        assert!(w0.iter().all(|b| *b == 0));
+        assert!(w1.iter().all(|b| *b == 0));
+
+        let mut buf2 = [0u8; 32];
+        buf2.copy_from_slice(w2);
+        let mut buf3 = [0u8; 32];
+        buf3.copy_from_slice(w3);
+        let got2 = U256::from_be_bytes(buf2);
+        let got3 = U256::from_be_bytes(buf3);
+        assert_eq!(got2, ctx.basefee);
+        assert_eq!(got3, ctx.basefee);
+
     }
     
     #[test]
@@ -973,29 +997,6 @@ mod tests {
         assert!(o2.is_empty() || o2.len() == 32);
     }
 
-        let (out, _gas, ok) = reg
-            .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_COMPONENTS), 200_000, U256::ZERO)
-            .expect("dispatch");
-        assert!(ok);
-        assert_eq!(out.len(), 128);
-
-        let w0 = &out[0..32];
-        let w1 = &out[32..64];
-        let w2 = &out[64..96];
-        let w3 = &out[96..128];
-
-        assert!(w0.iter().all(|b| *b == 0));
-        assert!(w1.iter().all(|b| *b == 0));
-
-        let mut buf2 = [0u8; 32];
-        buf2.copy_from_slice(w2);
-        let mut buf3 = [0u8; 32];
-        buf3.copy_from_slice(w3);
-        let got2 = U256::from_be_bytes(buf2);
-        let got3 = U256::from_be_bytes(buf3);
-        assert_eq!(got2, ctx.basefee);
-        assert_eq!(got3, ctx.basefee);
-    }
 
     }
 
