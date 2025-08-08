@@ -128,7 +128,7 @@ impl PredeployRegistry {
         reg.register(alloc::boxed::Box::new(ArbAddressTable::new(arb_address_table)));
         reg
     }
-impl PredeployRegistry {
+
     pub fn with_default_addresses() -> Self {
         use arb_alloy_predeploys as pre;
         let mut reg = Self::new();
@@ -138,8 +138,6 @@ impl PredeployRegistry {
         reg.register(alloc::boxed::Box::new(ArbAddressTable::new(Address::from(pre::ARB_ADDRESS_TABLE))));
         reg
     }
-}
-
 }
 #[cfg(test)]
 mod tests {
