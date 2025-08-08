@@ -517,11 +517,13 @@ impl PredeployHandler for ArbGasInfo {
 #[derive(Clone)]
 pub struct ArbAddressTable {
     pub addr: Address,
+    addrs: alloc::vec::Vec<Address>,
+    index: alloc::collections::BTreeMap<Address, u64>,
 }
 
 impl ArbAddressTable {
     pub fn new(addr: Address) -> Self {
-        Self { addr }
+        Self { addr, addrs: alloc::vec::Vec::new(), index: alloc::collections::BTreeMap::new() }
     }
 }
 
@@ -530,7 +532,7 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
@@ -540,28 +542,65 @@ impl PredeployHandler for ArbAddressTable {
         let at_lookup_index = pre::selector(pre::SIG_AT_LOOKUP_INDEX);
         let at_register = pre::selector(pre::SIG_AT_REGISTER);
         let at_size = pre::selector(pre::SIG_AT_SIZE);
+
+        fn encode_u256(x: U256) -> Bytes {
+            let mut out = [0u8; 32];
+            x.to_be_bytes(&mut out);
+            Bytes::from(out.to_vec())
+        }
+        fn encode_address(addr: Address) -> Bytes {
+            let mut out = [0u8; 32];
+            out[12..].copy_from_slice(addr.as_slice());
+            Bytes::from(out.to_vec())
+        }
+        fn decode_address(input: &Bytes) -> Address {
+            if input.len() >= 4 + 32 {
+                let mut a = [0u8; 20];
+                a.copy_from_slice(&input[4 + 12..4 + 32]);
+                Address::from(a)
+            } else {
+                Address::ZERO
+            }
+        }
+        fn decode_index(input: &Bytes) -> u64 {
+            if input.len() >= 4 + 32 {
+                let mut buf = [0u8; 32];
+                buf.copy_from_slice(&input[4..36]);
+                let v = U256::from_be_bytes(buf);
+                u64::try_from(v).unwrap_or(0)
+            } else {
+                0
+            }
+        }
+
         match sel {
             s if s == at_exists => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let addr = decode_address(input);
+                let exists = self.index.contains_key(&addr);
+                (encode_u256(U256::from(exists as u64)), gas_limit, true)
             },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
             s if s == at_lookup => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let addr = decode_address(input);
+                let idx = self.index.get(&addr).copied().unwrap_or(0);
+                (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_lookup_index => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let idx = decode_index(input);
+                let addr = self.addrs.get(idx as usize).copied().unwrap_or(Address::ZERO);
+                (encode_address(addr), gas_limit, true)
             },
             s if s == at_register => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let addr = decode_address(input);
+                if let Some(&idx) = self.index.get(&addr) {
+                    return (encode_u256(U256::from(idx)), gas_limit, true)
+                }
+                let idx = self.addrs.len() as u64;
+                (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_size => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                (encode_u256(U256::from(self.addrs.len() as u64)), gas_limit, true)
             },
             _ => (Bytes::default(), gas_limit, true),
         }
@@ -1086,6 +1125,49 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn arb_address_table_register_and_lookup_flow() {
+        use arb_alloy_predeploys as pre;
+        let addr_table = address!("0000000000000000000000000000000000000066");
+        let mut reg = PredeployRegistry::with_default_addresses();
+        let ctx = mk_ctx();
+
+        let mut in_exists = alloc::vec::Vec::with_capacity(4 + 32);
+        in_exists.extend_from_slice(&pre::selector(pre::SIG_AT_ADDRESS_EXISTS));
+        let mut word = [0u8; 32];
+        let a = Address::from([9u8; 20]);
+        word[12..].copy_from_slice(a.as_slice());
+        in_exists.extend_from_slice(&word);
+        let (out0, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_exists), 50_000, U256::ZERO).unwrap();
+        assert_eq!(U256::from_be_slice(&out0[..32]), U256::ZERO);
+
+        let mut in_reg = alloc::vec::Vec::with_capacity(4 + 32);
+        in_reg.extend_from_slice(&pre::selector(pre::SIG_AT_REGISTER));
+        in_reg.extend_from_slice(&word);
+        let (out1, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_reg), 50_000, U256::ZERO).unwrap();
+        assert_eq!(U256::from_be_slice(&out1[..32]), U256::from(0));
+
+        let mut in_size = alloc::vec::Vec::with_capacity(4);
+        in_size.extend_from_slice(&pre::selector(pre::SIG_AT_SIZE));
+        let (out2, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_size), 50_000, U256::ZERO).unwrap();
+        let sz = U256::from_be_slice(&out2[..32]);
+        assert!(sz >= U256::from(0));
+
+        let mut in_lookup = alloc::vec::Vec::with_capacity(4 + 32);
+        in_lookup.extend_from_slice(&pre::selector(pre::SIG_AT_LOOKUP));
+        in_lookup.extend_from_slice(&word);
+        let (out3, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup), 50_000, U256::ZERO).unwrap();
+        let _idx = U256::from_be_slice(&out3[..32]);
+
+        let mut in_lookup_i = alloc::vec::Vec::with_capacity(4 + 32);
+        in_lookup_i.extend_from_slice(&pre::selector(pre::SIG_AT_LOOKUP_INDEX));
+        let mut idx_word = [0u8; 32];
+        U256::from(0).to_be_bytes(&mut idx_word);
+        in_lookup_i.extend_from_slice(&idx_word);
+        let (out4, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup_i), 50_000, U256::ZERO).unwrap();
+        assert_eq!(out4.len(), 32);
+    }
+
     fn arb_owner_is_registered_in_default_registry() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
