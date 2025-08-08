@@ -31,6 +31,7 @@ reth-arbitrum-payload = { path = "../payload", default-features = false, feature
 # arb-alloy
 arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc", "std"] }
 arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false, features = ["alloc"] }
+arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features = false, features = ["alloc"] }
 
 # alloy
 alloy-consensus = { version = "1", default-features = false, features = ["std"] }

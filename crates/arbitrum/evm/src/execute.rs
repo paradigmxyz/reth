@@ -2,6 +2,7 @@
 
 use alloy_primitives::{Address, U256};
 use reth_evm::Evm;
+use arb_alloy_util::l1_pricing::L1PricingState;
 
 pub struct ArbStartTxContext {
     pub sender: Address,
