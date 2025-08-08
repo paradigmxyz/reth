@@ -177,6 +177,7 @@ members = [
     "crates/arbitrum/chainspec",
     "crates/arbitrum/node",
     "crates/arbitrum/rpc",
+    "crates/arbitrum/stf-wasm",
 
 ]
 default-members = ["bin/reth"]
