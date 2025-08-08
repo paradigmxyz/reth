@@ -29,11 +29,13 @@ impl ArbTransactionSigned {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArbTxType {
-    Legacy,
-    Eip1559,
-    Eip2930,
-    Eip7702,
     Deposit,
+    Unsigned,
+    Contract,
+    Retry,
+    SubmitRetryable,
+    Internal,
+    Legacy,
 }
 
 #[cfg(test)]

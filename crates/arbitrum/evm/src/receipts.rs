@@ -46,10 +46,12 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     logs: ctx.result.into_logs(),
                 };
                 let out = match ty {
+                    ArbTxType::Unsigned => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Contract => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Retry => ArbReceipt::Legacy(receipt),
+                    ArbTxType::SubmitRetryable => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Internal => ArbReceipt::Legacy(receipt),
                     ArbTxType::Legacy => ArbReceipt::Legacy(receipt),
-                    ArbTxType::Eip1559 => ArbReceipt::Eip1559(receipt),
-                    ArbTxType::Eip2930 => ArbReceipt::Eip2930(receipt),
-                    ArbTxType::Eip7702 => ArbReceipt::Eip7702(receipt),
                     ArbTxType::Deposit => unreachable!(),
                 };
                 Ok(out)
@@ -82,9 +84,9 @@ mod tests {
         let logs: Vec<Log> = Vec::new();
         let base = ArbRethReceiptBuilder::core_receipt(true, 1, logs);
         let _ = ArbReceipt::Legacy(base.clone());
-        let _ = ArbReceipt::Eip1559(base.clone());
-        let _ = ArbReceipt::Eip2930(base.clone());
-        let _ = ArbReceipt::Eip7702(base);
+        let _ = ArbReceipt::Legacy(base.clone());
+        let _ = ArbReceipt::Legacy(base.clone());
+        let _ = ArbReceipt::Legacy(base);
     }
 
     #[test]
