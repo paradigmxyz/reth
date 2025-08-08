@@ -175,8 +175,9 @@ impl PredeployHandler for ArbSys {
                     gas_price_bid: U256::ZERO,
                 };
                 match retryables.create_retryable(params) {
-                    crate::retryables::RetryableAction::Created { .. } => {
-                        let out = [0u8; 32];
+                    crate::retryables::RetryableAction::Created { ticket_id, .. } => {
+                        let mut out = [0u8; 32];
+                        out.copy_from_slice(&ticket_id.0);
                         (Bytes::from(out.to_vec()), gas_limit, true)
                     }
                     _ => (Bytes::default(), gas_limit, false),
@@ -274,7 +275,11 @@ impl PredeployHandler for ArbRetryableTx {
                 out[12..].copy_from_slice(addr.as_slice());
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
-            s if s == get_current_redeemer => (abi_zero_word(), gas_limit, true),
+            s if s == get_current_redeemer => {
+                let mut out = [0u8; 32];
+                out[12..].copy_from_slice(ctx.caller.as_slice());
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == submit_retryable => {
                 let params = crate::retryables::RetryableCreateParams {
                     sender: Address::ZERO,
