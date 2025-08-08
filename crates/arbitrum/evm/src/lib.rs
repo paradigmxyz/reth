@@ -227,9 +227,42 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
                 Ok((encoded, env))
             })
     }
+impl From<&arb_alloy_consensus::ArbTxEnvelope> for reth_arbitrum_primitives::ArbTxType {
+    fn from(env: &arb_alloy_consensus::ArbTxEnvelope) -> Self {
+        match env {
+            arb_alloy_consensus::ArbTxEnvelope::Deposit(_) => reth_arbitrum_primitives::ArbTxType::Deposit,
+            arb_alloy_consensus::ArbTxEnvelope::Unsigned(_) => reth_arbitrum_primitives::ArbTxType::Unsigned,
+            arb_alloy_consensus::ArbTxEnvelope::Contract(_) => reth_arbitrum_primitives::ArbTxType::Contract,
+            arb_alloy_consensus::ArbTxEnvelope::Retry(_) => reth_arbitrum_primitives::ArbTxType::Retry,
+            arb_alloy_consensus::ArbTxEnvelope::SubmitRetryable(_) => reth_arbitrum_primitives::ArbTxType::SubmitRetryable,
+            arb_alloy_consensus::ArbTxEnvelope::Internal(_) => reth_arbitrum_primitives::ArbTxType::Internal,
+            arb_alloy_consensus::ArbTxEnvelope::Legacy(_) => reth_arbitrum_primitives::ArbTxType::Legacy,
+        }
+    }
+}
+
 }
 impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
     pub fn default_predeploy_registry(&self) -> PredeployRegistry {
+impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
+    pub fn arb_tx_iterator_for_payload(
+        &self,
+        payload: &ArbExecutionData,
+    ) -> impl Iterator<Item = Result<(alloy_primitives::Bytes, reth_arbitrum_primitives::ArbTransactionSigned), AnyError>> + '_ {
+        payload
+            .payload
+            .transactions()
+            .clone()
+            .into_iter()
+            .map(|encoded| {
+                let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
+                    .map_err(AnyError::new)?;
+                let signed = reth_arbitrum_primitives::ArbTransactionSigned::from_envelope(&env);
+                Ok::<_, AnyError>( (encoded, signed) )
+            })
+    }
+}
+
         PredeployRegistry::with_default_addresses()
     }
 }
@@ -237,6 +270,13 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
 
 
 
+
+impl reth_arbitrum_primitives::ArbTransactionSigned {
+    pub fn from_envelope(env: &arb_alloy_consensus::ArbTxEnvelope) -> Self {
+        let ty = reth_arbitrum_primitives::ArbTxType::from(env);
+        reth_arbitrum_primitives::ArbTransactionSigned { ty }
+    }
+}
 
 }
 #[cfg(test)]
@@ -290,5 +330,48 @@ mod tests {
         let out = reg.dispatch(sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
         assert!(out.is_some());
     }
+    #[test]
+    fn arb_tx_iterator_maps_envelope_types() {
+        use arb_alloy_consensus::tx::{ArbDepositTx, ArbUnsignedTx};
+        use alloy_primitives::{address, b256, Bytes, U256};
+        let dep = arb_alloy_consensus::ArbTxEnvelope::Deposit(ArbDepositTx {
+            chain_id: U256::from(42161u64),
+            l1_request_id: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            from: address!("00000000000000000000000000000000000000aa"),
+            to: address!("00000000000000000000000000000000000000bb"),
+            value: U256::from(1u64),
+        });
+        let uns = arb_alloy_consensus::ArbTxEnvelope::Unsigned(ArbUnsignedTx {
+            chain_id: U256::from(42161u64),
+            from: address!("0000000000000000000000000000000000000003"),
+            nonce: 7,
+            gas_fee_cap: U256::from(1000u64),
+            gas: 21000,
+            to: None,
+            value: U256::from(0u64),
+            data: Vec::new(),
+        });
+        let enc_dep = dep.encode_typed();
+        let enc_uns = uns.encode_typed();
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    transactions: vec![Bytes::from(enc_dep), Bytes::from(enc_uns)],
+                    ..Default::default()
+                },
+            },
+            ..Default::default()
+        };
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let got: Vec<_> = cfg.arb_tx_iterator_for_payload(&payload)
+            .map(|r| r.expect("ok"))
+            .map(|(_enc, s)| s.ty)
+            .collect();
+        assert_eq!(got, vec![
+            reth_arbitrum_primitives::ArbTxType::Deposit,
+            reth_arbitrum_primitives::ArbTxType::Unsigned,
+        ]);
+    }
+
 
 }
