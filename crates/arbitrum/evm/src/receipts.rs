@@ -67,6 +67,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn builds_core_receipt_with_status_and_cumulative_gas() {
         let logs: Vec<Log> = Vec::new();
@@ -84,9 +85,12 @@ mod tests {
         let logs: Vec<Log> = Vec::new();
         let base = ArbRethReceiptBuilder::core_receipt(true, 1, logs);
         let _ = ArbReceipt::Legacy(base.clone());
-        let _ = ArbReceipt::Legacy(base.clone());
+    let _ = ArbReceipt::Legacy(base.clone());
+
         let _ = ArbReceipt::Legacy(base.clone());
         let _ = ArbReceipt::Legacy(base);
+    }
+
     #[test]
     fn deposit_receipt_build_path_errors() {
         use reth_evm::Evm;
@@ -95,6 +99,7 @@ mod tests {
 
         let builder = ArbRethReceiptBuilder::default();
         let tx = ArbTransactionSigned { ty: ArbTxType::Deposit };
+        let mut evm = DummyEvm;
         let ctx = ReceiptBuilderCtx {
             tx: &tx,
             result: alloy_evm::eth::receipt_builder::ExecutionResult {
@@ -105,12 +110,10 @@ mod tests {
             },
             cumulative_gas_used: 0,
             index: 0,
-            evm: &mut DummyEvm,
+            evm: &mut evm,
         };
         let res = builder.build_receipt::<DummyEvm>(ctx);
         assert!(res.is_err());
-    }
-
     }
 
     #[test]

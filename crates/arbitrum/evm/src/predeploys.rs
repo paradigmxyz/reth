@@ -54,19 +54,31 @@ impl PredeployHandler for ArbSys {
     fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
-        let _send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
-        let _withdraw_eth = pre::selector(pre::SIG_WITHDRAW_ETH);
-        let _create_retryable = pre::selector(pre::SIG_CREATE_RETRYABLE_TICKET);
-        let _redeem = pre::selector(pre::SIG_RETRY_REDEEM);
-        let _cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
-        let _block_number = pre::selector(pre::SIG_ARB_BLOCK_NUMBER);
-        let _block_hash = pre::selector(pre::SIG_ARB_BLOCK_HASH);
-        let _get_tx_call_value = pre::selector(pre::SIG_GET_TX_CALL_VALUE);
-        let _get_tx_origin = pre::selector(pre::SIG_GET_TX_ORIGIN);
-        let _get_block_number = pre::selector(pre::SIG_GET_BLOCK_NUMBER);
-        let _get_block_hash = pre::selector(pre::SIG_GET_BLOCK_HASH);
-        let _get_storage_at = pre::selector(pre::SIG_GET_STORAGE_AT);
+        let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
+        let withdraw_eth = pre::selector(pre::SIG_WITHDRAW_ETH);
+        let create_retryable = pre::selector(pre::SIG_CREATE_RETRYABLE_TICKET);
+        let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
+        let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let arb_block_number = pre::selector(pre::SIG_ARB_BLOCK_NUMBER);
+        let arb_block_hash = pre::selector(pre::SIG_ARB_BLOCK_HASH);
+        let get_tx_call_value = pre::selector(pre::SIG_GET_TX_CALL_VALUE);
+        let get_tx_origin = pre::selector(pre::SIG_GET_TX_ORIGIN);
+        let get_block_number = pre::selector(pre::SIG_GET_BLOCK_NUMBER);
+        let get_block_hash = pre::selector(pre::SIG_GET_BLOCK_HASH);
+        let get_storage_at = pre::selector(pre::SIG_GET_STORAGE_AT);
         match sel {
+            s if s == send_tx_to_l1 => (Bytes::default(), gas_limit, true),
+            s if s == withdraw_eth => (Bytes::default(), gas_limit, true),
+            s if s == create_retryable => (Bytes::default(), gas_limit, true),
+            s if s == redeem => (Bytes::default(), gas_limit, true),
+            s if s == cancel => (Bytes::default(), gas_limit, true),
+            s if s == arb_block_number => (Bytes::default(), gas_limit, true),
+            s if s == arb_block_hash => (Bytes::default(), gas_limit, true),
+            s if s == get_tx_call_value => (Bytes::default(), gas_limit, true),
+            s if s == get_tx_origin => (Bytes::default(), gas_limit, true),
+            s if s == get_block_number => (Bytes::default(), gas_limit, true),
+            s if s == get_block_hash => (Bytes::default(), gas_limit, true),
+            s if s == get_storage_at => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
     }
@@ -91,9 +103,11 @@ impl PredeployHandler for ArbRetryableTx {
     fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
-        let _redeem = pre::selector(pre::SIG_RETRY_REDEEM);
-        let _cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
+        let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
         match sel {
+            s if s == redeem => (Bytes::default(), gas_limit, true),
+            s if s == cancel => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
     }
@@ -140,14 +154,21 @@ impl PredeployHandler for ArbAddressTable {
     fn call(&self, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
-        let _at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
-        let _at_compress = pre::selector(pre::SIG_AT_COMPRESS);
-        let _at_decompress = pre::selector(pre::SIG_AT_DECOMPRESS);
-        let _at_lookup = pre::selector(pre::SIG_AT_LOOKUP);
-        let _at_lookup_index = pre::selector(pre::SIG_AT_LOOKUP_INDEX);
-        let _at_register = pre::selector(pre::SIG_AT_REGISTER);
-        let _at_size = pre::selector(pre::SIG_AT_SIZE);
+        let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
+        let at_compress = pre::selector(pre::SIG_AT_COMPRESS);
+        let at_decompress = pre::selector(pre::SIG_AT_DECOMPRESS);
+        let at_lookup = pre::selector(pre::SIG_AT_LOOKUP);
+        let at_lookup_index = pre::selector(pre::SIG_AT_LOOKUP_INDEX);
+        let at_register = pre::selector(pre::SIG_AT_REGISTER);
+        let at_size = pre::selector(pre::SIG_AT_SIZE);
         match sel {
+            s if s == at_exists => (Bytes::default(), gas_limit, true),
+            s if s == at_compress => (Bytes::default(), gas_limit, true),
+            s if s == at_decompress => (Bytes::default(), gas_limit, true),
+            s if s == at_lookup => (Bytes::default(), gas_limit, true),
+            s if s == at_lookup_index => (Bytes::default(), gas_limit, true),
+            s if s == at_register => (Bytes::default(), gas_limit, true),
+            s if s == at_size => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
     }
