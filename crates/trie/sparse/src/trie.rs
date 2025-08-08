@@ -1109,10 +1109,10 @@ impl SerialSparseTrie {
         self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
-    /// Returns an immutable reference to all nodes in the sparse trie.
-    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
-        &self.nodes
-    }
+    // /// Returns an immutable reference to all nodes in the sparse trie.
+    // pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+    //     &self.nodes
+    // }
 
     /// Reveals either a node or its hash placeholder based on the provided child data.
     ///
@@ -1814,15 +1814,15 @@ pub enum SparseNode {
 }
 
 impl SparseNode {
-    /// Create new sparse node from [`TrieNode`].
-    pub fn from_node(node: TrieNode) -> Self {
-        match node {
-            TrieNode::EmptyRoot => Self::Empty,
-            TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
-            TrieNode::Extension(ext) => Self::new_ext(ext.key),
-            TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
-        }
-    }
+    // / Create new sparse node from [`TrieNode`].
+    // pub fn from_node(node: TrieNode) -> Self {
+    //     match node {
+    //         TrieNode::EmptyRoot => Self::Empty,
+    //         TrieNode::Leaf(leaf) => Self::new_leaf(leaf.key),
+    //         TrieNode::Extension(ext) => Self::new_ext(ext.key),
+    //         TrieNode::Branch(branch) => Self::new_branch(branch.state_mask),
+    //     }
+    // }
 
     /// Create new [`SparseNode::Branch`] from state mask.
     pub const fn new_branch(state_mask: TrieMask, children: [Option<Box<SparseNode>>; 16]) -> Self {
@@ -1994,8 +1994,8 @@ fn reveal_node_child(
     path: Nibbles,
     node: TrieNode,
     masks: TrieMasks,
-) {
-    match current {
+) -> SparseTrieResult<()> {
+    match current.as_mut() {
         SparseNode::Empty => {
             assert!(path.is_empty());
             assert!(matches!(node, TrieNode::EmptyRoot));
@@ -2005,29 +2005,29 @@ fn reveal_node_child(
             assert_eq!(path, current_path);
 
             // Overwrite the hash with actual node.
-            current = match node {
+            *current = match node {
                 TrieNode::EmptyRoot => unreachable!(), // TODO:
                 TrieNode::Branch(branch) => {
                     let store_in_db_trie = masks.hash_mask.is_some_and(|mask| !mask.is_empty()) ||
                         masks.tree_mask.is_some_and(|mask| !mask.is_empty());
-                    let children = branch_children(current_path, &branch, values);
-                    SparseNode::Branch {
+                    let children = branch_children(current_path, &branch, values)?;
+                    Box::new(SparseNode::Branch {
                         state_mask: branch.state_mask,
-                        hash: Some(hash),
+                        hash: Some(*hash),
                         store_in_db_trie: Some(store_in_db_trie),
                         children,
-                    }
+                    })
                 }
                 TrieNode::Extension(ext) => {
                     let mut path = path;
                     path.extend(&ext.key);
-                    let child = reveal_node_or_hash(path, ext.child, values);
-                    SparseNode::Extension {
+                    let child = reveal_node_or_hash(path, ext.child, values)?;
+                    Box::new(SparseNode::Extension {
                         key: ext.key,
                         child,
-                        hash: Some(hash),
+                        hash: Some(*hash),
                         store_in_db_trie: None,
-                    }
+                    })
                 }
                 TrieNode::Leaf(leaf) => reveal_leaf(path, leaf, values),
             };
@@ -2038,8 +2038,8 @@ fn reveal_node_child(
 
             if current_path != path {
                 let child = &mut children[nibble as usize].unwrap(); // TODO:
-                reveal_node_child(current_path, child, values, &path, node, masks);
-                return // TODO:
+                reveal_node_child(current_path, child, values, path, node, masks);
+                return Ok(())
             }
 
             children[nibble as usize] = Some(match node {
@@ -2047,30 +2047,31 @@ fn reveal_node_child(
                 TrieNode::Branch(branch) => {
                     let store_in_db_trie = masks.hash_mask.is_some_and(|mask| !mask.is_empty()) ||
                         masks.tree_mask.is_some_and(|mask| !mask.is_empty());
-                    let children = branch_children(current_path, &branch, values);
-                    SparseNode::Branch {
+                    let children = branch_children(current_path, &branch, values)?;
+                    Box::new(SparseNode::Branch {
                         state_mask: branch.state_mask,
                         hash: Some(hash),
                         store_in_db_trie: Some(store_in_db_trie),
                         children,
-                    }
+                    })
                 }
                 TrieNode::Extension(ext) => {
                     current_path.extend(&ext.key);
-                    let child = reveal_node_or_hash(current_path, ext.child, values);
-                    SparseNode::new_ext(ext.key, child)
+                    let child = reveal_node_or_hash(current_path, ext.child, values)?;
+                    Box::new(SparseNode::new_ext(ext.key, child))
                 }
                 TrieNode::Leaf(leaf) => reveal_leaf(path, leaf, values),
             });
         }
         SparseNode::Extension { key, child, .. } => {
             current_path.extend(key);
-            reveal_node_child(current_path, child, values, path, node, masks);
+            reveal_node_child(current_path, child, values, path, node, masks)?;
         }
         SparseNode::Leaf { key, hash } => {
             assert_eq!(path, current_path);
         }
-    }
+    };
+    Ok(())
 }
 
 fn reveal_node_or_hash(
@@ -2079,53 +2080,53 @@ fn reveal_node_or_hash(
     values: &mut HashMap<Nibbles, Vec<u8>>,
 ) -> SparseTrieResult<Box<SparseNode>> {
     let node = if let Some(hash) = rlp_node.as_hash() {
-        SparseNode::Hash(hash)
+        Box::new(SparseNode::Hash(hash))
     } else {
-        match TrieNode::decode(&rlp_node[1..])? {
+        match TrieNode::decode(&mut &rlp_node[1..])? {
             TrieNode::EmptyRoot => unreachable!(), // TODO:
             TrieNode::Branch(branch) => {
-                let children = branch_children(path, &branch, values);
-                SparseNode::new_branch(branch.state_mask, children)
+                let children = branch_children(path, &branch, values)?;
+                Box::new(SparseNode::new_branch(branch.state_mask, children))
             }
             TrieNode::Extension(ext) => {
                 let mut path = path;
                 path.extend(&ext.key);
-                let child = reveal_node_or_hash(path, ext.child, values);
-                SparseNode::new_ext(ext.key, child)
+                let child = reveal_node_or_hash(path, ext.child, values)?;
+                Box::new(SparseNode::new_ext(ext.key, child))
             }
             TrieNode::Leaf(leaf) => reveal_leaf(path, leaf, values),
         }
     };
-    Ok(Box::new(node))
+    Ok(node)
 }
 
 fn reveal_leaf(
     mut path: Nibbles,
     leaf: LeafNode,
     values: &mut HashMap<Nibbles, Vec<u8>>,
-) -> SparseNode {
+) -> Box<SparseNode> {
     path.extend(&leaf.key);
     values.insert(path, leaf.value);
-    SparseNode::new_leaf(leaf.key)
+    Box::new(SparseNode::new_leaf(leaf.key))
 }
 
 fn branch_children(
     path: Nibbles,
     branch: &BranchNode,
     values: &mut HashMap<Nibbles, Vec<u8>>,
-) -> [Option<Box<SparseNode>>; 16] {
+) -> SparseTrieResult<[Option<Box<SparseNode>>; 16]> {
     let mut children = [None; 16];
     let mut stack_ptr = branch.as_ref().first_child_index();
     for bit in CHILD_INDEX_RANGE {
         if branch.state_mask.is_bit_set(bit) {
             let mut path = path;
             path.push_unchecked(bit);
-            let child = reveal_node_or_hash(path, branch.stack[stack_ptr], values);
-            children[bit] = Some(child);
+            let child = reveal_node_or_hash(path, branch.stack[stack_ptr], values)?;
+            children[bit as usize] = Some(child);
             stack_ptr += 1;
         }
     }
-    children
+    Ok(children)
 }
 
 #[cfg(test)]
