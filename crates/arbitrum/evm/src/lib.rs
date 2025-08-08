@@ -227,6 +227,8 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
                 Ok((encoded, env))
             })
     }
+}
+
 impl From<&arb_alloy_consensus::ArbTxEnvelope> for reth_arbitrum_primitives::ArbTxType {
     fn from(env: &arb_alloy_consensus::ArbTxEnvelope) -> Self {
         match env {
@@ -274,8 +276,6 @@ impl reth_arbitrum_primitives::ArbTransactionSigned {
         let ty = reth_arbitrum_primitives::ArbTxType::from(env);
         reth_arbitrum_primitives::ArbTransactionSigned { ty }
     }
-}
-
 }
 #[cfg(test)]
 mod tests {
