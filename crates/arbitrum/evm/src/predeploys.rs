@@ -423,4 +423,37 @@ mod tests {
         let out = reg.dispatch(&mk_ctx(), ni, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
     }
+    #[test]
+    fn arbsys_basic_queries_return_expected_values() {
+        use alloy_primitives::{address, U256};
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let sys_addr = address!("0000000000000000000000000000000000000064");
+
+        let mut ctx = mk_ctx();
+        ctx.block_number = 1234;
+        ctx.chain_id = U256::from(42161u64);
+        ctx.os_version = 1;
+
+        let mut call_and_decode_u256 = |selector: [u8;4]| -> U256 {
+            let mut input = alloc::vec::Vec::with_capacity(4);
+            input.extend_from_slice(&selector);
+            let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
+            assert!(success);
+            assert_eq!(out.len(), 32);
+            let mut buf = [0u8; 32];
+            buf.copy_from_slice(&out[..32]);
+            U256::from_be_bytes(buf)
+        };
+
+        let got_block = call_and_decode_u256(pre::selector(pre::SIG_ARB_BLOCK_NUMBER));
+        assert_eq!(got_block, U256::from(1234u64));
+
+        let got_chain = call_and_decode_u256(pre::selector(pre::SIG_ARB_CHAIN_ID));
+        assert_eq!(got_chain, U256::from(42161u64));
+
+        let got_os_ver = call_and_decode_u256(pre::selector(pre::SIG_ARB_OS_VERSION));
+        assert_eq!(got_os_ver, U256::from(56u64 + 1u64));
+    }
 }
