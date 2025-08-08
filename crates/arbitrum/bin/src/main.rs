@@ -2,9 +2,11 @@
 
 use clap::Parser;
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
-use reth_cli::Cli;
 use reth_arbitrum_chainspec::ArbChainSpec;
 use reth_arbitrum_node::{args::RollupArgs, ArbNode};
+use reth_cli_commands::launcher::FnLauncher;
+use reth_cli_commands::node::NodeCommand;
+use reth_cli_runner::CliRunner;
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -34,14 +36,24 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    if let Err(err) =
-        Cli::<ArbChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
-            info!(target: "arb-reth::cli", "Launching arb-reth");
-            let handle = builder.node(ArbNode::new(rollup_args)).launch_with_debug_capabilities().await?;
-            handle.node_exit_future.await
-        })
-    {
+    if let Err(err) = run() {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
+}
+
+fn run() -> eyre::Result<()> {
+    info!(target: "arb-reth::cli", "Launching arb-reth");
+    let runner = CliRunner::try_default_runtime()?;
+    let cmd = NodeCommand::<ArbChainSpecParser, RollupArgs>::parse();
+    runner.run_until_ctrl_c(async move |ctx| {
+        cmd.execute(
+            ctx,
+            FnLauncher::new::<ArbChainSpecParser, RollupArgs>(async move |builder, rollup_args| {
+                let handle = builder.node(ArbNode::new(rollup_args)).launch_with_debug_capabilities().await?;
+                handle.node_exit_future.await
+            }),
+        )
+        .await
+    })
 }
