@@ -159,7 +159,10 @@ impl PredeployHandler for ArbSys {
             s if s == create_retryable => (Bytes::default(), gas_limit, true),
             s if s == redeem => (Bytes::default(), gas_limit, true),
             s if s == cancel => (Bytes::default(), gas_limit, true),
-            s if s == get_storage_at => (Bytes::default(), gas_limit, true),
+            s if s == get_storage_at => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             _ => (Bytes::default(), gas_limit, true),
         }
     }
@@ -243,13 +246,19 @@ impl PredeployHandler for ArbAddressTable {
         let at_register = pre::selector(pre::SIG_AT_REGISTER);
         let at_size = pre::selector(pre::SIG_AT_SIZE);
         match sel {
-            s if s == at_exists => (Bytes::default(), gas_limit, true),
+            s if s == at_exists => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
             s if s == at_lookup => (Bytes::default(), gas_limit, true),
             s if s == at_lookup_index => (Bytes::default(), gas_limit, true),
             s if s == at_register => (Bytes::default(), gas_limit, true),
-            s if s == at_size => (Bytes::default(), gas_limit, true),
+            s if s == at_size => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             _ => (Bytes::default(), gas_limit, true),
         }
     }
