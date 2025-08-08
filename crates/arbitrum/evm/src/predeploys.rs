@@ -868,8 +868,9 @@ mod tests {
         let _ = call(pre::selector(pre::SIG_RETRY_KEEPALIVE));
         let _ = call(pre::selector(pre::SIG_RETRY_GET_BENEFICIARY));
         let _ = call(pre::selector(pre::SIG_RETRY_GET_CURRENT_REDEEMER));
-        let (_out, _gas, success) = call(pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
-        assert!(!success);
+        let (out, _gas, success) = call(pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
+        assert!(success);
+        assert_eq!(out.len(), 32);
     }
 
     #[test]
