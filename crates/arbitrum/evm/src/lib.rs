@@ -228,6 +228,12 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
             })
     }
 }
+impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
+    pub fn default_predeploy_registry(&self) -> PredeployRegistry {
+        PredeployRegistry::with_default_addresses()
+    }
+}
+
 
 
 
@@ -275,4 +281,14 @@ mod tests {
             _ => panic!("expected deposit envelope"),
         }
     }
+    #[test]
+    fn default_predeploy_registry_dispatches_known_address() {
+        use alloy_primitives::address;
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+        let reg = cfg.default_predeploy_registry();
+        let sys = address!("0000000000000000000000000000000000000064");
+        let out = reg.dispatch(sys, &alloy_primitives::Bytes::default(), 21_000, U256::ZERO);
+        assert!(out.is_some());
+    }
+
 }
