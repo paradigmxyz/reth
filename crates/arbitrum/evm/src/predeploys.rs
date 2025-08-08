@@ -699,6 +699,25 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, ctx.basefee);
+    #[test]
+    fn arb_gasinfo_l1_gas_price_estimate_returns_ctx_basefee() {
+        use alloy_primitives::{address, U256};
+        let mut ctx = mk_ctx();
+        ctx.basefee = U256::from(987_654u64);
+        let reg = PredeployRegistry::with_default_addresses();
+        let gi = address!("000000000000000000000000000000000000006c");
+        use arb_alloy_predeploys as pre;
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector(pre::SIG_GI_GET_L1_GAS_PRICE_ESTIMATE));
+        let (out, _gas, ok) = reg.dispatch(&ctx, gi, &Bytes::from(input), 21_000, U256::ZERO).expect("dispatch");
+        assert!(ok);
+        assert_eq!(out.len(), 32);
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out[..32]);
+        let got = U256::from_be_bytes(buf);
+        assert_eq!(got, ctx.basefee);
+    }
+
     }
 
         use alloy_primitives::address;
