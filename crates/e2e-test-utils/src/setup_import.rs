@@ -6,12 +6,11 @@ use reth_cli_commands::import_op::{import_blocks_from_file, ImportConfig};
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
-use reth_node_builder::{EngineNodeLauncher, Node, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_builder::{EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{
-    providers::BlockchainProvider, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
+    DatabaseProviderFactory, ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_stages_types::StageId;
@@ -221,9 +220,7 @@ pub async fn setup_engine_with_chain_import(
 
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
             .testing_node_with_datadir(exec.clone(), datadir.clone())
-            .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
-            .with_components(node.components_builder())
-            .with_add_ons(node.add_ons())
+            .node(node)
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),

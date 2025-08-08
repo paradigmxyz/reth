@@ -10,6 +10,9 @@
 //! This launches a regular reth node and also print:
 //! > "All components initialized" – once all components have been initialized
 //! > "Node started" – once the node has been started.
+//!
+//! Note: RPC hooks are now configured through the add-ons at launch time rather than
+//! directly on the builder.
 
 #![warn(unused_crate_dependencies)]
 
@@ -24,14 +27,12 @@ fn main() {
                     println!("Node started");
                     Ok(())
                 })
-                .on_rpc_started(|_ctx, _handles| {
-                    println!("RPC started");
-                    Ok(())
-                })
                 .on_component_initialized(|_ctx| {
                     println!("All components initialized");
                     Ok(())
                 })
+                // Note: RPC hooks are now configured differently in the new pattern
+                // and are passed at launch time through the add-ons
                 .launch()
                 .await?;
 

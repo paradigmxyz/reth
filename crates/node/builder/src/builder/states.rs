@@ -257,9 +257,19 @@ where
     {
         launcher.launch_node(self).await
     }
+}
 
+// Hook configuration methods for types using RethRpcAddOns
+impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+{
     /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    ///
+    /// Note: This is a no-op because hooks are now passed at launch time.
+    pub fn on_rpc_started<F>(self, _hook: F) -> Self
     where
         F: FnOnce(
                 RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
@@ -268,23 +278,19 @@ where
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_on_rpc_started(hook);
-            add_ons
-        })
+        self
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    ///
+    /// Note: This is a no-op because hooks are now passed at launch time.
+    pub fn extend_rpc_modules<F>(self, _hook: F) -> Self
     where
         F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_extend_rpc_modules(hook);
-            add_ons
-        })
+        self
     }
 }
 

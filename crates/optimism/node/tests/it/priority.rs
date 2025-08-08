@@ -12,7 +12,7 @@ use reth_e2e_test_utils::{
 use reth_node_api::FullNodeTypes;
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
-    EngineNodeLauncher, Node, NodeBuilder, NodeConfig,
+    EngineNodeLauncher, NodeBuilder, NodeConfig,
 };
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::OpChainSpecBuilder;
@@ -136,7 +136,7 @@ async fn test_custom_block_priority_config() {
         .with_database(db)
         .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
         .with_components(build_components(config.chain.chain_id()))
-        .with_add_ons(OpNode::new(Default::default()).add_ons())
+        .with_add_ons(OpNode::new(Default::default()).default_add_ons())
         .launch_with_fn(|builder| {
             let launcher = EngineNodeLauncher::new(
                 tasks.executor(),

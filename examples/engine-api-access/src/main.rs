@@ -39,9 +39,5 @@ async fn main() {
             Ok(())
         })
         .on_node_started(|_full_node| Ok(()))
-        .on_rpc_started(|_ctx, handles| {
-            let _client = handles.rpc.http_client();
-            Ok(())
-        })
         .check_launch();
 }
