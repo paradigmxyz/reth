@@ -786,6 +786,28 @@ mod tests {
         assert!(out_withdraw.len() == 0 || out_withdraw.len() == 32);
     }
 
+    #[test]
+    fn node_interface_basic_selector_dispatch() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let ni_addr = address!("00000000000000000000000000000000000000c8");
+
+        let mk = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (out, _gas, ok) = reg
+            .dispatch(&mk_ctx(), ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT), 200_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(ok);
+        assert!(out.len() == 0 || out.len() == 32);
+    }
+
     }
 
     #[test]
