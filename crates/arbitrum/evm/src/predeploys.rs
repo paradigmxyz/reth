@@ -733,3 +733,28 @@ mod tests {
         let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
     }
+    #[test]
+    fn arb_address_table_basic_selectors_dispatch() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let at_addr = address!("0000000000000000000000000000000000000066");
+        let mk = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+        for sig in [
+            pre::SIG_AT_ADDRESS_EXISTS,
+            pre::SIG_AT_COMPRESS,
+            pre::SIG_AT_DECOMPRESS,
+            pre::SIG_AT_LOOKUP,
+            pre::SIG_AT_LOOKUP_INDEX,
+            pre::SIG_AT_REGISTER,
+            pre::SIG_AT_SIZE,
+        ] {
+            let (_o, _g, ok) = reg.dispatch(&mk_ctx(), at_addr, &mk(sig), 50_000, U256::ZERO).expect("dispatch");
+            assert!(ok, "selector should dispatch: {}", sig);
+        }
+    }
