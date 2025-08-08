@@ -317,7 +317,7 @@ mod tests {
     fn default_predeploy_registry_dispatches_known_address() {
         use alloy_primitives::address;
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
-        let reg = cfg.default_predeploy_registry();
+        let mut reg = cfg.default_predeploy_registry();
         let sys = address!("0000000000000000000000000000000000000064");
         let ctx = crate::predeploys::PredeployCallContext {
             block_number: 100,

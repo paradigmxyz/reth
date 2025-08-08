@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use alloy_primitives::{Address, Bytes, U256, B256};
+use crate::retryables::{Retryables, DefaultRetryables};
 
 pub struct PredeployCallContext {
     pub block_number: u64,
@@ -16,26 +17,27 @@ pub struct PredeployCallContext {
 
 pub trait PredeployHandler {
     fn address(&self) -> Address;
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256) -> (Bytes, u64, bool);
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool);
 }
 
 pub struct PredeployRegistry {
     handlers: alloc::vec::Vec<alloc::boxed::Box<dyn PredeployHandler + Send + Sync>>,
+    retryables: DefaultRetryables,
 }
 
 impl PredeployRegistry {
     pub fn new() -> Self {
-        Self { handlers: alloc::vec::Vec::new() }
+        Self { handlers: alloc::vec::Vec::new(), retryables: DefaultRetryables::default() }
     }
 
     pub fn register(&mut self, handler: alloc::boxed::Box<dyn PredeployHandler + Send + Sync>) {
         self.handlers.push(handler);
     }
 
-    pub fn dispatch(&self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256) -> Option<(Bytes, u64, bool)> {
         for h in &self.handlers {
             if h.address() == to {
-                return Some(h.call(ctx, input, gas_limit, value));
+                return Some(h.call(ctx, input, gas_limit, value, &mut self.retryables));
             }
         }
         None
@@ -63,7 +65,7 @@ impl PredeployHandler for ArbSys {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
@@ -194,7 +196,7 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
@@ -254,7 +256,7 @@ impl PredeployHandler for NodeInterface {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -323,7 +325,7 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -375,7 +377,7 @@ impl PredeployHandler for ArbGasInfo {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -468,7 +470,7 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
@@ -559,7 +561,7 @@ mod tests {
         let a_owner = address!("0000000000000000000000000000000000000070");
         let a_table = address!("0000000000000000000000000000000000000066");
 
-        let reg = PredeployRegistry::with_addresses(a_sys, a_retry, a_owner, a_table);
+        let mut reg = PredeployRegistry::with_addresses(a_sys, a_retry, a_owner, a_table);
         let ctx = mk_ctx();
 
         let out_sys = reg.dispatch(&ctx, a_sys, &mk_bytes(), 100_000, U256::ZERO);
@@ -579,7 +581,7 @@ mod tests {
     #[test]
     fn node_interface_is_registered_in_default_registry() {
         use alloy_primitives::address;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let ni = address!("00000000000000000000000000000000000000c8");
         let out = reg.dispatch(&mk_ctx(), ni, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
@@ -589,7 +591,7 @@ mod tests {
         use alloy_primitives::{address, U256};
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
         let mut ctx = mk_ctx();
@@ -632,7 +634,7 @@ mod tests {
             B256::from_slice(&[3u8; 32]),
         ];
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
         let call_hash = |selector: [u8;4], block_num: u64| -> B256 {
@@ -665,7 +667,7 @@ mod tests {
         use alloy_primitives::{address, Bytes, U256};
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
         let mut ctx = mk_ctx();
@@ -695,7 +697,7 @@ mod tests {
         use alloy_primitives::{address, U256};
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(1_234_567u64);
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
         let (out, _gas, ok) = reg.dispatch(&ctx, gi, &mk_bytes(), 21_000, U256::ZERO).expect("dispatch");
         assert!(ok);
@@ -714,7 +716,7 @@ mod tests {
         use alloy_primitives::{address, U256};
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(987_654u64);
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
         use arb_alloy_predeploys as pre;
         let mut input = alloc::vec::Vec::with_capacity(4);
@@ -733,7 +735,7 @@ mod tests {
     #[test]
     fn gasinfo_is_registered_in_default_registry() {
         use alloy_primitives::{address, U256};
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let gi = address!("000000000000000000000000000000000000006c");
         let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
         assert!(out.is_some());
@@ -744,7 +746,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
         let call = |sel: [u8;4]| {
@@ -770,7 +772,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
         let mut input = alloc::vec::Vec::with_capacity(4);
@@ -793,7 +795,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
         let mut ctx = mk_ctx();
         ctx.time = 1_000_000;
@@ -819,7 +821,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
         let mut ctx = mk_ctx();
@@ -853,7 +855,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
         let mk_input = |sel: [u8; 4]| {
@@ -880,7 +882,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let ni_addr = address!("00000000000000000000000000000000000000c8");
 
         let mk = |sig: &str| {
@@ -914,7 +916,7 @@ mod tests {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
 
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let ni_addr = address!("00000000000000000000000000000000000000c8");
 
         let mk = |sig: &str| {
@@ -956,7 +958,7 @@ mod tests {
     fn node_interface_trivial_selectors_return_expected_abi() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let ni_addr = address!("00000000000000000000000000000000000000c8");
 
         let mk = |sig: &str| {
@@ -983,7 +985,7 @@ mod tests {
     fn arb_owner_getters_return_words() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
 
         let call = |sig: &str| {
@@ -1008,7 +1010,7 @@ mod tests {
     fn arb_owner_basic_selectors_dispatch() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
 
         let call = |sel: [u8;4]| {
@@ -1027,7 +1029,7 @@ mod tests {
     fn arb_owner_is_registered_in_default_registry() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
         let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_owner, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
@@ -1037,7 +1039,7 @@ mod tests {
     fn arb_address_table_is_registered_in_default_registry() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_at = address!("0000000000000000000000000000000000000066");
         let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
@@ -1047,7 +1049,7 @@ mod tests {
     fn arb_address_table_basic_selectors_dispatch() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let at_addr = address!("0000000000000000000000000000000000000066");
         let mk = |sig: &str| {
             let sel = pre::selector(sig);
@@ -1073,7 +1075,7 @@ mod tests {
     fn arb_address_table_selector_abi_shapes() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
-        let reg = PredeployRegistry::with_default_addresses();
+        let mut reg = PredeployRegistry::with_default_addresses();
         let addr_at = address!("0000000000000000000000000000000000000066");
 
         let mk = |sig: &str| {
