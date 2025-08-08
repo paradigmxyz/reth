@@ -147,6 +147,28 @@ mod tests {
 
         let expected_gas: u64 = (expected_fee / basefee).try_into().unwrap();
         assert_eq!(state.poster_gas, expected_gas);
+    #[test]
+    fn end_tx_accumulates_hold_gas_and_resets_poster_fields() {
+        let hooks = DefaultArbOsHooks::default();
+        let mut state = ArbTxProcessorState::default();
+        state.poster_fee = U256::from(12345u64);
+        state.poster_gas = 6789u64;
+        let before_hold = state.compute_hold_gas;
+
+        let mut evm = DummyEvm;
+        let ctx = ArbEndTxContext {
+            success: true,
+            gas_left: 0,
+            gas_limit: 1_000_000,
+            basefee: U256::from(1_000u64),
+        };
+        hooks.end_tx(&mut evm, &mut state, &ctx);
+
+        assert_eq!(state.compute_hold_gas, before_hold.saturating_add(6789u64));
+        assert_eq!(state.poster_fee, U256::ZERO);
+        assert_eq!(state.poster_gas, 0);
+    }
+
     }
 
     #[test]
