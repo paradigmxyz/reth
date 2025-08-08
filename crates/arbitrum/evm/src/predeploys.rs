@@ -194,6 +194,69 @@ impl PredeployHandler for ArbRetryableTx {
             s if s == cancel => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
+#[derive(Clone)]
+pub struct NodeInterface {
+    pub addr: Address,
+}
+
+impl NodeInterface {
+    pub fn new(addr: Address) -> Self {
+        Self { addr }
+    }
+}
+
+impl PredeployHandler for NodeInterface {
+    fn address(&self) -> Address {
+        self.addr
+    }
+
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+
+        let ni_estimate_retryable = pre::selector(pre::SIG_NI_ESTIMATE_RETRYABLE_TICKET);
+        let ni_construct_outbox_proof = pre::selector(pre::SIG_NI_CONSTRUCT_OUTBOX_PROOF);
+        let ni_find_batch = pre::selector(pre::SIG_NI_FIND_BATCH_CONTAINING_BLOCK);
+        let ni_get_l1_conf = pre::selector(pre::SIG_NI_GET_L1_CONFIRMATIONS);
+        let ni_gas_components = pre::selector(pre::SIG_NI_GAS_ESTIMATE_COMPONENTS);
+        let ni_gas_l1_component = pre::selector(pre::SIG_NI_GAS_ESTIMATE_L1_COMPONENT);
+        let ni_legacy_lookup = pre::selector(pre::SIG_NI_LEGACY_LOOKUP_MESSAGE_BATCH_PROOF);
+        let ni_nitro_genesis = pre::selector(pre::SIG_NI_NITRO_GENESIS_BLOCK);
+        let ni_block_l1_num = pre::selector(pre::SIG_NI_BLOCK_L1_NUM);
+        let ni_l2_range_for_l1 = pre::selector(pre::SIG_NI_L2_BLOCK_RANGE_FOR_L1);
+
+        fn abi_zero_word() -> Bytes {
+            let out = [0u8; 32];
+            Bytes::from(out.to_vec())
+        }
+
+        match sel {
+            s if s == ni_nitro_genesis => (abi_zero_word(), gas_limit, true),
+            s if s == ni_block_l1_num => (abi_zero_word(), gas_limit, true),
+            s if s == ni_l2_range_for_l1 => {
+                let mut out = alloc::vec::Vec::with_capacity(64);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == ni_gas_components => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == ni_gas_l1_component => (abi_zero_word(), gas_limit, true),
+            s if s == ni_estimate_retryable => (abi_zero_word(), gas_limit, true),
+            s if s == ni_construct_outbox_proof => (Bytes::default(), gas_limit, true),
+            s if s == ni_find_batch => (abi_zero_word(), gas_limit, true),
+            s if s == ni_get_l1_conf => (abi_zero_word(), gas_limit, true),
+            s if s == ni_legacy_lookup => (Bytes::default(), gas_limit, true),
+            _ => (Bytes::default(), gas_limit, true),
+        }
+    }
+}
+
     }
 }
 
