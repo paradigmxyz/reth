@@ -5,5 +5,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = ["std"]
+std = []
+
 [dependencies]
-# placeholder; will mirror optimism/evm deps when implementing
+alloy-consensus = { version = "0.7", default-features = false, features = ["std"] }
+reth-primitives = { path = "../../../primitives", default-features = false, features = ["std"] }
