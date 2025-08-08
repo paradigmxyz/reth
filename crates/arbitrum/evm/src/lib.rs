@@ -374,6 +374,7 @@ mod tests {
             reth_arbitrum_primitives::ArbTxType::Deposit,
             reth_arbitrum_primitives::ArbTxType::Unsigned,
         ]);
+    }
     #[test]
     fn maps_all_envelope_variants_to_tx_types() {
         use arb_alloy_consensus::tx::{
