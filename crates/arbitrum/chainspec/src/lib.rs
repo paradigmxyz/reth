@@ -17,6 +17,6 @@ impl ArbitrumChainSpec for ArbChainSpec {
         self.chain_id
     }
     fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
-        SpecId::LATEST
+        SpecId::CANCUN
     }
 }
