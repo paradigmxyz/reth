@@ -4,6 +4,19 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
+use alloy_consensus::Header;
+use alloy_primitives::U256;
+use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor};
+use reth_primitives_traits::{TxTy, WithEncoded};
+use reth_storage_errors::any::AnyError;
+use reth_arbitrum_payload::ArbExecutionData;
+use reth_arbitrum_chainspec::ArbitrumChainSpec;
+use revm::{
+    context::{BlockEnv, CfgEnv},
+    primitives::hardfork::SpecId,
+};
+
 mod config;
 pub use config::{ArbBlockAssembler, ArbNextBlockEnvAttributes};
 
@@ -62,15 +75,6 @@ where
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
     }
-use alloy_consensus::Header;
-use alloy_primitives::U256;
-use reth_evm::{ConfigureEvm, EvmEnv};
-use revm::{
-    context::{BlockEnv, CfgEnv},
-    primitives::hardfork::SpecId,
-};
-
-use reth_arbitrum_chainspec::ArbitrumChainSpec;
 
 impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec, N, R> {
     type Primitives = N;
@@ -127,10 +131,6 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEvm for ArbEvmConfig<ChainSpec
         Ok(EvmEnv { cfg_env, block_env })
     }
 }
-use reth_evm::{ConfigureEngineEvm, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor};
-use reth_primitives_traits::{TxTy, WithEncoded};
-use reth_storage_errors::any::AnyError;
-use reth_arbitrum_payload::ArbExecutionData;
 
 impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> for ArbEvmConfig<ChainSpec, N, R>
 {
