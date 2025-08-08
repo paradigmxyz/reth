@@ -109,3 +109,56 @@ impl Default for ArbTxProcessorState {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, U256};
+
+    struct DummyEvm;
+    impl Evm for DummyEvm {}
+
+    #[test]
+    fn gas_charging_applies_retryable_submission_fee_math() {
+        let hooks = DefaultArbOsHooks::default();
+        let mut state = ArbTxProcessorState::default();
+
+        let basefee = U256::from(1_000u64);
+        let calldata = vec![0u8; 100]; // 100 bytes
+        let ctx = ArbGasChargingContext {
+            intrinsic_gas: 21_000,
+            calldata: calldata.clone(),
+            basefee,
+            is_executed_on_chain: true,
+            skip_l1_charging: false,
+        };
+
+        let mut evm = DummyEvm;
+        let (_tip, res) = hooks.gas_charging(&mut evm, &mut state, &ctx);
+        assert!(res.is_ok());
+
+        let expected_units = U256::from(1400u64) + U256::from(6u64) * U256::from(calldata.len() as u64);
+        let expected_fee = expected_units * basefee;
+        assert_eq!(state.poster_fee, expected_fee);
+
+        let expected_gas: u64 = (expected_fee / basefee).try_into().unwrap();
+        assert_eq!(state.poster_gas, expected_gas);
+    }
+
+    #[test]
+    fn start_tx_sets_delayed_inbox_flag_from_coinbase() {
+        let hooks = DefaultArbOsHooks::default();
+        let mut state = ArbTxProcessorState::default();
+        let mut evm = DummyEvm;
+        let ctx = ArbStartTxContext {
+            sender: Address::ZERO,
+            nonce: 0,
+            l1_base_fee: U256::ZERO,
+            calldata_len: 0,
+            coinbase: Address::from([1u8; 20]),
+            executed_on_chain: true,
+            is_eth_call: false,
+        };
+        hooks.start_tx(&mut evm, &mut state, &ctx);
+        assert!(state.delayed_inbox);
+    }
+}
