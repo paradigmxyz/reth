@@ -87,6 +87,30 @@ mod tests {
         let _ = ArbReceipt::Legacy(base.clone());
         let _ = ArbReceipt::Legacy(base.clone());
         let _ = ArbReceipt::Legacy(base);
+    #[test]
+    fn deposit_receipt_build_path_errors() {
+        use reth_evm::Evm;
+        struct DummyEvm;
+        impl Evm for DummyEvm {}
+
+        let builder = ArbRethReceiptBuilder::default();
+        let tx = ArbTransactionSigned { ty: ArbTxType::Deposit };
+        let ctx = ReceiptBuilderCtx {
+            tx: &tx,
+            result: alloy_evm::eth::receipt_builder::ExecutionResult {
+                success: true,
+                logs: Vec::<Log>::new(),
+                return_value: alloy_primitives::Bytes::default(),
+                gas_used: 0,
+            },
+            cumulative_gas_used: 0,
+            index: 0,
+            evm: &mut DummyEvm,
+        };
+        let res = builder.build_receipt::<DummyEvm>(ctx);
+        assert!(res.is_err());
+    }
+
     }
 
     #[test]
