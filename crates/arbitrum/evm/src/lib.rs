@@ -369,6 +369,72 @@ mod tests {
             reth_arbitrum_primitives::ArbTxType::Deposit,
             reth_arbitrum_primitives::ArbTxType::Unsigned,
         ]);
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::{address, b256, Bytes, B256, U256};
+
+    #[test]
+    fn evm_env_for_payload_maps_all_fields() {
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+
+        let fee_recipient = address!("00000000000000000000000000000000000000fe");
+        let prev_randao = b256!("1111111111111111111111111111111111111111111111111111111111111111");
+        let base_fee = U256::from(1_234_567u64);
+        let gas_limit = 30_000_000u64;
+        let number = 12_345u64;
+        let ts = 1_700_000_000u64;
+
+        let payload = reth_arbitrum_payload::ArbExecutionData {
+            payload: reth_arbitrum_payload::ArbPayload {
+                v1: reth_arbitrum_payload::ArbPayloadV1 {
+                    fee_recipient,
+                    prev_randao,
+                    gas_limit,
+                    base_fee_per_gas: base_fee,
+                    extra_data: Bytes::default(),
+                    block_number: number,
+                    timestamp: ts,
+                    transactions: Vec::new(),
+                },
+            },
+            sidecar: reth_arbitrum_payload::ArbSidecar { parent_beacon_block_root: Some(B256::ZERO) },
+            parent_hash: B256::ZERO,
+        };
+
+        let env = <ArbEvmConfig::<(), (), ArbRethReceiptBuilder> as ConfigureEngineEvm<ArbExecutionData>>::evm_env_for_payload(&cfg, &payload);
+        assert_eq!(env.block_env.number, U256::from(number));
+        assert_eq!(env.block_env.beneficiary, fee_recipient);
+        assert_eq!(env.block_env.timestamp, U256::from(ts));
+        assert_eq!(env.block_env.prevrandao, Some(prev_randao));
+        assert_eq!(env.block_env.gas_limit, gas_limit);
+        assert_eq!(env.block_env.basefee, base_fee);
+    }
+
+    #[test]
+    fn evm_env_from_header_maps_all_fields() {
+        let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
+
+        let mut h = Header::default();
+        h.number = 99;
+        h.timestamp = 1_800_000_000;
+        h.beneficiary = address!("00000000000000000000000000000000000000aa");
+        h.mix_hash = Some(b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        h.gas_limit = 20_000_000;
+        h.base_fee_per_gas = Some(U256::from(42u64));
+        h.difficulty = U256::from(0u64);
+
+        let env = <ArbEvmConfig::<(), (), ArbRethReceiptBuilder> as ConfigureEvm>::evm_env(&cfg, &h);
+        assert_eq!(env.block_env.number, U256::from(99));
+        assert_eq!(env.block_env.timestamp, U256::from(1_800_000_000u64));
+        assert_eq!(env.block_env.beneficiary, h.beneficiary);
+        assert_eq!(env.block_env.prevrandao, h.mix_hash);
+        assert_eq!(env.block_env.gas_limit, 20_000_000u64);
+        assert_eq!(env.block_env.basefee, U256::from(42u64));
+    }
+}
+
     }
 
 
