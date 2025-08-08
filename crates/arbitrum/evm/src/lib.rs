@@ -201,6 +201,17 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> fo
             })
     }
 }
+impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
+    pub fn decode_arb_envelope(
+        &self,
+        bytes: &[u8],
+    ) -> Result<arb_alloy_consensus::ArbTxEnvelope, AnyError> {
+        let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(bytes)
+            .map_err(AnyError::new)?;
+        Ok(env)
+    }
+}
+
 
 
 }
