@@ -194,7 +194,7 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ConfigureEngineEvm<ArbExecutionData> fo
             .clone()
             .into_iter()
             .map(|encoded| {
-                let tx = TxTy::<Self::Primitives>::decode_2718_exact(encoded.as_ref())
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
                 let signer = tx.try_recover().map_err(AnyError::new)?;
                 Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
@@ -259,10 +259,9 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
             .clone()
             .into_iter()
             .map(|encoded| {
-                let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(encoded.as_ref())
                     .map_err(AnyError::new)?;
-                let signed = reth_arbitrum_primitives::ArbTransactionSigned::from_envelope(&env);
-                Ok::<_, AnyError>((encoded, signed))
+                Ok::<_, AnyError>((encoded, tx))
             })
     }
 }
@@ -271,12 +270,6 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
 
 
 
-impl reth_arbitrum_primitives::ArbTransactionSigned {
-    pub fn from_envelope(env: &arb_alloy_consensus::ArbTxEnvelope) -> Self {
-        let ty = reth_arbitrum_primitives::ArbTxType::from(env);
-        reth_arbitrum_primitives::ArbTransactionSigned { ty }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,7 +356,7 @@ mod tests {
         let cfg = ArbEvmConfig::<(), (), ArbRethReceiptBuilder>::default();
         let got: Vec<_> = cfg.arb_tx_iterator_for_payload(&payload)
             .map(|r| r.expect("ok"))
-            .map(|(_enc, s)| s.ty)
+            .map(|(_enc, s)| s.tx_type())
             .collect();
         assert_eq!(got, vec![
             reth_arbitrum_primitives::ArbTxType::Deposit,
