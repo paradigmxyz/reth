@@ -68,11 +68,12 @@ impl ArbOsHooks for DefaultArbOsHooks {
     ) -> (Address, Result<(), ()>) {
         let tip_recipient = Address::ZERO;
         if !ctx.skip_l1_charging && !ctx.basefee.is_zero() {
-            let calldata_len = ctx.calldata.len() as u128;
-            let per_byte = U256::from(6u64);
-            let overhead = U256::from(1400u64);
-            let fee_units = overhead + per_byte * U256::from(calldata_len);
-            let poster_cost = fee_units.saturating_mul(ctx.basefee);
+            let units = L1PricingState::poster_units_from_brotli_len(ctx.calldata.len() as u64);
+            let padded_units = L1PricingState::apply_estimation_padding(units);
+            let l1_base_fee_wei: u128 = ctx.basefee.try_into().unwrap_or_default();
+            let pricing = L1PricingState { l1_base_fee_wei };
+            let poster_cost_u128 = pricing.poster_data_cost_from_units(padded_units);
+            let poster_cost = U256::from(poster_cost_u128);
             let poster_gas = Self::get_poster_gas(ctx.basefee, poster_cost);
             state.poster_gas = poster_gas;
             state.poster_fee = poster_cost;
