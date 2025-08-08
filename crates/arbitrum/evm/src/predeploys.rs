@@ -189,8 +189,12 @@ impl PredeployHandler for ArbRetryableTx {
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
         let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+
         match sel {
-            s if s == redeem => (Bytes::default(), gas_limit, true),
+            s if s == redeem => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
             s if s == cancel => (Bytes::default(), gas_limit, true),
             _ => (Bytes::default(), gas_limit, true),
         }
