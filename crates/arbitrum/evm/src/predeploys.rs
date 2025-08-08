@@ -797,7 +797,7 @@ mod tests {
         let got = U256::from_be_bytes(buf);
         let expected = U256::from(ctx.time) + U256::from(arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS);
         assert_eq!(got, expected);
-        let (out_cur, _gcur, ok_cur) = reg.dispatch(&mk_ctx(), addr, &call(pre::SIG_RETRY_GET_CURRENT_REDEEMER), 50_000, U256::ZERO).expect("dispatch");
+        let (out_cur, _gcur, ok_cur) = reg.dispatch(&mk_ctx(), addr_retry, &call(pre::SIG_RETRY_GET_CURRENT_REDEEMER), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok_cur);
         assert_eq!(out_cur.len(), 32);
 
