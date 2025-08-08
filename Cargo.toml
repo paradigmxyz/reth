@@ -170,6 +170,14 @@ members = [
     "testing/ef-tests/",
     "testing/testing-utils",
     "crates/tracing-otlp",
+    "crates/arbitrum/bin",
+    "crates/arbitrum/primitives",
+    "crates/arbitrum/evm",
+    "crates/arbitrum/payload",
+    "crates/arbitrum/chainspec",
+    "crates/arbitrum/node",
+    "crates/arbitrum/rpc",
+
 ]
 default-members = ["bin/reth"]
 exclude = ["docs/cli"]
