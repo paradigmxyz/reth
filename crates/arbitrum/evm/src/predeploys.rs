@@ -65,7 +65,7 @@ impl PredeployHandler for ArbSys {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
@@ -163,8 +163,24 @@ impl PredeployHandler for ArbSys {
             }
             s if s == withdraw_eth => (Bytes::default(), gas_limit, true),
             s if s == create_retryable => {
-                let mut out = [0u8; 32];
-                (Bytes::from(out.to_vec()), gas_limit, true)
+                let params = crate::retryables::RetryableCreateParams {
+                    sender: ctx.caller,
+                    beneficiary: Address::ZERO,
+                    call_to: Address::ZERO,
+                    call_data: Bytes::default(),
+                    l1_base_fee: ctx.basefee,
+                    submission_fee: U256::ZERO,
+                    max_submission_cost: U256::MAX,
+                    max_gas: U256::ZERO,
+                    gas_price_bid: U256::ZERO,
+                };
+                match retryables.create_retryable(params) {
+                    crate::retryables::RetryableAction::Created { .. } => {
+                        let out = [0u8; 32];
+                        (Bytes::from(out.to_vec()), gas_limit, true)
+                    }
+                    _ => (Bytes::default(), gas_limit, false),
+                }
             }
             s if s == redeem => {
                 let mut out = [0u8; 32];
@@ -287,7 +303,7 @@ impl PredeployHandler for NodeInterface {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
