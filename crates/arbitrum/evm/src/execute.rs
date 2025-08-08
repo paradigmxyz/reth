@@ -147,6 +147,8 @@ mod tests {
 
         let expected_gas: u64 = (expected_fee / basefee).try_into().unwrap();
         assert_eq!(state.poster_gas, expected_gas);
+    }
+
     #[test]
     fn end_tx_accumulates_hold_gas_and_resets_poster_fields() {
         let hooks = DefaultArbOsHooks::default();
@@ -167,8 +169,6 @@ mod tests {
         assert_eq!(state.compute_hold_gas, before_hold.saturating_add(6789u64));
         assert_eq!(state.poster_fee, U256::ZERO);
         assert_eq!(state.poster_gas, 0);
-    }
-
     }
 
     #[test]
