@@ -913,6 +913,8 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, ctx.basefee);
+    }
+    
     #[test]
     fn node_interface_gas_estimate_components_returns_basefees() {
         use alloy_primitives::address;
@@ -930,7 +932,8 @@ mod tests {
 
         let mut ctx = mk_ctx();
         ctx.basefee = U256::from(123_456u64);
-
+    }
+    
     #[test]
     fn node_interface_trivial_selectors_return_expected_abi() {
         use alloy_primitives::address;
@@ -1006,8 +1009,6 @@ mod tests {
 
     }
 
-    }
-
     #[test]
     fn arb_owner_basic_selectors_dispatch() {
         use alloy_primitives::address;
@@ -1046,6 +1047,7 @@ mod tests {
         let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_at, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
     }
+
     #[test]
     fn arb_address_table_basic_selectors_dispatch() {
         use alloy_primitives::address;
@@ -1057,6 +1059,21 @@ mod tests {
             let mut v = alloc::vec::Vec::with_capacity(4);
             v.extend_from_slice(&sel);
             Bytes::from(v)
+        };
+        for sig in [
+            pre::SIG_AT_ADDRESS_EXISTS,
+            pre::SIG_AT_COMPRESS,
+            pre::SIG_AT_DECOMPRESS,
+            pre::SIG_AT_LOOKUP,
+            pre::SIG_AT_LOOKUP_INDEX,
+            pre::SIG_AT_REGISTER,
+            pre::SIG_AT_SIZE,
+        ] {
+            let (_o, _g, ok) = reg.dispatch(&mk_ctx(), at_addr, &mk(sig), 50_000, U256::ZERO).expect("dispatch");
+            assert!(ok, "selector should dispatch: {}", sig);
+        }
+    }
+
     #[test]
     fn arb_address_table_selector_abi_shapes() {
         use alloy_primitives::address;
@@ -1090,19 +1107,4 @@ mod tests {
         let (o_size, _g5, ok5) = reg.dispatch(&mk_ctx(), addr_at, &mk(pre::SIG_AT_SIZE), 50_000, U256::ZERO).expect("dispatch");
         assert!(ok5);
         assert!(o_size.is_empty() || o_size.len() == 32);
-    }
-
-        };
-        for sig in [
-            pre::SIG_AT_ADDRESS_EXISTS,
-            pre::SIG_AT_COMPRESS,
-            pre::SIG_AT_DECOMPRESS,
-            pre::SIG_AT_LOOKUP,
-            pre::SIG_AT_LOOKUP_INDEX,
-            pre::SIG_AT_REGISTER,
-            pre::SIG_AT_SIZE,
-        ] {
-            let (_o, _g, ok) = reg.dispatch(&mk_ctx(), at_addr, &mk(sig), 50_000, U256::ZERO).expect("dispatch");
-            assert!(ok, "selector should dispatch: {}", sig);
-        }
     }
