@@ -194,15 +194,6 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-        use arb_alloy_predeploys as pre;
-        let s_get_lifetime = pre::selector(pre::SIG_RETRY_GET_LIFETIME);
-        let s_get_timeout = pre::selector(pre::SIG_RETRY_GET_TIMEOUT);
-        let s_keepalive = pre::selector(pre::SIG_RETRY_KEEPALIVE);
-        let s_get_beneficiary = pre::selector(pre::SIG_RETRY_GET_BENEFICIARY);
-        let s_redeem = pre::selector(pre::SIG_RETRY_REDEEM);
-        let s_cancel = pre::selector(pre::SIG_RETRY_CANCEL);
-        let s_current_redeemer = pre::selector(pre::SIG_RETRY_GET_CURRENT_REDEEMER);
-
     fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
