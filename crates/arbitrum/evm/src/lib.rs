@@ -406,7 +406,7 @@ mod env_tests {
             parent_hash: B256::ZERO,
         };
 
-        let env = <ArbEvmConfig::<(), (), ArbRethReceiptBuilder> as ConfigureEngineEvm<ArbExecutionData>>::evm_env_for_payload(&cfg, &payload);
+        let env = cfg.evm_env_for_payload(&payload);
         assert_eq!(env.block_env.number, U256::from(number));
         assert_eq!(env.block_env.beneficiary, fee_recipient);
         assert_eq!(env.block_env.timestamp, U256::from(ts));
@@ -428,7 +428,7 @@ mod env_tests {
         h.base_fee_per_gas = Some(U256::from(42u64));
         h.difficulty = U256::from(0u64);
 
-        let env = <ArbEvmConfig::<(), (), ArbRethReceiptBuilder> as ConfigureEvm>::evm_env(&cfg, &h);
+        let env = cfg.evm_env(&h);
         assert_eq!(env.block_env.number, U256::from(99));
         assert_eq!(env.block_env.timestamp, U256::from(1_800_000_000u64));
         assert_eq!(env.block_env.beneficiary, h.beneficiary);
