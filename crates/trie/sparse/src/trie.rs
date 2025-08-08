@@ -696,7 +696,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         provider: P,
     ) -> SparseTrieResult<()> {
         if self.values.remove(full_path).is_none() {
-            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {
+            if let Some(&SparseNode::Hash(hash)) = self.get_node(full_path) {
                 // Leaf is present in the trie, but it's blinded.
                 return Err(SparseTrieErrorKind::BlindedNode { path: *full_path, hash }.into())
             }
@@ -1657,6 +1657,31 @@ impl SerialSparseTrie {
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
         buffers.rlp_node_stack.pop().unwrap().rlp_node
+    }
+
+    fn get_node(&self, path: &Nibbles) -> Option<&SparseNode> {
+        let mut current = Nibbles::default();
+        let mut node = &self.root;
+
+        loop {
+            match node.as_ref() {
+                SparseNode::Empty | SparseNode::Hash(_) => {
+                    return (current == *path).then_some(node.as_ref())
+                }
+                SparseNode::Leaf { key, .. } => {
+                    return (current.join(key) == *path).then_some(node.as_ref())
+                }
+                SparseNode::Extension { key, child, .. } => {
+                    current.extend(key);
+                    node = child;
+                }
+                SparseNode::Branch { children, .. } => {
+                    let nibble = path.get_unchecked(current.len());
+                    current.push_unchecked(nibble);
+                    node = children[nibble as usize].as_ref()?;
+                }
+            }
+        }
     }
 }
 
