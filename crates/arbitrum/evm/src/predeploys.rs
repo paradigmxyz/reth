@@ -285,10 +285,11 @@ impl PredeployHandler for NodeInterface {
                 (Bytes::from(out), gas_limit, true)
             }
             s if s == ni_gas_components => {
-                let mut out = alloc::vec::Vec::with_capacity(96);
-                out.extend_from_slice(&[0u8; 32]);
-                out.extend_from_slice(&[0u8; 32]);
-                out.extend_from_slice(&[0u8; 32]);
+                let mut out = alloc::vec::Vec::with_capacity(128);
+                out.extend_from_slice(&[0u8; 32]); // gasEstimate (uint64) -> padded word
+                out.extend_from_slice(&[0u8; 32]); // gasEstimateForL1 (uint64) -> padded word
+                out.extend_from_slice(&encode_u256(ctx.basefee)); // baseFee (uint256)
+                out.extend_from_slice(&encode_u256(ctx.basefee)); // l1BaseFeeEstimate (uint256)
                 (Bytes::from(out), gas_limit, true)
             }
             s if s == ni_gas_l1_component => (encode_u256(ctx.basefee), gas_limit, true),
@@ -874,6 +875,48 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, ctx.basefee);
+    #[test]
+    fn node_interface_gas_estimate_components_returns_basefees() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let ni_addr = address!("00000000000000000000000000000000000000c8");
+
+        let mk = |sig: &str| {
+            let sel = pre::selector(sig);
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let mut ctx = mk_ctx();
+        ctx.basefee = U256::from(123_456u64);
+
+        let (out, _gas, ok) = reg
+            .dispatch(&ctx, ni_addr, &mk(pre::SIG_NI_GAS_ESTIMATE_COMPONENTS), 200_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(ok);
+        assert_eq!(out.len(), 128);
+
+        let w0 = &out[0..32];
+        let w1 = &out[32..64];
+        let w2 = &out[64..96];
+        let w3 = &out[96..128];
+
+        assert!(w0.iter().all(|b| *b == 0));
+        assert!(w1.iter().all(|b| *b == 0));
+
+        let mut buf2 = [0u8; 32];
+        buf2.copy_from_slice(w2);
+        let mut buf3 = [0u8; 32];
+        buf3.copy_from_slice(w3);
+        let got2 = U256::from_be_bytes(buf2);
+        let got3 = U256::from_be_bytes(buf3);
+        assert_eq!(got2, ctx.basefee);
+        assert_eq!(got3, ctx.basefee);
+    }
+
     }
 
     }
