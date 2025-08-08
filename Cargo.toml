@@ -8,6 +8,9 @@ repository = "https://github.com/paradigmxyz/reth"
 exclude = [".github/"]
 
 [workspace]
+
+[workspace.dependencies]
+revm-precompile = "25.0.0"
 members = [
     "bin/reth-bench/",
     "bin/reth/",
