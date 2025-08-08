@@ -306,8 +306,40 @@ impl PredeployHandler for ArbOwner {
     }
 
     fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
-        let _sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
-        (Bytes::default(), gas_limit, true)
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+
+        fn abi_zero_word() -> Bytes {
+            let out = [0u8; 32];
+            Bytes::from(out.to_vec())
+        }
+
+        let add_owner = pre::selector(pre::SIG_OWNER_ADD_CHAIN_OWNER);
+        let remove_owner = pre::selector(pre::SIG_OWNER_REMOVE_CHAIN_OWNER);
+        let is_owner = pre::selector(pre::SIG_OWNER_IS_CHAIN_OWNER);
+        let all_owners = pre::selector(pre::SIG_OWNER_GET_ALL_CHAIN_OWNERS);
+        let get_net_fee = pre::selector(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT);
+        let get_infra_fee = pre::selector(pre::SIG_OWNER_GET_INFRA_FEE_ACCOUNT);
+        let set_net_fee = pre::selector(pre::SIG_OWNER_SET_NETWORK_FEE_ACCOUNT);
+        let set_infra_fee = pre::selector(pre::SIG_OWNER_SET_INFRA_FEE_ACCOUNT);
+
+        match sel {
+            s if s == add_owner => (Bytes::default(), gas_limit, true),
+            s if s == remove_owner => (Bytes::default(), gas_limit, true),
+            s if s == is_owner => (abi_zero_word(), gas_limit, true),
+            s if s == all_owners => (Bytes::default(), gas_limit, true),
+            s if s == get_net_fee => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
+            s if s == get_infra_fee => {
+                let mut out = [0u8; 32];
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            }
+            s if s == set_net_fee => (Bytes::default(), gas_limit, true),
+            s if s == set_infra_fee => (Bytes::default(), gas_limit, true),
+            _ => (Bytes::default(), gas_limit, true),
+        }
     }
 #[derive(Clone)]
 pub struct ArbGasInfo {
@@ -649,6 +681,25 @@ mod tests {
             input.extend_from_slice(&sel);
             reg.dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
                 .expect("dispatch")
+    #[test]
+    fn arb_owner_basic_selectors_dispatch() {
+        use alloy_primitives::{address, Bytes as ABytes};
+        use arb_alloy_predeploys as pre;
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_owner = address!("0000000000000000000000000000000000000070");
+
+        let call = |sel: [u8;4]| {
+            let mut v = alloc::vec::Vec::with_capacity(4);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (_o1, _g1, ok1) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::selector(pre::SIG_OWNER_IS_CHAIN_OWNER)), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok1);
+        let (_o2, _g2, ok2) = reg.dispatch(&mk_ctx(), addr_owner, &call(pre::selector(pre::SIG_OWNER_GET_NETWORK_FEE_ACCOUNT)), 50_000, U256::ZERO).expect("dispatch");
+        assert!(ok2);
+    }
+
         };
 
         let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
