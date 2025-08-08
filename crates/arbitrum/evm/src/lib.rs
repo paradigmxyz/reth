@@ -244,7 +244,9 @@ impl From<&arb_alloy_consensus::ArbTxEnvelope> for reth_arbitrum_primitives::Arb
 }
 impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
     pub fn default_predeploy_registry(&self) -> PredeployRegistry {
-impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
+        PredeployRegistry::with_default_addresses()
+    }
+
     pub fn arb_tx_iterator_for_payload(
         &self,
         payload: &ArbExecutionData,
@@ -258,12 +260,8 @@ impl<ChainSpec: ArbitrumChainSpec, N, R> ArbEvmConfig<ChainSpec, N, R> {
                 let (env, _) = arb_alloy_consensus::ArbTxEnvelope::decode_typed(encoded.as_ref())
                     .map_err(AnyError::new)?;
                 let signed = reth_arbitrum_primitives::ArbTransactionSigned::from_envelope(&env);
-                Ok::<_, AnyError>( (encoded, signed) )
+                Ok::<_, AnyError>((encoded, signed))
             })
-    }
-}
-
-        PredeployRegistry::with_default_addresses()
     }
 }
 
