@@ -759,6 +759,33 @@ mod tests {
         assert_eq!(got_chain, ctx.chain_id);
     }
 
+    #[test]
+    fn arbsys_send_tx_to_l1_and_withdraw_eth_dispatch_and_return_abi() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let sys_addr = address!("0000000000000000000000000000000000000064");
+
+        let mk_input = |sel: [u8; 4]| {
+            let mut v = alloc::vec::Vec::with_capacity(4 + 32 * 3);
+            v.extend_from_slice(&sel);
+            Bytes::from(v)
+        };
+
+        let (out_send, _gas_send, ok_send) =
+            reg.dispatch(&mk_ctx(), sys_addr, &mk_input(pre::selector(pre::SIG_SEND_TX_TO_L1)), 200_000, U256::ZERO)
+                .expect("dispatch");
+        assert!(ok_send);
+        assert_eq!(out_send.len(), 32);
+
+        let (out_withdraw, _gas_withdraw, ok_withdraw) =
+            reg.dispatch(&mk_ctx(), sys_addr, &mk_input(pre::selector(pre::SIG_WITHDRAW_ETH)), 200_000, U256::ZERO)
+                .expect("dispatch");
+        assert!(ok_withdraw);
+        assert!(out_withdraw.len() == 0 || out_withdraw.len() == 32);
+    }
+
     }
 
     #[test]
