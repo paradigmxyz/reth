@@ -292,6 +292,89 @@ impl PredeployHandler for ArbOwner {
         let _sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         (Bytes::default(), gas_limit, true)
     }
+#[derive(Clone)]
+pub struct ArbGasInfo {
+    pub addr: Address,
+}
+
+impl ArbGasInfo {
+    pub fn new(addr: Address) -> Self {
+        Self { addr }
+    }
+}
+
+impl PredeployHandler for ArbGasInfo {
+    fn address(&self) -> Address {
+        self.addr
+    }
+
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256) -> (Bytes, u64, bool) {
+        use arb_alloy_predeploys as pre;
+        let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
+
+        let gi_prices_in_wei = pre::selector(pre::SIG_GI_GET_PRICES_IN_WEI);
+        let gi_prices_in_wei_with_agg = pre::selector(pre::SIG_GI_GET_PRICES_IN_WEI_WITH_AGG);
+        let gi_prices_in_arbgas = pre::selector(pre::SIG_GI_GET_PRICES_IN_ARBGAS);
+        let gi_prices_in_arbgas_with_agg = pre::selector(pre::SIG_GI_GET_PRICES_IN_ARBGAS_WITH_AGG);
+        let gi_min_gas_price = pre::selector(pre::SIG_GI_GET_MIN_GAS_PRICE);
+        let gi_l1_basefee_estimate = pre::selector(pre::SIG_GI_GET_L1_BASEFEE_ESTIMATE);
+        let gi_l1_basefee_inertia = pre::selector(pre::SIG_GI_GET_L1_BASEFEE_INERTIA);
+        let gi_l1_reward_rate = pre::selector(pre::SIG_GI_GET_L1_REWARD_RATE);
+        let gi_l1_reward_recipient = pre::selector(pre::SIG_GI_GET_L1_REWARD_RECIPIENT);
+        let gi_l1_gas_price_estimate = pre::selector(pre::SIG_GI_GET_L1_GAS_PRICE_ESTIMATE);
+        let gi_current_tx_l1_fees = pre::selector(pre::SIG_GI_GET_CURRENT_TX_L1_FEES);
+
+        fn abi_zero_word() -> Bytes {
+            let out = [0u8; 32];
+            Bytes::from(out.to_vec())
+        }
+
+        match sel {
+            s if s == gi_prices_in_wei => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == gi_prices_in_wei_with_agg => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == gi_prices_in_arbgas => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == gi_prices_in_arbgas_with_agg => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            s if s == gi_min_gas_price => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_basefee_estimate => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_basefee_inertia => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_reward_rate => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_reward_recipient => (abi_zero_word(), gas_limit, true),
+            s if s == gi_l1_gas_price_estimate => (abi_zero_word(), gas_limit, true),
+            s if s == gi_current_tx_l1_fees => {
+                let mut out = alloc::vec::Vec::with_capacity(96);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                out.extend_from_slice(&[0u8; 32]);
+                (Bytes::from(out), gas_limit, true)
+            }
+            _ => (Bytes::default(), gas_limit, true),
+        }
+    }
+}
 }
 
 #[derive(Clone)]
@@ -363,6 +446,8 @@ impl PredeployRegistry {
         let mut reg = Self::new();
         reg.register(alloc::boxed::Box::new(ArbSys::new(Address::from(pre::ARB_SYS))));
         reg.register(alloc::boxed::Box::new(ArbRetryableTx::new(Address::from(pre::ARB_RETRYABLE_TX))));
+        reg.register(alloc::boxed::Box::new(ArbGasInfo::new(Address::from(pre::ARB_GAS_INFO))));
+
         reg.register(alloc::boxed::Box::new(ArbOwner::new(Address::from(pre::ARB_OWNER))));
         reg.register(alloc::boxed::Box::new(ArbAddressTable::new(Address::from(pre::ARB_ADDRESS_TABLE))));
         reg.register(alloc::boxed::Box::new(NodeInterface::new(Address::from(pre::NODE_INTERFACE))));
@@ -525,6 +610,14 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, callvalue);
+    #[test]
+    fn gasinfo_is_registered_in_default_registry() {
+        use alloy_primitives::address;
+        let reg = PredeployRegistry::with_default_addresses();
+        let gi = address!("000000000000000000000000000000000000006c");
+        let out = reg.dispatch(&mk_ctx(), gi, &mk_bytes(), 21_000, U256::ZERO);
+        assert!(out.is_some());
+    }
     }
     }
 }
