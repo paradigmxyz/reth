@@ -216,7 +216,12 @@ impl PredeployHandler for ArbRetryableTx {
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
             s if s == cancel => (Bytes::default(), gas_limit, true),
-            s if s == get_lifetime => (abi_zero_word(), gas_limit, true),
+            s if s == get_lifetime => {
+                let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
+                let mut out = [0u8; 32];
+                U256::from(secs).to_be_bytes(&mut out);
+                (Bytes::from(out.to_vec()), gas_limit, true)
+            },
             s if s == get_timeout => (abi_zero_word(), gas_limit, true),
             s if s == keepalive => (abi_zero_word(), gas_limit, true),
             s if s == get_beneficiary => (abi_zero_word(), gas_limit, true),
@@ -696,6 +701,30 @@ mod tests {
         let _ = call(pre::selector("getCurrentRedeemer()"));
         let (_out, _gas, success) = call(pre::selector("submitRetryable(bytes32,uint256,uint256,uint256,uint256,uint64,uint256,address,address,address,bytes)"));
         assert!(!success);
+    #[test]
+    fn arb_retryable_tx_get_lifetime_returns_constant() {
+        use alloy_primitives::address;
+        use arb_alloy_predeploys as pre;
+
+        let reg = PredeployRegistry::with_default_addresses();
+        let addr_retry = address!("000000000000000000000000000000000000006e");
+
+        let mut input = alloc::vec::Vec::with_capacity(4);
+        input.extend_from_slice(&pre::selector("getLifetime()"));
+        let (out, _gas, success) = reg
+            .dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
+            .expect("dispatch");
+        assert!(success);
+        assert_eq!(out.len(), 32);
+
+        let mut buf = [0u8; 32];
+        buf.copy_from_slice(&out[..32]);
+        let got = U256::from_be_bytes(buf);
+
+        let expected = U256::from(arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS);
+        assert_eq!(got, expected);
+    }
+
     }
 
     #[test]
