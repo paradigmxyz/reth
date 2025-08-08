@@ -10,5 +10,6 @@ default = ["std"]
 std = []
 
 [dependencies]
-alloy-consensus = { version = "0.7", default-features = false, features = ["std"] }
-reth-primitives = { path = "../../../primitives", default-features = false, features = ["std"] }
+alloy-consensus = { version = "1", default-features = false, features = ["std"] }
+alloy-primitives = { version = "1", default-features = false, features = ["std"] }
+reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }

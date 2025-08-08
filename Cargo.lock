@@ -7254,6 +7254,11 @@ version = "0.1.0"
 [[package]]
 name = "reth-arbitrum-evm"
 version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-primitives",
+]
 
 [[package]]
 name = "reth-arbitrum-node"
