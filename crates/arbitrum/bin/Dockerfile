@@ -3,7 +3,7 @@
 FROM rust:1.78 as builder
 WORKDIR /build
 COPY . /build
-RUN cargo build --release -p reth-arbitrum-bin
+RUN cargo build --release -p arb-reth
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
