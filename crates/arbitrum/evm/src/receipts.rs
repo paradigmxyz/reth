@@ -5,8 +5,10 @@ use alloy_consensus::{Eip658Value, Receipt as AlloyReceipt};
 use alloy_evm::eth::receipt_builder::ReceiptBuilderCtx;
 use alloy_primitives::Log;
 use reth_evm::Evm;
-use reth_arbitrum_primitives::{ArbReceipt, ArbTransactionSigned, ArbTxType};
+use reth_arbitrum_primitives::{ArbDepositReceipt, ArbReceipt, ArbTransactionSigned, ArbTxType};
 
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
 pub struct ArbRethReceiptBuilder;
 
 impl ArbRethReceiptBuilder {
@@ -23,6 +25,8 @@ pub trait ArbReceiptBuilder {
         &self,
         ctx: ReceiptBuilderCtx<'a, Self::Transaction, E>,
     ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, Self::Transaction, E>>;
+
+    fn build_deposit_receipt(&self, inner: ArbDepositReceipt) -> Self::Receipt;
 }
 
 impl ArbReceiptBuilder for ArbRethReceiptBuilder {
@@ -52,6 +56,10 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
             }
         }
     }
+
+    fn build_deposit_receipt(&self, inner: ArbDepositReceipt) -> Self::Receipt {
+        ArbReceipt::Deposit(inner)
+    }
 }
 
 #[cfg(test)]
@@ -77,5 +85,16 @@ mod tests {
         let _ = ArbReceipt::Eip1559(base.clone());
         let _ = ArbReceipt::Eip2930(base.clone());
         let _ = ArbReceipt::Eip7702(base);
+    }
+
+    #[test]
+    fn builds_deposit_receipt() {
+        let builder = ArbRethReceiptBuilder::default();
+        let dep = ArbDepositReceipt::default();
+        let r = builder.build_deposit_receipt(dep);
+        match r {
+            ArbReceipt::Deposit(_) => {}
+            _ => panic!("expected deposit receipt"),
+        }
     }
 }

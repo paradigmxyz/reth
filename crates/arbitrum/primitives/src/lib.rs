@@ -10,8 +10,11 @@ pub enum ArbReceipt {
     Eip1559(AlloyReceipt),
     Eip2930(AlloyReceipt),
     Eip7702(AlloyReceipt),
-    Deposit,
+    Deposit(ArbDepositReceipt),
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ArbDepositReceipt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArbTransactionSigned {
@@ -48,6 +51,16 @@ mod tests {
                 assert!(matches!(rr.status, Eip658Value::Eip658(true)));
             }
             _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn arb_deposit_receipt_variant_exists() {
+        let d = ArbDepositReceipt::default();
+        let e = ArbReceipt::Deposit(d);
+        match e {
+            ArbReceipt::Deposit(_) => {}
+            _ => panic!("expected deposit variant"),
         }
     }
 }
