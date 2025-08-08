@@ -1,3 +1,22 @@
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
+pub mod args;
+pub mod engine;
+pub use engine::ArbEngineTypes;
+
+pub mod node;
+pub use node::*;
+
+pub mod rpc;
+pub use rpc::ArbEngineApiBuilder;
+
+pub mod version;
+pub use version::ARB_NAME_CLIENT;
+
+pub use reth_arbitrum_evm::*;
+
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub struct ArbNode;
