@@ -60,7 +60,7 @@ fn test_cursor<T>(mut trie: T, expected: &[Vec<u8>])
 where
     T: TrieCursor,
 {
-    let mut walker = TrieWalker::state_trie(&mut trie, Default::default());
+    let mut walker = TrieWalker::<_>::state_trie(&mut trie, Default::default());
     assert!(walker.key().unwrap().is_empty());
 
     // We're traversing the path in lexicographical order.
@@ -114,7 +114,7 @@ fn cursor_rootnode_with_changesets() {
     let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
 
     // No changes
-    let mut cursor = TrieWalker::state_trie(&mut trie, Default::default());
+    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());
     assert_eq!(cursor.key().copied(), Some(Nibbles::new())); // root
     assert!(cursor.can_skip_current_node); // due to root_hash
     cursor.advance().unwrap(); // skips to the end of trie
@@ -123,7 +123,7 @@ fn cursor_rootnode_with_changesets() {
     // We insert something that's not part of the existing trie/prefix.
     let mut changed = PrefixSetMut::default();
     changed.insert(Nibbles::from_nibbles([0xF, 0x1]));
-    let mut cursor = TrieWalker::state_trie(&mut trie, changed.freeze());
+    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, changed.freeze());
 
     // Root node
     assert_eq!(cursor.key().copied(), Some(Nibbles::new()));

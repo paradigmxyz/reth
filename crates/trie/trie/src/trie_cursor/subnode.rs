@@ -1,5 +1,6 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
+use alloy_trie::proof::AddedRemovedKeys;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -85,6 +86,26 @@ impl CursorSubNode {
     #[inline]
     pub const fn full_key(&self) -> &Nibbles {
         &self.full_key
+    }
+
+    /// Returns true if all of:
+    /// - Position is a child
+    /// - There is a branch node
+    /// - All children except the current are removed according to the [`AddedRemovedKeys`].
+    pub fn full_key_is_only_nonremoved_child(&self, added_removed_keys: &AddedRemovedKeys) -> bool {
+        self.position.as_child().zip(self.node.as_ref()).is_some_and(|(nibble, node)| {
+            let removed_mask = added_removed_keys.get_removed_mask(&self.key);
+            let nonremoved_mask = !removed_mask & node.state_mask;
+            tracing::trace!(
+                target: "trie::walker",
+                key = ?self.key,
+                ?removed_mask,
+                ?nonremoved_mask,
+                ?nibble,
+                "Checking full_key_is_only_nonremoved_node",
+            );
+            nonremoved_mask.count_ones() == 1 && nonremoved_mask.is_bit_set(nibble)
+        })
     }
 
     /// Updates the full key by replacing or appending a child nibble based on the old subnode

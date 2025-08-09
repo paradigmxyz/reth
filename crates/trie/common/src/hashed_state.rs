@@ -1,6 +1,7 @@
 use core::ops::Not;
 
 use crate::{
+    added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, MultiProofTargets, Nibbles,
 };
@@ -207,15 +208,23 @@ impl HashedPostState {
     ///
     /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
     /// are done correctly.
-    pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
+    pub fn partition_by_targets(
+        mut self,
+        targets: &MultiProofTargets,
+        added_removed_keys: &MultiAddedRemovedKeys,
+    ) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
         self.storages.retain(|&address, storage| {
+            let storage_added_removed_keys = added_removed_keys.get_storage(&address);
+
             let (retain, storage_not_in_targets) = match targets.get(&address) {
                 Some(storage_in_targets) => {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) {
+                        if storage_in_targets.contains(&slot) &&
+                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
+                        {
                             return true
                         }
 
@@ -975,7 +984,8 @@ mod tests {
         };
         let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
 
-        let (with_targets, without_targets) = state.partition_by_targets(&targets);
+        let (with_targets, without_targets) =
+            state.partition_by_targets(&targets, &MultiAddedRemovedKeys::new());
 
         assert_eq!(
             with_targets,

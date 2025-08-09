@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -419,6 +419,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?path, ?node, ?masks, "reveal_node called");
+
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
@@ -570,6 +572,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, ?value, "update_leaf called");
+
         self.prefix_set.insert(full_path);
         let existing = self.values.insert(full_path, value);
         if existing.is_some() {
@@ -636,6 +640,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
+                                warn!(
+                                    target: "trie::sparse",
+                                    leaf_full_path = ?full_path,
+                                    child_path = ?current,
+                                    "Extension node child not revealed in update_leaf, falling back to db",
+                                );
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                     provider.trie_node(&current)?
                                 {
@@ -700,6 +710,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, "remove_leaf called");
+
         if self.values.remove(full_path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {
                 // Leaf is present in the trie, but it's blinded.
@@ -803,7 +815,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
+                            warn!(
+                                target: "trie::sparse",
+                                ?child_path,
+                                leaf_full_path = ?full_path,
+                                "Branch node child not revealed in remove_leaf, falling back to db",
+                            );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&child_path)?
                             {
@@ -2286,8 +2303,8 @@ mod tests {
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
-        let walker =
-            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze())
+            .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
