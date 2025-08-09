@@ -46,7 +46,7 @@ impl<T> FullEthApiServer for T where
 {
 }
 
-/// Eth rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>
+/// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthApi<TxReq: RpcObject, T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
