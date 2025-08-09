@@ -396,7 +396,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing
-        // exception in testsuite There are more nonce overflow tests that are in internal
+        // exception in testsuite There are more nonce overflow tests that are internal
         // call/create, and those tests are passing and are enabled.
         | "CreateTransactionHighNonce.json"
 
