@@ -49,7 +49,7 @@ pub struct ArbBlockExecutionCtx {
     pub extra_data: Bytes,
 }
 
-pub struct ArbBlockExecutor<'a, Evm, CS, RB> {
+pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<CS>, &'a RB>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
@@ -73,6 +73,7 @@ impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
 
 impl<'db, DB, E, CS, RB> AlloyBlockExecutor for ArbBlockExecutor<'_, E, CS, RB>
 where
+    RB: alloy_evm::eth::receipt_builder::ReceiptBuilder,
     DB: Database + 'db,
     E: reth_evm::Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
 {

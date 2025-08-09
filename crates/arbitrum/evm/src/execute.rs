@@ -1,7 +1,6 @@
 #![allow(unused)]
 
 use alloy_primitives::{Address, U256};
-use reth_evm::Evm;
 use arb_alloy_util::l1_pricing::L1PricingState;
 
 pub struct ArbStartTxContext {
@@ -30,14 +29,14 @@ pub struct ArbEndTxContext {
 }
 
 pub trait ArbOsHooks {
-    fn start_tx<E: Evm>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext);
-    fn gas_charging<E: Evm>(
+    fn start_tx<E>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext);
+    fn gas_charging<E>(
         &self,
         evm: &mut E,
         state: &mut ArbTxProcessorState,
         ctx: &ArbGasChargingContext,
     ) -> (Address, Result<(), ()>);
-    fn end_tx<E: Evm>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbEndTxContext);
+    fn end_tx<E>(&self, evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbEndTxContext);
     fn nonrefundable_gas(&self, state: &ArbTxProcessorState) -> u64;
     fn held_gas(&self, state: &ArbTxProcessorState) -> u64;
 }
@@ -56,11 +55,11 @@ impl DefaultArbOsHooks {
 }
 
 impl ArbOsHooks for DefaultArbOsHooks {
-    fn start_tx<E: Evm>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext) {
+    fn start_tx<E>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, ctx: &ArbStartTxContext) {
         state.delayed_inbox = ctx.coinbase != Address::ZERO;
     }
 
-    fn gas_charging<E: Evm>(
+    fn gas_charging<E>(
         &self,
         _evm: &mut E,
         state: &mut ArbTxProcessorState,
@@ -81,7 +80,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
         (tip_recipient, Ok(()))
     }
 
-    fn end_tx<E: Evm>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, _ctx: &ArbEndTxContext) {
+    fn end_tx<E>(&self, _evm: &mut E, state: &mut ArbTxProcessorState, _ctx: &ArbEndTxContext) {
         state.compute_hold_gas = state.compute_hold_gas.saturating_add(state.poster_gas);
         state.poster_fee = U256::ZERO;
         state.poster_gas = 0;
@@ -119,7 +118,6 @@ mod tests {
     use alloy_primitives::{Address, U256};
 
     struct DummyEvm;
-    impl Evm for DummyEvm {}
 
     #[test]
     fn gas_charging_applies_poster_data_cost_with_padding() {

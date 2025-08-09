@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use alloy_consensus::{Eip658Value, Receipt as AlloyReceipt};
 use alloy_evm::eth::receipt_builder::ReceiptBuilderCtx;
 use alloy_primitives::Log;
-use reth_evm::Evm;
 use reth_arbitrum_primitives::{ArbDepositReceipt, ArbReceipt, ArbTransactionSigned, ArbTxType};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -21,7 +20,7 @@ pub trait ArbReceiptBuilder {
     type Transaction;
     type Receipt;
 
-    fn build_receipt<'a, E: Evm>(
+    fn build_receipt<'a, E>(
         &self,
         ctx: ReceiptBuilderCtx<'a, Self::Transaction, E>,
     ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, Self::Transaction, E>>;
@@ -33,7 +32,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
     type Transaction = ArbTransactionSigned;
     type Receipt = ArbReceipt;
 
-    fn build_receipt<'a, E: Evm>(
+    fn build_receipt<'a, E>(
         &self,
         ctx: ReceiptBuilderCtx<'a, ArbTransactionSigned, E>,
     ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, ArbTransactionSigned, E>> {
@@ -90,9 +89,7 @@ mod tests {
 
     #[test]
     fn deposit_receipt_build_path_errors() {
-        use reth_evm::Evm;
         struct DummyEvm;
-        impl Evm for DummyEvm {}
 
         let builder = ArbRethReceiptBuilder::default();
         use arb_alloy_consensus::tx::ArbDepositTx;
@@ -128,9 +125,7 @@ mod tests {
 
     #[test]
     fn non_deposit_tx_types_build_legacy_receipts_without_l1_fields() {
-        use reth_evm::Evm;
         struct DummyEvm;
-        impl Evm for DummyEvm {}
 
         let builder = ArbRethReceiptBuilder::default();
 
