@@ -10,4 +10,7 @@ default = ["std"]
 std = []
 
 [dependencies]
-revm = { version = "27.0.3", default-features = false, features = ["std"] }
+revm.workspace = true
+reth-chainspec = { path = "../../chainspec", default-features = false, features = ["std"] }
+alloy-primitives.workspace = true
+alloy-evm.workspace = true
