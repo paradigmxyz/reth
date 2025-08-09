@@ -17,5 +17,5 @@ cmd=(
   --out-dir "$VOCS_PAGES_ROOT/cli/"
   "$RETH"
 )
-echo "Running: $" "${cmd[*]}"
+echo "Running: ${cmd[*]}"
 "${cmd[@]}"
