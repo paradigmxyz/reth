@@ -44,6 +44,7 @@ impl Default for DefaultRetryables {
     }
 }
 
+#[derive(Clone)]
 struct TicketState {
     escrowed: U256,
     beneficiary: Address,
@@ -159,6 +160,7 @@ mod tests {
             }
             _ => panic!("expected Redeemed"),
         }
+    }
     #[test]
     fn get_beneficiary_returns_set_address() {
         let mut r = DefaultRetryables::default();
@@ -183,5 +185,4 @@ mod tests {
         assert_eq!(got, Some(beneficiary));
     }
 
-    }
 }
