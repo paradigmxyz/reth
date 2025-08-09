@@ -5,7 +5,7 @@ on:
   # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
   # merge_group:
   push:
-    branches: [main]
+    branches: ["**"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,8 +15,7 @@ env:
 name: bench
 jobs:
   codspeed:
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
