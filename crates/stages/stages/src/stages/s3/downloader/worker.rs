@@ -13,7 +13,7 @@ use tracing::debug;
 pub(crate) enum WorkerResponse {
     /// Worker has been spawned and awaiting work.
     Ready { worker_id: u64, tx: UnboundedSender<WorkerRequest> },
-    /// Worker has downloaded
+    /// Worker has downloaded a chunk of data
     DownloadedChunk { worker_id: u64, chunk_index: usize, written_bytes: usize },
     /// Worker has encountered an error.
     Err { worker_id: u64, error: DownloaderError },
