@@ -843,6 +843,7 @@ pub enum ArbTxType {
     Legacy,
 }
 
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArbPrimitives;
 
@@ -868,7 +869,7 @@ impl reth_primitives_traits::NodePrimitives for ArbPrimitives {
             gas: 21000,
             to: Some(address!("00000000000000000000000000000000000000bb")),
             value: U256::from(123u64),
-            data: alloc::vec::Vec::new(),
+            data: alloc::vec::Vec::new().into(),
         };
 
         let mut enc = alloc::vec::Vec::with_capacity(1 + tx.length());
