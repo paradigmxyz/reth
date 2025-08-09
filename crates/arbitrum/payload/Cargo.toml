@@ -12,4 +12,8 @@ std = [
 ]
 
 [dependencies]
-alloy-primitives = { version = "1", default-features = false, features = ["std"] }
+alloy-primitives = { workspace = true, features = ["std"] }
+alloy-eips = { workspace = true }
+alloy-rpc-types-engine = { workspace = true }
+serde = { version = "1", default-features = false, features = ["derive"] }
+reth-payload-primitives = { path = "../../payload/primitives", default-features = false }
