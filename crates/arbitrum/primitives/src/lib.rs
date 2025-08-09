@@ -299,6 +299,7 @@ impl alloy_rlp::Decodable for ArbReceipt {
 
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ArbTypedTransaction {
     Deposit(arb_alloy_consensus::tx::ArbDepositTx),
     Unsigned(arb_alloy_consensus::tx::ArbUnsignedTx),
