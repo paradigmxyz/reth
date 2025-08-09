@@ -299,7 +299,6 @@ impl alloy_rlp::Decodable for ArbReceipt {
 
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ArbTypedTransaction {
     Deposit(arb_alloy_consensus::tx::ArbDepositTx),
     Unsigned(arb_alloy_consensus::tx::ArbUnsignedTx),
@@ -345,7 +344,6 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
 }
 
 #[derive(Clone, Debug, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbTransactionSigned {
     #[cfg_attr(feature = "serde", serde(skip))]
     hash: reth_primitives_traits::sync::OnceLock<TxHash>,
@@ -354,6 +352,49 @@ pub struct ArbTransactionSigned {
     #[cfg_attr(feature = "serde", serde(skip))]
     input_cache: reth_primitives_traits::sync::OnceLock<Bytes>,
 }
+#[cfg(feature = "serde")]
+impl serde::Serialize for ArbTransactionSigned {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ArbTransactionSigned", 3)?;
+        state.serialize_field("signature", &self.signature)?;
+        let mut buf = alloc::vec::Vec::with_capacity(self.length());
+        self.encode_2718(&mut buf);
+        let bytes = alloy_primitives::Bytes::from(buf);
+        state.serialize_field("transaction_encoded_2718", &bytes)?;
+        state.serialize_field("hash", self.tx_hash())?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ArbTransactionSigned {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            signature: Signature,
+            transaction_encoded_2718: alloy_primitives::Bytes,
+        }
+        let helper = Helper::deserialize(deserializer)?;
+        let mut slice: &[u8] = helper.transaction_encoded_2718.as_ref();
+        let mut remainder = alloy_rlp::Remainder::new(slice);
+        let parsed = ArbTransactionSigned::typed_decode(&mut remainder)
+            .map_err(serde::de::Error::custom)?;
+        let mut out = ArbTransactionSigned::new_unhashed(parsed.transaction, parsed.signature);
+        out.recalculate_hash();
+        if out.signature != helper.signature {
+            return Err(serde::de::Error::custom("signature mismatch"));
+        }
+        Ok(out)
+    }
+}
+
 
 impl Deref for ArbTransactionSigned {
     type Target = ArbTypedTransaction;
