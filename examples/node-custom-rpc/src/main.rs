@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p node-custom-rpc -- node --http --ws --enable-ext
+//! cargo run -p example-node-custom-rpc -- node --http --ws --enable-ext
 //! ```
 //!
 //! This installs an additional RPC method `txpoolExt_transactionCount` that can be queried via [cast](https://github.com/foundry-rs/foundry)
