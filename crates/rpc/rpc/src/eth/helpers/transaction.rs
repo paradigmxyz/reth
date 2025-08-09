@@ -8,9 +8,7 @@ use reth_rpc_eth_api::{
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
-};
+use reth_transaction_pool::{AddedTransactionOutcome, PoolTransaction, TransactionPool};
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
@@ -34,9 +32,8 @@ where
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =
-            self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+            self.inner.add_pool_transaction(pool_transaction).await?;
 
         Ok(hash)
     }
