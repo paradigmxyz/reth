@@ -345,11 +345,9 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
 
 #[derive(Clone, Debug, Eq)]
 pub struct ArbTransactionSigned {
-    #[cfg_attr(feature = "serde", serde(skip))]
     hash: reth_primitives_traits::sync::OnceLock<TxHash>,
     signature: Signature,
     transaction: ArbTypedTransaction,
-    #[cfg_attr(feature = "serde", serde(skip))]
     input_cache: reth_primitives_traits::sync::OnceLock<Bytes>,
 }
 #[cfg(feature = "serde")]
@@ -383,9 +381,21 @@ impl<'de> serde::Deserialize<'de> for ArbTransactionSigned {
         }
         let helper = Helper::deserialize(deserializer)?;
         let mut slice: &[u8] = helper.transaction_encoded_2718.as_ref();
-        let mut remainder = alloy_rlp::Remainder::new(slice);
-        let parsed = ArbTransactionSigned::typed_decode(&mut remainder)
-            .map_err(serde::de::Error::custom)?;
+        let parsed = if let Some(first) = slice.first().copied() {
+            match arb_alloy_consensus::tx::ArbTxType::from_u8(first) {
+                Ok(_) => {
+                    let mut rest = &slice[1..];
+                    ArbTransactionSigned::typed_decode(first, &mut rest)
+                        .map_err(serde::de::Error::custom)?
+                }
+                Err(_) => {
+                    ArbTransactionSigned::fallback_decode(&mut slice)
+                        .map_err(serde::de::Error::custom)?
+                }
+            }
+        } else {
+            return Err(serde::de::Error::custom("empty transaction_encoded_2718"));
+        };
         let mut out = ArbTransactionSigned::new_unhashed(parsed.transaction, parsed.signature);
         out.recalculate_hash();
         if out.signature != helper.signature {
