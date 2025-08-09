@@ -132,6 +132,17 @@ pub struct TxPoolArgs {
         conflicts_with = "transactions_backup_path"
     )]
     pub disable_transactions_backup: bool,
+
+    /// Discard reorged transactions instead of re-injecting them into the mempool.
+    ///
+    /// When enabled, transactions from reorged blocks are permanently discarded rather
+    /// than being re-added to the transaction pool. This is useful for custom chains
+    /// that have different transaction validity rules or require strict control over
+    /// mempool contents after reorgs.
+    ///
+    /// Default: false (re-inject transactions to preserve standard Ethereum behavior)
+    #[arg(long = "txpool.discard-reorged-transactions")]
+    pub discard_reorged_transactions: bool,
 }
 
 impl Default for TxPoolArgs {
@@ -165,6 +176,7 @@ impl Default for TxPoolArgs {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
+            discard_reorged_transactions: false,
         }
     }
 }
