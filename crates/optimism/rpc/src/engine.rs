@@ -221,7 +221,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
     /// Signals superchain information to the Engine.
-    /// Returns the latest supported OP-Stack protocol version of the execution engine.
+    /// Returns the latest supported OP Stack protocol version of the execution engine.
     /// See also <https://specs.optimism.io/protocol/exec-engine.html#engine_signalsuperchainv1>
     #[method(name = "engine_signalSuperchainV1")]
     async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion>;
