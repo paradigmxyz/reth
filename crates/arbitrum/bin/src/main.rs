@@ -4,9 +4,7 @@ use clap::Parser;
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use reth_arbitrum_chainspec::ArbChainSpec;
 use reth_arbitrum_node::{args::RollupArgs, ArbNode};
-use reth_cli_commands::launcher::FnLauncher;
-use reth_cli_commands::node::NodeCommand;
-use reth_cli_runner::CliRunner;
+use reth_ethereum_cli::interface::Cli;
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -44,17 +42,9 @@ fn main() {
 
 fn run() -> eyre::Result<()> {
     info!(target: "arb-reth::cli", "Launching arb-reth");
-    let runner = CliRunner::try_default_runtime()?;
-    let cmd = NodeCommand::<ArbChainSpecParser, RollupArgs>::parse();
-    runner.run_until_ctrl_c(async move |ctx| {
-        cmd.execute(
-            ctx,
-            FnLauncher::new::<ArbChainSpecParser, RollupArgs>(async move |builder, rollup_args| {
-                let handle = builder.node(ArbNode::new(rollup_args)).launch_with_debug_capabilities().await?;
-                handle.node_exit_future.await;
-                Ok(())
-            }),
-        )
-        .await
+    Cli::<ArbChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
+        let handle = builder.node(ArbNode::new(rollup_args)).launch_with_debug_capabilities().await?;
+        handle.node_exit_future.await;
+        Ok(())
     })
 }
