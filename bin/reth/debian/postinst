@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+# Create reth user if it doesn't exist
+if ! getent passwd reth >/dev/null 2>&1; then
+    adduser --system --group --home /var/lib/reth \
+            --shell /bin/false --gecos "reth Full Node" reth
+fi
+
+# Create data directory
+mkdir -p /var/lib/reth
+chown reth:reth /var/lib/reth
+chmod 750 /var/lib/reth
+
+# Create log directory  
+mkdir -p /var/log/reth
+chown reth:reth /var/log/reth
+chmod 750 /var/log/reth
+
+# Reload systemd
+systemctl daemon-reload || true
+
+#DEBHELPER#
+
+exit 0

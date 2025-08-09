@@ -62,10 +62,6 @@ build: ## Build the reth binary into `target` directory.
 # Environment variables for reproducible builds
 # Initialize RUSTFLAGS
 RUST_BUILD_FLAGS =
-# Enable static linking to ensure reproducibility across builds
-RUST_BUILD_FLAGS += --C target-feature=+crt-static
-# Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
 # Remove build ID from the binary to ensure reproducibility across builds
 RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
 # Remove metadata hash from symbol names to ensure reproducible builds
@@ -79,14 +75,17 @@ LOCALE_VAL = C
 # Set UTC timezone for consistent time handling across builds
 TZ_VAL = UTC
 
+# The target architecture for the build. Default is x86_64-unknown-linux-gnu.
+RUST_TARGET ?= x86_64-unknown-linux-gnu
+
 .PHONY: build-reproducible
-build-reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
+build-reproducible: ## Build the reth binary into `target` directory with reproducible builds.
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
 	RUSTFLAGS="${RUST_BUILD_FLAGS} --remap-path-prefix $$(pwd)=." \
 	CARGO_INCREMENTAL=${CARGO_INCREMENTAL_VAL} \
 	LC_ALL=${LOCALE_VAL} \
 	TZ=${TZ_VAL} \
-	cargo build --bin reth --features "$(FEATURES)" --profile "release" --locked --target x86_64-unknown-linux-gnu
+	cargo build --bin reth --features "$(FEATURES)" --profile "release" --locked --target $(RUST_TARGET)
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
@@ -504,3 +503,87 @@ check-features:
 		--package reth-primitives-traits \
 		--package reth-primitives \
 		--feature-powerset
+
+##@ Debian Packaging
+
+.PHONY: deb-cargo
+deb-cargo: build-reproducible ## Build .deb package using cargo-deb with reproducible settings
+	@echo "Building .deb package with cargo-deb..."
+
+	cd bin/reth && \
+	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
+	CARGO_INCREMENTAL=$(CARGO_INCREMENTAL_VAL) \
+	LC_ALL=$(LOCALE_VAL) \
+	TZ=$(TZ_VAL) \
+	RUSTFLAGS="${RUST_BUILD_FLAGS}" \
+	cargo deb --target $(RUST_TARGET) --no-build
+	
+	@echo "✅ Package built successfully!"
+	@find target/$(RUST_TARGET)/debian -name "*.deb" -exec ls -la {} \;
+
+.PHONY: deb-cargo-x86_64
+deb-cargo-x86_64: ## Build .deb for x86_64 architecture
+	$(MAKE) deb-cargo RUST_TARGET=x86_64-unknown-linux-gnu
+
+.PHONY: deb-cargo-aarch64  
+deb-cargo-aarch64: ## Build .deb for aarch64 architecture
+	$(MAKE) deb-cargo RUST_TARGET=aarch64-unknown-linux-gnu
+
+.PHONY: deb-cargo-all
+deb-cargo-all: deb-cargo-x86_64 deb-cargo-aarch64 ## Build .deb for all architectures
+
+.PHONY: test-deb-reproducible
+test-deb-reproducible: ## Test reproducibility of cargo-deb packages
+	@./scripts/test-deb-reproducible.sh
+
+.PHONY: install-deb-local
+install-deb-local: ## Install .deb package locally for testing
+	@PACKAGE=$(find target/x86_64-unknown-linux-gnu/debian -name "*.deb" | head -1); \
+	if [ -n "$PACKAGE" ]; then \
+		echo "Installing reth package: $PACKAGE"; \
+		sudo dpkg -i "$PACKAGE"; \
+		echo "Fixing dependencies if needed..."; \
+		sudo apt-get install -f; \
+		echo "✅ Package installed successfully!"; \
+		echo ""; \
+		echo "The reth service is now available but not started."; \
+		echo ""; \
+		echo "To check service status: systemctl status reth"; \
+	else \
+		echo "❌ No .deb package found. Run 'make deb-cargo' first."; \
+	fi
+
+.PHONY: remove-deb-local
+remove-deb-local: ## Remove installed reth package
+	@echo "Removing reth package..."
+	sudo dpkg -r reth || true
+	sudo systemctl daemon-reload || true
+
+.PHONY: clean-deb
+clean-deb: ## Clean up debian packaging artifacts
+	@echo "Cleaning up debian packaging artifacts..."
+	rm -f reth_*.deb reth-deb-*.deb *-diff.txt
+	rm -rf target/*/debian/
+
+.PHONY: help-deb
+help-deb: ## Show help for debian packaging
+	@echo "Debian Packaging Targets:"
+	@echo "  deb-cargo              - Build .deb package with cargo-deb"
+	@echo "  deb-cargo-x86_64       - Build x86_64 .deb package"
+	@echo "  deb-cargo-aarch64      - Build aarch64 .deb package"
+	@echo "  deb-cargo-all          - Build all architectures"
+	@echo "  test-deb-reproducible  - Test reproducibility"
+	@echo "  install-deb-local      - Install .deb package locally"
+	@echo "  remove-deb-local       - Remove installed package"
+	@echo "  clean-deb              - Clean up packaging artifacts"
+	@echo ""
+	@echo "Prerequisites:"
+	@echo "  - bin/reth/debian/reth.service file"  
+	@echo "  - README.md file in current directory"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make deb-cargo         - Build .deb for x86_64"
+	@echo "  make install-deb-local - Test the package"
+
+.PHONY: clean-all
+clean-all: clean clean-deb ## Clean all build artifacts including debian packaging
