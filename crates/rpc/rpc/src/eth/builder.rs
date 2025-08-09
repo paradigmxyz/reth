@@ -11,8 +11,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    GasPriceOracleConfig,
+    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap,
+    GasPriceOracle, GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -40,6 +40,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
+    raw_tx_forwarder: ForwardConfig,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -78,6 +79,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -94,6 +96,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            raw_tx_forwarder,
         }
     }
 }
@@ -121,6 +124,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -155,6 +159,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -171,6 +176,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         }
     }
 
@@ -194,6 +200,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env: _,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -210,6 +217,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         }
     }
 
@@ -281,6 +289,12 @@ where
         self
     }
 
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: ForwardConfig) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -309,6 +323,7 @@ where
             proof_permits,
             task_spawner,
             next_env,
+            raw_tx_forwarder,
         } = self;
 
         let provider = components.provider().clone();
@@ -345,6 +360,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
+            raw_tx_forwarder,
         )
     }
 
