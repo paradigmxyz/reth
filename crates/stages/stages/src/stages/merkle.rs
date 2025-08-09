@@ -50,7 +50,7 @@ pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
-/// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
+/// [`StorageHashingStage`][crate::stages::StorageHashingStage] to calculate intermediate hashes
 /// and state roots.
 ///
 /// This stage should be run with the above two stages, otherwise it is a no-op.
