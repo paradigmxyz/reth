@@ -83,7 +83,7 @@ macro_rules! blockchain_test {
         #[test]
         fn $test_name() {
             reth_tracing::init_test_tracing();
-            BlockchainTests::new(format!("{}", stringify!($dir))).run();
+            BlockchainTests::new(stringify!($dir).to_string()).run();
         }
     };
 }
