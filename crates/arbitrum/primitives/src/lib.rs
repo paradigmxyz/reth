@@ -344,7 +344,7 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
 }
 
 #[derive(Clone, Debug, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ArbTransactionSigned {
     #[cfg_attr(feature = "serde", serde(skip))]
     hash: reth_primitives_traits::sync::OnceLock<TxHash>,
