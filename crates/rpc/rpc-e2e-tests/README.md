@@ -94,20 +94,24 @@ async fn test_eth_get_logs_compat() -> Result<()> {
 
 ### Running Tests
 
+To run the official execution-apis test suite:
+
 1. Clone the execution-apis repository:
    ```bash
    git clone https://github.com/ethereum/execution-apis.git
    ```
 
-2. Set the test data path:
+2. Set the test data path environment variable:
    ```bash
-   export EXECUTION_APIS_TEST_PATH=../execution-apis/tests
+   export EXECUTION_APIS_TEST_PATH=/path/to/execution-apis/tests
    ```
 
-3. Run the test:
+3. Run the execution-apis compatibility test:
    ```bash
-   cargo test --test rpc_compat test_eth_get_logs_compat -- --nocapture
+   cargo nextest run --test e2e_testsuite test_execution_apis_compat
    ```
+
+This will auto-discover all RPC method directories and test each file individually, providing detailed per-file results.
 
 ### Custom Test Data
 

@@ -1,6 +1,6 @@
 //! MDBX implementation for reth's database abstraction layer.
 //!
-//! This crate is an implementation of [`reth-db-api`] for MDBX, as well as a few other common
+//! This crate is an implementation of `reth-db-api` for MDBX, as well as a few other common
 //! database types.
 //!
 //! # Overview

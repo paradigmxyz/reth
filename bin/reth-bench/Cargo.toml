@@ -65,7 +65,6 @@ humantime.workspace = true
 csv.workspace = true
 
 [dev-dependencies]
-reth-tracing.workspace = true
 
 [features]
 default = ["jemalloc"]

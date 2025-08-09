@@ -163,7 +163,7 @@ where
 
 impl<Net> BlockDownloaderProvider for NoopNetwork<Net>
 where
-    Net: NetworkPrimitives + Default,
+    Net: NetworkPrimitives,
 {
     type Client = NoopFullBlockClient<Net>;
 

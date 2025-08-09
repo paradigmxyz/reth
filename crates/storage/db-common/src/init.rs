@@ -8,6 +8,7 @@ use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
+use reth_execution_errors::StateRootError;
 use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
@@ -63,6 +64,9 @@ pub enum InitStorageError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// State root error while computing the state root
+    #[error(transparent)]
+    StateRootError(#[from] StateRootError),
     /// State root doesn't match the expected one.
     #[error("state root mismatch: {_0}")]
     StateRootMismatch(GotExpected<B256>),
@@ -88,6 +92,7 @@ where
         + HeaderProvider
         + HashingWriter
         + StateWriter
+        + TrieWriter
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -137,6 +142,9 @@ where
     insert_genesis_header(&provider_rw, &chain)?;
 
     insert_genesis_state(&provider_rw, alloc.iter())?;
+
+    // compute state root to populate trie tables
+    compute_state_root(&provider_rw)?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -552,7 +560,7 @@ where
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
-fn compute_state_root<Provider>(provider: &Provider) -> eyre::Result<B256>
+fn compute_state_root<Provider>(provider: &Provider) -> Result<B256, InitStorageError>
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
 {
@@ -572,7 +580,7 @@ where
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
-                    last_account_key = %state.last_account_key,
+                    last_account_key = %state.account_root_state.last_hashed_key,
                     updated_len,
                     total_flushed_updates,
                     "Flushing trie updates"

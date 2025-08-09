@@ -125,7 +125,7 @@ where
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CustomEngineApiBuilder {}
 
 impl<N> EngineApiBuilder<N> for CustomEngineApiBuilder

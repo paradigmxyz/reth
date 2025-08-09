@@ -5,12 +5,12 @@ use crate::{
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory};
+use crate::{DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -27,6 +27,7 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
@@ -37,6 +38,8 @@ use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+#[cfg(feature = "db-api")]
+use reth_trie_db::MerklePatriciaTrie;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug)]
@@ -477,6 +480,17 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
     }
 }
 
+impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
+    type Receipt = N::Receipt;
+
+    fn get_state(
+        &self,
+        _block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+        Ok(None)
+    }
+}
+
 impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
     fn storage(
         &self,
@@ -610,6 +624,13 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> StateCommitmentProvider
+    for NoopProvider<ChainSpec, N>
+{
+    type StateCommitment = MerklePatriciaTrie;
 }
 
 #[cfg(feature = "db-api")]

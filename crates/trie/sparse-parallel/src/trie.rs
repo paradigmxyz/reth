@@ -32,6 +32,60 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
+/// ## Structure
+///
+/// The trie is divided into two tiers for efficient parallel processing:
+/// - **Upper subtrie**: Contains nodes with paths shorter than [`UPPER_TRIE_MAX_DEPTH`]
+/// - **Lower subtries**: An array of [`NUM_LOWER_SUBTRIES`] subtries, each handling nodes with
+///   paths of at least [`UPPER_TRIE_MAX_DEPTH`] nibbles
+///
+/// Node placement is determined by path depth:
+/// - Paths with < [`UPPER_TRIE_MAX_DEPTH`] nibbles go to the upper subtrie
+/// - Paths with >= [`UPPER_TRIE_MAX_DEPTH`] nibbles go to lower subtries, indexed by their first
+///   [`UPPER_TRIE_MAX_DEPTH`] nibbles.
+///
+/// Each lower subtrie tracks its root via the `path` field, which represents the shortest path
+/// in that subtrie. This path will have at least [`UPPER_TRIE_MAX_DEPTH`] nibbles, but may be
+/// longer when an extension node in the upper trie "reaches into" the lower subtrie. For example,
+/// if the upper trie has an extension from `0x1` to `0x12345`, then the lower subtrie for prefix
+/// `0x12` will have its root at path `0x12345` rather than at `0x12`.
+///
+/// ## Node Revealing
+///
+/// The trie uses lazy loading to efficiently handle large state tries. Nodes can be:
+/// - **Blind nodes**: Stored as hashes ([`SparseNode::Hash`]), representing unloaded trie parts
+/// - **Revealed nodes**: Fully loaded nodes (Branch, Extension, Leaf) with complete structure
+///
+/// Note: An empty trie contains an `EmptyRoot` node at the root path, rather than no nodes at all.
+/// A trie with no nodes is blinded, its root may be `EmptyRoot` or some other node type.
+///
+/// Revealing is generally done using pre-loaded node data provided to via `reveal_nodes`. In
+/// certain cases, such as edge-cases when updating/removing leaves, nodes are revealed on-demand.
+///
+/// ## Leaf Operations
+///
+/// **Update**: When updating a leaf, the new value is stored in the appropriate subtrie's values
+/// map. If the leaf is new, the trie structure is updated by walking to the leaf from the root,
+/// creating necessary intermediate branch nodes.
+///
+/// **Removal**: Leaf removal may require parent node modifications. The algorithm walks up the
+/// trie, removing nodes that become empty and converting single-child branches to extensions.
+///
+/// During leaf operations the overall structure of the trie may change, causing nodes to be moved
+/// from the upper to lower trie or vice-versa.
+///
+/// The `prefix_set` is modified during both leaf updates and removals to track changed leaf paths.
+///
+/// ## Root Hash Calculation
+///
+/// Root hash computation follows a bottom-up approach:
+/// 1. Update hashes for all modified lower subtries (can be done in parallel)
+/// 2. Update hashes for the upper subtrie (which may reference lower subtrie hashes)
+/// 3. Calculate the final root hash from the upper subtrie's root node
+///
+/// The `prefix_set` tracks which paths have been modified, enabling incremental updates instead of
+/// recalculating the entire trie.
+///
 /// ## Invariants
 ///
 /// - Each leaf entry in the `subtries` and `upper_trie` collection must have a corresponding entry
@@ -55,6 +109,9 @@ pub struct ParallelSparseTrie {
     /// Reusable buffer pool used for collecting [`SparseTrieUpdatesAction`]s during hash
     /// computations.
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
+    /// Metrics for the parallel sparse trie.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ParallelSparseTrieMetrics,
 }
 
 impl Default for ParallelSparseTrie {
@@ -70,6 +127,8 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
         }
     }
 }
@@ -664,6 +723,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let (subtries, unchanged_prefix_set) = self.take_changed_lower_subtries(&mut prefix_set);
 
+        // update metrics
+        #[cfg(feature = "metrics")]
+        self.metrics.subtries_updated.record(subtries.len() as f64);
+
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
@@ -698,12 +761,16 @@ impl SparseTrieInterface for ParallelSparseTrie {
                          mut prefix_set,
                          mut update_actions_buf,
                      }| {
+                        #[cfg(feature = "metrics")]
+                        let start = std::time::Instant::now();
                         subtrie.update_hashes(
                             &mut prefix_set,
                             &mut update_actions_buf,
                             branch_node_tree_masks,
                             branch_node_hash_masks,
                         );
+                        #[cfg(feature = "metrics")]
+                        self.metrics.subtrie_hash_update_latency.record(start.elapsed());
                         (index, subtrie, update_actions_buf)
                     },
                 )
@@ -1164,6 +1231,9 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
+        #[cfg(feature = "metrics")]
+        let start = std::time::Instant::now();
+
         let mut update_actions_buf =
             self.updates_enabled().then(|| self.update_actions_buffers.pop().unwrap_or_default());
 
@@ -1208,6 +1278,9 @@ impl ParallelSparseTrie {
             );
             self.update_actions_buffers.push(update_actions_buf);
         }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.subtrie_upper_hash_latency.record(start.elapsed());
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
         self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
@@ -2381,7 +2454,7 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     path.get_byte_unchecked(0) as usize
 }
 
-/// Used by lower subtries to communicate updates to the the top-level [`SparseTrieUpdates`] set.
+/// Used by lower subtries to communicate updates to the top-level [`SparseTrieUpdates`] set.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum SparseTrieUpdatesAction {
     /// Remove the path from the `updated_nodes`, if it was present, and add it to `removed_nodes`.
