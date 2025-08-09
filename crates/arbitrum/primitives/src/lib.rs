@@ -33,7 +33,9 @@ pub enum ArbReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbDepositReceipt;
+#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbReceipt {}
+#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbTransactionSigned {}
 
 impl InMemorySize for ArbReceipt {
@@ -506,6 +508,7 @@ impl InMemorySize for ArbTransactionSigned {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl reth_codecs::Compact for ArbTransactionSigned {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

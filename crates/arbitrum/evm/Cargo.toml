@@ -25,7 +25,7 @@ reth-evm = { path = "../../evm/evm", default-features = false, features = ["std"
 reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
 reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }
 reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
-reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std"] }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std", "serde", "reth-codec", "serde-bincode-compat"] }
 reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
 
