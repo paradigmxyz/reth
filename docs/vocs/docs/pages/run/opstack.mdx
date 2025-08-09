@@ -5,7 +5,7 @@ description: Running Reth on Optimism and OP Stack chains.
 # Running Reth on OP Stack chains
 
 `reth` ships with the `optimism` feature flag in several crates, including the binary, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 EELS][l1-el-spec],
-comprising of the following key changes:
+comprising the following key changes:
 
 1. A new transaction type, [`0x7E (Deposit)`][deposit-spec], which is used to deposit funds from L1 to L2.
 1. Modifications to the `PayloadAttributes` that allow the [sequencer][sequencer] to submit transactions to the EL through the Engine API. Payloads will be built with deposit transactions at the top of the block,
@@ -45,7 +45,7 @@ This will install the `op-reth` binary to `~/.cargo/bin/op-reth`.
 
 ### Installing a Rollup Node
 
-Next, you'll need to install a [Rollup Node][rollup-node-spec], which is the equivalent to the Consensus Client on the OP Stack. Available options include:
+Next, you'll need to install a [Rollup Node][rollup-node-spec], which is the equivalent of the Consensus Client on the OP Stack. Available options include:
 
 1. [`op-node`][op-node]
 1. [`magi`][magi]

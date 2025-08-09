@@ -27,7 +27,7 @@ $ cd exex-remote
 ```
 
 We will also need a bunch of dependencies. Some of them you know from the [Hello World](/exex/hello-world) chapter,
-but some of specific to what we need now.
+but some of them are specific to what we need now.
 
 ```toml
 // [!include ~/snippets/sources/exex/remote/Cargo.toml]
@@ -93,7 +93,7 @@ and save the sender part (that way we will be able to create new receivers) of t
 ```
 
 And with that, we're ready to handle incoming notifications, serialize them with [bincode](https://docs.rs/bincode/)
-and send back to the client.
+and send it back to the client.
 
 For each incoming request, we spawn a separate tokio task that will run in the background,
 and then return the stream receiver to the client.
@@ -122,7 +122,7 @@ Don't forget to emit `ExExEvent::FinishedHeight`
 ```
 
 All that's left is to connect all pieces together: install our ExEx in the node and pass the sender part
-of communication channel to it.
+of the communication channel to it.
 
 ```rust
 // [!include ~/snippets/sources/exex/remote/src/exex.rs]
