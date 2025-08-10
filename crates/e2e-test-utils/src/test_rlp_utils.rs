@@ -106,6 +106,7 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             transactions: vec![],
             ommers: vec![],
             withdrawals: header.withdrawals_root.is_some().then(Withdrawals::default),
+            block_access_list: None,
         };
 
         // Create the block

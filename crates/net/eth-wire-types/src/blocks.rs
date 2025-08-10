@@ -411,6 +411,7 @@ mod tests {
                         },
                     ],
                     withdrawals: None,
+                    block_access_list:None
                 }
             ]),
         };
@@ -488,6 +489,7 @@ mod tests {
                         },
                     ],
                     withdrawals: None,
+                    block_access_list:None
                 }
             ]),
         };

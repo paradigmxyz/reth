@@ -402,6 +402,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });

@@ -145,6 +145,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         transactions: vec![Bytes::from(vec![(number % 256) as u8; 10])],
         ommers: vec![],
         withdrawals: Some(Withdrawals(vec![])),
+        block_access_list: None,
     };
 
     // Create test receipt list with bloom

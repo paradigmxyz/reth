@@ -114,7 +114,12 @@ where
 
         Ok(Block {
             header,
-            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
+            body: BlockBody {
+                transactions,
+                ommers: Default::default(),
+                withdrawals,
+                block_access_list: None,
+            },
         })
     }
 }

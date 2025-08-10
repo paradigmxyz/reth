@@ -295,6 +295,7 @@ mod tests {
                     storage,
                     status: AccountStatus::default(),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             );
             state
