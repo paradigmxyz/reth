@@ -36,7 +36,7 @@ serde = { version = "1", default-features = false, features = ["derive"], option
 bytes = { version = "1", default-features = false }
 
 # arb-alloy consensus types
-arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false }
+arb-alloy-consensus = { workspace = true }
 
 # reth workspace crates
 reth-codecs = { path = "../../storage/codecs", default-features = false, package = "reth-codecs", optional = true }

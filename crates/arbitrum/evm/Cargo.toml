@@ -38,9 +38,9 @@ reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, fea
 revm.workspace = true
 
 # arb-alloy
-arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc"] }
-arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default-features = false, features = ["alloc"] }
-arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features = false, features = ["alloc"] }
+arb-alloy-predeploys = { workspace = true, features = ["alloc"] }
+arb-alloy-consensus = { workspace = true, features = ["alloc"] }
+arb-alloy-util = { workspace = true, features = ["alloc"] }
 
 # alloy
 alloy-consensus.workspace = true

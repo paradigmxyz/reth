@@ -1025,7 +1025,9 @@ dependencies = [
 
 [[package]]
 name = "arb-alloy-consensus"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da591a661bf1f6a2aeff74fdacae22e5f73df8feddac7d7c22b23bc4794e000"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -1034,14 +1036,18 @@ dependencies = [
 
 [[package]]
 name = "arb-alloy-predeploys"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ee34d44e3bfa667f8f69b7849418e963a4c4bcd86ae64c87b182518a01a33e4"
 dependencies = [
  "alloy-primitives",
 ]
 
 [[package]]
 name = "arb-alloy-util"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbf824e0296311cfc3ab6b2c15e1b813909580db80a9f8d68927d7e0c1d6ff8b"
 dependencies = [
  "alloy-primitives",
 ]

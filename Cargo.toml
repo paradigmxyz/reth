@@ -473,6 +473,11 @@ reth-arbitrum-node = { path = "crates/arbitrum/node" }
 reth-arbitrum-rpc = { path = "crates/arbitrum/rpc" }
 reth-arbitrum-stf-wasm = { path = "crates/arbitrum/stf-wasm" }
 
+# arb-alloy
+arb-alloy-consensus = { version = "0.1.1", default-features = false }
+arb-alloy-predeploys = { version = "0.1.1", default-features = false }
+arb-alloy-util = { version = "0.1.1", default-features = false }
+
 # revm
 revm = { version = "27.0.3", default-features = false }
 revm-bytecode = { version = "6.0.1", default-features = false }
