@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 reth-optimism-node.workspace = true
-tokio.workspace = true
-reth-tracing.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-optimism-cli.workspace = true
 tower.workspace = true

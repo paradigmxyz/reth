@@ -455,8 +455,8 @@ where
     /// Sets the Tower middleware stack for processing Http requests.
     ///
     /// This method configures a custom middleware stack that will be applied to all Http requests
-    /// across HTTP, `WebSocket`, and IPC transports. The middleware is applied to the Http transport
-    /// layer, allowing you to intercept, modify, or enhance Http request processing.
+    /// across HTTP, `WebSocket`, and IPC transports. The middleware is applied to the Http
+    /// transport layer, allowing you to intercept, modify, or enhance Http request processing.
     ///
     /// See also [`RpcAddOns::with_tower_middleware`].
     pub fn with_tower_middleware<T>(
@@ -842,6 +842,11 @@ impl<NetworkT, RpcMiddleware: Clone, TowerMiddleware: Clone>
         PVB: PayloadValidatorBuilder<N> + Default,
         EB: Default,
         EVB: Default,
+        RpcMiddleware: RethRpcMiddleware,
+        TowerMiddleware: RethTowerMiddleware<
+            Stack<RpcMiddleware, Either<HistoricalRpc<<N as FullNodeTypes>::Provider>, Identity>>,
+            Stack<RpcRequestMetrics, Identity>,
+        >,
     {
         let Self {
             sequencer_url,

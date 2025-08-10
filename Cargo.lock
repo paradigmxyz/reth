@@ -3402,8 +3402,6 @@ dependencies = [
  "reth-node-builder",
  "reth-optimism-cli",
  "reth-optimism-node",
- "reth-tracing",
- "tokio",
  "tower",
  "tracing",
 ]

@@ -17,7 +17,7 @@ fn main() {
             let NodeHandle { node: _node, node_exit_future } = builder
                 .with_types::<OpNode>()
                 .with_components(node.components())
-                .with_add_ons(OpAddOns::default().with_tower_middleware(CustomLayer::default()))
+                .with_add_ons(OpAddOns::default().with_tower_middleware(CustomLayer))
                 .launch()
                 .await?;
 
