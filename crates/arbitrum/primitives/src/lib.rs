@@ -33,7 +33,9 @@ pub enum ArbReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbDepositReceipt;
+#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbReceipt {}
+#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbTransactionSigned {}
 
 impl InMemorySize for ArbReceipt {
@@ -344,16 +346,67 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
 }
 
 #[derive(Clone, Debug, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbTransactionSigned {
-    #[cfg_attr(feature = "serde", serde(skip))]
     hash: reth_primitives_traits::sync::OnceLock<TxHash>,
     signature: Signature,
-    #[cfg_attr(feature = "serde", serde(skip))]
     transaction: ArbTypedTransaction,
-    #[cfg_attr(feature = "serde", serde(skip))]
     input_cache: reth_primitives_traits::sync::OnceLock<Bytes>,
 }
+#[cfg(feature = "serde")]
+impl serde::Serialize for ArbTransactionSigned {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("ArbTransactionSigned", 3)?;
+        state.serialize_field("signature", &self.signature)?;
+        let mut buf = alloc::vec::Vec::with_capacity(self.length());
+        self.encode_2718(&mut buf);
+        let bytes = alloy_primitives::Bytes::from(buf);
+        state.serialize_field("transaction_encoded_2718", &bytes)?;
+        state.serialize_field("hash", self.tx_hash())?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ArbTransactionSigned {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            signature: Signature,
+            transaction_encoded_2718: alloy_primitives::Bytes,
+        }
+        let helper = Helper::deserialize(deserializer)?;
+        let mut slice: &[u8] = helper.transaction_encoded_2718.as_ref();
+        let parsed = if let Some(first) = slice.first().copied() {
+            match arb_alloy_consensus::tx::ArbTxType::from_u8(first) {
+                Ok(_) => {
+                    let mut rest = &slice[1..];
+                    ArbTransactionSigned::typed_decode(first, &mut rest)
+                        .map_err(serde::de::Error::custom)?
+                }
+                Err(_) => {
+                    ArbTransactionSigned::fallback_decode(&mut slice)
+                        .map_err(serde::de::Error::custom)?
+                }
+            }
+        } else {
+            return Err(serde::de::Error::custom("empty transaction_encoded_2718"));
+        };
+        let mut out = ArbTransactionSigned::new_unhashed(parsed.transaction, parsed.signature);
+        out.recalculate_hash();
+        if out.signature != helper.signature {
+            return Err(serde::de::Error::custom("signature mismatch"));
+        }
+        Ok(out)
+    }
+}
+
 
 impl Deref for ArbTransactionSigned {
     type Target = ArbTypedTransaction;
@@ -455,6 +508,7 @@ impl InMemorySize for ArbTransactionSigned {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl reth_codecs::Compact for ArbTransactionSigned {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
@@ -789,6 +843,7 @@ pub enum ArbTxType {
     Legacy,
 }
 
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArbPrimitives;
 
@@ -814,7 +869,7 @@ impl reth_primitives_traits::NodePrimitives for ArbPrimitives {
             gas: 21000,
             to: Some(address!("00000000000000000000000000000000000000bb")),
             value: U256::from(123u64),
-            data: alloc::vec::Vec::new(),
+            data: alloc::vec::Vec::new().into(),
         };
 
         let mut enc = alloc::vec::Vec::with_capacity(1 + tx.length());

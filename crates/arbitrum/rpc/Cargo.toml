@@ -5,4 +5,24 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+default = ["std"]
+std = []
+client = []
+
 [dependencies]
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-core = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-eips = { workspace = true }
+alloy-rpc-types-engine = { workspace = true }
+reth-rpc-engine-api = { path = "../../rpc/rpc-engine-api", default-features = false }
+reth-rpc-api = { path = "../../rpc/rpc-api", default-features = false }
+reth-node-api = { path = "../../node/api", default-features = false }
+reth-storage-api = { path = "../../storage/storage-api", default-features = false }
+reth-transaction-pool = { path = "../../transaction-pool", default-features = false }
+reth-chainspec = { path = "../../chainspec", default-features = false }
+reth-engine-primitives = { path = "../../engine/primitives", default-features = false }
+reth-arbitrum-payload = { path = "../payload", default-features = false }
+tracing = { workspace = true }
+async-trait = "0.1"

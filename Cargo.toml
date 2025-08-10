@@ -468,7 +468,7 @@ reth-ress-provider = { path = "crates/ress/provider" }
 reth-arbitrum-chainspec = { path = "crates/arbitrum/chainspec", default-features = false }
 reth-arbitrum-evm = { path = "crates/arbitrum/evm", default-features = false }
 reth-arbitrum-payload = { path = "crates/arbitrum/payload", default-features = false }
-reth-arbitrum-primitives = { path = "crates/arbitrum/primitives", default-features = false }
+reth-arbitrum-primitives = { path = "crates/arbitrum/primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
 reth-arbitrum-node = { path = "crates/arbitrum/node" }
 reth-arbitrum-rpc = { path = "crates/arbitrum/rpc" }
 reth-arbitrum-stf-wasm = { path = "crates/arbitrum/stf-wasm" }

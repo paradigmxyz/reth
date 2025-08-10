@@ -2,14 +2,21 @@
 name = "reth-arbitrum-stf-wasm"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 publish = false
 
 [lib]
-crate-type = ["cdylib", "rlib"]
-path = "src/lib.rs"
-
-[dependencies]
+# cdylib for wasm targets; rlib also fine for checking.
+crate-type = ["rlib", "cdylib"]
 
 [features]
-default = []
+default = ["std"]
 std = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+[dev-dependencies]
+alloy-primitives.workspace = true

@@ -20,6 +20,7 @@ pub trait PredeployHandler {
     fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool);
 }
 
+#[derive(Default)]
 pub struct PredeployRegistry {
     handlers: alloc::vec::Vec<alloc::boxed::Box<dyn PredeployHandler + Send + Sync>>,
     retryables: DefaultRetryables,
@@ -70,22 +71,21 @@ impl PredeployHandler for ArbSys {
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
         let withdraw_eth = pre::selector(pre::SIG_WITHDRAW_ETH);
-        let create_retryable = pre::selector(pre::SIG_CREATE_RETRYABLE_TICKET);
+        let create_retryable = pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
-        let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let cancel = pre::selector(pre::SIG_RETRY_CANCEL);
         let arb_block_number = pre::selector(pre::SIG_ARB_BLOCK_NUMBER);
         let arb_block_hash = pre::selector(pre::SIG_ARB_BLOCK_HASH);
-        let get_tx_call_value = pre::selector(pre::SIG_GET_TX_CALL_VALUE);
-        let get_tx_origin = pre::selector(pre::SIG_GET_TX_ORIGIN);
-        let get_block_number = pre::selector(pre::SIG_GET_BLOCK_NUMBER);
-        let get_block_hash = pre::selector(pre::SIG_GET_BLOCK_HASH);
-        let get_storage_at = pre::selector(pre::SIG_GET_STORAGE_AT);
+        let get_tx_call_value = pre::selector("getTxCallValue()");
+        let get_tx_origin = pre::selector("txOrigin()");
+        let get_block_number = arb_block_number;
+        let get_block_hash = arb_block_hash;
+        let get_storage_at = pre::selector(pre::SIG_GET_STORAGE_GAS_AVAILABLE);
         let arb_chain_id = pre::selector(pre::SIG_ARB_CHAIN_ID);
         let arb_os_version = pre::selector(pre::SIG_ARB_OS_VERSION);
 
         fn encode_u256(x: U256) -> Bytes {
-            let mut out = [0u8; 32];
-            x.to_be_bytes(&mut out);
+            let out = x.to_be_bytes::<32>();
             Bytes::from(out.to_vec())
         }
         fn encode_b256(x: B256) -> Bytes {
@@ -217,7 +217,7 @@ impl PredeployHandler for ArbRetryableTx {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
-        let cancel = pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET);
+        let cancel = pre::selector(pre::SIG_RETRY_CANCEL);
         let get_lifetime = pre::selector(pre::SIG_RETRY_GET_LIFETIME);
         let get_timeout = pre::selector(pre::SIG_RETRY_GET_TIMEOUT);
         let keepalive = pre::selector(pre::SIG_RETRY_KEEPALIVE);
@@ -251,14 +251,12 @@ impl PredeployHandler for ArbRetryableTx {
             }
             s if s == get_lifetime => {
                 let secs = arb_alloy_util::retryables::RETRYABLE_LIFETIME_SECONDS;
-                let mut out = [0u8; 32];
-                U256::from(secs).to_be_bytes(&mut out);
+                let out = U256::from(secs).to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
             s if s == get_timeout => {
                 let timeout = arb_alloy_util::retryables::retryable_timeout_from(ctx.time);
-                let mut out = [0u8; 32];
-                U256::from(timeout).to_be_bytes(&mut out);
+                let out = U256::from(timeout).to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
             },
             s if s == keepalive => {
@@ -342,8 +340,7 @@ impl PredeployHandler for NodeInterface {
             Bytes::from(out.to_vec())
         }
         fn encode_u256(x: U256) -> Bytes {
-            let mut out = [0u8; 32];
-            x.to_be_bytes(&mut out);
+            let out = x.to_be_bytes::<32>();
             Bytes::from(out.to_vec())
         }
 
@@ -378,18 +375,18 @@ impl PredeployHandler for NodeInterface {
 #[derive(Clone)]
 pub struct ArbOwner {
     pub addr: Address,
-    owners: alloc::rc::Rc<core::cell::RefCell<alloc::collections::BTreeSet<Address>>>,
-    network_fee: alloc::rc::Rc<core::cell::RefCell<Address>>,
-    infra_fee: alloc::rc::Rc<core::cell::RefCell<Address>>,
+    owners: alloc::sync::Arc<std::sync::Mutex<alloc::collections::BTreeSet<Address>>>,
+    network_fee: alloc::sync::Arc<std::sync::Mutex<Address>>,
+    infra_fee: alloc::sync::Arc<std::sync::Mutex<Address>>,
 }
 
 impl ArbOwner {
     pub fn new(addr: Address) -> Self {
         Self {
             addr,
-            owners: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::collections::BTreeSet::new())),
-            network_fee: alloc::rc::Rc::new(core::cell::RefCell::new(Address::ZERO)),
-            infra_fee: alloc::rc::Rc::new(core::cell::RefCell::new(Address::ZERO)),
+            owners: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::collections::BTreeSet::new())),
+            network_fee: alloc::sync::Arc::new(std::sync::Mutex::new(Address::ZERO)),
+            infra_fee: alloc::sync::Arc::new(std::sync::Mutex::new(Address::ZERO)),
         }
     }
 }
@@ -409,8 +406,7 @@ impl PredeployHandler for ArbOwner {
             Bytes::from(out.to_vec())
         }
         fn encode_u256(x: U256) -> Bytes {
-            let mut out = [0u8; 32];
-            x.to_be_bytes(&mut out);
+            let out = x.to_be_bytes::<32>();
             Bytes::from(out.to_vec())
         }
         fn read_address(input: &Bytes) -> Address {
@@ -435,19 +431,19 @@ impl PredeployHandler for ArbOwner {
         match sel {
             s if s == add_owner => {
                 let addr = read_address(input);
-                let mut owners = self.owners.borrow_mut();
+                let mut owners = self.owners.lock().unwrap();
                 owners.insert(addr);
                 (Bytes::default(), gas_limit, true)
             }
             s if s == remove_owner => {
                 let addr = read_address(input);
-                let mut owners = self.owners.borrow_mut();
+                let mut owners = self.owners.lock().unwrap();
                 owners.remove(&addr);
                 (Bytes::default(), gas_limit, true)
             }
             s if s == is_owner => {
                 let addr = read_address(input);
-                let owners = self.owners.borrow();
+                let owners = self.owners.lock().unwrap();
                 let exists = owners.contains(&addr) as u64;
                 (encode_u256(U256::from(exists)), gas_limit, true)
             }
@@ -455,26 +451,28 @@ impl PredeployHandler for ArbOwner {
                 (Bytes::default(), gas_limit, true)
             }
             s if s == get_net_fee => {
-                let addr = *self.network_fee.borrow();
+                let addr = *self.network_fee.lock().unwrap();
                 (encode_address(addr), gas_limit, true)
             }
             s if s == get_infra_fee => {
-                let addr = *self.infra_fee.borrow();
+                let addr = *self.infra_fee.lock().unwrap();
                 (encode_address(addr), gas_limit, true)
             }
             s if s == set_net_fee => {
                 let addr = read_address(input);
-                *self.network_fee.borrow_mut() = addr;
+                *self.network_fee.lock().unwrap() = addr;
                 (Bytes::default(), gas_limit, true)
             }
             s if s == set_infra_fee => {
                 let addr = read_address(input);
-                *self.infra_fee.borrow_mut() = addr;
+                *self.infra_fee.lock().unwrap() = addr;
                 (Bytes::default(), gas_limit, true)
             }
             _ => (Bytes::default(), gas_limit, true),
         }
     }
+}
+
 #[derive(Clone)]
 pub struct ArbGasInfo {
     pub addr: Address,
@@ -543,16 +541,14 @@ impl PredeployHandler for ArbGasInfo {
             }
             s if s == gi_min_gas_price => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_basefee_estimate => {
-                let mut out = [0u8; 32];
-                _ctx.basefee.to_be_bytes(&mut out);
+                let out = _ctx.basefee.to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
             s if s == gi_l1_basefee_inertia => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_rate => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_reward_recipient => (abi_zero_word(), gas_limit, true),
             s if s == gi_l1_gas_price_estimate => {
-                let mut out = [0u8; 32];
-                _ctx.basefee.to_be_bytes(&mut out);
+                let out = _ctx.basefee.to_be_bytes::<32>();
                 (Bytes::from(out.to_vec()), gas_limit, true)
             }
             s if s == gi_current_tx_l1_fees => {
@@ -566,21 +562,19 @@ impl PredeployHandler for ArbGasInfo {
         }
     }
 }
-}
-
 #[derive(Clone)]
 pub struct ArbAddressTable {
     pub addr: Address,
-    addrs: alloc::rc::Rc<core::cell::RefCell<alloc::vec::Vec<Address>>>,
-    index: alloc::rc::Rc<core::cell::RefCell<alloc::collections::BTreeMap<Address, u64>>>,
+    addrs: alloc::sync::Arc<std::sync::Mutex<alloc::vec::Vec<Address>>>,
+    index: alloc::sync::Arc<std::sync::Mutex<alloc::collections::BTreeMap<Address, u64>>>,
 }
 
 impl ArbAddressTable {
     pub fn new(addr: Address) -> Self {
         Self {
             addr,
-            addrs: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::vec::Vec::new())),
-            index: alloc::rc::Rc::new(core::cell::RefCell::new(alloc::collections::BTreeMap::new())),
+            addrs: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::vec::Vec::new())),
+            index: alloc::sync::Arc::new(std::sync::Mutex::new(alloc::collections::BTreeMap::new())),
         }
     }
 }
@@ -602,8 +596,7 @@ impl PredeployHandler for ArbAddressTable {
         let at_size = pre::selector(pre::SIG_AT_SIZE);
 
         fn encode_u256(x: U256) -> Bytes {
-            let mut out = [0u8; 32];
-            x.to_be_bytes(&mut out);
+            let out = x.to_be_bytes::<32>();
             Bytes::from(out.to_vec())
         }
         fn encode_address(addr: Address) -> Bytes {
@@ -634,35 +627,35 @@ impl PredeployHandler for ArbAddressTable {
         match sel {
             s if s == at_exists => {
                 let addr = decode_address(input);
-                let exists = self.index.borrow().contains_key(&addr);
+                let exists = self.index.lock().unwrap().contains_key(&addr);
                 (encode_u256(U256::from(exists as u64)), gas_limit, true)
             },
             s if s == at_compress => (Bytes::default(), gas_limit, true),
             s if s == at_decompress => (Bytes::default(), gas_limit, true),
             s if s == at_lookup => {
                 let addr = decode_address(input);
-                let idx = self.index.borrow().get(&addr).copied().unwrap_or(0);
+                let idx = self.index.lock().unwrap().get(&addr).copied().unwrap_or(0);
                 (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_lookup_index => {
                 let idx = decode_index(input);
-                let addr = self.addrs.borrow().get(idx as usize).copied().unwrap_or(Address::ZERO);
+                let addr = self.addrs.lock().unwrap().get(idx as usize).copied().unwrap_or(Address::ZERO);
                 (encode_address(addr), gas_limit, true)
             },
             s if s == at_register => {
                 let addr = decode_address(input);
-                if let Some(&idx) = self.index.borrow().get(&addr) {
+                if let Some(&idx) = self.index.lock().unwrap().get(&addr) {
                     return (encode_u256(U256::from(idx)), gas_limit, true)
                 }
-                let mut addrs = self.addrs.borrow_mut();
-                let mut index = self.index.borrow_mut();
+                let mut addrs = self.addrs.lock().unwrap();
+                let mut index = self.index.lock().unwrap();
                 let idx = addrs.len() as u64;
                 addrs.push(addr);
                 index.insert(addr, idx);
                 (encode_u256(U256::from(idx)), gas_limit, true)
             },
             s if s == at_size => {
-                (encode_u256(U256::from(self.addrs.borrow().len() as u64)), gas_limit, true)
+                (encode_u256(U256::from(self.addrs.lock().unwrap().len() as u64)), gas_limit, true)
             },
             _ => (Bytes::default(), gas_limit, true),
         }
@@ -695,9 +688,10 @@ impl PredeployRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use alloy_primitives::{address, Bytes, U256};
 
-    fn mk_ctx() -> PredeployCallContext {
+    pub(crate) fn mk_ctx() -> PredeployCallContext {
         PredeployCallContext {
             block_number: 100,
             block_hashes: alloc::vec::Vec::new(),
@@ -798,11 +792,10 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let sys_addr = address!("0000000000000000000000000000000000000064");
 
-        let call_hash = |selector: [u8;4], block_num: u64| -> B256 {
+        let mut call_hash = |selector: [u8;4], block_num: u64| -> B256 {
             let mut input = alloc::vec::Vec::with_capacity(4 + 32);
             input.extend_from_slice(&selector);
-            let mut bn = [0u8; 32];
-            U256::from(block_num).to_be_bytes(&mut bn);
+            let bn = U256::from(block_num).to_be_bytes::<32>();
             input.extend_from_slice(&bn);
             let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
             assert!(success);
@@ -835,14 +828,14 @@ mod tests {
         ctx.origin = address!("00000000000000000000000000000000000000aa");
 
         let mut input = alloc::vec::Vec::with_capacity(4);
-        input.extend_from_slice(&pre::selector(pre::SIG_GET_TX_ORIGIN));
+        input.extend_from_slice(&pre::selector("txOrigin()"));
         let (out, _gas_left, success) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input), 100_000, U256::ZERO).expect("dispatch");
         assert!(success);
         assert_eq!(out.len(), 32);
         assert_eq!(&out[12..], ctx.origin.as_slice());
 
         let mut input2 = alloc::vec::Vec::with_capacity(4);
-        input2.extend_from_slice(&pre::selector(pre::SIG_GET_TX_CALL_VALUE));
+        input2.extend_from_slice(&pre::selector("getTxCallValue()"));
         let callvalue = U256::from(123456u64);
         let (out2, _gas_left2, success2) = reg.dispatch(&ctx, sys_addr, &Bytes::from(input2), 100_000, callvalue).expect("dispatch");
         assert!(success2);
@@ -872,6 +865,7 @@ mod tests {
         buf.copy_from_slice(&out2[..32]);
         let got = U256::from_be_bytes(buf);
         assert_eq!(got, ctx.basefee);
+    }
     #[test]
     fn arb_gasinfo_l1_gas_price_estimate_returns_ctx_basefee() {
         use alloy_primitives::{address, U256};
@@ -891,8 +885,6 @@ mod tests {
         assert_eq!(got, ctx.basefee);
     }
 
-    }
-
     #[test]
     fn gasinfo_is_registered_in_default_registry() {
         use alloy_primitives::{address, U256};
@@ -910,7 +902,7 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_retry = address!("000000000000000000000000000000000000006e");
 
-        let call = |sel: [u8;4]| {
+        let mut call = |sel: [u8;4]| {
             let mut input = alloc::vec::Vec::with_capacity(4);
             input.extend_from_slice(&sel);
             reg.dispatch(&mk_ctx(), addr_retry, &Bytes::from(input), 50_000, U256::ZERO)
@@ -918,7 +910,7 @@ mod tests {
         };
 
         let _ = call(pre::selector(pre::SIG_RETRY_REDEEM));
-        let _ = call(pre::selector(pre::SIG_CANCEL_RETRYABLE_TICKET));
+        let _ = call(pre::selector(pre::SIG_RETRY_CANCEL));
         let _ = call(pre::selector(pre::SIG_RETRY_GET_LIFETIME));
         let _ = call(pre::selector(pre::SIG_RETRY_GET_TIMEOUT));
         let _ = call(pre::selector(pre::SIG_RETRY_KEEPALIVE));
@@ -927,6 +919,7 @@ mod tests {
         let (out, _gas, success) = call(pre::selector(pre::SIG_RETRY_SUBMIT_RETRYABLE));
         assert!(success);
         assert_eq!(out.len(), 32);
+    }
     #[test]
     fn arb_retryable_tx_submit_returns_ticket_id_word() {
         use alloy_primitives::address;
@@ -1000,8 +993,6 @@ mod tests {
         buf.copy_from_slice(&out[..32]);
         let got = alloy_primitives::U256::from_be_bytes(buf);
         assert_ne!(got, alloy_primitives::U256::ZERO);
-    }
-
     }
 
     #[test]
@@ -1240,9 +1231,7 @@ mod tests {
         assert!(o2.is_empty() || o2.len() == 32);
     }
 
-
-    }
-
+ 
     #[test]
     fn arb_owner_basic_selectors_dispatch() {
         use alloy_primitives::address;
@@ -1250,7 +1239,7 @@ mod tests {
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
 
-        let call = |sel: [u8;4]| {
+        let mut call = |sel: [u8;4]| {
             let mut v = alloc::vec::Vec::with_capacity(4);
             v.extend_from_slice(&sel);
             Bytes::from(v)
@@ -1263,8 +1252,8 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn arb_address_table_register_and_lookup_flow() {
+        use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
         let addr_table = address!("0000000000000000000000000000000000000066");
         let mut reg = PredeployRegistry::with_default_addresses();
@@ -1299,19 +1288,30 @@ mod tests {
 
         let mut in_lookup_i = alloc::vec::Vec::with_capacity(4 + 32);
         in_lookup_i.extend_from_slice(&pre::selector(pre::SIG_AT_LOOKUP_INDEX));
-        let mut idx_word = [0u8; 32];
-        U256::from(0).to_be_bytes(&mut idx_word);
+        let idx_word = U256::from(0).to_be_bytes::<32>();
         in_lookup_i.extend_from_slice(&idx_word);
         let (out4, _, _) = reg.dispatch(&ctx, addr_table, &Bytes::from(in_lookup_i), 50_000, U256::ZERO).unwrap();
         assert_eq!(out4.len(), 32);
     }
 
+    #[test]
     fn arb_owner_is_registered_in_default_registry() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_owner = address!("0000000000000000000000000000000000000070");
-        let (_out, _gas, success) = reg.dispatch(&mk_ctx(), addr_owner, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
+        let ctx = PredeployCallContext {
+            block_number: 100,
+            block_hashes: alloc::vec::Vec::new(),
+            chain_id: U256::from(42161u64),
+            os_version: 0,
+            time: 0,
+            origin: alloy_primitives::Address::ZERO,
+            caller: alloy_primitives::Address::ZERO,
+            depth: 1,
+            basefee: U256::ZERO,
+        };
+        let (_out, _gas, success) = reg.dispatch(&ctx, addr_owner, &Bytes::default(), 50_000, U256::ZERO).expect("dispatch");
         assert!(success);
     }
 
@@ -1355,6 +1355,7 @@ mod tests {
     fn arb_address_table_selector_abi_shapes() {
         use alloy_primitives::address;
         use arb_alloy_predeploys as pre;
+    
         let mut reg = PredeployRegistry::with_default_addresses();
         let addr_at = address!("0000000000000000000000000000000000000066");
 
@@ -1385,3 +1386,4 @@ mod tests {
         assert!(ok5);
         assert!(o_size.is_empty() || o_size.len() == 32);
     }
+}

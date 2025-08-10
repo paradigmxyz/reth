@@ -1,5 +1,3 @@
-
-
 [package]
 name = "reth-arbitrum-evm"
 version = "0.1.0"
@@ -22,12 +20,22 @@ std = [
 [dependencies]
 # Reth
 reth-evm = { path = "../../evm/evm", default-features = false, features = ["std"] }
-reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
 reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }
 reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
-reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std"] }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
 reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
+
+# Additional workspace deps mirroring Optimism patterns
+reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
+reth-storage-errors.workspace = true
+
+# ethereum evm adapter
+reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
+
+# revm (workspace)
+revm.workspace = true
 
 # arb-alloy
 arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys", default-features = false, features = ["alloc"] }
@@ -35,6 +43,8 @@ arb-alloy-consensus = { path = "../../../../arb-alloy/crates/consensus", default
 arb-alloy-util = { path = "../../../../arb-alloy/crates/util", default-features = false, features = ["alloc"] }
 
 # alloy
-alloy-consensus = { version = "1", default-features = false, features = ["std"] }
-alloy-primitives = { version = "1", default-features = false, features = ["std"] }
-alloy-evm = { version = "0.7", default-features = false, features = ["std"] }
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-evm.workspace = true
+alloy-eips.workspace = true
+revm-context-interface.workspace = true

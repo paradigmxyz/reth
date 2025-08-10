@@ -10,6 +10,7 @@ use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 
 use crate::ARB_NAME_CLIENT;
 use reth_arbitrum_rpc::engine::ARB_ENGINE_CAPABILITIES;
+use reth_arbitrum_payload::ArbExecutionData;
 
 #[derive(Debug, Default, Clone)]
 pub struct ArbEngineApiBuilder<EV> {
@@ -19,12 +20,15 @@ pub struct ArbEngineApiBuilder<EV> {
 impl<N, EV> EngineApiBuilder<N> for ArbEngineApiBuilder<EV>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec: EthereumHardforks>,
+        Types: NodeTypes<
+            ChainSpec: EthereumHardforks,
+            Payload: EngineTypes<ExecutionData = ArbExecutionData>,
+        >,
     >,
     EV: PayloadValidatorBuilder<N>,
     EV::Validator: EngineApiValidator<<N::Types as NodeTypes>::Payload>,
 {
-    type EngineApi = EngineApi<
+    type EngineApi = reth_arbitrum_rpc::engine::ArbEngineApi<
         N::Provider,
         <N::Types as NodeTypes>::Payload,
         N::Pool,
@@ -55,6 +59,6 @@ where
             ctx.config.engine.accept_execution_requests_hash,
         );
 
-        Ok(inner)
+        Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }
 }

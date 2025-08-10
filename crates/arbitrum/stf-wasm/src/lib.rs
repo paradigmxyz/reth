@@ -1,4 +1,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
 
 #[no_mangle]
 pub extern "C" fn record_block_inputs(ptr: *const u8, len: usize, out_ptr: *mut u8, out_len: *mut usize) -> i32 {
