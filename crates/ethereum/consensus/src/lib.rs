@@ -73,7 +73,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             // Note: While the core algorithm remains the same, different hard forks have
             // different difficulty bomb delays. For simplicity, we use a fixed delay here.
             // In a full implementation, this should be adjusted per hard fork.
-            self.calculate_difficulty_byzantium::<H>(
+            self.calculate_difficulty_byzantium(
                 parent_difficulty,
                 parent_timestamp,
                 header_timestamp,
@@ -82,7 +82,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             )
         } else if self.chain_spec.is_homestead_active_at_block(block_number) {
             // Homestead: EIP-2 difficulty adjustment
-            self.calculate_difficulty_homestead::<H>(
+            self.calculate_difficulty_homestead(
                 parent_difficulty,
                 parent_timestamp,
                 header_timestamp,
@@ -90,7 +90,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             )
         } else {
             // Frontier difficulty adjustment
-            self.calculate_difficulty_frontier::<H>(
+            self.calculate_difficulty_frontier(
                 parent_difficulty,
                 parent_timestamp,
                 header_timestamp,
@@ -109,7 +109,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
     }
 
     /// Calculates difficulty for Frontier era
-    fn calculate_difficulty_frontier<H: BlockHeader>(
+    fn calculate_difficulty_frontier(
         &self,
         parent_difficulty: U256,
         parent_timestamp: u64,
@@ -138,15 +138,15 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         } else {
             U256::try_from(new_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         }
     }
 
     /// Calculates difficulty for Homestead era (EIP-2)
-    fn calculate_difficulty_homestead<H: BlockHeader>(
+    fn calculate_difficulty_homestead(
         &self,
         parent_difficulty: U256,
         parent_timestamp: u64,
@@ -169,21 +169,21 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) + difficulty_adjustment;
 
         // Apply difficulty bomb (Ice Age) - delayed in Homestead
-        let period = if block_number >= 3000000 { (block_number - 3000000) / 100000 } else { 0 };
+        let period = block_number.saturating_sub(3000000) / 100000;
         if period > 0 {
             let bomb = U256::from(1) << (period - 1);
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         } else {
             U256::try_from(new_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         }
     }
 
     /// Calculates difficulty for Byzantium era and later (EIP-100)
-    fn calculate_difficulty_byzantium<H: BlockHeader>(
+    fn calculate_difficulty_byzantium(
         &self,
         parent_difficulty: U256,
         parent_timestamp: u64,
@@ -212,7 +212,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         // Apply difficulty bomb (Ice Age) - using standard delay for Byzantium+
         // Note: Different hard forks (Constantinople, Muir Glacier, Arrow Glacier, Gray Glacier)
         // have different bomb delays, but the core algorithm remains the same
-        let fake_block_number = if block_number >= 3000000 { block_number - 3000000 } else { 0 };
+        let fake_block_number = block_number.saturating_sub(3000000);
         let period = fake_block_number / 100000;
 
         if period > 0 {
@@ -220,10 +220,10 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         } else {
             U256::try_from(new_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
-                .unwrap_or(U256::from(131072))
+                .unwrap_or_else(|_| U256::from(131072))
         }
     }
 
@@ -537,7 +537,7 @@ mod tests {
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
         let expected_difficulty = consensus
-            .calculate_difficulty_frontier::<reth_primitives_traits::Header>(
+            .calculate_difficulty_frontier(
                 U256::from(1000000),
                 1000000,
                 1000015, // 15 seconds later
@@ -573,7 +573,7 @@ mod tests {
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
         let expected_difficulty = consensus
-            .calculate_difficulty_homestead::<reth_primitives_traits::Header>(
+            .calculate_difficulty_homestead(
                 U256::from(1000000),
                 1000000,
                 1000015, // 15 seconds later
@@ -610,7 +610,7 @@ mod tests {
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
         let expected_difficulty = consensus
-            .calculate_difficulty_byzantium::<reth_primitives_traits::Header>(
+            .calculate_difficulty_byzantium(
                 U256::from(1000000),
                 1000000,
                 1000015, // 15 seconds later
@@ -705,7 +705,7 @@ mod tests {
 
         // Calculate difficulty with bomb
         let difficulty_with_bomb = consensus
-            .calculate_difficulty_byzantium::<reth_primitives_traits::Header>(
+            .calculate_difficulty_byzantium(
                 U256::from(1000000),
                 1000000,
                 1000015,
