@@ -668,7 +668,7 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns the combined number of all transactions.
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.pending.len() + self.queued.len()
     }
 
