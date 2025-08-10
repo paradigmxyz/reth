@@ -42,7 +42,11 @@ use reth_rpc::{
     ValidationApi,
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
-use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
+use reth_rpc_builder::{
+    config::RethRpcServerConfig,
+    middleware::{RethRpcMiddleware, RethTowerMiddleware},
+    RpcRequestMetrics,
+};
 use reth_rpc_eth_api::{
     helpers::pending_block::BuildPendingEnv, RpcConvert, RpcTypes, SignableTxRequest,
 };
@@ -56,6 +60,7 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
+use tower::layer::util::Stack;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -179,17 +184,21 @@ pub struct EthereumAddOns<
     EB = BasicEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
+    TowerMiddleware = Identity,
 > {
-    inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
+    inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>,
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
+    EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
     /// Creates a new instance from the inner `RpcAddOns`.
-    pub const fn new(inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>) -> Self {
+    pub const fn new(
+        inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>,
+    ) -> Self {
         Self { inner }
     }
 }
@@ -213,20 +222,23 @@ where
             BasicEngineApiBuilder::default(),
             BasicEngineValidatorBuilder::default(),
             Default::default(),
+            Default::default(),
         ))
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
+    EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
+    RpcMiddleware: Clone,
 {
     /// Replace the engine API builder.
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware>
+    ) -> EthereumAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, TowerMiddleware>
     where
         T: Send,
     {
@@ -238,7 +250,7 @@ where
     pub fn with_payload_validator<V, T>(
         self,
         payload_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware> {
+    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware, TowerMiddleware> {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_payload_validator(payload_validator_builder))
     }
@@ -247,17 +259,29 @@ where
     pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: T,
-    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, T>
+    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, T, TowerMiddleware>
     where
         T: Send,
     {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_rpc_middleware(rpc_middleware))
     }
+
+    /// Sets tower middleware
+    pub fn with_tower_middleware<T>(
+        self,
+        tower_middleware: T,
+    ) -> EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, T>
+    where
+        T: Send,
+    {
+        let Self { inner } = self;
+        EthereumAddOns::new(inner.with_tower_middleware(tower_middleware))
+    }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
-    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware> NodeAddOns<N>
+    for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -274,6 +298,7 @@ where
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
+    TowerMiddleware: RethTowerMiddleware<RpcMiddleware, Stack<RpcRequestMetrics, Identity>>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 

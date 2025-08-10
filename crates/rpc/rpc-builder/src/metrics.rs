@@ -26,12 +26,22 @@ use tower::Layer;
 /// - Request metrics: metrics for each RPC method (e.g. number of calls started, time taken to
 ///   process a call)
 #[derive(Default, Debug, Clone)]
-pub(crate) struct RpcRequestMetrics {
+pub struct RpcRequestMetrics {
     inner: Arc<RpcServerMetricsInner>,
 }
 
 impl RpcRequestMetrics {
-    pub(crate) fn new(module: &RpcModule<()>, transport: RpcTransport) -> Self {
+    /// Creates a new [`RpcRequestMetrics`] instance with metrics for the given RPC module and
+    /// transport.
+    ///
+    /// This function initializes metrics tracking for RPC methods and transport connections.
+    /// It extracts method names from the provided module and creates corresponding metrics
+    /// for call counts, response times, and transport-specific connection metrics.
+    ///
+    /// # Arguments
+    /// * `module` - The RPC module containing method definitions to track
+    /// * `transport` - The transport type (HTTP, WS, IPC) for connection-specific metrics
+    pub fn new(module: &RpcModule<()>, transport: RpcTransport) -> Self {
         Self {
             inner: Arc::new(RpcServerMetricsInner {
                 connection_metrics: transport.connection_metrics(),
@@ -46,24 +56,24 @@ impl RpcRequestMetrics {
     }
 
     /// Creates a new instance of the metrics layer for HTTP.
-    pub(crate) fn http(module: &RpcModule<()>) -> Self {
+    pub fn http(module: &RpcModule<()>) -> Self {
         Self::new(module, RpcTransport::Http)
     }
 
     /// Creates a new instance of the metrics layer for same port.
     ///
     /// Note: currently it's not possible to track transport specific metrics for a server that runs http and ws on the same port: <https://github.com/paritytech/jsonrpsee/issues/1345> until we have this feature we will use the http metrics for this case.
-    pub(crate) fn same_port(module: &RpcModule<()>) -> Self {
+    pub fn same_port(module: &RpcModule<()>) -> Self {
         Self::http(module)
     }
 
     /// Creates a new instance of the metrics layer for Ws.
-    pub(crate) fn ws(module: &RpcModule<()>) -> Self {
+    pub fn ws(module: &RpcModule<()>) -> Self {
         Self::new(module, RpcTransport::WebSocket)
     }
 
     /// Creates a new instance of the metrics layer for Ws.
-    pub(crate) fn ipc(module: &RpcModule<()>) -> Self {
+    pub fn ipc(module: &RpcModule<()>) -> Self {
         Self::new(module, RpcTransport::Ipc)
     }
 }
@@ -97,7 +107,8 @@ pub struct RpcRequestMetricsService<S> {
 }
 
 impl<S> RpcRequestMetricsService<S> {
-    pub(crate) fn new(service: S, metrics: RpcRequestMetrics) -> Self {
+    /// Creates a new instance of the RPC request metrics service.
+    pub fn new(service: S, metrics: RpcRequestMetrics) -> Self {
         // this instance is kept alive for the duration of the connection
         metrics.inner.connection_metrics.connections_opened_total.increment(1);
         Self { inner: service, metrics }
@@ -196,7 +207,7 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
 
 /// The transport protocol used for the RPC connection.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum RpcTransport {
+pub enum RpcTransport {
     Http,
     WebSocket,
     Ipc,
@@ -204,7 +215,7 @@ pub(crate) enum RpcTransport {
 
 impl RpcTransport {
     /// Returns the string representation of the transport protocol.
-    pub(crate) const fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Http => "http",
             Self::WebSocket => "ws",

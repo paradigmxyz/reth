@@ -32,6 +32,7 @@ reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-engine-local = { workspace = true, features = ["op"] }
 reth-rpc-api.workspace = true
+reth-rpc-builder.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
@@ -67,6 +68,9 @@ reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+
+tower.workspace = true
+jsonrpsee.workspace = true
 
 [dev-dependencies]
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
