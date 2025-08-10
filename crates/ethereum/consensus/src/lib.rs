@@ -536,13 +536,12 @@ mod tests {
         let parent = SealedHeader::new(parent_header, B256::ZERO);
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
-        let expected_difficulty = consensus
-            .calculate_difficulty_frontier(
-                U256::from(1000000),
-                1000000,
-                1000015, // 15 seconds later
-                51,
-            );
+        let expected_difficulty = consensus.calculate_difficulty_frontier(
+            U256::from(1000000),
+            1000000,
+            1000015, // 15 seconds later
+            51,
+        );
 
         let child_header = reth_primitives_traits::Header {
             number: 51,
@@ -572,13 +571,12 @@ mod tests {
         let parent = SealedHeader::new(parent_header, B256::ZERO);
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
-        let expected_difficulty = consensus
-            .calculate_difficulty_homestead(
-                U256::from(1000000),
-                1000000,
-                1000015, // 15 seconds later
-                1150001,
-            );
+        let expected_difficulty = consensus.calculate_difficulty_homestead(
+            U256::from(1000000),
+            1000000,
+            1000015, // 15 seconds later
+            1150001,
+        );
 
         let child_header = reth_primitives_traits::Header {
             number: 1150001,
@@ -609,14 +607,13 @@ mod tests {
         let parent = SealedHeader::new(parent_header, B256::ZERO);
 
         // Calculate expected difficulty for a child block with normal timing (15 seconds)
-        let expected_difficulty = consensus
-            .calculate_difficulty_byzantium(
-                U256::from(1000000),
-                1000000,
-                1000015, // 15 seconds later
-                4370001,
-                false, // no ommers
-            );
+        let expected_difficulty = consensus.calculate_difficulty_byzantium(
+            U256::from(1000000),
+            1000000,
+            1000015, // 15 seconds later
+            4370001,
+            false, // no ommers
+        );
 
         let child_header = reth_primitives_traits::Header {
             number: 4370001,
@@ -704,14 +701,13 @@ mod tests {
         let high_block_number = 5000000; // Well into Byzantium era
 
         // Calculate difficulty with bomb
-        let difficulty_with_bomb = consensus
-            .calculate_difficulty_byzantium(
-                U256::from(1000000),
-                1000000,
-                1000015,
-                high_block_number,
-                false,
-            );
+        let difficulty_with_bomb = consensus.calculate_difficulty_byzantium(
+            U256::from(1000000),
+            1000000,
+            1000015,
+            high_block_number,
+            false,
+        );
 
         // The bomb should make difficulty significantly higher than base adjustment
         // Base difficulty adjustment alone would be small, but bomb adds exponential growth
