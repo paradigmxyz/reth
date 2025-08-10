@@ -134,7 +134,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         // Apply difficulty bomb (Ice Age)
         let period = block_number / 100000;
         if period > 2 {
-            let bomb = U256::from(1) << (period - 2);
+            let bomb = U256::from(1) << ((period - 2) as u32);
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
@@ -171,7 +171,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         // Apply difficulty bomb (Ice Age) - delayed in Homestead
         let period = block_number.saturating_sub(3000000) / 100000;
         if period > 0 {
-            let bomb = U256::from(1) << (period - 1);
+            let bomb = U256::from(1) << ((period - 1) as u32);
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
@@ -216,7 +216,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         let period = fake_block_number / 100000;
 
         if period > 0 {
-            let bomb = U256::from(1) << (period - 1);
+            let bomb = U256::from(1) << ((period - 1) as u32);
             let bomb_i256 = I256::try_from(bomb).unwrap_or(I256::ZERO);
             let final_difficulty = new_difficulty + bomb_i256;
             U256::try_from(final_difficulty.max(I256::try_from(131072u64).unwrap_or(I256::ZERO)))
