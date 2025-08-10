@@ -125,9 +125,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             I256::try_from(-1i64).unwrap_or(I256::ZERO)
         };
 
-        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO)
-            / I256::try_from(2048u64).unwrap_or(I256::ZERO)
-            * adjustment;
+        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) /
+            I256::try_from(2048u64).unwrap_or(I256::ZERO) *
+            adjustment;
         let new_difficulty =
             I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) + difficulty_adjustment;
 
@@ -162,9 +162,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             I256::try_from(-1i64).unwrap_or(I256::ZERO)
         };
 
-        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO)
-            / I256::try_from(2048u64).unwrap_or(I256::ZERO)
-            * adjustment;
+        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) /
+            I256::try_from(2048u64).unwrap_or(I256::ZERO) *
+            adjustment;
         let new_difficulty =
             I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) + difficulty_adjustment;
 
@@ -203,9 +203,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             uncle_adjustment - (diff / I256::try_from(9u64).unwrap_or(I256::ZERO));
         let time_adjustment = time_adjustment.max(I256::try_from(-99i64).unwrap_or(I256::ZERO));
 
-        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO)
-            / I256::try_from(2048u64).unwrap_or(I256::ZERO)
-            * time_adjustment;
+        let difficulty_adjustment = I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) /
+            I256::try_from(2048u64).unwrap_or(I256::ZERO) *
+            time_adjustment;
         let new_difficulty =
             I256::try_from(parent_difficulty).unwrap_or(I256::ZERO) + difficulty_adjustment;
 
@@ -237,12 +237,11 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number())
-            && self.chain_spec.is_london_active_at_block(header.number())
+        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
+            self.chain_spec.is_london_active_at_block(header.number())
         {
-            parent.gas_limit()
-                * self
-                    .chain_spec
+            parent.gas_limit() *
+                self.chain_spec
                     .base_fee_params_at_timestamp(header.timestamp())
                     .elasticity_multiplier as u64
         } else {
@@ -259,8 +258,8 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
-        else if parent_gas_limit - header.gas_limit()
-            >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
+        else if parent_gas_limit - header.gas_limit() >=
+            parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
         {
             return Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit,
@@ -341,8 +340,8 @@ where
                     .unwrap()
                     .as_secs();
 
-                if header.timestamp()
-                    > present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
+                if header.timestamp() >
+                    present_timestamp + alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS
                 {
                     return Err(ConsensusError::TimestampIsInFuture {
                         timestamp: header.timestamp(),
@@ -356,12 +355,12 @@ where
         validate_header_base_fee(header, &self.chain_spec)?;
 
         // EIP-4895: Beacon chain push withdrawals as operations
-        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp())
-            && header.withdrawals_root().is_none()
+        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
+            header.withdrawals_root().is_none()
         {
             return Err(ConsensusError::WithdrawalsRootMissing);
-        } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp())
-            && header.withdrawals_root().is_some()
+        } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
+            header.withdrawals_root().is_some()
         {
             return Err(ConsensusError::WithdrawalsRootUnexpected);
         }
