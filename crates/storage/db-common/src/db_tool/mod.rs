@@ -185,7 +185,7 @@ pub struct ListFilter {
 
 impl ListFilter {
     /// If `search` has a list of bytes, then filter for rows that have this sequence.
-    pub fn has_search(&self) -> bool {
+    pub const fn has_search(&self) -> bool {
         !self.search.is_empty()
     }
 
