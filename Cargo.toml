@@ -166,6 +166,7 @@ members = [
     "examples/rpc-db/",
     "examples/precompile-cache/",
     "examples/txpool-tracing/",
+    "examples/custom-http-middleware",
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
     "testing/testing-utils",

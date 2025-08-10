@@ -773,6 +773,28 @@ where
         self.layer_rpc_middleware(layer)
     }
 
+    /// Optionally adds a new layer `T` to the configured [`RpcServiceBuilder`].
+    #[expect(clippy::type_complexity)]
+    pub fn option_layer_tower_middleware<T>(
+        self,
+        layer: Option<T>,
+    ) -> RpcAddOns<
+        Node,
+        EthB,
+        PVB,
+        EB,
+        EVB,
+        RpcMiddleware,
+        Stack<TowerMiddleware, Either<T, Identity>>,
+    >
+    where
+        RpcMiddleware: RethRpcMiddleware,
+        T: Clone,
+    {
+        let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
+        self.layer_tower_middleware(layer)
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where

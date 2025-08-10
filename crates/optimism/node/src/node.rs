@@ -452,6 +452,38 @@ where
         )
     }
 
+    /// Sets the Tower middleware stack for processing Http requests.
+    ///
+    /// This method configures a custom middleware stack that will be applied to all Http requests
+    /// across HTTP, `WebSocket`, and IPC transports. The middleware is applied to the Http transport
+    /// layer, allowing you to intercept, modify, or enhance Http request processing.
+    ///
+    /// See also [`RpcAddOns::with_tower_middleware`].
+    pub fn with_tower_middleware<T>(
+        self,
+        tower_middleware: T,
+    ) -> OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, T> {
+        let Self {
+            rpc_add_ons,
+            da_config,
+            sequencer_url,
+            sequencer_headers,
+            enable_tx_conditional,
+            min_suggested_priority_fee,
+            historical_rpc,
+            ..
+        } = self;
+        OpAddOns::new(
+            rpc_add_ons.with_tower_middleware(tower_middleware),
+            da_config,
+            sequencer_url,
+            sequencer_headers,
+            historical_rpc,
+            enable_tx_conditional,
+            min_suggested_priority_fee,
+        )
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
@@ -661,7 +693,7 @@ where
 /// A regular optimism evm and executor builder.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
+pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity, TowerMiddleware = Identity> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_url: Option<String>,
@@ -679,6 +711,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     min_suggested_priority_fee: u64,
     /// RPC middleware to use
     rpc_middleware: RpcMiddleware,
+    /// Tower middleware to use
+    tower_middleware: TowerMiddleware,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -692,11 +726,14 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             min_suggested_priority_fee: 1_000_000,
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
+            tower_middleware: Identity::new(),
         }
     }
 }
 
-impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
+impl<NetworkT, RpcMiddleware, TowerMiddleware>
+    OpAddOnsBuilder<NetworkT, RpcMiddleware, TowerMiddleware>
+{
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
         self.sequencer_url = sequencer_client;
@@ -734,7 +771,10 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     }
 
     /// Configure the RPC middleware to use
-    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> OpAddOnsBuilder<NetworkT, T> {
+    pub fn with_rpc_middleware<T>(
+        self,
+        rpc_middleware: T,
+    ) -> OpAddOnsBuilder<NetworkT, T, TowerMiddleware> {
         let Self {
             sequencer_url,
             sequencer_headers,
@@ -743,6 +783,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             enable_tx_conditional,
             min_suggested_priority_fee,
             _nt,
+            tower_middleware,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -754,15 +795,47 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             min_suggested_priority_fee,
             _nt,
             rpc_middleware,
+            tower_middleware,
+        }
+    }
+
+    /// Configure the tower middleware to use
+    pub fn with_tower_middleware<T>(
+        self,
+        tower_middleware: T,
+    ) -> OpAddOnsBuilder<NetworkT, RpcMiddleware, T> {
+        let Self {
+            sequencer_url,
+            sequencer_headers,
+            historical_rpc,
+            da_config,
+            enable_tx_conditional,
+            min_suggested_priority_fee,
+            _nt,
+            rpc_middleware,
+            ..
+        } = self;
+        OpAddOnsBuilder {
+            sequencer_url,
+            sequencer_headers,
+            historical_rpc,
+            da_config,
+            enable_tx_conditional,
+            min_suggested_priority_fee,
+            _nt,
+            rpc_middleware,
+            tower_middleware,
         }
     }
 }
 
-impl<NetworkT, RpcMiddleware: Clone> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
+impl<NetworkT, RpcMiddleware: Clone, TowerMiddleware: Clone>
+    OpAddOnsBuilder<NetworkT, RpcMiddleware, TowerMiddleware>
+{
     /// Builds an instance of [`OpAddOns`].
     pub fn build<N, PVB, EB, EVB>(
         self,
-    ) -> OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB, RpcMiddleware>
+    ) -> OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB, RpcMiddleware, TowerMiddleware>
     where
         N: FullNodeComponents<Types: NodeTypes>,
         OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
@@ -778,6 +851,7 @@ impl<NetworkT, RpcMiddleware: Clone> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             min_suggested_priority_fee,
             historical_rpc,
             rpc_middleware,
+            tower_middleware,
             ..
         } = self;
 
@@ -791,7 +865,7 @@ impl<NetworkT, RpcMiddleware: Clone> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                 EB::default(),
                 EVB::default(),
                 rpc_middleware,
-                Identity::new(),
+                tower_middleware,
             ),
             da_config.unwrap_or_default(),
             sequencer_url,

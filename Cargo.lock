@@ -3395,6 +3395,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-http-middleware"
+version = "0.0.0"
+dependencies = [
+ "jsonrpsee",
+ "reth-node-builder",
+ "reth-optimism-cli",
+ "reth-optimism-node",
+ "reth-tracing",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
