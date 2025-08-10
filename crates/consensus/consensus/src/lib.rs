@@ -13,7 +13,7 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
@@ -243,6 +243,15 @@ pub enum ConsensusError {
     /// Error when the difficulty after a merge is not zero.
     #[error("difficulty after merge is not zero")]
     TheMergeDifficultyIsNotZero,
+
+    /// Error when the block difficulty does not match the expected calculated difficulty.
+    #[error("invalid difficulty: parent: {parent_difficulty}, child: {child_difficulty}")]
+    DifficultyInvalid {
+        /// The parent block's difficulty.
+        parent_difficulty: U256,
+        /// The child block's difficulty.
+        child_difficulty: U256,
+    },
 
     /// Error when the nonce after a merge is not zero.
     #[error("nonce after merge is not zero")]
