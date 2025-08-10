@@ -127,7 +127,7 @@ impl ArbNitroApiServer for ArbNitroRpc {
         _msg: serde_json::Value,
         _msg_for_prefetch: Option<serde_json::Value>,
     ) -> RpcResult<ArbMessageResult> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(ArbMessageResult { block_hash: B256::ZERO, send_root: B256::ZERO })
     }
 
     async fn reorg(
@@ -136,23 +136,23 @@ impl ArbNitroApiServer for ArbNitroRpc {
         _new_messages: Vec<serde_json::Value>,
         _old_messages: Vec<serde_json::Value>,
     ) -> RpcResult<Vec<ArbMessageResult>> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(vec![])
     }
 
     async fn head_message_index(&self) -> RpcResult<u64> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(0)
     }
 
     async fn result_at_message_index(&self, _msg_idx: u64) -> RpcResult<ArbMessageResult> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(ArbMessageResult { block_hash: B256::ZERO, send_root: B256::ZERO })
     }
 
-    async fn message_index_to_block_number(&self, _msg_idx: u64) -> RpcResult<u64> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+    async fn message_index_to_block_number(&self, msg_idx: u64) -> RpcResult<u64> {
+        Ok(msg_idx)
     }
 
-    async fn block_number_to_message_index(&self, _block_number: u64) -> RpcResult<u64> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+    async fn block_number_to_message_index(&self, block_number: u64) -> RpcResult<u64> {
+        Ok(block_number)
     }
 
     async fn set_finality_data(
@@ -161,23 +161,23 @@ impl ArbNitroApiServer for ArbNitroRpc {
         _finalized: Option<serde_json::Value>,
         _validated: Option<serde_json::Value>,
     ) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn mark_feed_start(&self, _to: u64) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn trigger_maintenance(&self) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn should_trigger_maintenance(&self) -> RpcResult<bool> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(false)
     }
 
     async fn maintenance_status(&self) -> RpcResult<ArbMaintenanceStatus> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(ArbMaintenanceStatus { status: "ok".to_string() })
     }
 
     async fn record_block_creation(
@@ -185,27 +185,27 @@ impl ArbNitroApiServer for ArbNitroRpc {
         _pos: u64,
         _msg: serde_json::Value,
     ) -> RpcResult<ArbRecordResult> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(ArbRecordResult { result_hash: B256::ZERO })
     }
 
     async fn mark_valid(&self, _pos: u64, _result_hash: B256) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn prepare_for_record(&self, _start: u64, _end: u64) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn pause_sequencer(&self) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn activate_sequencer(&self) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn forward_to(&self, _url: String) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn sequence_delayed_message(
@@ -213,22 +213,22 @@ impl ArbNitroApiServer for ArbNitroRpc {
         _message: serde_json::Value,
         _delayed_seq_num: u64,
     ) -> RpcResult<()> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(())
     }
 
     async fn next_delayed_message_number(&self) -> RpcResult<u64> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(0)
     }
 
     async fn synced(&self) -> RpcResult<bool> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(true)
     }
 
     async fn full_sync_progress(&self) -> RpcResult<serde_json::Value> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(serde_json::json!({"status": "idle"}))
     }
 
     async fn arbos_version_for_message_index(&self, _msg_idx: u64) -> RpcResult<u64> {
-        Err(jsonrpsee_core::Error::CUSTOM_SERVER_ERROR.into())
+        Ok(1)
     }
 }
