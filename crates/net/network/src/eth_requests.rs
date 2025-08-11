@@ -116,7 +116,7 @@ where
 
                 match direction {
                     HeadersDirection::Rising => {
-                        if let Some(next) = header.number.checked_add(skip) {
+                        if let Some(next) = number.checked_add(skip) {
                             block = next.into()
                         } else {
                             break
