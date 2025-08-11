@@ -986,9 +986,9 @@ pub enum ArbTxType {
 pub struct ArbPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for ArbPrimitives {
-    type Block = alloy_consensus::Block<ArbTransactionSigned>;
+    type Block = alloy_consensus::Block<ArbTransactionSigned, alloy_consensus::Header>;
     type BlockHeader = alloy_consensus::Header;
-    type BlockBody = alloy_consensus::BlockBody<ArbTransactionSigned>;
+    type BlockBody = alloy_consensus::BlockBody<ArbTransactionSigned, alloy_consensus::Header>;
     type SignedTx = ArbTransactionSigned;
     type Receipt = ArbReceipt;
 }
