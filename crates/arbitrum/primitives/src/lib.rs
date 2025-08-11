@@ -26,16 +26,12 @@ pub enum ArbReceipt {
     Eip2930(AlloyReceipt),
     Eip7702(AlloyReceipt),
     Deposit(ArbDepositReceipt),
-
-
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ArbDepositReceipt;
-#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbReceipt {}
-#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::RlpBincode for ArbTransactionSigned {}
 
 impl InMemorySize for ArbReceipt {
@@ -300,7 +296,68 @@ impl alloy_rlp::Decodable for ArbReceipt {
 
 
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(feature = "reth-codec")]
+mod compact_receipt {
+    use super::*;
+    use alloc::borrow::Cow;
+    use reth_codecs::Compact;
+
+    #[derive(reth_codecs::CompactZstd)]
+    #[reth_zstd(
+        compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
+        decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
+    )]
+    struct CompactArbReceipt<'a> {
+        is_legacy_like: bool,
+        success: bool,
+        cumulative_gas_used: u64,
+        #[expect(clippy::owned_cow)]
+        logs: Cow<'a, Vec<alloy_primitives::Log>>,
+    }
+
+    impl<'a> From<&'a ArbReceipt> for CompactArbReceipt<'a> {
+        fn from(receipt: &'a ArbReceipt) -> Self {
+            let inner = receipt.as_receipt();
+            Self {
+                is_legacy_like: !matches!(receipt, ArbReceipt::Deposit(_)),
+                success: inner.status().into(),
+                cumulative_gas_used: inner.cumulative_gas_used(),
+                logs: Cow::Borrowed(&inner.logs),
+            }
+        }
+    }
+
+    impl From<CompactArbReceipt<'_>> for ArbReceipt {
+        fn from(r: CompactArbReceipt<'_>) -> Self {
+            let inner = AlloyReceipt {
+                status: alloy_consensus::Eip658Value::Eip658(r.success),
+                cumulative_gas_used: r.cumulative_gas_used,
+                logs: r.logs.into_owned(),
+            };
+            if r.is_legacy_like {
+                ArbReceipt::Legacy(inner)
+            } else {
+                ArbReceipt::Deposit(ArbDepositReceipt)
+            }
+        }
+    }
+
+    impl Compact for ArbReceipt {
+        fn to_compact<B>(&self, buf: &mut B) -> usize
+        where
+            B: bytes::BufMut + AsMut<[u8]>,
+        {
+            CompactArbReceipt::from(self).to_compact(buf)
+        }
+
+        fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+            let (r, buf) = CompactArbReceipt::from_compact(buf, len);
+            (r.into(), buf)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArbTypedTransaction {
     Deposit(arb_alloy_consensus::tx::ArbDepositTx),
     Unsigned(arb_alloy_consensus::tx::ArbUnsignedTx),
@@ -309,6 +366,87 @@ pub enum ArbTypedTransaction {
     SubmitRetryable(arb_alloy_consensus::tx::ArbSubmitRetryableTx),
     Internal(arb_alloy_consensus::tx::ArbInternalTx),
     Legacy(TxLegacy),
+}
+
+#[cfg(feature = "reth-codec")]
+impl reth_codecs::Compact for ArbTypedTransaction {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+        match self {
+            ArbTypedTransaction::Legacy(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode(&mut tmp);
+                buf.put_slice(&tmp);
+            }
+            ArbTypedTransaction::Deposit(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx.as_u8());
+                tx.encode(buf);
+            }
+            ArbTypedTransaction::Unsigned(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx.as_u8());
+                tx.encode(buf);
+            }
+            ArbTypedTransaction::Contract(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx.as_u8());
+                tx.encode(buf);
+            }
+            ArbTypedTransaction::Retry(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx.as_u8());
+                tx.encode(buf);
+            }
+            ArbTypedTransaction::SubmitRetryable(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx.as_u8());
+                tx.encode(buf);
+            }
+            ArbTypedTransaction::Internal(tx) => {
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
+                tx.encode(buf);
+            }
+        }
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (head, tail) = buf.split_at(len);
+        let mut slice: &[u8] = head;
+
+        if let Some(first) = slice.first().copied() {
+            if let Ok(kind) = arb_alloy_consensus::tx::ArbTxType::from_u8(first) {
+                let mut rest = &slice[1..];
+                let tx = match kind {
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
+                        ArbTypedTransaction::Deposit(<arb_alloy_consensus::tx::ArbDepositTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode deposit"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => {
+                        ArbTypedTransaction::Unsigned(<arb_alloy_consensus::tx::ArbUnsignedTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode unsigned"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => {
+                        ArbTypedTransaction::Contract(<arb_alloy_consensus::tx::ArbContractTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode contract"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => {
+                        ArbTypedTransaction::Retry(<arb_alloy_consensus::tx::ArbRetryTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode retry"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => {
+                        ArbTypedTransaction::SubmitRetryable(<arb_alloy_consensus::tx::ArbSubmitRetryableTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode submit retryable"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => {
+                        ArbTypedTransaction::Internal(<arb_alloy_consensus::tx::ArbInternalTx as alloy_rlp::Decodable>::decode(&mut rest).expect("decode internal"))
+                    }
+                    arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => {
+                        let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).expect("decode legacy");
+                        ArbTypedTransaction::Legacy(tx)
+                    }
+                };
+                return (tx, tail);
+            }
+        }
+        let mut s = slice;
+        let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).expect("decode legacy");
+        (ArbTypedTransaction::Legacy(tx), tail)
+    }
 }
 
 impl alloy_consensus::TxReceipt for ArbReceipt {
