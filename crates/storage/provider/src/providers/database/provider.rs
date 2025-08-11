@@ -75,7 +75,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -2286,7 +2286,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
-                    block_receipts.push(receipts_iter.next().unwrap().1);
+                    if let Some((_, receipt)) = receipts_iter.next() {
+                        block_receipts.push(receipt);
+                    } else {
+                        warn!(
+                            target: "storage::provider",
+                            "Missing receipt for transaction number {} in block body",
+                            num
+                        );
+                    }
                 }
             }
             receipts.push(block_receipts);
