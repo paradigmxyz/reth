@@ -8,7 +8,7 @@ use crate::{
     BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::{BlockNumberOrTag, Decodable2718};
+use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::{Bytes, Encodable};
 use futures_util::{
@@ -632,7 +632,7 @@ where
                         &mut backup.rlp.as_ref(),
                     )
                     .ok()?;
-                    let recovered = tx_signed.try_clone_into_recovered().ok()?;
+                    let recovered = tx_signed.try_into_recovered().ok()?;
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
 
@@ -645,9 +645,8 @@ where
 
             txs_signed
                 .into_iter()
-                .filter_map(|tx| tx.try_clone_into_recovered().ok())
+                .filter_map(|tx| tx.try_into_recovered().ok())
                 .filter_map(|tx| {
-                    // Filter out errors
                     <P::Transaction as PoolTransaction>::try_from_consensus(tx)
                         .ok()
                         .map(|pool_tx| (TransactionOrigin::Local, pool_tx))
@@ -655,23 +654,14 @@ where
                 .collect()
         };
 
-    let num_txs = pool_transactions.len();
+    let inserted = futures_util::future::join_all(
+        pool_transactions.into_iter().map(|(origin, tx)| pool.add_transaction(origin, tx)),
+    )
+    .await;
 
-    for (origin, pool_tx) in pool_transactions {
-        let _ = pool.add_transaction(origin, pool_tx).await;
-    }
-
-    info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Successfully reinserted local transactions from file");
+    info!(target: "txpool", txs_file =?file_path, num_txs=%inserted.len(), "Successfully reinserted local transactions from file");
     reth_fs_util::remove_file(file_path)?;
     Ok(())
-}
-
-/// A transaction backup that is saved as json to a file for
-/// reinsertion into the pool
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TxBackup {
-    rlp: Bytes,
-    origin: TransactionOrigin,
 }
 
 fn save_local_txs_backup<P>(pool: P, file_path: &Path)
@@ -688,15 +678,13 @@ where
         .into_iter()
         .map(|tx| {
             let consensus_tx = tx.transaction.clone_into_consensus().into_inner();
-            let mut rlp_data = Vec::new();
-            consensus_tx.encode(&mut rlp_data);
+            let rlp_data = consensus_tx.encoded_2718();
 
             TxBackup { rlp: rlp_data.into(), origin: tx.origin }
         })
         .collect::<Vec<_>>();
 
-    let num_txs = local_transactions.len();
-    let json_data = match serde_json::to_vec(&local_transactions) {
+    let json_data = match serde_json::to_string(&local_transactions) {
         Ok(data) => data,
         Err(err) => {
             warn!(target: "txpool", %err, txs_file=?file_path, "failed to serialize local transactions to json");
@@ -704,7 +692,7 @@ where
         }
     };
 
-    info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
+    info!(target: "txpool", txs_file =?file_path, num_txs=%local_transactions.len(), "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
     match parent_dir.map(|_| reth_fs_util::write(file_path, json_data)) {
@@ -715,6 +703,16 @@ where
             warn!(target: "txpool", %err, txs_file=?file_path, "Failed to write local transactions to file");
         }
     }
+}
+
+/// A transaction backup that is saved as json to a file for
+/// reinsertion into the pool
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TxBackup {
+    /// Encoded transaction
+    pub rlp: Bytes,
+    /// The origin of the transaction
+    pub origin: TransactionOrigin,
 }
 
 /// Errors possible during txs backup load and decode
