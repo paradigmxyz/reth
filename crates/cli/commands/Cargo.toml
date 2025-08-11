@@ -51,7 +51,7 @@ reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-common = { workspace = true, optional = true }
+reth-trie-common = { workspace = true }
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
@@ -115,12 +115,15 @@ arbitrary = [
     "reth-codecs/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "reth-trie-common/test-utils",
     "reth-codecs/arbitrary",
     "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
-    "reth-trie-common?/arbitrary",
+    "reth-trie-common/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
+
+[[bin]]
+name = "nibble-analyzer"
+path = "src/nibble_storage_analyzer.rs"
