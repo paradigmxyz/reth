@@ -8,7 +8,7 @@ use futures_util::{stream::Fuse, StreamExt};
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
+    EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
 };
 use reth_provider::BlockReader;
 use reth_transaction_pool::TransactionPool;
