@@ -468,33 +468,33 @@ where
             }
 
             let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        println!("connection almost ready");
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())));
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())));
-                        }
-                        return Poll::Ready(Some(Err(err.into())));
-                    }
-                    Poll::Pending => {
-                        println!("connection not ready");
-                        conn_ready = false;
-                        break;
-                    }
-                }
-            }
+            // loop {
+            //     match this.inner.conn.poll_ready_unpin(cx) {
+            //         Poll::Ready(Ok(())) => {
+            //             println!("connection almost ready");
+            //             if let Some(msg) = this.inner.out_buffer.pop_front() {
+            //                 if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+            //                     return Poll::Ready(Some(Err(err.into())));
+            //                 }
+            //             } else {
+            //                 break;
+            //             }
+            //         }
+            //         Poll::Ready(Err(err)) => {
+            //             if let Err(disconnect_err) =
+            //                 this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+            //             {
+            //                 return Poll::Ready(Some(Err(disconnect_err.into())));
+            //             }
+            //             return Poll::Ready(Some(Err(err.into())));
+            //         }
+            //         Poll::Pending => {
+            //             println!("connection not ready");
+            //             conn_ready = false;
+            //             break;
+            //         }
+            //     }
+            // }
 
             let now = std::time::Instant::now();
             let mut any_poll = false;
@@ -536,14 +536,14 @@ where
 
                             // Suggesting short circuiting here under some max buffer condition
                             // remove this condition and the `eth_test_protocol_satellite_starvation` test will block
-                            if this.inner.out_buffer.len() > 1000 {
-                                this.inner.protocols.push(proto);
-                                break;
-                            }
+                            // if this.inner.out_buffer.len() > 1000 {
+                            //     this.inner.protocols.push(proto);
+                            //     break;
+                            // }
                         }
                         Poll::Ready(None) => return Poll::Ready(None),
                         Poll::Pending => {
-                            println!("satilite {idx} pending - retrying");
+                            // println!("satilite {idx} pending - retrying");
                             this.inner.protocols.push(proto);
                             break;
                         }
@@ -592,12 +592,12 @@ where
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
-                        println!("p2p stream closed");
+                        // println!("p2p stream closed");
                         // connection closed
                         return Poll::Ready(None);
                     }
                     Poll::Pending => {
-                        println!("p2p connection pending");
+                        // println!("p2p connection pending");
                         break;
                     }
                 }
@@ -620,6 +620,34 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
+
+        loop {
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    println!("connection almost ready");
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(err.into()));
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                Poll::Ready(Err(err)) => {
+                    if let Err(disconnect_err) =
+                        this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                    {
+                        return Poll::Ready(Err(disconnect_err.into()));
+                    }
+                    return Poll::Ready(Err(err.into()));
+                }
+                Poll::Pending => {
+                    println!("connection not ready");
+                    break;
+                }
+            }
+        }
+
         if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err.into()));
         }
