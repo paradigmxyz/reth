@@ -2,7 +2,7 @@
 
 use crate::chainspec::EthereumChainSpecParser;
 use clap::{Parser, Subcommand};
-use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks, HardforksOverrides};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
@@ -124,7 +124,10 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: CliHeader>,
+            ChainSpec: Hardforks + HardforksOverrides,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
@@ -178,7 +181,10 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: CliHeader>,
+            ChainSpec: Hardforks + EthChainSpec + HardforksOverrides,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         // Add network name if available to the logs dir

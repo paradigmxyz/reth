@@ -768,6 +768,22 @@ impl EthereumHardforks for ChainSpec {
     }
 }
 
+/// A trait for applying hardfork overrides to a chainspec.
+pub trait HardforksOverrides {
+    /// Apply the given hardfork timestamp overrides to the chainspec.
+    fn apply_hardforks_overrides<H: Hardfork>(&self, overrides: Vec<(H, u64)>) -> Self;
+}
+
+impl HardforksOverrides for ChainSpec {
+    fn apply_hardforks_overrides<H: Hardfork>(&self, overrides: Vec<(H, u64)>) -> Self {
+        let mut spec = self.clone();
+        for (hf, ts) in overrides {
+            spec.hardforks.insert(hf, ForkCondition::Timestamp(ts));
+        }
+        spec
+    }
+}
+
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ChainSpecProvider: Debug + Send + Sync {

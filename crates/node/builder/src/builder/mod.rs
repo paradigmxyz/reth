@@ -332,6 +332,11 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
     pub const fn config(&self) -> &NodeConfig<ChainSpec> {
         self.builder.config()
     }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        self.builder.config_mut()
+    }
 }
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
