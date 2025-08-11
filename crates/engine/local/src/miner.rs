@@ -35,7 +35,7 @@ pub enum MiningMode {
         /// Maximum number of transactions to accumulate before mining a block.
         /// If None, mine immediately when any transaction arrives.
         max_transactions: Option<usize>,
-        /// Counter for accumulated transactions (only used when max_transactions is set).
+        /// Counter for accumulated transactions (only used when `max_transactions` is set).
         accumulated: usize,
     },
     /// In this mode a block is built at a fixed interval.
