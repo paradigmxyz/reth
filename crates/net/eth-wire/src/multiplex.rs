@@ -592,7 +592,7 @@ where
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
-                        // println!("p2p stream closed");
+                        println!("p2p stream closed");
                         //
                         // connection closed
                         return Poll::Ready(None);
@@ -649,9 +649,9 @@ where
             }
         }
 
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()));
-        }
+        // if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
+        //     return Poll::Ready(Err(err.into()));
+        // }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
             return Poll::Ready(Err(err));
         }
