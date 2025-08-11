@@ -36,7 +36,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{trace, warn, debug};
+use tracing::{trace, warn};
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -479,23 +479,6 @@ impl PeersManager {
                         // this caps the reputation change to the maximum allowed for trusted peers
                         reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
                     }
-                }
-                // Clamp too-large penalties that may still be configured in legacy `reth.toml` files.
-                if matches!(rep, ReputationChangeKind::BadMessage)
-                    && reputation_change < reth_network_types::peers::reputation::BAD_MESSAGE_REPUTATION_CHANGE
-                {
-                    reputation_change = reth_network_types::peers::reputation::BAD_MESSAGE_REPUTATION_CHANGE;
-                }
-
-                if matches!(rep, ReputationChangeKind::BadMessage) {
-                    debug!(
-                        target: "net::peers",
-                        peer_id=?peer_id,
-                        const_penalty=reth_network_types::peers::reputation::BAD_MESSAGE_REPUTATION_CHANGE,
-                        weight=self.reputation_weights.bad_message,
-                        delta=reputation_change,
-                        "Applying BadMessage reputation delta"
-                    );
                 }
                 peer.apply_reputation(reputation_change, rep)
             }

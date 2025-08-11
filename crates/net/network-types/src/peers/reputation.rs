@@ -18,11 +18,8 @@ pub const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 25 * REPUTATION_UNIT;
 /// The reputation change to apply to a peer that failed to respond in time.
 const TIMEOUT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
-/// Reputation delta applied when a peer sends an invalid or malformed protocol message.
-///
-/// This constant needs to be `pub` because downstream crates (e.g. `reth-network`) may
-/// reference it for debugging purposes.
-pub const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 1 * REPUTATION_UNIT; // was 4 * UNIT, now 1 * UNIT for BSC tolerance
+/// The reputation change to apply to a peer that sent a bad message.
+const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 
 /// The reputation change applies to a peer that has sent a transaction (full or hash) that we
 /// already know about and have already previously received from that peer.
@@ -175,7 +172,7 @@ impl ReputationChangeWeights {
 
 impl Default for ReputationChangeWeights {
     fn default() -> Self {
-        let weights = Self {
+        Self {
             bad_block: BAD_MESSAGE_REPUTATION_CHANGE,
             bad_transactions: BAD_MESSAGE_REPUTATION_CHANGE,
             already_seen_transactions: ALREADY_SEEN_TRANSACTION_REPUTATION_CHANGE,
@@ -185,9 +182,7 @@ impl Default for ReputationChangeWeights {
             failed_to_connect: FAILED_TO_CONNECT_REPUTATION_CHANGE,
             dropped: REMOTE_DISCONNECT_REPUTATION_CHANGE,
             bad_announcement: BAD_ANNOUNCEMENT_REPUTATION_CHANGE,
-        };
-        tracing::debug!(target: "net::peers", bad_message_penalty = BAD_MESSAGE_REPUTATION_CHANGE, "Initialized reputation weights");
-        weights
+        }
     }
 }
 
