@@ -468,33 +468,33 @@ where
             }
 
             let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        println!("connection almost ready");
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())));
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())));
-                        }
-                        return Poll::Ready(Some(Err(err.into())));
-                    }
-                    Poll::Pending => {
-                        println!("connection not ready");
-                        conn_ready = false;
-                        break;
-                    }
-                }
-            }
+            // loop {
+            //     match this.inner.conn.poll_ready_unpin(cx) {
+            //         Poll::Ready(Ok(())) => {
+            //             println!("connection almost ready");
+            //             if let Some(msg) = this.inner.out_buffer.pop_front() {
+            //                 if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+            //                     return Poll::Ready(Some(Err(err.into())));
+            //                 }
+            //             } else {
+            //                 break;
+            //             }
+            //         }
+            //         Poll::Ready(Err(err)) => {
+            //             if let Err(disconnect_err) =
+            //                 this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+            //             {
+            //                 return Poll::Ready(Some(Err(disconnect_err.into())));
+            //             }
+            //             return Poll::Ready(Some(Err(err.into())));
+            //         }
+            //         Poll::Pending => {
+            //             println!("connection not ready");
+            //             conn_ready = false;
+            //             break;
+            //         }
+            //     }
+            // }
 
             let now = std::time::Instant::now();
             let mut any_poll = false;
