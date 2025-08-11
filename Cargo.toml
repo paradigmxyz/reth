@@ -162,6 +162,7 @@ members = [
     "examples/network-proxy/",
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
+    "examples/op-db-access/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/precompile-cache/",
