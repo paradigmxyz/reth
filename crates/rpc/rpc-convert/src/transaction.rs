@@ -456,7 +456,9 @@ pub struct TransactionConversionError(String);
 /// network and EVM associated primitives:
 /// * [`FromConsensusTx`]: from signed transaction into RPC response object.
 /// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
-/// * [`TryIntoTxEnv`]: from RPC transaction request into an executable transaction.
+/// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: Converts RPC transaction request into an executable transaction.
+///   - Use `()` for `TxEnv` generic when [`TryIntoTxEnv`] is implemented on the request type
+///   - Use a closure or custom type implementing [`TxEnvConverter`] for custom conversion logic
 /// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
