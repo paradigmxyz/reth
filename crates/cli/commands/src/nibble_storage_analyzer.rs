@@ -1,6 +1,7 @@
 use reth_db::init_db;
 use reth_db_api::{cursor::{DbCursorRO, DbDupCursorRO}, database::Database, transaction::DbTx};
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey};
+use reth_codecs::Compact;
 use std::path::Path;
 use clap::Parser;
 
@@ -23,8 +24,12 @@ pub struct Args {
 struct NibbleStats {
     /// Total number of entries
     total_entries: usize,
-    /// Current total bytes used (with padding)
-    current_total_bytes: usize,
+    /// Current total bytes used for nibbles/keys
+    current_nibbles_bytes: usize,
+    /// Total table size (keys + values)
+    total_table_bytes: usize,
+    /// Bytes for values only
+    value_bytes: usize,
     /// Bytes if using packed + length encoding
     packed_with_length_bytes: usize,
     /// Bytes if using packed + even/odd byte encoding
@@ -41,14 +46,17 @@ impl NibbleStats {
         }
     }
     
-    fn add_subkey_entry(&mut self, nibbles: &StoredNibblesSubKey) {
+    fn add_subkey_entry(&mut self, nibbles: &StoredNibblesSubKey, value_size: usize) {
         let nibble_count = nibbles.len();
         
         // Update statistics
         self.total_entries += 1;
         
         // Current storage: always 65 bytes (64 padded nibbles + 1 length byte)
-        self.current_total_bytes += 65;
+        let nibbles_storage = 65;
+        self.current_nibbles_bytes += nibbles_storage;
+        self.value_bytes += value_size;
+        self.total_table_bytes += nibbles_storage + value_size;
         
         // Update length distribution
         if nibble_count <= 64 {
@@ -68,14 +76,16 @@ impl NibbleStats {
         self.packed_with_parity_bytes += packed_bytes + 1;
     }
     
-    fn add_nibbles_entry(&mut self, nibbles: &StoredNibbles) {
+    fn add_nibbles_entry(&mut self, nibbles: &StoredNibbles, value_size: usize) {
         let nibble_count = nibbles.0.len();
         
         // Update statistics
         self.total_entries += 1;
         
         // For StoredNibbles, current storage is just the nibble count (no padding)
-        self.current_total_bytes += nibble_count;
+        self.current_nibbles_bytes += nibble_count;
+        self.value_bytes += value_size;
+        self.total_table_bytes += nibble_count + value_size;
         
         // Update length distribution
         if nibble_count <= 64 {
@@ -92,51 +102,82 @@ impl NibbleStats {
         self.packed_with_parity_bytes += packed_bytes + 1;
     }
     
-    fn print_summary(&self) {
-        println!("\n=== Nibble Storage Analysis Report ===\n");
+    fn print_summary(&self, table_name: &str) {
+        println!("\n=== {} Analysis Report ===", table_name);
         println!("Total entries analyzed: {}", self.total_entries);
-        println!("\n--- Current Storage Format ---");
-        println!("Format: Padded to 64 nibbles + length byte");
-        println!("Total bytes: {} ({:.2} MB)", 
-            self.current_total_bytes, 
-            self.current_total_bytes as f64 / (1024.0 * 1024.0)
+        
+        println!("\n--- Current Storage ---");
+        println!("Nibbles/keys only: {} bytes ({:.2} MB)", 
+            self.current_nibbles_bytes, 
+            self.current_nibbles_bytes as f64 / (1024.0 * 1024.0)
         );
-        println!("Average bytes per entry: {:.2}", 
-            self.current_total_bytes as f64 / self.total_entries as f64
+        println!("Values only: {} bytes ({:.2} MB)", 
+            self.value_bytes, 
+            self.value_bytes as f64 / (1024.0 * 1024.0)
+        );
+        println!("Total table size: {} bytes ({:.2} MB)", 
+            self.total_table_bytes, 
+            self.total_table_bytes as f64 / (1024.0 * 1024.0)
+        );
+        println!("Nibbles as % of table: {:.2}%",
+            (self.current_nibbles_bytes as f64 / self.total_table_bytes as f64) * 100.0
+        );
+        println!("Average nibbles bytes per entry: {:.2}", 
+            self.current_nibbles_bytes as f64 / self.total_entries as f64
         );
         
         println!("\n--- Option 1: Packed + Length Byte ---");
         println!("Format: Pack nibbles (2 per byte) + 1 byte for length");
-        println!("Total bytes: {} ({:.2} MB)", 
+        println!("Nibbles bytes: {} ({:.2} MB)", 
             self.packed_with_length_bytes, 
             self.packed_with_length_bytes as f64 / (1024.0 * 1024.0)
         );
-        println!("Average bytes per entry: {:.2}", 
+        println!("Average nibbles bytes per entry: {:.2}", 
             self.packed_with_length_bytes as f64 / self.total_entries as f64
         );
-        let savings1 = self.current_total_bytes - self.packed_with_length_bytes;
-        let savings1_pct = (savings1 as f64 / self.current_total_bytes as f64) * 100.0;
-        println!("Space saved: {} bytes ({:.2} MB) - {:.2}% reduction", 
-            savings1, 
-            savings1 as f64 / (1024.0 * 1024.0),
-            savings1_pct
+        
+        let nibbles_savings1 = self.current_nibbles_bytes.saturating_sub(self.packed_with_length_bytes);
+        let nibbles_savings1_pct = (nibbles_savings1 as f64 / self.current_nibbles_bytes as f64) * 100.0;
+        println!("Nibbles space saved: {} bytes ({:.2} MB) - {:.2}% reduction", 
+            nibbles_savings1, 
+            nibbles_savings1 as f64 / (1024.0 * 1024.0),
+            nibbles_savings1_pct
+        );
+        
+        let new_table_size1 = self.packed_with_length_bytes + self.value_bytes;
+        let table_savings1 = self.total_table_bytes.saturating_sub(new_table_size1);
+        let table_savings1_pct = (table_savings1 as f64 / self.total_table_bytes as f64) * 100.0;
+        println!("Total table reduction: {} bytes ({:.2} MB) - {:.2}% of table", 
+            table_savings1, 
+            table_savings1 as f64 / (1024.0 * 1024.0),
+            table_savings1_pct
         );
         
         println!("\n--- Option 2: Packed + Even/Odd Parity Byte ---");
         println!("Format: Pack nibbles (2 per byte) + 1 byte for even/odd disambiguation");
-        println!("Total bytes: {} ({:.2} MB)", 
+        println!("Nibbles bytes: {} ({:.2} MB)", 
             self.packed_with_parity_bytes, 
             self.packed_with_parity_bytes as f64 / (1024.0 * 1024.0)
         );
-        println!("Average bytes per entry: {:.2}", 
+        println!("Average nibbles bytes per entry: {:.2}", 
             self.packed_with_parity_bytes as f64 / self.total_entries as f64
         );
-        let savings2 = self.current_total_bytes - self.packed_with_parity_bytes;
-        let savings2_pct = (savings2 as f64 / self.current_total_bytes as f64) * 100.0;
-        println!("Space saved: {} bytes ({:.2} MB) - {:.2}% reduction", 
-            savings2, 
-            savings2 as f64 / (1024.0 * 1024.0),
-            savings2_pct
+        
+        let nibbles_savings2 = self.current_nibbles_bytes.saturating_sub(self.packed_with_parity_bytes);
+        let nibbles_savings2_pct = (nibbles_savings2 as f64 / self.current_nibbles_bytes as f64) * 100.0;
+        println!("Nibbles space saved: {} bytes ({:.2} MB) - {:.2}% reduction", 
+            nibbles_savings2, 
+            nibbles_savings2 as f64 / (1024.0 * 1024.0),
+            nibbles_savings2_pct
+        );
+        
+        let new_table_size2 = self.packed_with_parity_bytes + self.value_bytes;
+        let table_savings2 = self.total_table_bytes.saturating_sub(new_table_size2);
+        let table_savings2_pct = (table_savings2 as f64 / self.total_table_bytes as f64) * 100.0;
+        println!("Total table reduction: {} bytes ({:.2} MB) - {:.2}% of table", 
+            table_savings2, 
+            table_savings2 as f64 / (1024.0 * 1024.0),
+            table_savings2_pct
         );
         
         println!("\n--- Nibble Length Distribution ---");
@@ -184,7 +225,9 @@ pub fn analyze_storage_tries(datadir: &Path, verbose: bool) -> eyre::Result<()> 
         let mut count = 0;
         // Iterate through all entries in the dup-sorted table
         while let Some((_key, entry)) = cursor.next()? {
-            storage_stats.add_subkey_entry(&entry.nibbles);
+            // Calculate size of the encoded value
+            let value_size = entry.node.to_compact(&mut Vec::new());
+            storage_stats.add_subkey_entry(&entry.nibbles, value_size);
             count += 1;
             
             if verbose && count % 100_000 == 0 {
@@ -193,8 +236,7 @@ pub fn analyze_storage_tries(datadir: &Path, verbose: bool) -> eyre::Result<()> 
         }
     }
     
-    println!("\n=== StoragesTrie Table ===");
-    storage_stats.print_summary();
+    storage_stats.print_summary("StoragesTrie Table");
     
     // Analyze AccountsTrie table
     println!("\n\nAnalyzing AccountsTrie table...");
@@ -205,8 +247,10 @@ pub fn analyze_storage_tries(datadir: &Path, verbose: bool) -> eyre::Result<()> 
         let mut cursor = tx.cursor_read::<reth_db::tables::AccountsTrie>()?;
         
         let mut count = 0;
-        while let Some((key, _value)) = cursor.next()? {
-            account_stats.add_nibbles_entry(&key);
+        while let Some((key, value)) = cursor.next()? {
+            // Calculate size of the encoded value
+            let value_size = value.to_compact(&mut Vec::new());
+            account_stats.add_nibbles_entry(&key, value_size);
             count += 1;
             
             if verbose && count % 100_000 == 0 {
@@ -215,44 +259,81 @@ pub fn analyze_storage_tries(datadir: &Path, verbose: bool) -> eyre::Result<()> 
         }
     }
     
-    println!("\n=== AccountsTrie Table ===");
-    account_stats.print_summary();
+    account_stats.print_summary("AccountsTrie Table");
     
     // Combined summary
     println!("\n\n=== COMBINED SUMMARY ===");
-    let total_current = storage_stats.current_total_bytes + account_stats.current_total_bytes;
+    let total_current_nibbles = storage_stats.current_nibbles_bytes + account_stats.current_nibbles_bytes;
+    let total_current_values = storage_stats.value_bytes + account_stats.value_bytes;
+    let total_current_tables = storage_stats.total_table_bytes + account_stats.total_table_bytes;
     let total_packed_length = storage_stats.packed_with_length_bytes + account_stats.packed_with_length_bytes;
     let total_packed_parity = storage_stats.packed_with_parity_bytes + account_stats.packed_with_parity_bytes;
     
-    println!("Total current storage: {} bytes ({:.2} MB)", 
-        total_current, 
-        total_current as f64 / (1024.0 * 1024.0)
+    println!("Current storage:");
+    println!("  Nibbles/keys: {} bytes ({:.2} MB)", 
+        total_current_nibbles, 
+        total_current_nibbles as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Values: {} bytes ({:.2} MB)", 
+        total_current_values, 
+        total_current_values as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Total tables: {} bytes ({:.2} MB)", 
+        total_current_tables, 
+        total_current_tables as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Nibbles as % of tables: {:.2}%",
+        (total_current_nibbles as f64 / total_current_tables as f64) * 100.0
     );
     
     println!("\nWith packed + length encoding:");
-    let total_savings1 = total_current - total_packed_length;
-    let total_savings1_pct = (total_savings1 as f64 / total_current as f64) * 100.0;
-    println!("  Total: {} bytes ({:.2} MB)", 
+    let nibbles_savings1 = total_current_nibbles.saturating_sub(total_packed_length);
+    let nibbles_savings1_pct = (nibbles_savings1 as f64 / total_current_nibbles as f64) * 100.0;
+    println!("  New nibbles size: {} bytes ({:.2} MB)", 
         total_packed_length, 
         total_packed_length as f64 / (1024.0 * 1024.0)
     );
-    println!("  Savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
-        total_savings1, 
-        total_savings1 as f64 / (1024.0 * 1024.0),
-        total_savings1_pct
+    println!("  Nibbles savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
+        nibbles_savings1, 
+        nibbles_savings1 as f64 / (1024.0 * 1024.0),
+        nibbles_savings1_pct
+    );
+    let new_total_tables1 = total_packed_length + total_current_values;
+    let table_savings1 = total_current_tables.saturating_sub(new_total_tables1);
+    let table_savings1_pct = (table_savings1 as f64 / total_current_tables as f64) * 100.0;
+    println!("  New total tables: {} bytes ({:.2} MB)", 
+        new_total_tables1, 
+        new_total_tables1 as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Total table savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
+        table_savings1, 
+        table_savings1 as f64 / (1024.0 * 1024.0),
+        table_savings1_pct
     );
     
     println!("\nWith packed + even/odd parity encoding:");
-    let total_savings2 = total_current - total_packed_parity;
-    let total_savings2_pct = (total_savings2 as f64 / total_current as f64) * 100.0;
-    println!("  Total: {} bytes ({:.2} MB)", 
+    let nibbles_savings2 = total_current_nibbles.saturating_sub(total_packed_parity);
+    let nibbles_savings2_pct = (nibbles_savings2 as f64 / total_current_nibbles as f64) * 100.0;
+    println!("  New nibbles size: {} bytes ({:.2} MB)", 
         total_packed_parity, 
         total_packed_parity as f64 / (1024.0 * 1024.0)
     );
-    println!("  Savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
-        total_savings2, 
-        total_savings2 as f64 / (1024.0 * 1024.0),
-        total_savings2_pct
+    println!("  Nibbles savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
+        nibbles_savings2, 
+        nibbles_savings2 as f64 / (1024.0 * 1024.0),
+        nibbles_savings2_pct
+    );
+    let new_total_tables2 = total_packed_parity + total_current_values;
+    let table_savings2 = total_current_tables.saturating_sub(new_total_tables2);
+    let table_savings2_pct = (table_savings2 as f64 / total_current_tables as f64) * 100.0;
+    println!("  New total tables: {} bytes ({:.2} MB)", 
+        new_total_tables2, 
+        new_total_tables2 as f64 / (1024.0 * 1024.0)
+    );
+    println!("  Total table savings: {} bytes ({:.2} MB) - {:.2}% reduction", 
+        table_savings2, 
+        table_savings2 as f64 / (1024.0 * 1024.0),
+        table_savings2_pct
     );
     
     Ok(())
