@@ -3618,6 +3618,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-op-db-access"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth-op",
+]
+
+[[package]]
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
