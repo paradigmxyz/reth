@@ -141,12 +141,12 @@ impl PrefixSetMut {
     }
 
     /// Returns the number of elements in the set.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.keys.len()
     }
 
     /// Returns `true` if the set is empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
 
