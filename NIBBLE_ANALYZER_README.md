@@ -40,6 +40,12 @@ cargo build -p reth-cli-commands --bin nibble-analyzer --release
 
 # With verbose output (shows progress)
 ./target/release/nibble-analyzer --datadir /data/mainnet/reth --verbose
+
+# Disable read transaction timeout (useful for large databases like Base)
+./target/release/nibble-analyzer --datadir /data/mainnet/reth --no-timeout
+
+# Combined options
+./target/release/nibble-analyzer --datadir /data/base/reth --verbose --no-timeout
 ```
 
 ## Example Output

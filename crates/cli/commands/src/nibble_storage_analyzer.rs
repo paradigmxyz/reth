@@ -1,5 +1,5 @@
-use reth_db::init_db;
-use reth_db_api::{cursor::{DbCursorRO, DbDupCursorRO}, database::Database, transaction::DbTx};
+use reth_db::{init_db, mdbx::{DatabaseArguments, MaxReadTransactionDuration}};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey};
 use reth_codecs::Compact;
 use std::path::Path;
@@ -17,6 +17,10 @@ pub struct Args {
     /// Show detailed statistics
     #[arg(long)]
     pub verbose: bool,
+    
+    /// Disable read transaction timeout (useful for large databases)
+    #[arg(long)]
+    pub no_timeout: bool,
 }
 
 /// Statistics for nibble storage analysis
@@ -208,11 +212,18 @@ impl NibbleStats {
     }
 }
 
-pub fn analyze_storage_tries(datadir: &Path, verbose: bool) -> eyre::Result<()> {
+pub fn analyze_storage_tries(datadir: &Path, verbose: bool, no_timeout: bool) -> eyre::Result<()> {
     println!("Opening database at: {:?}", datadir);
     
-    // Open the database
-    let db = init_db(datadir, Default::default())?;
+    // Open the database with optional timeout disabled
+    let mut db_args = DatabaseArguments::default();
+    if no_timeout {
+        db_args = db_args.with_max_read_transaction_duration(
+            Some(MaxReadTransactionDuration::Unbounded)
+        );
+        println!("Read transaction timeout disabled");
+    }
+    let db = init_db(datadir, db_args)?;
     
     // Analyze StoragesTrie table
     println!("\nAnalyzing StoragesTrie table...");
@@ -347,7 +358,7 @@ fn main() -> eyre::Result<()> {
         return Err(eyre::eyre!("Database directory does not exist: {:?}", datadir));
     }
     
-    analyze_storage_tries(datadir, args.verbose)?;
+    analyze_storage_tries(datadir, args.verbose, args.no_timeout)?;
     
     Ok(())
 }
