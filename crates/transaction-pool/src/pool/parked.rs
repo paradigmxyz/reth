@@ -312,11 +312,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
             .collect()
     }
 
-    fn get_sender_count(&self, sender_id: SenderId) -> u64 {
-        self.sender_id_count
-            .binary_search_by_key(&sender_id, |sc| sc.sender_id())
-            .map(|idx| self.sender_id_count[idx].count())
-            .unwrap_or(0)
+    fn batch_remove_senders(&mut self, removed_senders: &std::collections::HashSet<SenderId>) {
+        // Remove from sender_id_count in one pass
+        self.sender_id_count.retain(|sc| !removed_senders.contains(&sc.sender_id()));
+
+        // Remove from sender_id_last_submission in one pass
+        self.sender_id_last_submission.retain(|ss| !removed_senders.contains(&ss.sender_id()));
     }
 
     /// Truncates the pool by removing transactions, until the given [`SubPoolLimit`] has been met.
@@ -368,6 +369,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         if processed_senders > 0 {
+            self.batch_remove_senders(&removed_senders); 
             self.submission_order.drain(0..processed_senders);
         }
 
