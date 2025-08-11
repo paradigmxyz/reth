@@ -25,9 +25,9 @@ pub struct ParkedPool<T: ParkedOrd> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
-    /// Bitmap 1: [sender_id: u64][count: u64] - tracks transaction count per sender
+    /// Bitmap 1: [`sender_id`: u64][count: u64] - tracks transaction count per sender
     sender_id_count: Vec<SenderCount>,
-    /// Bitmap 2: [sender_id: u64][last_submission_id: u64] - tracks last submission per sender
+    /// Bitmap 2: [`sender_id`: u64][last_submission_id: u64] - tracks last submission per sender
     sender_id_last_submission: Vec<SenderSubmission>,
 
     // Only contains senders that have transactions
@@ -48,17 +48,17 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 }
 
-/// Packed 128-bit value: [sender_id: u64][count: u64]
+/// Packed 128-bit value: [`sender_id`: u64][count: u64]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SenderCount(u128);
 
 impl SenderCount {
-    /// Create a new SenderCount from sender_id and count
+    /// Create a new `SenderCount` from `sender_id` and count
     const fn new(sender_id: SenderId, count: u64) -> Self {
         Self(((sender_id.as_u64()) as u128) << 64 | count as u128)
     }
 
-    /// Extract sender_id from packed value
+    /// Extract `sender_id` from packed value
     const fn sender_id(self) -> SenderId {
         SenderId::from_u64((self.0 >> 64) as u64)
     }
@@ -82,22 +82,22 @@ impl PartialOrd for SenderCount {
     }
 }
 
-/// Packed 128-bit value: [sender_id: u64][last_submission_id: u64]
+/// Packed 128-bit value: [`sender_id`: u64][last_submission_id: u64]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SenderSubmission(u128);
 
 impl SenderSubmission {
-    /// Create a new SenderSubmission from sender_id and submission_id
+    /// Create a new `SenderSubmission` from `sender_id` and `submission_id`
     const fn new(sender_id: SenderId, submission_id: u64) -> Self {
         Self(((sender_id.as_u64()) as u128) << 64 | submission_id as u128)
     }
 
-    /// Extract sender_id from packed value
+    /// Extract `sender_id` from packed value
     const fn sender_id(self) -> SenderId {
         SenderId::from_u64((self.0 >> 64) as u64)
     }
 
-    /// Extract submission_id from packed value
+    /// Extract `submission_id` from packed value
     const fn submission_id(self) -> u64 {
         self.0 as u64
     }
@@ -369,7 +369,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         if processed_senders > 0 {
-            self.batch_remove_senders(&removed_senders); 
+            self.batch_remove_senders(&removed_senders);
             self.submission_order.drain(0..processed_senders);
         }
 

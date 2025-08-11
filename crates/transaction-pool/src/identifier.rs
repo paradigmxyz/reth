@@ -61,7 +61,7 @@ impl SenderIdentifiers {
 pub struct SenderId(u64);
 
 impl SenderId {
-    /// Create a new SenderId from u64
+    /// Create a new `SenderId` from u64
     pub const fn from_u64(value: u64) -> Self {
         Self(value)
     }
