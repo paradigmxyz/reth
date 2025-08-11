@@ -593,6 +593,7 @@ where
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
                         // println!("p2p stream closed");
+                        //
                         // connection closed
                         return Poll::Ready(None);
                     }
