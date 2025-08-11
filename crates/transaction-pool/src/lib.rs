@@ -298,6 +298,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
+use futures_util::future::join_all;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -504,6 +505,17 @@ where
         let validated = self.validate_all(origin, transactions).await;
 
         self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
+    }
+
+    async fn add_transactions_with_individual_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        if transactions.is_empty() {
+            return Vec::new()
+        }
+        join_all(transactions.into_iter().map(|(origin, tx)| self.add_transaction(origin, tx)))
+            .await
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
