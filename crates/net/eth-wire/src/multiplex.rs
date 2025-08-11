@@ -81,7 +81,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     {
         let Ok(shared_cap) = self.shared_capabilities().ensure_matching_capability(cap).cloned()
         else {
-            return Err(P2PStreamError::CapabilityNotShared)
+            return Err(P2PStreamError::CapabilityNotShared);
         };
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
@@ -149,7 +149,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     {
         let Ok(shared_cap) = self.shared_capabilities().ensure_matching_capability(cap).cloned()
         else {
-            return Err(P2PStreamError::CapabilityNotShared.into())
+            return Err(P2PStreamError::CapabilityNotShared.into());
         };
 
         let (to_primary, from_wire) = mpsc::unbounded_channel();
@@ -245,7 +245,7 @@ impl<St> MultiplexInner<St> {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);
-                return true
+                return true;
             }
         }
         false
@@ -301,7 +301,7 @@ impl ProtocolProxy {
     fn try_send(&self, msg: Bytes) -> Result<(), io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
         self.to_wire.send(self.mask_msg_id(msg)?).map_err(|_| io::ErrorKind::BrokenPipe.into())
     }
@@ -311,7 +311,7 @@ impl ProtocolProxy {
     fn mask_msg_id(&self, msg: Bytes) -> Result<Bytes, io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
 
         let offset = self.shared_cap.relative_message_id_offset();
@@ -329,7 +329,7 @@ impl ProtocolProxy {
     fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
         msg[0] = msg[0]
             .checked_sub(self.shared_cap.relative_message_id_offset())
@@ -463,48 +463,63 @@ where
         loop {
             // first drain the primary stream
             if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
-                return Poll::Ready(Some(msg))
+                println!("draining primary stream");
+                return Poll::Ready(Some(msg));
             }
 
             let mut conn_ready = true;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
                     Poll::Ready(Ok(())) => {
+                        println!("connection almost ready");
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
+                                return Poll::Ready(Some(Err(err.into())));
                             }
                         } else {
-                            break
+                            break;
                         }
                     }
                     Poll::Ready(Err(err)) => {
                         if let Err(disconnect_err) =
                             this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
                         {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
+                            return Poll::Ready(Some(Err(disconnect_err.into())));
                         }
-                        return Poll::Ready(Some(Err(err.into())))
+                        return Poll::Ready(Some(Err(err.into())));
                     }
                     Poll::Pending => {
+                        println!("connection not ready");
                         conn_ready = false;
-                        break
+                        break;
                     }
                 }
             }
 
+            let now = std::time::Instant::now();
+            let mut any_poll = false;
             // advance primary out
             loop {
                 match this.primary.from_primary.poll_next_unpin(cx) {
                     Poll::Ready(Some(msg)) => {
+                        any_poll = true;
                         this.inner.out_buffer.push_back(msg);
                     }
                     Poll::Ready(None) => {
+                        println!("primary closed");
                         // primary closed
-                        return Poll::Ready(None)
+                        return Poll::Ready(None);
                     }
                     Poll::Pending => break,
                 }
+            }
+
+            let t = now.elapsed().as_micros();
+            if t > 1 {
+                println!(
+                    "polled {any_poll} - time for primary poll: {}mcs",
+                    now.elapsed().as_micros()
+                );
             }
 
             // advance all satellites
@@ -516,14 +531,27 @@ where
                             return Poll::Ready(Some(Err(P2PStreamError::Io(err).into())))
                         }
                         Poll::Ready(Some(Ok(msg))) => {
+                            // println!("satilite {idx} recieved msg");
                             this.inner.out_buffer.push_back(msg);
+
+                            // Suggesting short circuiting here under some max buffer condition
+                            // remove this condition and the `eth_test_protocol_satellite_starvation` test will block
+                            if this.inner.out_buffer.len() > 1000 {
+                                this.inner.protocols.push(proto);
+                                break;
+                            }
                         }
                         Poll::Ready(None) => return Poll::Ready(None),
                         Poll::Pending => {
+                            println!("satilite {idx} pending - retrying");
                             this.inner.protocols.push(proto);
-                            break
+                            break;
                         }
                     }
+                }
+                let t = now.elapsed().as_micros();
+                if t > 10 {
+                    println!("time for satilite {idx} poll: {t}mcs");
                 }
             }
 
@@ -536,7 +564,7 @@ where
                         let Some(offset) = msg.first().copied() else {
                             return Poll::Ready(Some(Err(
                                 P2PStreamError::EmptyProtocolMessage.into()
-                            )))
+                            )));
                         };
                         // delegate the multiplexed message to the correct protocol
                         if let Some(cap) =
@@ -545,33 +573,38 @@ where
                             if cap == &this.primary.shared_cap {
                                 // delegate to primary
                                 let _ = this.primary.to_primary.send(msg);
+                                println!("sending p2p msg to primary stream");
                             } else {
                                 // delegate to installed satellite if any
                                 for proto in &this.inner.protocols {
                                     if proto.shared_cap == *cap {
+                                        println!("sending p2p msg to proto stream");
                                         proto.send_raw(msg);
-                                        break
+                                        break;
                                     }
                                 }
                             }
                         } else {
-                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
-                                offset,
-                            )
-                            .into())))
+                            return Poll::Ready(Some(Err(
+                                P2PStreamError::UnknownReservedMessageId(offset).into(),
+                            )));
                         }
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
                     Poll::Ready(None) => {
+                        println!("p2p stream closed");
                         // connection closed
-                        return Poll::Ready(None)
+                        return Poll::Ready(None);
                     }
-                    Poll::Pending => break,
+                    Poll::Pending => {
+                        println!("p2p connection pending");
+                        break;
+                    }
                 }
             }
 
             if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -588,10 +621,10 @@ where
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
         if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+            return Poll::Ready(Err(err.into()));
         }
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err))
+            return Poll::Ready(Err(err));
         }
         Poll::Ready(Ok(()))
     }
@@ -623,7 +656,7 @@ impl ProtocolStream {
     fn mask_msg_id(&self, mut msg: BytesMut) -> Result<Bytes, io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
         msg[0] = msg[0]
             .checked_add(self.shared_cap.relative_message_id_offset())
@@ -636,7 +669,7 @@ impl ProtocolStream {
     fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
         if msg.is_empty() {
             // message must not be empty
-            return Err(io::ErrorKind::InvalidInput.into())
+            return Err(io::ErrorKind::InvalidInput.into());
         }
         msg[0] = msg[0]
             .checked_sub(self.shared_cap.relative_message_id_offset())
@@ -790,6 +823,100 @@ mod tests {
                 let msg = conn.next().await.unwrap();
                 let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
                 assert_eq!(msg, TestProtoMessage::message("good bye!"));
+
+                tx.send(()).unwrap();
+
+                futures::future::pending::<()>().await;
+                unreachable!()
+            }
+        })
+        .unwrap();
+
+        loop {
+            tokio::select! {
+                _ = &mut rx => {
+                    break
+                }
+               _ = st.next() => {
+                }
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn eth_test_protocol_satellite_starvation() {
+        reth_tracing::init_test_tracing();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let (status, fork_filter) = eth_handshake();
+        let other_status = status;
+        let other_fork_filter = fork_filter.clone();
+        let _handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (server_hello, _) = test_hello();
+            let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
+
+            let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+                .into_eth_satellite_stream::<EthNetworkPrimitives>(other_status, other_fork_filter)
+                .await
+                .unwrap();
+
+            st.install_protocol(&TestProtoMessage::capability(), |mut conn| {
+                async_stream::stream! {
+                    yield TestProtoMessage::ping().encoded();
+                    let msg = conn.next().await.unwrap();
+                    let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
+                    assert_eq!(msg, TestProtoMessage::pong());
+
+                    yield TestProtoMessage::message("hello").encoded();
+                    let msg = conn.next().await.unwrap();
+                    let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
+                    assert_eq!(msg, TestProtoMessage::message("good bye!"));
+
+                    yield TestProtoMessage::message("good bye!").encoded();
+
+                    futures::future::pending::<()>().await;
+                    unreachable!()
+                }
+            })
+            .unwrap();
+
+            loop {
+                let _out = st.next().await;
+                // println!("out: {out:?}");
+            }
+        });
+
+        let conn = connect_passthrough(local_addr, test_hello().0).await;
+        let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
+            .into_eth_satellite_stream::<EthNetworkPrimitives>(status, fork_filter)
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = oneshot::channel();
+
+        st.install_protocol(&TestProtoMessage::capability(), |mut conn| {
+            async_stream::stream! {
+                let msg = conn.next().await.unwrap();
+                let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
+                assert_eq!(msg, TestProtoMessage::ping());
+
+                yield TestProtoMessage::pong().encoded();
+
+                let msg = conn.next().await.unwrap();
+                let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
+                assert_eq!(msg, TestProtoMessage::message("hello"));
+
+                yield TestProtoMessage::message("good bye!").encoded();
+
+                let msg = conn.next().await.unwrap();
+                let msg = TestProtoMessage::decode_message(&mut &msg[..]).unwrap();
+                assert_eq!(msg, TestProtoMessage::message("good bye!"));
+
+                for _ in 0..10000000 {
+                    yield TestProtoMessage::message("k").encoded();
+                }
 
                 tx.send(()).unwrap();
 
