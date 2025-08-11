@@ -30,7 +30,6 @@ reth-tasks = { workspace = true, optional = true }
 reth-trie-common.workspace = true
 reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-engine-primitives.workspace = true
 reth-engine-local = { workspace = true, features = ["op"] }
 reth-rpc-api.workspace = true
 
@@ -84,7 +83,6 @@ reth-network-api.workspace = true
 
 alloy-network.workspace = true
 futures.workspace = true
-alloy-eips.workspace = true
 op-alloy-network.workspace = true
 tempfile.workspace = true
 

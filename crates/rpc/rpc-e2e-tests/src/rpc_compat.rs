@@ -25,7 +25,7 @@ pub struct RpcTestCase {
 /// Action that runs RPC compatibility tests from execution-apis test data
 #[derive(Debug)]
 pub struct RunRpcCompatTests {
-    /// RPC methods to test (e.g., ["`eth_getLogs`"])
+    /// RPC methods to test (e.g. `eth_getLogs`)
     pub methods: Vec<String>,
     /// Path to the execution-apis tests directory
     pub test_data_path: String,

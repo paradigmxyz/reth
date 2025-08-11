@@ -8,10 +8,10 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_evm::{Database, RecoveredTx};
+use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -80,7 +80,7 @@ where
     /// Spawns all pending transactions as blocking tasks by first chunking them.
     fn spawn_all(
         &self,
-        pending: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         let executor = self.executor.clone();
@@ -156,7 +156,7 @@ where
     /// was cancelled.
     pub(super) fn run(
         self,
-        pending: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         // spawn execution tasks.
@@ -296,7 +296,7 @@ where
     /// executed sequentially.
     fn transact_batch(
         self,
-        txs: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
     ) {
@@ -312,14 +312,14 @@ where
 
             // create the tx env
             let start = Instant::now();
-            let res = match evm.transact(tx.as_executable()) {
+            let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
                         target: "engine::tree",
                         %err,
-                        tx_hash=%tx.as_executable().tx().tx_hash(),
-                        sender=%tx.as_executable().signer(),
+                        tx_hash=%tx.tx().tx_hash(),
+                        sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     return

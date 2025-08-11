@@ -1,11 +1,12 @@
 use crate::{
     chainspec::CustomChainSpec,
+    evm::CustomEvmConfig,
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
     CustomNode,
 };
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_engine_primitives::EngineValidator;
+use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
@@ -17,7 +18,7 @@ use reth_ethereum::{
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
 };
-use reth_node_builder::{rpc::EngineValidatorBuilder, InvalidPayloadAttributesError};
+use reth_node_builder::{rpc::PayloadValidatorBuilder, InvalidPayloadAttributesError};
 use reth_op::{
     node::{
         engine::OpEngineValidator, OpBuiltPayload, OpEngineTypes, OpPayloadAttributes,
@@ -35,8 +36,8 @@ pub struct CustomPayloadTypes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
-    inner: OpExecutionData,
-    extension: u64,
+    pub inner: OpExecutionData,
+    pub extension: u64,
 }
 
 impl ExecutionPayload for CustomExecutionData {
@@ -250,7 +251,7 @@ where
     }
 }
 
-impl<P> EngineValidator<CustomPayloadTypes> for CustomEngineValidator<P>
+impl<P> EngineApiValidator<CustomPayloadTypes> for CustomEngineValidator<P>
 where
     P: StateProviderFactory + Send + Sync + Unpin + 'static,
 {
@@ -296,9 +297,9 @@ pub enum CustomError {
 #[non_exhaustive]
 pub struct CustomEngineValidatorBuilder;
 
-impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
+impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<Types = CustomNode>,
+    N: FullNodeComponents<Types = CustomNode, Evm = CustomEvmConfig>,
 {
     type Validator = CustomEngineValidator<N::Provider>;
 
