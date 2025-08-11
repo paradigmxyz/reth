@@ -125,7 +125,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     fn fill(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-        tx_inf: TransactionInfo,
+        tx_info: TransactionInfo,
     ) -> Result<RpcTransaction<Self::Network>, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
