@@ -339,12 +339,12 @@ impl<T: ParkedOrd> ParkedPool<T> {
         if !self.exceeds(&limit) {
             return Vec::new();
         }
-        let submission_order = self.submission_order.clone();
+        let mut submission_order = self.submission_order.clone();
+
+        submission_order.sort_by_key(|ss| ss.submission_id());
 
         let mut removed = Vec::new();
-
-        // submission_order is already sorted by submission_id (oldest first)!
-        // Just iterate directly - O(k) where k = senders to process
+        
         for &submission in &submission_order {
             if !limit.is_exceeded(self.len(), self.size()) {
                 break;
