@@ -125,7 +125,7 @@ dependencies = [
  "arbitrary",
  "auto_impl",
  "c-kzg",
- "derive_more",
+ "derive_more 2.0.1",
  "either",
  "k256",
  "once_cell",
@@ -183,7 +183,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
  "alloy-sol-types",
- "derive_more",
+ "derive_more 2.0.1",
  "itoa",
  "serde",
  "serde_json",
@@ -249,7 +249,7 @@ dependencies = [
  "arbitrary",
  "auto_impl",
  "c-kzg",
- "derive_more",
+ "derive_more 2.0.1",
  "either",
  "ethereum_ssz",
  "ethereum_ssz_derive",
@@ -270,7 +270,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-sol-types",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "op-alloy-consensus",
  "op-revm",
  "revm",
@@ -351,7 +351,7 @@ dependencies = [
  "alloy-sol-types",
  "async-trait",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "futures-utils-wasm",
  "serde",
  "serde_json",
@@ -412,7 +412,7 @@ dependencies = [
  "cfg-if",
  "const-hex",
  "derive_arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "foldhash",
  "getrandom 0.3.3",
  "hashbrown 0.15.5",
@@ -619,7 +619,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9b6f0482c82310366ec3dcf4e5212242f256a69fcf1a26e5017e6704091ee95"
 dependencies = [
  "alloy-primitives",
- "derive_more",
+ "derive_more 2.0.1",
  "serde",
 ]
 
@@ -635,7 +635,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonwebtoken",
@@ -832,7 +832,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "base64 0.22.1",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "futures-utils-wasm",
  "parking_lot",
@@ -910,7 +910,7 @@ dependencies = [
  "arbitrary",
  "arrayvec",
  "derive_arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "nybbles",
  "proptest",
  "proptest-derive",
@@ -1025,9 +1025,9 @@ dependencies = [
 
 [[package]]
 name = "arb-alloy-consensus"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8da591a661bf1f6a2aeff74fdacae22e5f73df8feddac7d7c22b23bc4794e000"
+checksum = "0d6b781bc9242d4d38df01e1936b0c7af2f6a463200e2401e580727206040351"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -1035,19 +1035,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arb-alloy-network"
+version = "0.1.2"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+]
+
+[[package]]
 name = "arb-alloy-predeploys"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee34d44e3bfa667f8f69b7849418e963a4c4bcd86ae64c87b182518a01a33e4"
+checksum = "94abc6fbd063269c1c16ff91e63ffcb6087ae1371b816cd49520de4dacab1338"
 dependencies = [
  "alloy-primitives",
 ]
 
 [[package]]
 name = "arb-alloy-util"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbf824e0296311cfc3ab6b2c15e1b813909580db80a9f8d68927d7e0c1d6ff8b"
+checksum = "fe4194538d8214b5d00881a40eda169d0414bf4c5e69c49930791f10fc8286b4"
 dependencies = [
  "alloy-primitives",
 ]
@@ -1060,10 +1070,13 @@ dependencies = [
  "eyre",
  "reth-arbitrum-chainspec",
  "reth-arbitrum-node",
+ "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-db",
+ "reth-ethereum-cli",
  "reth-node-builder",
  "tracing",
 ]
@@ -2459,6 +2472,12 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
+name = "convert_case"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
@@ -2911,6 +2930,19 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
+version = "0.99.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
+dependencies = [
+ "convert_case 0.4.0",
+ "proc-macro2",
+ "quote",
+ "rustc_version 0.4.1",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "derive_more"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
@@ -2924,7 +2956,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
 dependencies = [
- "convert_case",
+ "convert_case 0.7.1",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -3357,7 +3389,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "bytes",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "reth-chainspec",
  "reth-discv4",
@@ -3470,7 +3502,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "async-trait",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "jsonrpsee",
  "modular-bitfield",
@@ -4095,9 +4127,9 @@ dependencies = [
 
 [[package]]
 name = "glob"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gloo-net"
@@ -5308,9 +5340,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.174"
+version = "0.2.175"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
+checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
 
 [[package]]
 name = "libgit2-sys"
@@ -6081,7 +6113,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "serde",
  "serde_with",
  "thiserror 2.0.12",
@@ -6132,7 +6164,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "op-alloy-consensus",
  "serde",
  "serde_json",
@@ -6152,7 +6184,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "op-alloy-consensus",
@@ -6689,9 +6721,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
+checksum = "beef09f85ae72cea1ef96ba6870c51e6382ebfa4f0e85b643459331f3daa5be0"
 dependencies = [
  "unicode-ident",
 ]
@@ -7304,6 +7336,8 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "arb-alloy-consensus",
  "arb-alloy-predeploys",
  "arb-alloy-util",
@@ -7316,8 +7350,11 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-rpc-convert",
+ "reth-rpc-eth-api",
  "reth-storage-errors",
  "revm",
+ "revm-context",
  "revm-context-interface 8.0.1",
 ]
 
@@ -7328,21 +7365,31 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "clap",
  "eyre",
  "reth-arbitrum-chainspec",
  "reth-arbitrum-evm",
  "reth-arbitrum-payload",
+ "reth-arbitrum-primitives",
  "reth-arbitrum-rpc",
+ "reth-arbitrum-storage",
+ "reth-arbitrum-txpool",
  "reth-chainspec",
  "reth-consensus",
  "reth-engine-local",
+ "reth-ethereum-consensus",
+ "reth-ethereum-engine-primitives",
+ "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
+ "reth-node-ethereum",
+ "reth-node-types",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-api",
@@ -7360,10 +7407,14 @@ dependencies = [
 name = "reth-arbitrum-payload"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "reth-arbitrum-primitives",
+ "reth-ethereum-engine-primitives",
  "reth-payload-primitives",
+ "reth-primitives-traits",
  "serde",
 ]
 
@@ -7377,8 +7428,10 @@ dependencies = [
  "alloy-rlp",
  "arb-alloy-consensus",
  "bytes",
+ "modular-bitfield",
  "reth-codecs",
  "reth-primitives-traits",
+ "reth-zstd-compressors",
  "serde",
 ]
 
@@ -7386,20 +7439,38 @@ dependencies = [
 name = "reth-arbitrum-rpc"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
+ "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
+ "arb-alloy-network",
  "async-trait",
+ "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
  "reth-arbitrum-payload",
+ "reth-arbitrum-primitives",
  "reth-chainspec",
  "reth-engine-primitives",
+ "reth-evm",
  "reth-node-api",
+ "reth-node-builder",
+ "reth-primitives-traits",
+ "reth-rpc",
  "reth-rpc-api",
+ "reth-rpc-convert",
  "reth-rpc-engine-api",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-transaction-pool",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -7408,6 +7479,35 @@ name = "reth-arbitrum-stf-wasm"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+]
+
+[[package]]
+name = "reth-arbitrum-storage"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-arbitrum-primitives",
+ "reth-chainspec",
+ "reth-db-api",
+ "reth-node-api",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+]
+
+[[package]]
+name = "reth-arbitrum-txpool"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "c-kzg",
+ "derive_more 0.99.20",
+ "reth-arbitrum-primitives",
+ "reth-primitives-traits",
+ "reth-transaction-pool",
 ]
 
 [[package]]
@@ -7481,7 +7581,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
- "derive_more",
+ "derive_more 2.0.1",
  "metrics",
  "parking_lot",
  "pin-project",
@@ -7516,7 +7616,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
@@ -7673,7 +7773,7 @@ dependencies = [
 name = "reth-codecs-derive"
 version = "1.6.0"
 dependencies = [
- "convert_case",
+ "convert_case 0.7.1",
  "proc-macro2",
  "quote",
  "similar-asserts",
@@ -7734,7 +7834,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types-engine",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "futures",
  "reqwest",
@@ -7756,7 +7856,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "codspeed-criterion-compat",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "metrics",
  "page_size",
@@ -7789,13 +7889,14 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bytes",
- "derive_more",
+ "derive_more 2.0.1",
  "metrics",
  "modular-bitfield",
  "parity-scale-codec",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
+ "reth-arbitrum-primitives",
  "reth-codecs",
  "reth-db-models",
  "reth-ethereum-primitives",
@@ -7890,7 +7991,7 @@ version = "1.6.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "derive_more",
+ "derive_more 2.0.1",
  "discv5",
  "enr",
  "futures",
@@ -7991,7 +8092,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "alloy-signer-local",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "futures-util",
  "jsonrpsee",
@@ -8158,7 +8259,7 @@ dependencies = [
  "assert_matches",
  "codspeed-criterion-compat",
  "crossbeam-channel",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "futures",
  "metrics",
@@ -8331,7 +8432,7 @@ dependencies = [
  "arbitrary",
  "async-stream",
  "bytes",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "pin-project",
  "proptest",
@@ -8370,7 +8471,7 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "bytes",
- "derive_more",
+ "derive_more 2.0.1",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
@@ -8526,7 +8627,7 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "bincode 1.3.3",
- "derive_more",
+ "derive_more 2.0.1",
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8559,7 +8660,7 @@ dependencies = [
  "alloy-evm",
  "alloy-primitives",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "futures-util",
  "metrics",
  "metrics-util",
@@ -8585,7 +8686,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "derive_more",
+ "derive_more 2.0.1",
  "parking_lot",
  "reth-chainspec",
  "reth-ethereum-forks",
@@ -8621,7 +8722,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bincode 1.3.3",
- "derive_more",
+ "derive_more 2.0.1",
  "rand 0.9.2",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
@@ -8790,7 +8891,7 @@ dependencies = [
  "byteorder",
  "codspeed-criterion-compat",
  "dashmap 6.1.0",
- "derive_more",
+ "derive_more 2.0.1",
  "indexmap 2.10.0",
  "parking_lot",
  "rand 0.9.2",
@@ -8853,7 +8954,7 @@ dependencies = [
  "aquamarine",
  "auto_impl",
  "codspeed-criterion-compat",
- "derive_more",
+ "derive_more 2.0.1",
  "discv5",
  "enr",
  "futures",
@@ -8911,7 +9012,7 @@ dependencies = [
  "alloy-rpc-types-admin",
  "alloy-rpc-types-eth",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "enr",
  "futures",
  "reth-eth-wire-types",
@@ -8934,7 +9035,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "parking_lot",
  "reth-consensus",
@@ -8984,7 +9085,7 @@ version = "1.6.0"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
- "derive_more",
+ "derive_more 2.0.1",
  "lz4_flex",
  "memmap2",
  "rand 0.9.2",
@@ -9099,7 +9200,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
- "derive_more",
+ "derive_more 2.0.1",
  "dirs-next",
  "eyre",
  "futures",
@@ -9228,7 +9329,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "humantime",
  "pin-project",
@@ -9327,7 +9428,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-hardforks",
  "alloy-primitives",
- "derive_more",
+ "derive_more 2.0.1",
  "miniz_oxide",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
@@ -9353,7 +9454,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "clap",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "futures-util",
  "op-alloy-consensus",
@@ -9534,7 +9635,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
- "derive_more",
+ "derive_more 2.0.1",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
@@ -9604,7 +9705,7 @@ dependencies = [
  "alloy-transport",
  "alloy-transport-http",
  "async-trait",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
@@ -9676,7 +9777,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "c-kzg",
- "derive_more",
+ "derive_more 2.0.1",
  "futures-util",
  "metrics",
  "op-alloy-consensus",
@@ -9807,7 +9908,7 @@ dependencies = [
  "bincode 1.3.3",
  "byteorder",
  "bytes",
- "derive_more",
+ "derive_more 2.0.1",
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
@@ -9917,7 +10018,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "assert_matches",
- "derive_more",
+ "derive_more 2.0.1",
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
@@ -10020,7 +10121,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "async-trait",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "http",
  "http-body",
@@ -10192,6 +10293,7 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-revm",
+ "reth-arbitrum-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-optimism-primitives",
@@ -10311,7 +10413,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
- "derive_more",
+ "derive_more 2.0.1",
  "futures",
  "itertools 0.14.0",
  "jsonrpsee-core",
@@ -10538,7 +10640,7 @@ version = "1.6.0"
 dependencies = [
  "alloy-primitives",
  "clap",
- "derive_more",
+ "derive_more 2.0.1",
  "reth-nippy-jar",
  "serde",
  "strum 0.27.2",
@@ -10574,7 +10676,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "derive_more",
+ "derive_more 2.0.1",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
@@ -10772,7 +10874,7 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "codspeed-criterion-compat",
- "derive_more",
+ "derive_more 2.0.1",
  "hash-db",
  "itertools 0.14.0",
  "nybbles",
@@ -10822,7 +10924,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "codspeed-criterion-compat",
- "derive_more",
+ "derive_more 2.0.1",
  "itertools 0.14.0",
  "metrics",
  "proptest",
@@ -11480,9 +11582,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.21"
+version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rusty-fork"
@@ -12238,13 +12340,12 @@ dependencies = [
 
 [[package]]
 name = "tar-no-std"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15574aa79d3c04a12f3cb53ff976d5571e53b9d8e0bdbe4021df0a06473dd1c9"
+checksum = "ac9ee8b664c9f1740cd813fea422116f8ba29997bb7c878d1940424889802897"
 dependencies = [
  "bitflags 2.9.1",
  "log",
- "memchr",
  "num-traits",
 ]
 
@@ -13129,9 +13230,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.17.0"
+version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
+checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
 dependencies = [
  "getrandom 0.3.3",
  "js-sys",
