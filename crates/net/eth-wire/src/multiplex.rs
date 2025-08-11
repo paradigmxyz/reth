@@ -463,7 +463,7 @@ where
         loop {
             // first drain the primary stream
             if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
-                return Poll::Ready(Some(msg));
+                return Poll::Ready(Some(msg))
             }
 
             // advance primary out
