@@ -7,9 +7,9 @@ use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx,
+    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -554,30 +554,38 @@ where
 
 /// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
 /// executor.
-pub trait OwnedExecutableTxFor<Evm: ConfigureEvm>:
-    OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+pub trait ExecutableTxFor<Evm: ConfigureEvm>:
+    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
-impl<T, Evm: ConfigureEvm> OwnedExecutableTxFor<Evm> for T where
-    T: OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
+    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
-/// executor.
-pub trait OwnedExecutableTx<TxEnv, Tx>: Clone + Send + 'static {
-    /// Converts the type into an [`ExecutableTx`] for block executor.
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy;
+/// A container for a transaction and a transaction environment.
+#[derive(Debug, Clone)]
+pub struct WithTxEnv<TxEnv, T> {
+    /// The transaction environment for EVM.
+    pub tx_env: TxEnv,
+    /// The recovered transaction.
+    pub tx: T,
 }
 
-impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for T
-where
-    T: Clone + Send + 'static,
-    for<'a> &'a T: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
-{
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
-        self
+impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
+    fn tx(&self) -> &Tx {
+        self.tx.tx()
+    }
+
+    fn signer(&self) -> &Address {
+        self.tx.signer()
+    }
+}
+
+impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
+    fn to_tx_env(&self) -> TxEnv {
+        self.tx_env.clone()
     }
 }
 

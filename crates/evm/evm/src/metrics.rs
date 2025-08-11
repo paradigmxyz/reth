@@ -2,10 +2,10 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{execute::OwnedExecutableTx, Database, OnStateHook};
+use crate::{Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::{
-    block::{BlockExecutor, StateChangeSource},
+    block::{BlockExecutor, ExecutableTx, StateChangeSource},
     Evm,
 };
 use core::borrow::BorrowMut;
@@ -104,12 +104,7 @@ impl ExecutorMetrics {
     pub fn execute_metered<E, DB>(
         &self,
         executor: E,
-        transactions: impl Iterator<
-            Item = Result<
-                impl OwnedExecutableTx<<E::Evm as Evm>::Tx, E::Transaction>,
-                BlockExecutionError,
-            >,
-        >,
+        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
@@ -126,7 +121,7 @@ impl ExecutorMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx?.as_executable())?;
+                executor.execute_transaction(tx?)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };

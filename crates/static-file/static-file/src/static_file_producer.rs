@@ -304,8 +304,10 @@ mod tests {
         let mut receipts = Vec::new();
         for block in &blocks {
             for transaction in &block.body().transactions {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0), None),
+                ));
             }
         }
         db.insert_receipts(receipts).expect("insert receipts");

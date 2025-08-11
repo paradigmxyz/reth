@@ -843,12 +843,14 @@ impl<S: SparseTrieInterface + Default> StorageTries<S> {
 
     /// Takes the storage trie for the account from the internal `HashMap`, creating it if it
     /// doesn't already exist.
+    #[cfg(feature = "std")]
     fn take_or_create_trie(&mut self, account: &B256) -> SparseTrie<S> {
         self.tries.remove(account).unwrap_or_else(|| self.cleared_tries.pop().unwrap_or_default())
     }
 
     /// Takes the revealed paths set from the account from the internal `HashMap`, creating one if
     /// it doesn't exist.
+    #[cfg(feature = "std")]
     fn take_or_create_revealed_paths(&mut self, account: &B256) -> HashSet<Nibbles> {
         self.revealed_paths
             .remove(account)
