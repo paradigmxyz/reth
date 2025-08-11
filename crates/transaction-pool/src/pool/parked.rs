@@ -214,7 +214,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     fn insert_submission_order(&mut self, submission: SenderSubmission) {
-           self.submission_order.push(submission);
+        self.submission_order.push(submission);
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -254,29 +254,52 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     fn remove_from_submission_order(&mut self, submission: SenderSubmission) {
+        println!(
+            "Removing submission: sender={:?}, submission_id={}",
+            submission.sender_id(),
+            submission.submission_id()
+        );
+
         if let Ok(idx) = self
             .submission_order
             .binary_search_by_key(&submission.submission_id(), |ss| ss.submission_id())
         {
-            // Handle multiple entries with same submission_id
+            println!("Found at idx: {}, vec len: {}", idx, self.submission_order.len());
+
             let start = idx;
             let mut end = idx;
+            let target_submission_id = submission.submission_id();
+
             while end < self.submission_order.len() &&
-                self.submission_order[end].submission_id() == submission.submission_id()
+                self.submission_order[end].submission_id() == target_submission_id
             {
+                println!("Expanding end: {} -> {}", end, end + 1);
                 end += 1;
+
+                // SAFETY CHECK - prevent infinite loop
+                if end - start > 1000 {
+                    panic!("Infinite loop detected in remove_from_submission_order");
+                }
             }
 
-            // Find exact match and remove
+            println!("Range: {}..{}", start, end);
+
             for i in start..end {
+                println!(
+                    "Checking index {}: sender_id={:?}",
+                    i,
+                    self.submission_order[i].sender_id()
+                );
+
                 if self.submission_order[i].sender_id() == submission.sender_id() {
-                    self.submission_order.swap_remove(i);
+                    println!("Found exact match at {}, removing", i);
+                    self.submission_order.remove(i);
+                    println!("After remove, vec len: {}", self.submission_order.len());
                     break;
                 }
             }
         }
     }
-
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
@@ -344,7 +367,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         submission_order.sort_by_key(|ss| ss.submission_id());
 
         let mut removed = Vec::new();
-        
+
         for &submission in &submission_order {
             if !limit.is_exceeded(self.len(), self.size()) {
                 break;
