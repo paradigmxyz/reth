@@ -1,10 +1,12 @@
 use crate::{
-    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
-    DatabaseTrieCursorFactory, DatabaseTrieWitness,
+    DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
+    DatabaseStorageRoot, DatabaseTrieCursorFactory, DatabaseTrieWitness,
 };
 use reth_db_api::transaction::DbTx;
 use reth_trie::{
-    proof::Proof, witness::TrieWitness, KeccakKeyHasher, KeyHasher, StateRoot, StorageRoot,
+    proof::{Proof, StorageProof},
+    witness::TrieWitness,
+    KeccakKeyHasher, KeyHasher, StateRoot, StorageRoot,
 };
 
 /// The `StateCommitment` trait provides associated types for state commitment operations.
@@ -15,6 +17,8 @@ pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'stat
     type StorageRoot<'a, TX: DbTx + 'a>: DatabaseStorageRoot<'a, TX>;
     /// The state proof type.
     type StateProof<'a, TX: DbTx + 'a>: DatabaseProof<'a, TX>;
+    /// The storage proof type.
+    type StorageProof<'a, TX: DbTx + 'a>: DatabaseStorageProof<'a, TX>;
     /// The state witness type.
     type StateWitness<'a, TX: DbTx + 'a>: DatabaseTrieWitness<'a, TX>;
     /// The key hasher type.
@@ -33,6 +37,8 @@ impl StateCommitment for MerklePatriciaTrie {
         StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StateProof<'a, TX: DbTx + 'a> =
         Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+    type StorageProof<'a, TX: DbTx + 'a> =
+        StorageProof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StateWitness<'a, TX: DbTx + 'a> =
         TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type KeyHasher = KeccakKeyHasher;

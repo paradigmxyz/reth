@@ -19,11 +19,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    proof::{Proof, StorageProof},
-    updates::TrieUpdates,
-    witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -292,13 +289,13 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root(self.tx(), revert_state)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateRoot<'_, _> as DatabaseStateRoot<'_, _>>::overlay_root(self.tx(), revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateRoot<'_, _> as DatabaseStateRoot<'_, _>>::overlay_root_from_nodes(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -308,7 +305,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        StateRoot::overlay_root_with_updates(self.tx(), revert_state)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateRoot<'_, _> as DatabaseStateRoot<'_,_>>::overlay_root_with_updates(self.tx(), revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -317,7 +314,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?);
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateRoot<'_,_> as DatabaseStateRoot<'_,_>>::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -332,7 +329,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<B256> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageRoot::overlay_root(self.tx(), address, revert_storage)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StorageRoot<'_,_> as DatabaseStorageRoot<'_,_>>::overlay_root(self.tx(), address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -344,7 +341,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<reth_trie::StorageProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StorageProof<'_,_> as DatabaseStorageProof<'_, _>>::overlay_storage_proof(self.tx(), address, slot, revert_storage)
             .map_err(ProviderError::from)
     }
 
@@ -356,7 +353,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
     ) -> ProviderResult<StorageMultiProof> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StorageProof<'_,_> as DatabaseStorageProof<'_,_>>::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
             .map_err(ProviderError::from)
     }
 }
@@ -372,7 +369,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         input.prepend(self.revert_state()?);
-        Proof::overlay_account_proof(self.tx(), input, address, slots).map_err(ProviderError::from)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateProof<'_, _> as DatabaseProof<'_, _>>::overlay_account_proof(self.tx(), input, address, slots).map_err(ProviderError::from)
     }
 
     fn multiproof(
@@ -381,12 +378,12 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         input.prepend(self.revert_state()?);
-        Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateProof<'_, _> as DatabaseProof<'_, _>>::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        <<<Self as StateCommitmentProvider>::StateCommitment as StateCommitment>::StateWitness<'_, _> as DatabaseTrieWitness<'_, _>>::overlay_witness(self.tx(), input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }
