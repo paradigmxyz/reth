@@ -214,12 +214,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     }
 
     fn insert_submission_order(&mut self, submission: SenderSubmission) {
-        // Binary search to find insertion point by submission_id
-        let pos = self
-            .submission_order
-            .binary_search_by_key(&submission.submission_id(), |ss| ss.submission_id())
-            .unwrap_or_else(|pos| pos);
-        self.submission_order.insert(pos, submission);
+           self.submission_order.push(submission);
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -275,7 +270,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             // Find exact match and remove
             for i in start..end {
                 if self.submission_order[i].sender_id() == submission.sender_id() {
-                    self.submission_order.remove(i);
+                    self.submission_order.swap_remove(i);
                     break;
                 }
             }
