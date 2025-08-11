@@ -383,7 +383,7 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 }
 
 /// Converts rpc transaction requests into transaction environment.
-pub trait TxEnvConverter<RpcReq, TxEnvOut>: Debug + Send + Sync + Unpin + Clone + 'static {
+pub trait TxEnvConverter<RpcReq, T>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// An associated error that can occur during conversion.
     type Error;
 
@@ -393,12 +393,12 @@ pub trait TxEnvConverter<RpcReq, TxEnvOut>: Debug + Send + Sync + Unpin + Clone 
         request: RpcReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
-    ) -> Result<TxEnvOut, Self::Error>;
+    ) -> Result<T, Self::Error>;
 }
 
-impl<RpcReq, TxEnvOut> TxEnvConverter<RpcReq, TxEnvOut> for ()
+impl<RpcReq, T> TxEnvConverter<RpcReq, T> for ()
 where
-    RpcReq: TryIntoTxEnv<TxEnvOut>,
+    RpcReq: TryIntoTxEnv<T>,
 {
     type Error = RpcReq::Err;
 
@@ -407,8 +407,38 @@ where
         request: RpcReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
-    ) -> Result<TxEnvOut, Self::Error> {
+    ) -> Result<T, Self::Error> {
         request.try_into_tx_env(cfg_env, block_env)
+    }
+}
+
+/// Converts rpc transaction requests into transaction environment using a closure.
+/// Uses unsafe transmute to cast `&CfgEnv<Spec>` to `&CfgEnv<()>`, allowing closures
+/// to access all `CfgEnv` fields.
+impl<F, RpcReq, T, E> TxEnvConverter<RpcReq, T> for F
+where
+    F: Fn(RpcReq, &CfgEnv<()>, &BlockEnv) -> Result<T, E>
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + 'static,
+    RpcReq: Clone,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    type Error = E;
+
+    fn convert_tx_env<Spec>(
+        &self,
+        request: RpcReq,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<T, Self::Error> {
+        //TODO: check if we should use only the chain id - and some other specific fields
+        // or the whole `CfgEnv`
+        let cfg_env_base = unsafe { std::mem::transmute::<&CfgEnv<Spec>, &CfgEnv<()>>(cfg_env) };
+        self(request, cfg_env_base, block_env)
     }
 }
 
@@ -551,7 +581,7 @@ where
     Network: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm<Primitives = N> + 'static,
     TxTy<N>: IntoRpcTx<Network::TransactionResponse> + Clone + Debug,
-    RpcTxReq<Network>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
+    RpcTxReq<Network>: TryIntoSimTx<TxTy<N>>,
     Receipt: ReceiptConverter<
             N,
             RpcReceipt = RpcReceipt<Network>,
