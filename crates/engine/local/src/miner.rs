@@ -27,16 +27,26 @@ use tracing::error;
 pub enum MiningMode {
     /// In this mode a block is built as soon as
     /// a valid transaction reaches the pool.
-    Instant(Fuse<ReceiverStream<TxHash>>),
+    /// If `max_transactions` is set, a block is built when that many transactions have
+    /// accumulated.
+    Instant {
+        /// Stream of transaction notifications.
+        rx: Fuse<ReceiverStream<TxHash>>,
+        /// Maximum number of transactions to accumulate before mining a block.
+        /// If None, mine immediately when any transaction arrives.
+        max_transactions: Option<usize>,
+        /// Counter for accumulated transactions (only used when `max_transactions` is set).
+        accumulated: usize,
+    },
     /// In this mode a block is built at a fixed interval.
     Interval(Interval),
 }
 
 impl MiningMode {
     /// Constructor for a [`MiningMode::Instant`]
-    pub fn instant<Pool: TransactionPool>(pool: Pool) -> Self {
+    pub fn instant<Pool: TransactionPool>(pool: Pool, max_transactions: Option<usize>) -> Self {
         let rx = pool.pending_transactions_listener();
-        Self::Instant(ReceiverStream::new(rx).fuse())
+        Self::Instant { rx: ReceiverStream::new(rx).fuse(), max_transactions, accumulated: 0 }
     }
 
     /// Constructor for a [`MiningMode::Interval`]
@@ -52,10 +62,20 @@ impl Future for MiningMode {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         match this {
-            Self::Instant(rx) => {
-                // drain all transactions notifications
-                if let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
-                    return Poll::Ready(())
+            Self::Instant { rx, max_transactions, accumulated } => {
+                // Poll for new transaction notifications
+                while let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
+                    if let Some(max_tx) = max_transactions {
+                        *accumulated += 1;
+                        // If we've reached the max transactions threshold, mine a block
+                        if *accumulated >= *max_tx {
+                            *accumulated = 0; // Reset counter for next block
+                            return Poll::Ready(());
+                        }
+                    } else {
+                        // If no max_transactions is set, mine immediately
+                        return Poll::Ready(());
+                    }
                 }
                 Poll::Pending
             }
