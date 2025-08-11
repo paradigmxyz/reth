@@ -15,7 +15,7 @@ reth-chainspec.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["op"] }
 reth-config = { workspace = true, features = ["serde"] }
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }

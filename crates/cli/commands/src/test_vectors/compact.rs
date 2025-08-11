@@ -13,6 +13,7 @@ use reth_codecs::alloy::{
     transaction::{
         eip1559::TxEip1559, eip2930::TxEip2930, eip4844::TxEip4844, eip7702::TxEip7702,
         legacy::TxLegacy,
+        optimism::TxDeposit,
     },
     withdrawal::Withdrawal,
 };
@@ -94,7 +95,7 @@ compact_types!(
         Log,
         // BranchNodeCompact, // todo requires arbitrary
         TrieMask,
-        // TxDeposit, TODO(joshie): optimism
+        TxDeposit,
         // reth_prune_types
         PruneCheckpoint,
         PruneMode,
