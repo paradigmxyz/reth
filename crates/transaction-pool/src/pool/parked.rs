@@ -340,26 +340,23 @@ impl<T: ParkedOrd> ParkedPool<T> {
             return Vec::new();
         }
 
-        println!("Starting truncate_pool with {} submissions", self.submission_order.len());
-
-         let start = std::time::Instant::now();
         self.submission_order.sort_by_key(|ss| ss.submission_id());
-        println!("Sort took: {:?}", start.elapsed());
 
         let mut removed = Vec::new();
         let mut processed_senders = 0;
+        let mut removed_senders = std::collections::HashSet::new();
 
-         let process_start = std::time::Instant::now();
         while self.exceeds(&limit) && processed_senders < self.submission_order.len() {
             let submission = self.submission_order[processed_senders];
             let sender_id = submission.sender_id();
 
             let sender_txs = self.get_txs_by_sender(sender_id);
-            println!("Processing sender {} with {} txs", processed_senders, sender_txs.len());
 
             for &tx_id in sender_txs.iter().rev() {
-                if let Some(tx) = self.remove_transaction(&tx_id) {
-                    removed.push(tx);
+                if let Some(tx) = self.by_id.remove(&tx_id) {
+                    self.size_of -= tx.transaction.size();
+                    removed.push(tx.transaction.into());
+                    removed_senders.insert(sender_id);
                 }
 
                 if !self.exceeds(&limit) {
@@ -371,7 +368,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         }
 
         if processed_senders > 0 {
-            println!("Processed {} senders, took {:?}", processed_senders, process_start.elapsed());
             self.submission_order.drain(0..processed_senders);
         }
 
