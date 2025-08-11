@@ -136,9 +136,12 @@ pub struct CustomNextBlockEnvAttributes {
     extension: u64,
 }
 
-impl<H: BlockHeader> BuildPendingEnv<H> for CustomNextBlockEnvAttributes {
-    fn build_pending_env(parent: &SealedHeader<H>) -> Self {
-        Self { inner: OpNextBlockEnvAttributes::build_pending_env(parent), extension: 0 }
+impl BuildPendingEnv<CustomHeader> for CustomNextBlockEnvAttributes {
+    fn build_pending_env(parent: &SealedHeader<CustomHeader>) -> Self {
+        Self {
+            inner: OpNextBlockEnvAttributes::build_pending_env(parent),
+            extension: parent.extension,
+        }
     }
 }
 
