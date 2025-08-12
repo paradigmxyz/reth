@@ -102,7 +102,6 @@ where
     let provider = provider_factory.provider()?;
     let starting_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
     let starting_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
-    drop(provider);
 
     let mut total_decoded_blocks = 0;
     let mut total_decoded_txns = 0;
@@ -139,8 +138,6 @@ where
         pipeline.set_tip(tip);
         debug!(target: "reth::import", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
-
         let latest_block_number =
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
@@ -159,8 +156,6 @@ where
             .sealed_header(provider_factory.last_block_number()?)?
             .expect("should have genesis");
     }
-
-    let provider = provider_factory.provider()?;
 
     let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
     let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
