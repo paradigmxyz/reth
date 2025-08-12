@@ -518,7 +518,7 @@ where
         self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
     }
 
-    async fn add_transactions_with_individual_origins(
+    async fn add_transactions_with_origins(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {

@@ -182,7 +182,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Each transaction can have its own [`TransactionOrigin`].
     ///
     /// Consumer: RPC
-    fn add_transactions_with_individual_origins(
+    fn add_transactions_with_origins(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;

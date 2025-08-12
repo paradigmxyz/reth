@@ -98,7 +98,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
             .collect()
     }
 
-    async fn add_transactions_with_individual_origins(
+    async fn add_transactions_with_origins(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
