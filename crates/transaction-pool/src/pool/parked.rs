@@ -189,7 +189,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
         while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_submission.is_empty()
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
-            // Unwrap here is safe because we checked that there is at least one sender
             let sender_id = self.last_sender_submission.last().unwrap().sender_id;
             let list = self.get_txs_by_sender(sender_id);
 
