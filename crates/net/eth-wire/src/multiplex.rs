@@ -316,7 +316,7 @@ impl ProtocolProxy {
 
         let offset = self.shared_cap.relative_message_id_offset();
         if offset == 0 {
-            return Ok(msg)
+            return Ok(msg);
         }
 
         let mut masked = Vec::from(msg);
