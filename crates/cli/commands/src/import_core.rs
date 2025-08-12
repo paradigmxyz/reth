@@ -40,6 +40,10 @@ pub struct ImportConfig {
 /// Result of an import operation.
 #[derive(Debug)]
 pub struct ImportResult {
+    /// Total number of blocks present in the database before the import started.
+    pub starting_imported_blocks: usize,
+    /// Total number of transactions present in the database before the import started.
+    pub starting_imported_txns: usize,
     /// Total number of blocks decoded from the file.
     pub total_decoded_blocks: usize,
     /// Total number of transactions decoded from the file.
@@ -53,8 +57,13 @@ pub struct ImportResult {
 impl ImportResult {
     /// Returns true if all blocks and transactions were imported successfully.
     pub fn is_complete(&self) -> bool {
-        self.total_decoded_blocks == self.total_imported_blocks &&
-            self.total_decoded_txns == self.total_imported_txns
+        // Compare deltas so this works for fresh DBs (genesis present) and non-empty DBs alike.
+        self.total_imported_blocks
+            .saturating_sub(self.starting_imported_blocks)
+            .saturating_eq(self.total_decoded_blocks) &&
+            self.total_imported_txns
+                .saturating_sub(self.starting_imported_txns)
+                .saturating_eq(self.total_decoded_txns)
     }
 }
 
@@ -89,6 +98,11 @@ where
 
     // open file
     let mut reader = ChunkedFileReader::new(path, import_config.chunk_len).await?;
+
+    let provider = provider_factory.provider()?;
+    let starting_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
+    let starting_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+    drop(provider);
 
     let mut total_decoded_blocks = 0;
     let mut total_decoded_txns = 0;
@@ -152,6 +166,8 @@ where
     let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
     let result = ImportResult {
+        starting_imported_blocks,
+        starting_imported_txns,
         total_decoded_blocks,
         total_decoded_txns,
         total_imported_blocks,
@@ -170,7 +186,7 @@ where
         info!(target: "reth::import",
             total_imported_blocks,
             total_imported_txns,
-            "Chain file imported"
+            "Chain was fully imported"
         );
     }
 
