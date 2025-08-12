@@ -101,7 +101,7 @@ where
                 // <https://github.com/rust-lang/rust/issues/100013>
                 let db = db.0;
 
-                let (res, _) = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
+                let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
@@ -166,8 +166,7 @@ where
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) =
-                        this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                    let res = this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()

@@ -186,7 +186,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
         let mut removed = Vec::new();
 
-        while limit.is_exceeded(self.len(), self.size()) && !self.last_sender_submission.is_empty()
+        while !self.last_sender_submission.is_empty() && limit.is_exceeded(self.len(), self.size())
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().expect("not empty").sender_id;
