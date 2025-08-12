@@ -509,7 +509,7 @@ where
                         let Some(offset) = msg.first().copied() else {
                             return Poll::Ready(Some(Err(
                                 P2PStreamError::EmptyProtocolMessage.into()
-                            )));
+                            )))
                         };
                         // delegate the multiplexed message to the correct protocol
                         if let Some(cap) =
@@ -528,9 +528,10 @@ where
                                 }
                             }
                         } else {
-                            return Poll::Ready(Some(Err(
-                                P2PStreamError::UnknownReservedMessageId(offset).into(),
-                            )));
+                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
+                                offset,
+                            )
+                            .into())))
                         }
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
@@ -581,7 +582,7 @@ where
         }
 
         if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err));
+            return Poll::Ready(Err(err))
         }
         Poll::Ready(Ok(()))
     }
