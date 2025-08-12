@@ -11,14 +11,15 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{keccak256, Address, B256};
+use k256::ecdsa::{signature::hazmat::PrehashVerifier, VerifyingKey};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 /// Errors that can occur during stateless validation.
@@ -86,9 +87,75 @@ pub enum StatelessValidationError {
         expected: B256,
     },
 
+    /// Error during signer recovery.
+    #[error("signer recovery failed")]
+    SignerRecovery,
+
+    /// Error when signature has non-normalized s value in homestead block.
+    #[error("signature s value not normalized for homestead block")]
+    HomesteadSignatureNotNormalized,
+
     /// Custom error.
     #[error("{0}")]
     Custom(&'static str),
+}
+
+/// Verifies a transaction using its signature and the given public key.
+///
+/// Note: If the signature or the public key is incorrect, then this method
+/// will return an error.
+///
+/// Returns the address derived from the public key.
+fn recover_sender(
+    vk: &VerifyingKey,
+    tx: &TransactionSigned,
+    is_homestead: bool,
+) -> Result<Address, StatelessValidationError> {
+    let sig = tx.signature();
+
+    // non-normalized signatures are only valid pre-homestead
+    let sig_is_normalized = sig.normalize_s().is_none();
+    if is_homestead && !sig_is_normalized {
+        return Err(StatelessValidationError::HomesteadSignatureNotNormalized);
+    }
+
+    sig.to_k256()
+        .and_then(|sig| vk.verify_prehash(tx.signature_hash().as_slice(), &sig))
+        .map_err(|_| StatelessValidationError::SignerRecovery)?;
+
+    Ok(Address::from_public_key(vk))
+}
+
+/// Verifies all transactions in a block against a list of public keys and signatures.
+///
+/// Returns a `RecoveredBlock`
+fn recover_block_with_public_keys<ChainSpec>(
+    block: Block,
+    public_keys: Vec<VerifyingKey>,
+    chain_spec: &ChainSpec,
+) -> Result<RecoveredBlock<Block>, StatelessValidationError>
+where
+    ChainSpec: EthereumHardforks,
+{
+    if block.body().transactions.len() != public_keys.len() {
+        return Err(StatelessValidationError::Custom(
+            "Number of public keys must match number of transactions",
+        ));
+    }
+
+    // Determine if we're in the Homestead fork for signature validation
+    let is_homestead = chain_spec.is_homestead_active_at_block(block.header().number());
+
+    // Verify each transaction signature against its corresponding public key
+    let senders = public_keys
+        .iter()
+        .zip(block.body().transactions())
+        .map(|(vk, tx)| recover_sender(vk, tx, is_homestead))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Create RecoveredBlock with verified senders
+    let block_hash = block.hash_slow();
+    Ok(RecoveredBlock::new(block, senders, block_hash))
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -127,7 +194,8 @@ pub enum StatelessValidationError {
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
 pub fn stateless_validation<ChainSpec, E>(
-    current_block: RecoveredBlock<Block>,
+    current_block: Block,
+    public_keys: Vec<VerifyingKey>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
@@ -138,6 +206,7 @@ where
 {
     stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
         current_block,
+        public_keys,
         witness,
         chain_spec,
         evm_config,
@@ -151,7 +220,8 @@ where
 ///
 /// See `stateless_validation` for detailed documentation of the validation process.
 pub fn stateless_validation_with_trie<T, ChainSpec, E>(
-    current_block: RecoveredBlock<Block>,
+    current_block: Block,
+    public_keys: Vec<VerifyingKey>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
@@ -161,6 +231,8 @@ where
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
+    let current_block = recover_block_with_public_keys(current_block, public_keys, &*chain_spec)?;
+
     let mut ancestor_headers: Vec<_> = witness
         .headers
         .iter()

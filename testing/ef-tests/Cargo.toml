@@ -39,6 +39,8 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
+# TODO: Needed while alloy_consensus does not expose PublicKey
+k256.workspace = true
 
 walkdir.workspace = true
 serde.workspace = true

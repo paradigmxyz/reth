@@ -36,3 +36,5 @@ thiserror.workspace = true
 itertools.workspace = true
 serde.workspace = true
 serde_with.workspace = true
+# TODO: needed while alloy_consensus does not expose PublicKey
+k256.workspace = true
