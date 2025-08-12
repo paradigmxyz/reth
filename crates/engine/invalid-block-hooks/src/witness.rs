@@ -65,17 +65,15 @@ impl BundleStateSorted {
             .clone()
             .into_iter()
             .map(|(address, account)| {
-                {
-                    (
-                        address,
-                        BundleAccountSorted {
-                            info: account.info,
-                            original_info: account.original_info,
-                            status: account.status,
-                            storage: BTreeMap::from_iter(account.storage),
-                        },
-                    )
-                }
+                (
+                    address,
+                    BundleAccountSorted {
+                        info: account.info,
+                        original_info: account.original_info,
+                        status: account.status,
+                        storage: BTreeMap::from_iter(account.storage),
+                    },
+                )
             })
             .collect();
 

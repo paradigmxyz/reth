@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.6.0"
 edition = "2021"
-rust-version = "1.86"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -162,6 +162,7 @@ members = [
     "examples/network-proxy/",
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
+    "examples/op-db-access/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/precompile-cache/",

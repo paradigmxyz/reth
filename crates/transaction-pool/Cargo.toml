@@ -48,7 +48,8 @@ thiserror.workspace = true
 tracing.workspace = true
 rustc-hash.workspace = true
 schnellru.workspace = true
-serde = { workspace = true, features = ["derive", "rc"], optional = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
@@ -76,7 +77,6 @@ futures.workspace = true
 
 [features]
 serde = [
-    "dep:serde",
     "reth-execution-types/serde",
     "reth-eth-wire-types/serde",
     "alloy-consensus/serde",

@@ -76,7 +76,6 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -668,7 +667,7 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns the combined number of all transactions.
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.pending.len() + self.queued.len()
     }
 
@@ -757,7 +756,7 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
     #[default]
