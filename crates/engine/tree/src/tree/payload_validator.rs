@@ -905,7 +905,7 @@ pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
 /// Type that validates the payloads processed by the engine.
 ///
 /// This provides the necessary functions for validating/executing payloads/blocks.
-pub trait EngineValidator<
+pub trait EngineApiValidator<
     Types: PayloadTypes,
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
