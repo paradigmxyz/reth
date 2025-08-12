@@ -96,21 +96,13 @@ pub fn default_client_version() -> ClientVersion {
     }
 }
 
-/// Get a reference to the initialized version metadata.
-///
-/// # Panics
-/// If `init_version_metadata()` hasn't been called.
-pub fn version_metadata() -> &'static RethCliVersionConsts {
-    VERSION_METADATA.get().expect("Version metadata not initialized")
-}
-
 /// Get a reference to the global version metadata
-pub fn get_version_metadata() -> &'static RethCliVersionConsts {
-    VERSION_METADATA.get_or_init(default_version_metadata)
+pub fn version_metadata() -> &'static RethCliVersionConsts {
+    VERSION_METADATA.get_or_init(default_reth_version_metadata)
 }
 
-/// default version metadata using compile-time env! macros.
-pub fn default_version_metadata() -> RethCliVersionConsts {
+/// default reth version metadata using compile-time env! macros.
+pub fn default_reth_version_metadata() -> RethCliVersionConsts {
     RethCliVersionConsts {
         name_client: Cow::Borrowed("Reth"),
         cargo_pkg_version: Cow::Owned(env!("CARGO_PKG_VERSION").to_string()),

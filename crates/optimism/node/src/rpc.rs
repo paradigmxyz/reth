@@ -88,7 +88,7 @@ use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
-use reth_node_core::version::{get_version_metadata, CLIENT_CODE};
+use reth_node_core::version::{version_metadata, CLIENT_CODE};
 use reth_optimism_rpc::engine::OP_ENGINE_CAPABILITIES;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
@@ -125,8 +125,8 @@ where
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
             name: OP_NAME_CLIENT.to_string(),
-            version: get_version_metadata().cargo_pkg_version.to_string(),
-            commit: get_version_metadata().vergen_git_sha.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
         let inner = EngineApi::new(
             ctx.node.provider().clone(),
