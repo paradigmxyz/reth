@@ -14,9 +14,9 @@ use crate::{
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
     HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -408,10 +408,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
 
         Ok(Box::new(state_provider))
     }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvider<TX, N> {
-    type StateCommitment = N::StateCommitment;
 }
 
 impl<
