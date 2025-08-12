@@ -535,6 +535,7 @@ tables! {
     }
 
     /// Stores BSC Parlia checkpoint snapshots (compressed CBOR bytes).
+    /// defined it here is for schema registration and database initialization.
     table ParliaSnapshots {
         type Key = BlockNumber;
         type Value = crate::models::ParliaSnapshotBlob;
