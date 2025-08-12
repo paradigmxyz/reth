@@ -42,3 +42,4 @@ aes.workspace = true
 hmac.workspace = true
 block-padding.workspace = true
 cipher = { workspace = true, features = ["block-padding"] }
+subtle.workspace = true
