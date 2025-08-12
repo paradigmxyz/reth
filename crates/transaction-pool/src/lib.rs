@@ -298,7 +298,6 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
-use futures_util::future::join_all;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -362,6 +361,19 @@ where
         self.inner().config()
     }
 
+    /// Validates the given transaction
+    async fn validate(
+        &self,
+        origin: TransactionOrigin,
+        transaction: V::Transaction,
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+        let hash = *transaction.hash();
+
+        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+
+        (hash, outcome)
+    }
+
     /// Returns future that validates all transactions in the given iterator.
     ///
     /// This returns the validated transactions in the iterator's order.
@@ -379,17 +391,16 @@ where
             .collect()
     }
 
-    /// Validates the given transaction
-    async fn validate(
+    /// Validates all transactions with their individual origins.
+    ///
+    /// This returns the validated transactions in the same order as input.
+    async fn validate_all_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
-        let hash = *transaction.hash();
-
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-
-        (hash, outcome)
+        transactions: Vec<(TransactionOrigin, V::Transaction)>,
+    ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
+        origins.into_iter().zip(tx_outcomes).collect()
     }
 
     /// Number of transactions in the entire pool
@@ -514,8 +525,9 @@ where
         if transactions.is_empty() {
             return Vec::new()
         }
-        join_all(transactions.into_iter().map(|(origin, tx)| self.add_transaction(origin, tx)))
-            .await
+        let validated = self.validate_all_with_origins(transactions).await;
+
+        self.pool.add_transactions_with_origins(validated)
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
