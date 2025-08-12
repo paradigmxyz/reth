@@ -36,16 +36,6 @@ use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, Store
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-// -----------------------------------------------------------------------------
-//  Alias types (must be in scope for the `tables!` macro below)
-// -----------------------------------------------------------------------------
-
-/// List with block numbers.
-pub type BlockNumberList = IntegerList;
-
-/// Encoded stage id used as database key.
-pub type StageId = String;
-
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TableType {
@@ -542,12 +532,12 @@ tables! {
     }
 }
 
-// Keys for the `ChainState`
+/// Keys for the `ChainState` table.
 #[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Hash)]
 pub enum ChainStateKey {
-    /// Last finalized block number recorded by the client.
+    /// Last finalized block key
     LastFinalizedBlock,
-    /// Last safe block number recorded by the client.
+    /// Last finalized block key
     LastSafeBlockBlock,
 }
 
@@ -568,6 +558,29 @@ impl Decode for ChainStateKey {
             [0] => Ok(Self::LastFinalizedBlock),
             [1] => Ok(Self::LastSafeBlockBlock),
             _ => Err(crate::DatabaseError::Decode),
+        }
+    }
+}
+
+// Alias types.
+
+/// List with transaction numbers.
+pub type BlockNumberList = IntegerList;
+
+/// Encoded stage id.
+pub type StageId = String;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn parse_table_from_str() {
+        for table in Tables::ALL {
+            assert_eq!(format!("{table:?}"), table.name());
+            assert_eq!(table.to_string(), table.name());
+            assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }
     }
 }
