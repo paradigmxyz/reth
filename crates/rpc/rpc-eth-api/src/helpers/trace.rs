@@ -25,26 +25,21 @@ use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
 pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
-    /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
-    /// changes.
-    #[expect(clippy::type_complexity)]
+    /// Executes the [`TxEnvFor`] with [`EvmEnvFor`] against the given [Database] without committing
+    /// state changes.
     fn inspect<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
-    ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-        Self::Error,
-    >
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = ProviderError>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        Ok((res, (evm_env, tx_env)))
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        evm.transact(tx_env).map_err(Self::Error::from_evm_err)
     }
 
     /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
@@ -72,7 +67,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
         self.with_state_at_block(at, |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+            let res = self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res)
         })
     }
@@ -107,7 +102,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+            let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -195,7 +190,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
                 let tx_env = this.evm_config().tx_env(tx);
-                let (res, _) = this.inspect(
+                let res = this.inspect(
                     StateCacheDbRefMutWrapper(&mut db),
                     evm_env,
                     tx_env,
