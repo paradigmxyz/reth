@@ -14,7 +14,6 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
-use bytes::BufMut;
 
 pub mod accounts;
 pub mod blocks;
