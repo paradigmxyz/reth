@@ -35,12 +35,6 @@
 
 extern crate alloc;
 
-/// Block types whose transactions contain signatures that allow recovering the transaction signer.
-pub mod block;
-
-#[doc(inline)]
-pub use block::RecoverableBlock;
-
 /// Sparse trie implementation for stateless validation
 pub mod trie;
 

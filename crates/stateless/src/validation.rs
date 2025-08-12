@@ -1,7 +1,7 @@
 use crate::{
     trie::{StatelessSparseTrie, StatelessTrie},
     witness_db::WitnessDatabase,
-    ExecutionWitness, RecoverableBlock,
+    ExecutionWitness,
 };
 use alloc::{
     collections::BTreeMap,
@@ -86,9 +86,9 @@ pub enum StatelessValidationError {
         expected: B256,
     },
 
-    /// Error when recovering signers
-    #[error("error recovering the signers in the block")]
-    SignerRecovery,
+    /// Custom error.
+    #[error("{0}")]
+    Custom(&'static str),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -126,18 +126,17 @@ pub enum StatelessValidationError {
 ///
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
-pub fn stateless_validation<B, ChainSpec, E>(
-    current_block: B,
+pub fn stateless_validation<ChainSpec, E>(
+    current_block: RecoveredBlock<Block>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
 ) -> Result<B256, StatelessValidationError>
 where
-    B: RecoverableBlock<Block>,
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    stateless_validation_with_trie::<StatelessSparseTrie, B, ChainSpec, E>(
+    stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
         current_block,
         witness,
         chain_spec,
@@ -151,21 +150,17 @@ where
 /// implementation of the `StatelessTrie` for custom trie backends or optimizations.
 ///
 /// See `stateless_validation` for detailed documentation of the validation process.
-pub fn stateless_validation_with_trie<T, B, ChainSpec, E>(
-    current_block: B,
+pub fn stateless_validation_with_trie<T, ChainSpec, E>(
+    current_block: RecoveredBlock<Block>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
 ) -> Result<B256, StatelessValidationError>
 where
     T: StatelessTrie,
-    B: RecoverableBlock<Block>,
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    let current_block =
-        current_block.try_into_recovered().map_err(|_| StatelessValidationError::SignerRecovery)?;
-
     let mut ancestor_headers: Vec<_> = witness
         .headers
         .iter()
