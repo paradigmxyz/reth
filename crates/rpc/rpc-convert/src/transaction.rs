@@ -247,7 +247,7 @@ pub trait SimTxConverter<TxReq, SimTx>: Clone + Debug + Unpin + Send + Sync + 's
 
 impl<TxReq, SimTx> SimTxConverter<TxReq, SimTx> for ()
 where
-    TxReq: TryIntoSimTx<SimTx> + Sized,
+    TxReq: TryIntoSimTx<SimTx>,
 {
     fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, ValueError<TxReq>> {
         tx_req.try_into_sim_tx()
