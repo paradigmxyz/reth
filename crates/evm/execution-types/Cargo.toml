@@ -28,6 +28,8 @@ serde_with = { workspace = true, optional = true }
 
 derive_more.workspace = true
 
+once_cell = { version = "1.19", default-features = false, features = ["std"] }
+
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary"] }
