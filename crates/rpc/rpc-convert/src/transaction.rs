@@ -238,7 +238,7 @@ where
 /// implementation for free, thanks to the blanket implementation, unless the conversion requires
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
-pub trait SimTxConverter<TxReq, SimTx> {
+pub trait SimTxConverter<TxReq, SimTx>: Clone + Debug + Unpin + Send + Sync + 'static {
     /// Performs the conversion from `tx_req` into `SimTx`.
     ///
     /// See [`SimTxConverter`] for more information.
@@ -256,7 +256,13 @@ where
 
 impl<TxReq, SimTx, F> SimTxConverter<TxReq, SimTx> for F
 where
-    F: Fn(TxReq) -> Result<SimTx, ValueError<TxReq>>,
+    F: Fn(TxReq) -> Result<SimTx, ValueError<TxReq>>
+        + Clone
+        + Debug
+        + Unpin
+        + Send
+        + Sync
+        + 'static,
 {
     fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, ValueError<TxReq>> {
         self(tx_req)
@@ -580,8 +586,7 @@ where
         + Send
         + Sync
         + 'static,
-    SimTx:
-        SimTxConverter<RpcTxReq<Network>, TxTy<N>> + Clone + Debug + Unpin + Send + Sync + 'static,
+    SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
 {
     type Primitives = N;
     type Network = Network;
