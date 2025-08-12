@@ -202,13 +202,19 @@ enum Outgoing {
 }
 
 impl Outgoing {
-    #[inline] fn is_disconnect(&self) -> bool { matches!(self, Outgoing::Disconnect(_)) }
-    #[inline] fn is_message(&self)    -> bool { matches!(self, Outgoing::Message(_)) }
+    #[inline]
+    const fn is_disconnect(&self) -> bool {
+        matches!(self, Self::Disconnect(_))
+    }
+    #[inline]
+    const fn is_message(&self) -> bool {
+        matches!(self, Self::Message(_))
+    }
 
     fn drain_disconnect(&mut self) -> Option<Bytes> {
-        if let Outgoing::Disconnect(disc) = self {
+        if let Self::Disconnect(disc) = self {
             let out = disc.clone();
-            *self = Outgoing::Empty;
+            *self = Self::Empty;
             Some(out)
         } else {
             None
@@ -216,9 +222,9 @@ impl Outgoing {
     }
 
     fn drain_message(&mut self) -> Option<Bytes> {
-        if let Outgoing::Message(msg) = self {
+        if let Self::Message(msg) = self {
             let out = msg.clone();
-            *self = Outgoing::Empty;
+            *self = Self::Empty;
             Some(out)
         } else {
             None
@@ -568,7 +574,7 @@ where
             }
         }
 
-        return Poll::Ready(Ok(()))  
+        Poll::Ready(Ok(()))
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
@@ -605,7 +611,7 @@ where
         // message id based on the offset
         compressed[0] = item[0] + MAX_RESERVED_MESSAGE_ID + 1;
         this.inner.start_send_unpin(compressed.freeze())?;
-    
+
         Ok(())
     }
 
@@ -619,7 +625,7 @@ where
             if let Some(frame) = this.outgoing.drain_disconnect() {
                 this.inner.as_mut().start_send(frame).map_err(P2PStreamError::from)?;
             }
-          
+
             return this.inner.as_mut().poll_flush(cx).map_err(P2PStreamError::from);
         }
 
@@ -853,11 +859,9 @@ mod tests {
             let (mut p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
-            p2p_stream.outgoing = Outgoing::Disconnect(
-                Bytes::from(alloy_rlp::encode(
-                    P2PMessage::Disconnect(DisconnectReason::SubprotocolSpecific),
-                ))
-            );
+            p2p_stream.outgoing = Outgoing::Disconnect(Bytes::from(alloy_rlp::encode(
+                P2PMessage::Disconnect(DisconnectReason::SubprotocolSpecific),
+            )));
             p2p_stream.disconnecting = true;
             p2p_stream.close().await.unwrap();
         });
