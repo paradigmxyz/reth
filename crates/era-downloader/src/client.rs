@@ -128,7 +128,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 if let Some(name) = entry.file_name().to_str() {
                     if let Some(number) = self.file_name_to_number(name) {
                         if number < index || number >= last {
-                            eprintln!("Deleting kokot {}", entry.path().display());
+                            eprintln!("Deleting file {}", entry.path().display());
                             eprintln!("{number} < {index} || {number} > {last}");
                             reth_fs_util::remove_file(entry.path())?;
                         }

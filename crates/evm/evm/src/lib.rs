@@ -44,6 +44,9 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+mod engine;
+pub use engine::{ConfigureEngineEvm, ExecutableTxIterator};
+
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
@@ -191,9 +194,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     type NextBlockEnvCtx: Debug + Clone;
 
     /// Configured [`BlockExecutorFactory`], contains [`EvmFactory`] internally.
-    type BlockExecutorFactory: BlockExecutorFactory<
+    type BlockExecutorFactory: for<'a> BlockExecutorFactory<
         Transaction = TxTy<Self::Primitives>,
         Receipt = ReceiptTy<Self::Primitives>,
+        ExecutionCtx<'a>: Debug + Send,
         EvmFactory: EvmFactory<
             Tx: TransactionEnv
                     + FromRecoveredTx<TxTy<Self::Primitives>>

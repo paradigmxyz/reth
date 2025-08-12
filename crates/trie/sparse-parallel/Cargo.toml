@@ -23,6 +23,10 @@ alloy-trie.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+# metrics
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
 # misc
 smallvec.workspace = true
 rayon = { workspace = true, optional = true }
@@ -47,7 +51,7 @@ rand.workspace = true
 rand_08.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "metrics"]
 std = [
     "dep:rayon",
     "alloy-primitives/std",
@@ -58,4 +62,9 @@ std = [
     "reth-trie-common/std",
     "reth-trie-sparse/std",
     "tracing/std",
+]
+metrics = [
+    "dep:reth-metrics",
+    "dep:metrics",
+    "std",
 ]

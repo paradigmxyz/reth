@@ -18,7 +18,6 @@ use reth_chain_state::{
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
-pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -58,7 +57,6 @@ mod block_buffer;
 mod cached_state;
 pub mod error;
 mod instrumented_state;
-mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
@@ -73,7 +71,6 @@ mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
-pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
@@ -617,6 +614,7 @@ where
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
+            self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
         };
 
@@ -746,7 +744,7 @@ where
     }
 
     /// Returns the persisting kind for the input block.
-    fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
+    fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
         // Check that we're currently persisting.
         let Some(action) = self.persistence_state.current_action() else {
             return PersistingKind::NotPersisting
@@ -758,7 +756,9 @@ where
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.number() > highest.number && self.state.tree_state.is_descendant(*highest, block) {
+        if block.block.number > highest.number &&
+            self.state.tree_state.is_descendant(*highest, block)
+        {
             return PersistingKind::PersistingDescendant
         }
 
@@ -783,6 +783,9 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
         self.metrics.engine.forkchoice_updated_messages.increment(1);
+        if attrs.is_some() {
+            self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
+        }
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
@@ -1400,9 +1403,10 @@ where
                 .build()?;
 
             let mut trie_input = self.compute_trie_input(
-                self.persisting_kind_for(block.recovered_block().header()),
+                self.persisting_kind_for(block.recovered_block.block_with_parent()),
                 self.provider.database_provider_ro()?,
                 block.recovered_block().parent_hash(),
+                None,
             )?;
             // Extend with block we are generating trie updates for.
             trie_input.append_ref(block.hashed_state());
@@ -1679,10 +1683,12 @@ where
                     }
                 }
                 Err(err) => {
-                    debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
-                    if let Err(fatal) = self.on_insert_block_error(err) {
-                        warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
-                        return Err(fatal)
+                    if let InsertPayloadError::Block(err) = err {
+                        debug!(target: "engine::tree", ?err, "failed to connect buffered block to tree");
+                        if let Err(fatal) = self.on_insert_block_error(err) {
+                            warn!(target: "engine::tree", %fatal, "fatal error occurred while connecting buffered blocks");
+                            return Err(fatal)
+                        }
                     }
                 }
             }
@@ -2021,10 +2027,12 @@ where
                 trace!(target: "engine::tree", "downloaded block already executed");
             }
             Err(err) => {
-                debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
-                if let Err(fatal) = self.on_insert_block_error(err) {
-                    warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
-                    return Err(fatal)
+                if let InsertPayloadError::Block(err) = err {
+                    debug!(target: "engine::tree", err=%err.kind(), "failed to insert downloaded block");
+                    if let Err(fatal) = self.on_insert_block_error(err) {
+                        warn!(target: "engine::tree", %fatal, "fatal error occurred while inserting downloaded block");
+                        return Err(fatal)
+                    }
                 }
             }
         }
@@ -2046,7 +2054,7 @@ where
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
+    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
             block,
@@ -2177,8 +2185,10 @@ where
         persisting_kind: PersistingKind,
         provider: TP,
         parent_hash: B256,
+        allocated_trie_input: Option<TrieInput>,
     ) -> ProviderResult<TrieInput> {
-        let mut input = TrieInput::default();
+        // get allocated trie input or use a default trie input
+        let mut input = allocated_trie_input.unwrap_or_default();
 
         let best_block_number = provider.best_block_number()?;
 
@@ -2582,8 +2592,8 @@ pub enum BlockStatus {
 
 /// How a payload was inserted if it was valid.
 ///
-/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen(_)`] is
-/// returned, otherwise [`InsertPayloadOk::Inserted(_)`] is returned.
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen`] is
+/// returned, otherwise [`InsertPayloadOk::Inserted`] is returned.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InsertPayloadOk {
     /// The payload was valid, but we have already seen it.
