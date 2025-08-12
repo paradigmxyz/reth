@@ -2,7 +2,7 @@ use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
@@ -96,6 +96,10 @@ pub struct BestTransactions<T: TransactionOrdering> {
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
+    /// The priority value of most recently yielded transaction.
+    ///
+    /// This is required if we new pending transactions are fed in while it yields new values.
+    pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
 }
@@ -122,7 +126,16 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     fn try_recv(&mut self) -> Option<PendingTransaction<T>> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
-                Ok(tx) => return Some(tx),
+                Ok(tx) => {
+                    if let Some(last_priority) = &self.last_priority {
+                        if &tx.priority > last_priority {
+                            // we skip transactions if we already yielded a transaction with lower
+                            // priority
+                            return None
+                        }
+                    }
+                    return Some(tx)
+                }
                 // note TryRecvError::Lagged can be returned here, which is an error that attempts
                 // to correct itself on consecutive try_recv() attempts
 
@@ -169,6 +182,7 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.new_transaction_receiver.take();
+        self.last_priority.take();
     }
 
     fn skip_blobs(&mut self) {
@@ -215,6 +229,9 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
+                if self.new_transaction_receiver.is_some() {
+                    self.last_priority = Some(best.priority.clone())
+                }
                 return Some(best.transaction)
             }
         }
@@ -755,7 +772,7 @@ mod tests {
         // Create a filter that only returns transactions with even nonces
         let filter =
             BestTransactionFilter::new(best, |tx: &Arc<ValidPoolTransaction<MockTransaction>>| {
-                tx.nonce() % 2 == 0
+                tx.nonce().is_multiple_of(2)
             });
 
         // Verify that the filter only returns transactions with even nonces
@@ -931,5 +948,47 @@ mod tests {
         assert!(best.new_transaction_receiver.is_none());
     }
 
-    // TODO: Same nonce test
+    #[test]
+    fn test_best_update_transaction_priority() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // yield one tx, effectively locking in the highest prio
+        let first = best.next().unwrap();
+
+        // Create a new transaction with nonce 5 and validate it
+        let new_higher_fee_tx = MockTransaction::eip1559().with_nonce(0);
+        let valid_new_higher_fee_tx = f.validated(new_higher_fee_tx);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_higher_fee_tx.clone()),
+            priority: Priority::Value(U256::from(u64::MAX)),
+        };
+        tx_sender.send(pending_tx).unwrap();
+
+        // ensure that the higher prio tx is skipped since we yielded a lower one
+        for tx in best {
+            assert_eq!(tx.sender_id(), first.sender_id());
+            assert_ne!(tx.sender_id(), valid_new_higher_fee_tx.sender_id());
+        }
+    }
 }

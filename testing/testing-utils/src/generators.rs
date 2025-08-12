@@ -453,6 +453,7 @@ pub fn random_receipt<R: Rng>(
     rng: &mut R,
     transaction: &TransactionSigned,
     logs_count: Option<u8>,
+    topics_count: Option<u8>,
 ) -> Receipt {
     let success = rng.random::<bool>();
     let logs_count = logs_count.unwrap_or_else(|| rng.random::<u8>());
@@ -462,7 +463,7 @@ pub fn random_receipt<R: Rng>(
         success,
         cumulative_gas_used: rng.random_range(0..=transaction.gas_limit()),
         logs: if success {
-            (0..logs_count).map(|_| random_log(rng, None, None)).collect()
+            (0..logs_count).map(|_| random_log(rng, None, topics_count)).collect()
         } else {
             vec![]
         },

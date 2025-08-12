@@ -98,6 +98,19 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
             .collect()
     }
 
+    async fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        transactions
+            .into_iter()
+            .map(|(_, transaction)| {
+                let hash = *transaction.hash();
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+            })
+            .collect()
+    }
+
     fn transaction_event_listener(&self, _tx_hash: TxHash) -> Option<TransactionEvents> {
         None
     }
@@ -196,6 +209,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
 
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         AllPoolTransactions::default()
+    }
+
+    fn all_transaction_hashes(&self) -> Vec<TxHash> {
+        vec![]
     }
 
     fn remove_transactions(

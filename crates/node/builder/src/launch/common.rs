@@ -449,7 +449,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {
-            MiningMode::instant(pool)
+            MiningMode::instant(pool, self.node_config().dev.block_max_transactions)
         }
     }
 }
