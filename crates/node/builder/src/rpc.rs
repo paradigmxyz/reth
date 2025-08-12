@@ -1,7 +1,7 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+pub use reth_engine_tree::tree::{BasicEngineApiValidator, EngineApiValidator};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
@@ -426,7 +426,7 @@ pub struct RpcAddOns<
     EthB: EthApiBuilder<Node>,
     PVB,
     EB = BasicEngineApiBuilder<PVB>,
-    EVB = BasicEngineValidatorBuilder<PVB>,
+    EVB = BasicEngineApiValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
 > {
     /// Additional RPC add-ons.
@@ -536,7 +536,7 @@ where
         }
     }
 
-    /// Maps the [`EngineValidatorBuilder`] builder type.
+    /// Maps the [`EngineApiValidatorBuilder`] builder type.
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
@@ -699,7 +699,7 @@ where
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EB: EngineApiBuilder<N>,
-    EVB: EngineValidatorBuilder<N>,
+    EVB: EngineApiValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
@@ -981,7 +981,7 @@ where
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    EVB: EngineValidatorBuilder<N>,
+    EVB: EngineApiValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
@@ -1060,21 +1060,21 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 }
 
 /// Helper trait that provides the validator builder for the engine API
-pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
+pub trait EngineApiValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The validator builder type to use.
-    type ValidatorBuilder: EngineValidatorBuilder<Node>;
+    type ValidatorBuilder: EngineApiValidatorBuilder<Node>;
 
     /// Returns the validator builder.
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder;
 }
 
-impl<N, EthB, PVB, EB, EVB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, PVB, EB, EVB>
+impl<N, EthB, PVB, EB, EVB> EngineApiValidatorAddOn<N> for RpcAddOns<N, EthB, PVB, EB, EVB>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
-    EVB: EngineValidatorBuilder<N>,
+    EVB: EngineApiValidatorBuilder<N>,
 {
     type ValidatorBuilder = EVB;
 
@@ -1125,9 +1125,9 @@ pub trait PayloadValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone
 ///
 /// This trait is responsible for building validators that the consensus engine will use
 /// for block execution, state validation, and fork handling.
-pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
+pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The tree validator type that will be used by the consensus engine.
-    type EngineValidator: EngineValidator<
+    type EngineApiValidator: EngineApiValidator<
         <Node::Types as NodeTypes>::Payload,
         <Node::Types as NodeTypes>::Primitives,
     >;
@@ -1139,26 +1139,26 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-    ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
+    ) -> impl Future<Output = eyre::Result<Self::EngineApiValidator>> + Send;
 }
 
-/// Basic implementation of [`EngineValidatorBuilder`].
+/// Basic implementation of [`EngineApiValidatorBuilder`].
 ///
-/// This builder creates a [`BasicEngineValidator`] using the provided payload validator builder.
+/// This builder creates a [`BasicEngineApiValidator`] using the provided payload validator builder.
 #[derive(Debug, Clone)]
-pub struct BasicEngineValidatorBuilder<EV> {
+pub struct BasicEngineApiValidatorBuilder<EV> {
     /// The payload validator builder used to create the engine validator.
     payload_validator_builder: EV,
 }
 
-impl<EV> BasicEngineValidatorBuilder<EV> {
+impl<EV> BasicEngineApiValidatorBuilder<EV> {
     /// Creates a new instance with the given payload validator builder.
     pub const fn new(payload_validator_builder: EV) -> Self {
         Self { payload_validator_builder }
     }
 }
 
-impl<EV> Default for BasicEngineValidatorBuilder<EV>
+impl<EV> Default for BasicEngineApiValidatorBuilder<EV>
 where
     EV: Default,
 {
@@ -1167,7 +1167,7 @@ where
     }
 }
 
-impl<Node, EV> EngineValidatorBuilder<Node> for BasicEngineValidatorBuilder<EV>
+impl<Node, EV> EngineApiValidatorBuilder<Node> for BasicEngineApiValidatorBuilder<EV>
 where
     Node: FullNodeComponents<
         Evm: ConfigureEngineEvm<
@@ -1180,17 +1180,17 @@ where
         Block = BlockTy<Node::Types>,
     >,
 {
-    type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
+    type EngineApiValidator = BasicEngineApiValidator<Node::Provider, Node::Evm, EV::Validator>;
 
     async fn build_tree_validator(
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-    ) -> eyre::Result<Self::EngineValidator> {
+    ) -> eyre::Result<Self::EngineApiValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
-        Ok(BasicEngineValidator::new(
+        Ok(BasicEngineApiValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
