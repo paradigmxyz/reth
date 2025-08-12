@@ -574,22 +574,24 @@ where
         Ok(listener)
     }
 
-    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    /// Adds all transactions in the iterator to the pool, each with its individual origin,
+    /// returning a list of results.
     ///
     /// Note: A large batch may lock the pool for a long time that blocks important operations
     /// like updating the pool on canonical state changes. The caller should consider having
     /// a max batch size to balance transaction insertions with other updates.
-    pub fn add_transactions(
+    pub fn add_transactions_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+        transactions: impl IntoIterator<
+            Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
+        >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        // Add the transactions and enforce the pool size limits in one write lock
+        // Process all transactions in one write lock, maintaining individual origins
         let (mut added, discarded) = {
             let mut pool = self.pool.write();
             let added = transactions
                 .into_iter()
-                .map(|tx| self.add_transaction(&mut pool, origin, tx))
+                .map(|(origin, tx)| self.add_transaction(&mut pool, origin, tx))
                 .collect::<Vec<_>>();
 
             // Enforce the pool size limits if at least one transaction was added successfully
@@ -622,6 +624,19 @@ where
         }
 
         added
+    }
+
+    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    ///
+    /// Note: A large batch may lock the pool for a long time that blocks important operations
+    /// like updating the pool on canonical state changes. The caller should consider having
+    /// a max batch size to balance transaction insertions with other updates.
+    pub fn add_transactions(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
     }
 
     /// Notify all listeners about a new pending transaction.
