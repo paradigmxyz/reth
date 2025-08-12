@@ -10475,6 +10475,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-rlp",
  "rand 0.8.5",
  "rand 0.9.2",
  "reth-ethereum-primitives",
