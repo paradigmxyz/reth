@@ -174,4 +174,89 @@ mod comprehensive_tests {
         
         println!("✓ Backwards compatibility verified: old format reads correctly and converts to new format");
     }
+
+    #[test]
+    fn test_storage_entry_variable_nibble_lengths_with_hashes() {
+        // Test case that would cause buf.len() % 32 != 6 after nibbles
+        // This simulates the exact error scenario from production
+        
+        // Case 1: 1 nibble = 2 bytes total (1 length + 1 packed)
+        // After nibbles, remaining buffer for BranchNodeCompact would not align to % 32 == 6
+        test_with_nibble_count_and_hashes(1);
+        
+        // Case 2: 3 nibbles = 3 bytes total (1 length + 2 packed)
+        test_with_nibble_count_and_hashes(3);
+        
+        // Case 3: 5 nibbles = 4 bytes total (1 length + 3 packed)
+        test_with_nibble_count_and_hashes(5);
+        
+        // Case 4: 17 nibbles = 10 bytes total (1 length + 9 packed)
+        test_with_nibble_count_and_hashes(17);
+        
+        println!("✓ All variable nibble length tests with hashes passed");
+        
+        fn test_with_nibble_count_and_hashes(nibble_count: usize) {
+            use alloy_primitives::B256;
+            use crate::{BranchNodeCompact, StoredNibblesSubKey, storage::StorageTrieEntry};
+            use reth_codecs::Compact;
+            use alloy_trie::TrieMask;
+            
+            let nibbles_data: Vec<u8> = (0..nibble_count).map(|i| (i % 16) as u8).collect();
+            let nibbles = StoredNibblesSubKey::from(nibbles_data.clone());
+            
+            // Create a branch node with actual hashes
+            let hash1 = B256::from([0x11; 32]);
+            let hash2 = B256::from([0x22; 32]);
+            
+            let node = BranchNodeCompact::new(
+                TrieMask::new(0xFFFF),  // All children present
+                TrieMask::new(0x00FF),  // Some are tree nodes
+                TrieMask::new(0x0003),  // Two hashes (bits 0 and 1)
+                vec![hash1, hash2],
+                None,
+            );
+            
+            let entry = StorageTrieEntry {
+                nibbles: nibbles.clone(),
+                node: node.clone(),
+            };
+            
+            // Encode
+            let mut buf = Vec::new();
+            let encoded_len = entry.to_compact(&mut buf);
+            
+            // The nibbles will take: 1 + (nibble_count + 1) / 2 bytes
+            let nibbles_size = 1 + (nibble_count + 1) / 2;
+            // The node will take: 6 bytes (masks) + 64 bytes (2 hashes)
+            let node_size = 6 + 64;
+            let expected_total = nibbles_size + node_size;
+            
+            assert_eq!(encoded_len, expected_total, 
+                      "Encoded length mismatch for {} nibbles", nibble_count);
+            
+            // This is the critical test - decoding should work even though 
+            // nibbles_size might not align nicely with the 32-byte hash boundary
+            let (decoded, remaining) = StorageTrieEntry::from_compact(&buf, encoded_len);
+            
+            assert_eq!(decoded.nibbles.0.to_vec(), nibbles_data,
+                      "Nibbles mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.state_mask, node.state_mask,
+                      "State mask mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.tree_mask, node.tree_mask,
+                      "Tree mask mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.hash_mask, node.hash_mask,
+                      "Hash mask mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.hashes.len(), 2,
+                      "Hash count mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.hashes[0], hash1,
+                      "First hash mismatch for {} nibbles", nibble_count);
+            assert_eq!(decoded.node.hashes[1], hash2,
+                      "Second hash mismatch for {} nibbles", nibble_count);
+            assert_eq!(remaining.len(), 0,
+                      "Buffer not fully consumed for {} nibbles", nibble_count);
+            
+            println!("  ✓ {} nibbles ({} bytes) + hashes roundtrip successful", 
+                     nibble_count, nibbles_size);
+        }
+    }
 }

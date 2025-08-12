@@ -75,36 +75,43 @@ impl Compact for BranchNodeCompact {
         buf_size
     }
 
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let hash_len = B256::len_bytes();
 
+        // Use only the specified length from the buffer, not the entire remaining buffer
+        let buf_to_decode = if len > 0 { &buf[..len] } else { buf };
+        
         // Assert the buffer is long enough to contain the masks and the hashes.
-        assert_eq!(buf.len() % hash_len, 6);
+        assert_eq!(buf_to_decode.len() % hash_len, 6);
 
-        // Consume the masks.
-        let (state_mask, buf) = TrieMask::from_compact(buf, 0);
-        let (tree_mask, buf) = TrieMask::from_compact(buf, 0);
-        let (hash_mask, buf) = TrieMask::from_compact(buf, 0);
+        // Consume the masks from the original buffer
+        let (state_mask, buf_after_masks) = TrieMask::from_compact(buf, 0);
+        let (tree_mask, buf_after_masks) = TrieMask::from_compact(buf_after_masks, 0);
+        let (hash_mask, buf_after_masks) = TrieMask::from_compact(buf_after_masks, 0);
 
-        let mut buf = buf;
-        let mut num_hashes = buf.len() / hash_len;
+        let mut current_buf = buf_after_masks;
+        // Calculate the number of hashes from the buffer we're supposed to consume
+        let hashes_bytes = if len > 0 { len - 6 } else { current_buf.len() };
+        let mut num_hashes = hashes_bytes / hash_len;
         let mut root_hash = None;
 
         // Check if the root hash is present
         if hash_mask.count_ones() as usize + 1 == num_hashes {
-            root_hash = Some(B256::from_slice(&buf[..hash_len]));
-            buf.advance(hash_len);
+            root_hash = Some(B256::from_slice(&current_buf[..hash_len]));
+            current_buf.advance(hash_len);
             num_hashes -= 1;
         }
 
         // Consume all remaining hashes.
         let mut hashes = Vec::<B256>::with_capacity(num_hashes);
         for _ in 0..num_hashes {
-            hashes.push(B256::from_slice(&buf[..hash_len]));
-            buf.advance(hash_len);
+            hashes.push(B256::from_slice(&current_buf[..hash_len]));
+            current_buf.advance(hash_len);
         }
 
-        (Self::new(state_mask, tree_mask, hash_mask, hashes, root_hash), buf)
+        // Return the remaining buffer after consuming exactly `len` bytes
+        let bytes_consumed = if len > 0 { len } else { buf.len() - current_buf.len() };
+        (Self::new(state_mask, tree_mask, hash_mask, hashes, root_hash), &buf[bytes_consumed..])
     }
 }
 
