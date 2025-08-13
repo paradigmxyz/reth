@@ -1036,13 +1036,9 @@ dependencies = [
 
 [[package]]
 name = "arb-alloy-network"
-version = "0.1.2"
-dependencies = [
- "alloy-consensus",
- "alloy-network",
- "alloy-primitives",
- "alloy-rpc-types-eth",
-]
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d96157f2af6b7adee519c2fce60b07a79628164410c2b32558ef816018ec748e"
 
 [[package]]
 name = "arb-alloy-predeploys"
@@ -7336,8 +7332,6 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
- "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
  "arb-alloy-consensus",
  "arb-alloy-predeploys",
  "arb-alloy-util",
@@ -7350,11 +7344,9 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-rpc-convert",
  "reth-rpc-eth-api",
  "reth-storage-errors",
  "revm",
- "revm-context",
  "revm-context-interface 8.0.1",
 ]
 
@@ -7378,16 +7370,13 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-engine-local",
+ "reth-engine-primitives",
  "reth-ethereum-consensus",
- "reth-ethereum-engine-primitives",
- "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-node-ethereum",
- "reth-node-types",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -7410,9 +7399,11 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "reth-arbitrum-primitives",
- "reth-ethereum-engine-primitives",
+ "reth-chain-state",
+ "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
  "serde",
@@ -7441,9 +7432,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-network",
  "alloy-primitives",
- "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "arb-alloy-network",
@@ -7451,6 +7440,8 @@ dependencies = [
  "eyre",
  "jsonrpsee",
  "jsonrpsee-core",
+ "jsonrpsee-types",
+ "reth-arbitrum-evm",
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",
  "reth-chainspec",
@@ -7465,11 +7456,15 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
+ "reth-rpc-server-types",
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
+ "revm-context",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -7483,16 +7478,19 @@ dependencies = [
 
 [[package]]
 name = "reth-arbitrum-storage"
-version = "0.1.0"
+version = "1.6.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "reth-arbitrum-primitives",
  "reth-chainspec",
+ "reth-codecs",
  "reth-db-api",
  "reth-node-api",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune-types",
+ "reth-stages-types",
  "reth-storage-api",
 ]
 
@@ -10288,6 +10286,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-signer",
+ "arb-alloy-network",
  "jsonrpsee-types",
  "op-alloy-consensus",
  "op-alloy-network",
