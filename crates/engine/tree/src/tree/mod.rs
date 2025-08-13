@@ -856,6 +856,9 @@ where
                         self.process_payload_attributes(attr, &canonical_header, state, version);
                     return Ok(TreeOutcome::new(updated))
                 }
+
+                // TODO: here we'd need to actually set the Latest block to the `canonical_header`, like in step 3.
+
             }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
