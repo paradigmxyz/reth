@@ -5,17 +5,15 @@ use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
+use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
-};
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_storage_api::{
+    BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_transaction_pool::TransactionPool;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
@@ -159,19 +157,41 @@ pub trait EthState: LoadState + SpawnBlocking {
             Ok(Some(Account { balance, nonce, code_hash, storage_root }))
         })
     }
+
+    /// Retrieves the account's balance, nonce, and code for a given address.
+    fn get_account_info(
+        &self,
+        address: Address,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<AccountInfo, Self::Error>> + Send {
+        self.spawn_blocking_io(move |this| {
+            let state = this.state_at_block_id(block_id)?;
+            let account = state
+                .basic_account(&address)
+                .map_err(Self::Error::from_eth_err)?
+                .unwrap_or_default();
+
+            let balance = account.balance;
+            let nonce = account.nonce;
+            let code = if account.get_bytecode_hash() == KECCAK_EMPTY {
+                Default::default()
+            } else {
+                state
+                    .account_code(&address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default()
+                    .original_bytes()
+            };
+
+            Ok(AccountInfo { balance, nonce, code })
+        })
+    }
 }
 
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState:
-    EthApiTypes
-    + RpcNodeCoreExt<
-        Provider: StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Pool: TransactionPool,
-    >
-{
+pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
@@ -249,17 +269,15 @@ pub trait LoadState:
     {
         self.spawn_blocking_io(move |this| {
             // first fetch the on chain nonce of the account
-            let on_chain_account_nonce = this
+            let mut next_nonce = this
                 .latest_state()?
                 .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
-            let mut next_nonce = on_chain_account_nonce;
             // Retrieve the highest consecutive transaction for the sender from the transaction pool
-            if let Some(highest_tx) = this
-                .pool()
-                .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
+            if let Some(highest_tx) =
+                this.pool().get_highest_consecutive_transaction_by_sender(address, next_nonce)
             {
                 // Return the nonce of the highest consecutive transaction + 1
                 next_nonce = highest_tx.nonce().checked_add(1).ok_or_else(|| {
@@ -294,9 +312,10 @@ pub trait LoadState:
                 .unwrap_or_default();
 
             if block_id == Some(BlockId::pending()) {
-                // for pending tag we need to find the highest nonce in the pool
-                if let Some(highest_pool_tx) =
-                    this.pool().get_highest_transaction_by_sender(address)
+                // for pending tag we need to find the highest nonce of txn in the pending state.
+                if let Some(highest_pool_tx) = this
+                    .pool()
+                    .get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
                 {
                     {
                         // and the corresponding txcount is nonce + 1 of the highest tx in the pool

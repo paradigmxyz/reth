@@ -3,11 +3,11 @@
 //! The structure of an Era1 file follows the specification:
 //! `Version | block-tuple* | other-entries* | Accumulator | BlockIndex`
 //!
-//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>.
 
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
-    e2s_types::{E2sError, Entry, Version},
+    e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
@@ -43,13 +43,13 @@ impl Era1File {
 
     /// Get a block by its number, if present in this file
     pub fn get_block_by_number(&self, number: BlockNumber) -> Option<&BlockTuple> {
-        let index = (number - self.group.block_index.starting_number) as usize;
+        let index = (number - self.group.block_index.starting_number()) as usize;
         (index < self.group.blocks.len()).then(|| &self.group.blocks[index])
     }
 
     /// Get the range of block numbers contained in this file
     pub fn block_range(&self) -> std::ops::RangeInclusive<BlockNumber> {
-        let start = self.group.block_index.starting_number;
+        let start = self.group.block_index.starting_number();
         let end = start + (self.group.blocks.len() as u64) - 1;
         start..=end
     }
@@ -59,6 +59,7 @@ impl Era1File {
         self.block_range().contains(&number)
     }
 }
+
 /// Reader for Era1 files that builds on top of [`E2StoreReader`]
 #[derive(Debug)]
 pub struct Era1Reader<R: Read> {
@@ -67,8 +68,8 @@ pub struct Era1Reader<R: Read> {
 
 /// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
 #[derive(Debug)]
-pub struct BlockTupleIterator<'r, R: Read> {
-    reader: &'r mut E2StoreReader<R>,
+pub struct BlockTupleIterator<R: Read> {
+    reader: E2StoreReader<R>,
     headers: VecDeque<CompressedHeader>,
     bodies: VecDeque<CompressedBody>,
     receipts: VecDeque<CompressedReceipts>,
@@ -78,8 +79,8 @@ pub struct BlockTupleIterator<'r, R: Read> {
     block_index: Option<BlockIndex>,
 }
 
-impl<'r, R: Read> BlockTupleIterator<'r, R> {
-    fn new(reader: &'r mut E2StoreReader<R>) -> Self {
+impl<R: Read> BlockTupleIterator<R> {
+    fn new(reader: E2StoreReader<R>) -> Self {
         Self {
             reader,
             headers: Default::default(),
@@ -93,7 +94,7 @@ impl<'r, R: Read> BlockTupleIterator<'r, R> {
     }
 }
 
-impl<'r, R: Read + Seek> Iterator for BlockTupleIterator<'r, R> {
+impl<R: Read + Seek> Iterator for BlockTupleIterator<R> {
     type Item = Result<BlockTuple, E2sError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -101,7 +102,7 @@ impl<'r, R: Read + Seek> Iterator for BlockTupleIterator<'r, R> {
     }
 }
 
-impl<'r, R: Read + Seek> BlockTupleIterator<'r, R> {
+impl<R: Read + Seek> BlockTupleIterator<R> {
     fn next_result(&mut self) -> Result<Option<BlockTuple>, E2sError> {
         loop {
             let Some(entry) = self.reader.read_next_entry()? else {
@@ -161,13 +162,13 @@ impl<R: Read + Seek> Era1Reader<R> {
     }
 
     /// Returns an iterator of [`BlockTuple`] streaming from `reader`.
-    pub fn iter(&mut self) -> BlockTupleIterator<'_, R> {
-        BlockTupleIterator::new(&mut self.reader)
+    pub fn iter(self) -> BlockTupleIterator<R> {
+        BlockTupleIterator::new(self.reader)
     }
 
     /// Reads and parses an Era1 file from the underlying reader, assembling all components
     /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
-    pub fn read(&mut self, network_name: String) -> Result<Era1File, E2sError> {
+    pub fn read(mut self, network_name: String) -> Result<Era1File, E2sError> {
         // Validate version entry
         let _version_entry = match self.reader.read_version()? {
             Some(entry) if entry.is_version() => entry,
@@ -215,8 +216,8 @@ impl<R: Read + Seek> Era1Reader<R> {
 
         let id = Era1Id::new(
             network_name,
-            block_index.starting_number,
-            block_index.offsets.len() as u32,
+            block_index.starting_number(),
+            block_index.offsets().len() as u32,
         );
 
         Ok(Era1File::new(group, id))
@@ -230,7 +231,7 @@ impl Era1Reader<File> {
         network_name: impl Into<String>,
     ) -> Result<Era1File, E2sError> {
         let file = File::open(path).map_err(E2sError::Io)?;
-        let mut reader = Self::new(file);
+        let reader = Self::new(file);
         reader.read(network_name.into())
     }
 }
@@ -445,7 +446,7 @@ mod tests {
 
         let mut offsets = Vec::with_capacity(block_count);
         for i in 0..block_count {
-            offsets.push(i as i64 * 100);
+            offsets.push(i as u64 * 100);
         }
         let block_index = BlockIndex::new(start_block, offsets);
         let group = Era1Group::new(blocks, accumulator, block_index);
@@ -468,7 +469,7 @@ mod tests {
         }
 
         // Read back from memory buffer
-        let mut reader = Era1Reader::new(Cursor::new(&buffer));
+        let reader = Era1Reader::new(Cursor::new(&buffer));
         let read_era1 = reader.read("testnet".to_string())?;
 
         // Verify core properties

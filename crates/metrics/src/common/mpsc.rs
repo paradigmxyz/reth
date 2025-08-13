@@ -11,7 +11,6 @@ use std::{
 use tokio::sync::mpsc::{
     self,
     error::{SendError, TryRecvError, TrySendError},
-    OwnedPermit,
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
@@ -144,11 +143,38 @@ impl<T> MeteredSender<T> {
         Self { sender, metrics: MeteredSenderMetrics::new(scope) }
     }
 
-    /// Tries to acquire a permit to send a message.
+    /// Tries to acquire a permit to send a message without waiting.
     ///
     /// See also [Sender](mpsc::Sender)'s `try_reserve_owned`.
-    pub fn try_reserve_owned(&self) -> Result<OwnedPermit<T>, TrySendError<mpsc::Sender<T>>> {
-        self.sender.clone().try_reserve_owned()
+    pub fn try_reserve_owned(self) -> Result<OwnedPermit<T>, TrySendError<Self>> {
+        let Self { sender, metrics } = self;
+        sender.try_reserve_owned().map(|permit| OwnedPermit::new(permit, metrics.clone())).map_err(
+            |err| match err {
+                TrySendError::Full(sender) => TrySendError::Full(Self { sender, metrics }),
+                TrySendError::Closed(sender) => TrySendError::Closed(Self { sender, metrics }),
+            },
+        )
+    }
+
+    /// Waits to acquire a permit to send a message and return owned permit.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `reserve_owned`.
+    pub async fn reserve_owned(self) -> Result<OwnedPermit<T>, SendError<()>> {
+        self.sender.reserve_owned().await.map(|permit| OwnedPermit::new(permit, self.metrics))
+    }
+
+    /// Waits to acquire a permit to send a message.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `reserve`.
+    pub async fn reserve(&self) -> Result<Permit<'_, T>, SendError<()>> {
+        self.sender.reserve().await.map(|permit| Permit::new(permit, &self.metrics))
+    }
+
+    /// Tries to acquire a permit to send a message without waiting.
+    ///
+    /// See also [Sender](mpsc::Sender)'s `try_reserve`.
+    pub fn try_reserve(&self) -> Result<Permit<'_, T>, TrySendError<()>> {
+        self.sender.try_reserve().map(|permit| Permit::new(permit, &self.metrics))
     }
 
     /// Returns the underlying [Sender](mpsc::Sender).
@@ -190,6 +216,51 @@ impl<T> MeteredSender<T> {
 impl<T> Clone for MeteredSender<T> {
     fn clone(&self) -> Self {
         Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// A wrapper type around [`OwnedPermit`](mpsc::OwnedPermit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct OwnedPermit<T> {
+    permit: mpsc::OwnedPermit<T>,
+    /// Holds metrics for this type
+    metrics: MeteredSenderMetrics,
+}
+
+impl<T> OwnedPermit<T> {
+    /// Creates a new [`OwnedPermit`] wrapping the provided [`mpsc::OwnedPermit`] with given metrics
+    /// handle.
+    pub const fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> Self {
+        Self { permit, metrics }
+    }
+
+    /// Sends a value using the reserved capacity and update metrics accordingly.
+    pub fn send(self, value: T) -> MeteredSender<T> {
+        let Self { permit, metrics } = self;
+        metrics.messages_sent_total.increment(1);
+        MeteredSender { sender: permit.send(value), metrics }
+    }
+}
+
+/// A wrapper type around [Permit](mpsc::Permit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct Permit<'a, T> {
+    permit: mpsc::Permit<'a, T>,
+    metrics_ref: &'a MeteredSenderMetrics,
+}
+
+impl<'a, T> Permit<'a, T> {
+    /// Creates a new [`Permit`] wrapping the provided [`mpsc::Permit`] with given metrics ref.
+    pub const fn new(permit: mpsc::Permit<'a, T>, metrics_ref: &'a MeteredSenderMetrics) -> Self {
+        Self { permit, metrics_ref }
+    }
+
+    /// Sends a value using the reserved capacity and updates metrics accordingly.
+    pub fn send(self, value: T) {
+        self.metrics_ref.messages_sent_total.increment(1);
+        self.permit.send(value);
     }
 }
 
@@ -252,7 +323,7 @@ impl<T> Stream for MeteredReceiver<T> {
 /// Throughput metrics for [`MeteredSender`]
 #[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
-struct MeteredSenderMetrics {
+pub struct MeteredSenderMetrics {
     /// Number of messages sent
     messages_sent_total: Counter,
     /// Number of failed message deliveries

@@ -133,6 +133,8 @@ where
                 target: request.start_hash(),
             });
             self.inflight_block_range_requests.push(request);
+
+            self.update_block_download_metrics();
         }
     }
 

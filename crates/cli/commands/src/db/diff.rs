@@ -10,7 +10,7 @@ use reth_node_core::{
     dirs::{DataDirPath, PlatformPath},
 };
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fmt::Debug,
     fs::{self, File},
     hash::Hash,
@@ -109,14 +109,19 @@ where
     info!("");
     info!("Diff results for {table}:");
 
+    // analyze the result and print some stats
+    let discrepancies = result.discrepancies.len();
+    let extra_elements = result.extra_elements.len();
+
+    if discrepancies == 0 && extra_elements == 0 {
+        info!("No discrepancies or extra elements found in table {table}");
+        return Ok(());
+    }
+
     // create directory and open file
     fs::create_dir_all(output_dir.as_ref())?;
     let file_name = format!("{table}.txt");
     let mut file = File::create(output_dir.as_ref().join(file_name.clone()))?;
-
-    // analyze the result and print some stats
-    let discrepancies = result.discrepancies.len();
-    let extra_elements = result.extra_elements.len();
 
     // Make a pretty summary header for the table
     writeln!(file, "Diff results for {table}")?;
@@ -155,7 +160,7 @@ where
     }
 
     for discrepancy in result.discrepancies.values() {
-        writeln!(file, "{discrepancy:?}")?;
+        writeln!(file, "{discrepancy:#?}")?;
     }
 
     if extra_elements > 0 {
@@ -163,7 +168,7 @@ where
     }
 
     for extra_element in result.extra_elements.values() {
-        writeln!(file, "{extra_element:?}")?;
+        writeln!(file, "{extra_element:#?}")?;
     }
 
     let full_file_name = output_dir.as_ref().join(file_name);
@@ -257,10 +262,10 @@ where
     T::Key: Hash,
 {
     /// All elements of the database that are different
-    discrepancies: HashMap<T::Key, TableDiffElement<T>>,
+    discrepancies: BTreeMap<T::Key, TableDiffElement<T>>,
 
     /// Any extra elements, and the table they are in
-    extra_elements: HashMap<T::Key, ExtraTableElement<T>>,
+    extra_elements: BTreeMap<T::Key, ExtraTableElement<T>>,
 }
 
 impl<T> Default for TableDiffResult<T>
@@ -269,7 +274,7 @@ where
     T::Key: Hash,
 {
     fn default() -> Self {
-        Self { discrepancies: HashMap::default(), extra_elements: HashMap::default() }
+        Self { discrepancies: BTreeMap::default(), extra_elements: BTreeMap::default() }
     }
 }
 

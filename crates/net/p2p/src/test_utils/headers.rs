@@ -141,7 +141,9 @@ impl Stream for TestDownload {
                     let mut headers =
                         resp.1.into_iter().skip(1).map(SealedHeader::seal_slow).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
-                    headers.into_iter().for_each(|h| this.buffer.push(h));
+                    for h in headers {
+                        this.buffer.push(h);
+                    }
                     this.done = true;
                 }
                 Err(err) => {

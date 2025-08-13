@@ -25,3 +25,7 @@ pub mod proof_task;
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;
+
+/// Proof task manager metrics.
+#[cfg(feature = "metrics")]
+pub mod proof_task_metrics;

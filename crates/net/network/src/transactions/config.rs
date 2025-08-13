@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::Debug, marker::PhantomData, str::FromStr};
 
 use super::{
     PeerMetadata, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
@@ -9,8 +9,10 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
+use alloy_primitives::B256;
 use derive_more::{Constructor, Display};
 use reth_eth_wire::NetworkPrimitives;
+use reth_ethereum_primitives::TxType;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -118,7 +120,7 @@ pub trait TransactionPropagationPolicy: Send + Sync + Unpin + 'static {
 pub enum TransactionPropagationKind {
     /// Propagate transactions to all peers.
     ///
-    /// No restructions
+    /// No restrictions
     #[default]
     All,
     /// Propagate transactions to only trusted peers.
@@ -149,3 +151,103 @@ impl FromStr for TransactionPropagationKind {
         }
     }
 }
+
+/// Defines the outcome of evaluating a transaction against an `AnnouncementFilteringPolicy`.
+///
+/// Dictates how the `TransactionManager` should proceed on an announced transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnouncementAcceptance {
+    /// Accept the transaction announcement.
+    Accept,
+    /// Log the transaction but not fetching the transaction or penalizing the peer.
+    Ignore,
+    /// Reject
+    Reject {
+        /// If true, the peer sending this announcement should be penalized.
+        penalize_peer: bool,
+    },
+}
+
+/// A policy that defines how to handle incoming transaction announcements,
+/// particularly concerning transaction types and other announcement metadata.
+pub trait AnnouncementFilteringPolicy: Send + Sync + Unpin + 'static {
+    /// Decides how to handle a transaction announcement based on its type, hash, and size.
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance;
+}
+
+/// A generic `AnnouncementFilteringPolicy` that enforces strict validation
+/// of transaction type based on a generic type `T`.
+#[derive(Debug, Clone)]
+pub struct TypedStrictFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
+
+impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedStrictFilter<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> AnnouncementFilteringPolicy for TypedStrictFilter<T>
+where
+    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
+    <T as TryFrom<u8>>::Error: Debug,
+{
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
+        match T::try_from(ty) {
+            Ok(_valid_type) => AnnouncementAcceptance::Accept,
+            Err(e) => {
+                tracing::trace!(target: "net::tx::policy::strict_typed",
+                    type_param = %std::any::type_name::<T>(),
+                    %ty,
+                    %size,
+                    %hash,
+                    error = ?e,
+                    "Invalid or unrecognized transaction type byte. Rejecting entry and recommending peer penalization."
+                );
+                AnnouncementAcceptance::Reject { penalize_peer: true }
+            }
+        }
+    }
+}
+
+/// Type alias for a `TypedStrictFilter`. This is the default strict announcement filter.
+pub type StrictEthAnnouncementFilter = TypedStrictFilter<TxType>;
+
+/// An [`AnnouncementFilteringPolicy`] that permissively handles unknown type bytes
+/// based on a given type `T` using `T::try_from(u8)`.
+///
+/// If `T::try_from(ty)` succeeds, the announcement is accepted. Otherwise, it's ignored.
+#[derive(Debug, Clone)]
+pub struct TypedRelaxedFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
+
+impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedRelaxedFilter<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> AnnouncementFilteringPolicy for TypedRelaxedFilter<T>
+where
+    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
+    <T as TryFrom<u8>>::Error: Debug,
+{
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
+        match T::try_from(ty) {
+            Ok(_valid_type) => AnnouncementAcceptance::Accept,
+            Err(e) => {
+                tracing::trace!(target: "net::tx::policy::relaxed_typed",
+                    type_param = %std::any::type_name::<T>(),
+                    %ty,
+                    %size,
+                    %hash,
+                    error = ?e,
+                    "Unknown transaction type byte. Ignoring entry."
+                );
+                AnnouncementAcceptance::Ignore
+            }
+        }
+    }
+}
+
+/// Type alias for `TypedRelaxedFilter`. This filter accepts known Ethereum transaction types and
+/// ignores unknown ones without penalizing the peer.
+pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter<TxType>;

@@ -12,17 +12,13 @@ env:
   BASELINE: base
   SEED: reth
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 name: bench
 jobs:
   codspeed:
     runs-on:
       group: Reth
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
       - uses: rui314/setup-mold@v1

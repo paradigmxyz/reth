@@ -14,7 +14,7 @@ use discv5::{
 };
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::NodeRecord;
-use tracing::warn;
+use tracing::debug;
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
@@ -413,7 +413,7 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 
             if let Some(discv5_addr) = discv5_addr_ipv4 {
                 if discv5_addr != rlpx_addr {
-                    warn!(target: "net::discv5",
+                    debug!(target: "net::discv5",
                         %discv5_addr,
                         %rlpx_addr,
                         "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
@@ -432,7 +432,7 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 
             if let Some(discv5_addr) = discv5_addr_ipv6 {
                 if discv5_addr != rlpx_addr {
-                    warn!(target: "net::discv5",
+                    debug!(target: "net::discv5",
                         %discv5_addr,
                         %rlpx_addr,
                         "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"

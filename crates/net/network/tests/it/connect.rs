@@ -19,7 +19,9 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
+use reth_network_types::peers::config::PeerBackoffDurations;
 use reth_storage_api::noop::NoopProvider;
+use reth_tracing::init_test_tracing;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::time::Duration;
@@ -359,16 +361,28 @@ async fn test_shutdown() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trusted_peer_only() {
+    init_test_tracing();
     let net = Testnet::create(2).await;
     let mut handles = net.handles();
+
+    // handle0 is used to test that:
+    // * outgoing connections to untrusted peers are not allowed
+    // * outgoing connections to trusted peers are allowed and succeed
     let handle0 = handles.next().unwrap();
+
+    // handle1 is used to test that:
+    // * incoming connections from untrusted peers are not allowed
+    // * incoming connections from trusted peers are allowed and succeed
     let handle1 = handles.next().unwrap();
 
     drop(handles);
     let _handle = net.spawn();
 
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-    let peers_config = PeersConfig::default().with_trusted_nodes_only(true);
+    let peers_config = PeersConfig::default()
+        .with_backoff_durations(PeerBackoffDurations::test())
+        .with_ban_duration(Duration::from_millis(200))
+        .with_trusted_nodes_only(true);
 
     let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
@@ -390,8 +404,8 @@ async fn test_trusted_peer_only() {
     // connect to an untrusted peer should fail.
     handle.add_peer(*handle0.peer_id(), handle0.local_addr());
 
-    // wait 2 seconds, the number of connection is still 0.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // wait 1 second, the number of connection is still 0.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(handle.num_connected_peers(), 0);
 
     // add to trusted peer.
@@ -402,18 +416,24 @@ async fn test_trusted_peer_only() {
     assert_eq!(handle.num_connected_peers(), 1);
 
     // only receive connections from trusted peers.
+    handle1.add_peer(*handle.peer_id(), handle.local_addr());
 
-    handle1.add_peer(*handle.peer_id(), handle0.local_addr());
-
-    // wait 2 seconds, the number of connections is still 1, because peer1 is untrusted.
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // wait 1 second, the number of connections is still 1, because peer1 is untrusted.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(handle.num_connected_peers(), 1);
 
-    handle1.add_trusted_peer(*handle.peer_id(), handle.local_addr());
+    handle.add_trusted_peer(*handle1.peer_id(), handle1.local_addr());
 
+    // wait for the next session established event to check the handle1 incoming connection
     let outgoing_peer_id1 = event_stream.next_session_established().await.unwrap();
     assert_eq!(outgoing_peer_id1, *handle1.peer_id());
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(handle.num_connected_peers(), 2);
+
+    // check that handle0 and handle1 both have peers.
+    assert_eq!(handle0.num_connected_peers(), 1);
+    assert_eq!(handle1.num_connected_peers(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,3 +1,38 @@
+//! Bincode compatibility support for reth primitive types.
+//!
+//! This module provides traits and implementations to work around bincode's limitations
+//! with optional serde fields. The bincode crate requires all fields to be present during
+//! serialization, which conflicts with types that have `#[serde(skip_serializing_if)]`
+//! attributes for RPC compatibility.
+//!
+//! # Overview
+//!
+//! The main trait is `SerdeBincodeCompat`, which provides a conversion mechanism between
+//! types and their bincode-compatible representations. There are two main ways to implement
+//! this trait:
+//!
+//! 1. **Using RLP encoding** - Implement `RlpBincode` for types that already support RLP
+//! 2. **Custom implementation** - Define a custom representation type
+//!
+//! # Examples
+//!
+//! ## Using with `serde_with`
+//!
+//! ```rust
+//! # use reth_primitives_traits::serde_bincode_compat::{self, SerdeBincodeCompat};
+//! # use serde::{Deserialize, Serialize};
+//! # use serde_with::serde_as;
+//! # use alloy_consensus::Header;
+//! #[serde_as]
+//! #[derive(Serialize, Deserialize)]
+//! struct MyStruct {
+//!     #[serde_as(as = "serde_bincode_compat::BincodeReprFor<'_, Header>")]
+//!     data: Header,
+//! }
+//! ```
+
+use alloc::vec::Vec;
+use alloy_primitives::Bytes;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -9,8 +44,26 @@ pub use block_bincode::{Block, BlockBody};
 
 /// Trait for types that can be serialized and deserialized using bincode.
 ///
+/// This trait provides a workaround for bincode's incompatibility with optional
+/// serde fields. It ensures all fields are serialized, making the type bincode-compatible.
+///
+/// # Implementation
+///
+/// The easiest way to implement this trait is using [`RlpBincode`] for RLP-encodable types:
+///
+/// ```rust
+/// # use reth_primitives_traits::serde_bincode_compat::RlpBincode;
+/// # use alloy_rlp::{RlpEncodable, RlpDecodable};
+/// # #[derive(RlpEncodable, RlpDecodable)]
+/// # struct MyType;
+/// impl RlpBincode for MyType {}
+/// // SerdeBincodeCompat is automatically implemented
+/// ```
+///
+/// For custom implementations, see the examples in the `block` module.
+///
 /// The recommended way to add bincode compatible serialization is via the
-/// [`serde_with`] crate and the `serde_as` macro that. See for reference [`header`].
+/// [`serde_with`] crate and the `serde_as` macro. See for reference [`header`].
 pub trait SerdeBincodeCompat: Sized + 'static {
     /// Serde representation of the type for bincode serialization.
     ///
@@ -37,7 +90,57 @@ impl SerdeBincodeCompat for alloy_consensus::Header {
 }
 
 /// Type alias for the [`SerdeBincodeCompat::BincodeRepr`] associated type.
+///
+/// This provides a convenient way to refer to the bincode representation type
+/// without having to write out the full associated type projection.
+///
+/// # Example
+///
+/// ```rust
+/// # use reth_primitives_traits::serde_bincode_compat::{SerdeBincodeCompat, BincodeReprFor};
+/// fn serialize_to_bincode<T: SerdeBincodeCompat>(value: &T) -> BincodeReprFor<'_, T> {
+///     value.as_repr()
+/// }
+/// ```
 pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
+
+/// A helper trait for using RLP-encoding for providing bincode-compatible serialization.
+///
+/// By implementing this trait, [`SerdeBincodeCompat`] will be automatically implemented for the
+/// type and RLP encoding will be used for serialization and deserialization for bincode
+/// compatibility.
+///
+/// # Example
+///
+/// ```rust
+/// # use reth_primitives_traits::serde_bincode_compat::RlpBincode;
+/// # use alloy_rlp::{RlpEncodable, RlpDecodable};
+/// #[derive(RlpEncodable, RlpDecodable)]
+/// struct MyCustomType {
+///     value: u64,
+///     data: Vec<u8>,
+/// }
+///
+/// // Simply implement the marker trait
+/// impl RlpBincode for MyCustomType {}
+///
+/// // Now MyCustomType can be used with bincode through RLP encoding
+/// ```
+pub trait RlpBincode: alloy_rlp::Encodable + alloy_rlp::Decodable {}
+
+impl<T: RlpBincode + 'static> SerdeBincodeCompat for T {
+    type BincodeRepr<'a> = Bytes;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf);
+        buf.into()
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        Self::decode(&mut repr.as_ref()).expect("Failed to decode bincode rlp representation")
+    }
+}
 
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;

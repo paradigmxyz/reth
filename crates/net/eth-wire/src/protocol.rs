@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -52,10 +52,7 @@ impl Protocol {
     }
 
     /// The number of values needed to represent all message IDs of capability.
-    pub fn messages(&self) -> u8 {
-        if self.cap.is_eth() {
-            return EthMessageID::max() + 1
-        }
+    pub const fn messages(&self) -> u8 {
         self.messages
     }
 }

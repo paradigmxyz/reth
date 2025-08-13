@@ -6,7 +6,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
@@ -165,6 +165,7 @@ where
             trie,
         } in blocks
         {
+            let block_hash = recovered_block.hash();
             self.database()
                 .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
@@ -179,7 +180,9 @@ where
             // insert hashes and intermediate merkle nodes
             self.database()
                 .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
-            self.database().write_trie_updates(&trie)?;
+            self.database().write_trie_updates(
+                trie.as_ref().ok_or(ProviderError::MissingTrieUpdates(block_hash))?,
+            )?;
         }
 
         // update history indices
@@ -240,7 +243,7 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+        HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm_database::{
@@ -333,6 +336,7 @@ mod tests {
                 info: account_a.clone(),
                 status: AccountStatus::Touched | AccountStatus::Created,
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -343,6 +347,7 @@ mod tests {
                 info: account_b_changed.clone(),
                 status: AccountStatus::Touched,
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -401,6 +406,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_b_changed,
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -475,6 +481,7 @@ mod tests {
                             EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                         ),
                     ]),
+                    transaction_id: 0,
                 },
             ),
             (
@@ -491,6 +498,7 @@ mod tests {
                             ..Default::default()
                         },
                     )]),
+                    transaction_id: 0,
                 },
             ),
         ]));
@@ -592,6 +600,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: RevmAccountInfo::default(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -658,6 +667,7 @@ mod tests {
                         EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                     ),
                 ]),
+                transaction_id: 0,
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
@@ -690,6 +700,7 @@ mod tests {
                         ..Default::default()
                     },
                 )]),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -701,6 +712,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -712,6 +724,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -739,6 +752,7 @@ mod tests {
                         EvmStorageSlot { present_value: U256::from(6), ..Default::default() },
                     ),
                 ]),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -750,6 +764,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -761,6 +776,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -773,6 +789,7 @@ mod tests {
                     U256::ZERO,
                     EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                 )]),
+                transaction_id: 0,
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -781,6 +798,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.commit(HashMap::from_iter([(
@@ -789,6 +807,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account_info.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::Reverts);
@@ -804,8 +823,10 @@ mod tests {
                     U256::ZERO,
                     EvmStorageSlot { present_value: U256::from(9), ..Default::default() },
                 )]),
+                transaction_id: 0,
             },
         )]));
+
         state.merge_transitions(BundleRetention::Reverts);
 
         let bundle = state.take_bundle();
@@ -972,6 +993,7 @@ mod tests {
                         EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                     ),
                 ]),
+                transaction_id: 0,
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
@@ -995,6 +1017,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: account1.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -1004,6 +1027,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account1.clone(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
 
@@ -1017,6 +1041,7 @@ mod tests {
                     U256::from(1),
                     EvmStorageSlot { present_value: U256::from(5), ..Default::default() },
                 )]),
+                transaction_id: 0,
             },
         )]));
 
@@ -1143,6 +1168,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::SelfDestructed,
                 info: RevmAccountInfo::default(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1169,8 +1195,13 @@ mod tests {
                 info: account2.0.into(),
                 storage: HashMap::from_iter([(
                     slot2,
-                    EvmStorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
+                    EvmStorageSlot::new_changed(
+                        account2_slot2_old_value,
+                        account2_slot2_new_value,
+                        0,
+                    ),
                 )]),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1188,6 +1219,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 info: account3.0.into(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1205,6 +1237,7 @@ mod tests {
                 status: AccountStatus::Touched,
                 info: account4.0.into(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1220,6 +1253,7 @@ mod tests {
                 status: AccountStatus::Touched | AccountStatus::Created,
                 info: account1_new.into(),
                 storage: HashMap::default(),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1237,8 +1271,9 @@ mod tests {
                 info: account1_new.into(),
                 storage: HashMap::from_iter([(
                     slot20,
-                    EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value),
+                    EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value, 0),
                 )]),
+                transaction_id: 0,
             },
         )]));
         state.merge_transitions(BundleRetention::PlainState);
@@ -1308,8 +1343,14 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // calculate database storage root and write intermediate storage nodes.
-        let (storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
+        let StorageRootProgress::Complete(storage_root, _, storage_updates) =
+            StorageRoot::from_tx_hashed(tx, hashed_address)
+                .with_no_threshold()
+                .calculate(true)
+                .unwrap()
+        else {
+            panic!("no threshold for root");
+        };
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw

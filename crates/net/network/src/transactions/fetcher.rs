@@ -28,14 +28,12 @@
 use super::{
     config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    MessageFilter, PeerMetadata, PooledTransactions,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
     metrics::TransactionFetcherMetrics,
-    transactions::{validation, PartiallyFilterMessage},
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -43,7 +41,7 @@ use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
@@ -60,7 +58,6 @@ use std::{
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::trace;
-use validation::FilterOutcome;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -85,8 +82,6 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
     pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
-    /// Filter for valid announcement and response data.
-    pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
     #[doc(hidden)]
@@ -845,19 +840,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the given version of the protocol.
-    pub const fn approx_capacity_get_pooled_transactions_req(
-        &self,
-        announcement_version: EthVersion,
-    ) -> usize {
-        if announcement_version.is_eth68() {
-            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
-        } else {
-            approx_capacity_get_pooled_transactions_req_eth66()
-        }
-    }
-
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
     /// [`TransactionsManager`](super::TransactionsManager).
@@ -900,15 +882,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
-                if verification_outcome == VerificationOutcome::ReportPeer {
-                    // todo: report peer for sending hashes that weren't requested
+
+                let report_peer = if verification_outcome == VerificationOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unverified_len,
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
-                }
+                    true
+                } else {
+                    false
+                };
+
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
                     return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
@@ -919,20 +905,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 let unvalidated_payload_len = verified_payload.len();
 
-                let (validation_outcome, valid_payload) =
-                    self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+                let valid_payload = verified_payload.dedup();
 
                 // todo: validate based on announced tx size/type and report peer for sending
                 // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if validation_outcome == FilterOutcome::ReportPeer {
+                if valid_payload.len() != unvalidated_payload_len {
                     trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        unvalidated_payload_len,
-                        valid_payload_len=valid_payload.len(),
-                        "received invalid `PooledTransactions` response from peer, filtered out duplicate entries"
+                    peer_id=format!("{peer_id:#}"),
+                    unvalidated_payload_len,
+                    valid_payload_len=valid_payload.len(),
+                    "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
@@ -971,7 +956,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
                 let transactions = valid_payload.into_data().into_values().collect();
 
-                FetchEvent::TransactionsFetched { peer_id, transactions }
+                FetchEvent::TransactionsFetched { peer_id, transactions, report_peer }
             }
             Ok(Err(req_err)) => {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
@@ -1014,7 +999,6 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new(
                 DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
             ),
-            filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
         }
@@ -1059,6 +1043,9 @@ pub enum FetchEvent<T = PooledTransaction> {
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
         transactions: PooledTransactions<T>,
+        /// Whether the peer should be penalized for sending unsolicited transactions or for
+        /// misbehavior.
+        report_peer: bool,
     },
     /// Triggered when there is an error in fetching transactions.
     FetchError {
@@ -1305,6 +1292,7 @@ mod test {
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 

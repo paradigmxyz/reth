@@ -89,7 +89,6 @@ reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
-alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 
 # misc
@@ -124,6 +123,7 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-network-api/serde",
     "rand_08/serde",
+    "reth-storage-api/serde",
 ]
 test-utils = [
     "reth-transaction-pool/test-utils",

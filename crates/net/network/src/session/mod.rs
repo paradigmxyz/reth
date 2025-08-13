@@ -4,24 +4,8 @@ mod active;
 mod conn;
 mod counter;
 mod handle;
-
-use active::QueuedOutgoingMessages;
-pub use conn::EthRlpxConnection;
-pub use handle::{
-    ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
-    SessionCommand,
-};
-
-pub use reth_network_api::{Direction, PeerInfo};
-
-use std::{
-    collections::HashMap,
-    future::Future,
-    net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+mod types;
+pub use types::BlockRangeInfo;
 
 use crate::{
     message::PeerMessage,
@@ -29,13 +13,15 @@ use crate::{
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
 };
+use active::QueuedOutgoingMessages;
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols,
-    NetworkPrimitives, Status, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
+    HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
+    HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -45,6 +31,14 @@ use reth_network_types::SessionsConfig;
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
+use std::{
+    collections::HashMap,
+    future::Future,
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -53,6 +47,14 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
+
+use crate::session::active::RANGE_UPDATE_INTERVAL;
+pub use conn::EthRlpxConnection;
+pub use handle::{
+    ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+    SessionCommand,
+};
+pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -77,7 +79,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
-    status: Status,
+    status: UnifiedStatus,
     /// The `HelloMessage` message to send to peers.
     hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
@@ -115,6 +117,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     metrics: SessionManagerMetrics,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Shared local range information that gets propagated to active sessions.
+    /// This represents the range of blocks that this node can serve to other peers.
+    local_range_info: BlockRangeInfo,
 }
 
 // === impl SessionManager ===
@@ -126,7 +131,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         secret_key: SecretKey,
         config: SessionsConfig,
         executor: Box<dyn TaskSpawner>,
-        status: Status,
+        status: UnifiedStatus,
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
@@ -135,6 +140,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
+
+        // Initialize local range info from the status
+        let local_range_info = BlockRangeInfo::new(
+            status.earliest_block.unwrap_or_default(),
+            status.latest_block.unwrap_or_default(),
+            status.blockhash,
+        );
 
         Self {
             next_id: 0,
@@ -158,7 +170,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
+            local_range_info,
         }
+    }
+
+    /// Returns the currently tracked [`ForkId`].
+    pub(crate) const fn fork_id(&self) -> ForkId {
+        self.fork_filter.current()
     }
 
     /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
@@ -175,7 +193,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Returns the current status of the session.
-    pub const fn status(&self) -> Status {
+    pub const fn status(&self) -> UnifiedStatus {
         self.status
     }
 
@@ -220,9 +238,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// active [`ForkId`]. See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
-        self.status.total_difficulty = head.total_difficulty;
+        self.status.total_difficulty = Some(head.total_difficulty);
         let transition = self.fork_filter.set_head(head);
         self.status.forkid = self.fork_filter.current();
+        self.status.latest_block = Some(head.number);
+
         transition
     }
 
@@ -518,6 +538,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
+                // Configure the interval at which the range information is updated, starting with
+                // ETH69
+                let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
+                    let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    interval
+                });
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -540,6 +568,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
+                    range_info: None,
+                    local_range_info: self.local_range_info.clone(),
+                    range_update_interval,
                 };
 
                 self.spawn(session);
@@ -576,6 +607,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
+                    range_info: None,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -647,6 +679,26 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             }
         }
     }
+
+    /// Updates the advertised block range that this node can serve to other peers starting with
+    /// Eth69.
+    ///
+    /// This method updates both the local status message that gets sent to peers during handshake
+    /// and the shared local range information that gets propagated to active sessions (Eth69).
+    /// The range information is used in ETH69 protocol where peers announce the range of blocks
+    /// they can serve to optimize data synchronization.
+    pub(crate) fn update_advertised_block_range(&mut self, block_range_update: BlockRangeUpdate) {
+        self.status.earliest_block = Some(block_range_update.earliest);
+        self.status.latest_block = Some(block_range_update.latest);
+        self.status.blockhash = block_range_update.latest_hash;
+
+        // Update the shared local range info that gets propagated to active sessions
+        self.local_range_info.update(
+            block_range_update.earliest,
+            block_range_update.latest,
+            block_range_update.latest_hash,
+        );
+    }
 }
 
 /// A counter for ongoing graceful disconnections attempts.
@@ -681,7 +733,7 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// negotiated eth version
         version: EthVersion,
         /// The Status message the peer sent during the `eth` handshake
-        status: Arc<Status>,
+        status: Arc<UnifiedStatus>,
         /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender<PeerRequest<N>>,
         /// The direction of the session, either `Inbound` or `Outgoing`
@@ -689,6 +741,8 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// The maximum time that the session waits for a response from the peer before timing out
         /// the connection
         timeout: Arc<AtomicU64>,
+        /// The range info for the peer.
+        range_info: Option<BlockRangeInfo>,
     },
     /// The peer was already connected with another session.
     AlreadyConnected {
@@ -828,7 +882,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -861,7 +915,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     remote_peer_id: PeerId,
     secret_key: SecretKey,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -913,7 +967,7 @@ async fn authenticate<N: NetworkPrimitives>(
     secret_key: SecretKey,
     direction: Direction,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -996,7 +1050,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     local_addr: Option<SocketAddr>,
     direction: Direction,
     mut hello: HelloMessageWithProtocols,
-    mut status: Status,
+    mut status: UnifiedStatus,
     fork_filter: ForkFilter,
     mut extra_handlers: RlpxSubProtocolHandlers,
 ) -> PendingSessionEvent<N> {
@@ -1055,12 +1109,12 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
+    // Before trying status handshake, set up the version to negotiated shared version
+    status.set_eth_version(eth_version);
+
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
         // if the shared caps are 1, we know both support the eth version
         // if the hello handshake was successful we can try status handshake
-        //
-        // Before trying status handshake, set up the version to negotiated shared version
-        status.set_eth_version(eth_version);
 
         // perform the eth protocol handshake
         match handshake
@@ -1068,7 +1122,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             .await
         {
             Ok(their_status) => {
-                let eth_stream = EthStream::new(status.version, p2p_stream);
+                let eth_stream = EthStream::new(eth_version, p2p_stream);
                 (eth_stream.into(), their_status)
             }
             Err(err) => {

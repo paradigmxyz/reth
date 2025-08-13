@@ -155,7 +155,7 @@ mod tests {
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use jsonrpsee::{
-        server::{RandomStringIdProvider, ServerBuilder, ServerHandle},
+        server::{RandomStringIdProvider, ServerBuilder, ServerConfig, ServerHandle},
         RpcModule,
     };
     use reqwest::{header, StatusCode};
@@ -260,7 +260,9 @@ mod tests {
 
         // Create a layered server
         let server = ServerBuilder::default()
-            .set_id_provider(RandomStringIdProvider::new(16))
+            .set_config(
+                ServerConfig::builder().set_id_provider(RandomStringIdProvider::new(16)).build(),
+            )
             .set_http_middleware(middleware)
             .build(addr.parse::<SocketAddr>().unwrap())
             .await

@@ -67,6 +67,13 @@ pub trait BlockBody:
         self.transactions_iter().find(|tx| tx.tx_hash() == hash)
     }
 
+    /// Returns true if the block body contains a transaction with the given hash.
+    ///
+    /// This is a convenience function for `transaction_by_hash().is_some()`
+    fn contains_transaction(&self, hash: &B256) -> bool {
+        self.transaction_by_hash(hash).is_some()
+    }
+
     /// Clones the transactions in the block.
     ///
     /// This is a convenience function for `transactions().to_vec()`

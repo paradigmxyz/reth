@@ -1,19 +1,18 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    HeaderProvider, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-    TransactionsProvider,
+    AccountReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader,
+    StateCommitmentProvider, StateProviderFactory, StateReader, StaticFileProviderFactory,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
-use reth_chainspec::EthereumHardforks;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<N: NodeTypesWithDB>:
-    DatabaseProviderFactory<DB = N::DB>
+    DatabaseProviderFactory<DB = N::DB, Provider: BlockReader>
     + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + BlockReaderIdExt<
@@ -23,6 +22,9 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Header = HeaderTy<N>,
     > + AccountReader
     + StateProviderFactory
+    + StateReader
+    + StateCommitmentProvider
+    + HashedPostStateProvider
     + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
@@ -36,7 +38,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 }
 
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
-    T: DatabaseProviderFactory<DB = N::DB>
+    T: DatabaseProviderFactory<DB = N::DB, Provider: BlockReader>
         + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + BlockReaderIdExt<
@@ -46,6 +48,9 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Header = HeaderTy<N>,
         > + AccountReader
         + StateProviderFactory
+        + StateReader
+        + StateCommitmentProvider
+        + HashedPostStateProvider
         + ChainSpecProvider<ChainSpec = N::ChainSpec>
         + ChangeSetReader
         + CanonStateSubscriptions
@@ -53,34 +58,6 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + StageCheckpointReader
         + Clone
         + Debug
-        + Unpin
-        + 'static
-{
-}
-
-/// Helper trait to unify all provider traits required to support `eth` RPC server behaviour, for
-/// simplicity.
-pub trait FullRpcProvider:
-    StateProviderFactory
-    + ChainSpecProvider<ChainSpec: EthereumHardforks>
-    + BlockReaderIdExt
-    + HeaderProvider
-    + TransactionsProvider
-    + StageCheckpointReader
-    + Clone
-    + Unpin
-    + 'static
-{
-}
-
-impl<T> FullRpcProvider for T where
-    T: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + BlockReaderIdExt
-        + HeaderProvider
-        + TransactionsProvider
-        + StageCheckpointReader
-        + Clone
         + Unpin
         + 'static
 {

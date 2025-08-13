@@ -4,30 +4,28 @@ use crate::{
     BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
     ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    TransactionsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
-    eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumHash,
-    BlockNumberOrTag, HashOrNumber,
+    eip2718::Encodable2718, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+    HashOrNumber,
 };
 use alloy_primitives::{
     map::{hash_map, HashMap},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{
-    Account, BlockBody, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
-};
+use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, OmmersProvider,
-    StateProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
+    StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -591,6 +589,28 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
         fetch_from_db(&self.storage_provider)
     }
+
+    /// Consumes the provider and returns a state provider for the specific block hash.
+    pub(crate) fn into_state_provider_at_block_hash(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Box<dyn StateProvider>> {
+        let Self { storage_provider, head_block, .. } = self;
+        let into_history_at_block_hash = |block_hash| -> ProviderResult<Box<dyn StateProvider>> {
+            let block_number = storage_provider
+                .block_number(block_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+            storage_provider.try_into_history_at_block(block_number)
+        };
+        if let Some(Some(block_state)) =
+            head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
+        {
+            let anchor_hash = block_state.anchor().hash;
+            let latest_historical = into_history_at_block_hash(anchor_hash)?;
+            return Ok(Box::new(block_state.state_provider(latest_historical)));
+        }
+        into_history_at_block_hash(block_hash)
+    }
 }
 
 impl<N: ProviderNodeTypes> ConsistentProvider<N> {
@@ -825,17 +845,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(self.canonical_in_memory_state.pending_block())
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1103,6 +1119,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             },
         )
     }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        self.storage_provider.receipts_by_block_range(block_range)
+    }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
@@ -1135,42 +1158,6 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
                 }
             },
         }
-    }
-}
-
-impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
-    fn withdrawals_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        if !self.chain_spec().is_shanghai_active_at_timestamp(timestamp) {
-            return Ok(None)
-        }
-
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.withdrawals_by_block(id, timestamp),
-            |block_state| {
-                Ok(block_state.block_ref().recovered_block().body().withdrawals().cloned())
-            },
-        )
-    }
-}
-
-impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.ommers(id),
-            |block_state| {
-                if self.chain_spec().is_paris_active_at_block(block_state.number()) {
-                    return Ok(Some(Vec::new()))
-                }
-
-                Ok(block_state.block_ref().recovered_block().body().ommers().map(|o| o.to_vec()))
-            },
-        )
     }
 }
 
@@ -1283,7 +1270,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             BlockNumberOrTag::Safe => {
                 self.canonical_in_memory_state.get_safe_header().map(|h| h.unseal())
             }
-            BlockNumberOrTag::Earliest => self.header_by_number(0)?,
+            BlockNumberOrTag::Earliest => self.header_by_number(self.earliest_block_number()?)?,
             BlockNumberOrTag::Pending => self.canonical_in_memory_state.pending_header(),
 
             BlockNumberOrTag::Number(num) => self.header_by_number(num)?,
@@ -1303,7 +1290,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
             BlockNumberOrTag::Earliest => self
-                .header_by_number(0)?
+                .header_by_number(self.earliest_block_number()?)?
                 .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
             BlockNumberOrTag::Number(num) => self
@@ -1327,17 +1314,6 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?,
         })
-    }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
-        match id {
-            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-            BlockId::Hash(hash) => {
-                // TODO: EIP-1898 question, see above
-                // here it is not handled
-                self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
-            }
-        }
     }
 }
 
@@ -1484,7 +1460,9 @@ mod tests {
     use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain};
+    use reth_chain_state::{
+        ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, NewCanonicalChain,
+    };
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::ExecutionOutcome;
@@ -1594,7 +1572,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                Default::default(),
+                ExecutedTrieUpdates::empty(),
             )],
         };
         consistent_provider.canonical_in_memory_state.update_chain(chain);
@@ -1638,7 +1616,7 @@ mod tests {
                 execution_output: Default::default(),
                 hashed_state: Default::default(),
             },
-            trie: Default::default(),
+            trie: ExecutedTrieUpdates::empty(),
         });
 
         // Now the last block should be found in memory
@@ -1704,7 +1682,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                Default::default(),
+                ExecutedTrieUpdates::empty(),
             )],
         };
         consistent_provider.canonical_in_memory_state.update_chain(chain);
@@ -1819,7 +1797,7 @@ mod tests {
                             ..Default::default()
                         }),
                         Default::default(),
-                        Default::default(),
+                        ExecutedTrieUpdates::empty(),
                     )
                 })
                 .unwrap()],

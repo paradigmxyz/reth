@@ -42,7 +42,9 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -131,7 +133,9 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+        + StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
@@ -172,7 +176,7 @@ mod tests {
     };
     use alloy_primitives::B256;
     use reth_ethereum_primitives::Block;
-    use reth_primitives_traits::SealedBlock;
+    use reth_primitives_traits::{SealedBlock, SignerRecoverable};
     use reth_provider::{
         providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };

@@ -43,7 +43,7 @@ mod test_utils {
     use tempfile::tempdir;
 
     /// Regression test for <https://github.com/danburkert/lmdb-rs/issues/21>.
-    /// This test reliably segfaults when run against lmbdb compiled with opt level -O3 and newer
+    /// This test reliably segfaults when run against lmdb compiled with opt level -O3 and newer
     /// GCC compilers.
     #[test]
     fn issue_21_regression() {

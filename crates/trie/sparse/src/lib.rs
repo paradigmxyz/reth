@@ -11,8 +11,12 @@ pub use state::*;
 mod trie;
 pub use trie::*;
 
-pub mod blinded;
+mod traits;
+pub use traits::*;
 
+pub mod provider;
+
+#[cfg(feature = "metrics")]
 mod metrics;
 
 /// Re-export sparse trie error types.

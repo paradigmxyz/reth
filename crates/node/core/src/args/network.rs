@@ -161,6 +161,13 @@ pub struct NetworkArgs {
     /// The policy determines which peers transactions are gossiped to.
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
+
+    /// Disable transaction pool gossip
+    ///
+    /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
+    /// personal nodes, though providers should always opt to enable this flag.
+    #[arg(long = "disable-tx-gossip")]
+    pub disable_tx_gossip: bool,
 }
 
 impl NetworkArgs {
@@ -272,6 +279,7 @@ impl NetworkArgs {
                 // set discovery port based on instance number
                 self.discovery.port,
             ))
+            .disable_tx_gossip(self.disable_tx_gossip)
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -342,7 +350,8 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
-            tx_propagation_policy: TransactionPropagationKind::default()
+            tx_propagation_policy: TransactionPropagationKind::default(),
+            disable_tx_gossip: false,
         }
     }
 }
@@ -441,7 +450,7 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_nat();
         }
 
-        if !self.disable_discovery && self.enable_discv5_discovery {
+        if self.should_enable_discv5() {
             network_config_builder = network_config_builder
                 .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
@@ -488,6 +497,17 @@ impl DiscoveryArgs {
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
+    }
+
+    /// Returns true if discv5 discovery should be configured
+    const fn should_enable_discv5(&self) -> bool {
+        if self.disable_discovery {
+            return false;
+        }
+
+        self.enable_discv5_discovery ||
+            self.discv5_addr.is_some() ||
+            self.discv5_addr_ipv6.is_some()
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
@@ -604,6 +624,12 @@ mod tests {
 
             assert_eq!(args.dns_retries, retries);
         }
+    }
+
+    #[test]
+    fn parse_disable_tx_gossip_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
+        assert!(args.disable_tx_gossip);
     }
 
     #[test]

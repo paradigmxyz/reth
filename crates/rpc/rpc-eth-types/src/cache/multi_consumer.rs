@@ -99,6 +99,14 @@ where
         V: InMemorySize,
     {
         let size = value.size();
+
+        if self.cache.limiter().is_over_the_limit(self.cache.len() + 1) {
+            if let Some((_, evicted)) = self.cache.pop_oldest() {
+                // update tracked memory with the evicted value
+                self.memory_usage = self.memory_usage.saturating_sub(evicted.size());
+            }
+        }
+
         if self.cache.insert(key, value) {
             self.memory_usage = self.memory_usage.saturating_add(size);
             true

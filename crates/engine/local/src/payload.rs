@@ -1,5 +1,5 @@
 //! The implementation of the [`PayloadAttributesBuilder`] for the
-//! [`LocalEngineService`](super::service::LocalEngineService).
+//! [`LocalMiner`](super::LocalMiner).
 
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
@@ -11,7 +11,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct LocalPayloadAttributesBuilder<ChainSpec> {
-    chain_spec: Arc<ChainSpec>,
+    /// The chainspec
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl<ChainSpec> LocalPayloadAttributesBuilder<ChainSpec> {
@@ -61,21 +62,5 @@ where
             gas_limit: None,
             eip_1559_params: None,
         }
-    }
-}
-
-/// A temporary workaround to support local payload engine launcher for arbitrary payload
-/// attributes.
-// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
-// for any
-pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
-
-impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
-where
-    ChainSpec: Send + Sync + 'static,
-    T: UnsupportedLocalAttributes,
-{
-    fn build(&self, _: u64) -> T {
-        panic!("Unsupported payload attributes")
     }
 }

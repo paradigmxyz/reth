@@ -22,6 +22,7 @@ use revm_database::{AccountStatus, BundleAccount};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
     pub accounts: B256Map<Option<Account>>,
@@ -333,10 +334,46 @@ impl HashedPostState {
 
         HashedPostStateSorted { accounts, storages }
     }
+
+    /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by
+    /// draining.
+    ///
+    /// This effectively clears all the fields in the [`HashedPostStateSorted`].
+    ///
+    /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
+    /// post state, like `into_sorted`.
+    pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
+        let mut updated_accounts = Vec::new();
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, info) in self.accounts.drain() {
+            if let Some(info) = info {
+                updated_accounts.push((hashed_address, info));
+            } else {
+                destroyed_accounts.insert(hashed_address);
+            }
+        }
+        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+
+        let storages = self
+            .storages
+            .drain()
+            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .collect();
+
+        HashedPostStateSorted { accounts, storages }
+    }
+
+    /// Clears the account and storage maps of this `HashedPostState`.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storages.clear();
+    }
 }
 
 /// Representation of in-memory hashed storage.
 #[derive(PartialEq, Eq, Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,

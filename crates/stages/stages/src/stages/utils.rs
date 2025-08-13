@@ -124,14 +124,14 @@ where
 
     // observability
     let total_entries = collector.len();
-    let interval = (total_entries / 100).max(1);
+    let interval = (total_entries / 10).max(1);
 
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = decode_key(k)?;
         let new_list = BlockNumberList::decompress_owned(v)?;
 
-        if index > 0 && index % interval == 0 && total_entries > 100 {
+        if index > 0 && index % interval == 0 && total_entries > 10 {
             info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices");
         }
 

@@ -145,7 +145,7 @@ where
             &hashed_state_sorted,
         );
 
-        let walker = TrieWalker::new(
+        let walker = TrieWalker::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
@@ -163,7 +163,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
+                    let storage_root_result = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
@@ -184,6 +184,17 @@ where
                                 self.metrics.storage_trie.clone(),
                             )
                             .calculate(retain_updates)?
+                        }
+                    };
+
+                    let (storage_root, _, updates) = match storage_root_result {
+                        reth_trie::StorageRootProgress::Complete(root, _, updates) => (root, (), updates),
+                        reth_trie::StorageRootProgress::Progress(..) => {
+                            return Err(ParallelStateRootError::StorageRoot(
+                                StorageRootError::Database(DatabaseError::Other(
+                                    "StorageRoot returned Progress variant in parallel trie calculation".to_string()
+                                ))
+                            ))
                         }
                     };
 
@@ -247,6 +258,12 @@ impl From<ParallelStateRootError> for ProviderError {
             }
             ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
         }
+    }
+}
+
+impl From<alloy_rlp::Error> for ParallelStateRootError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Provider(ProviderError::Rlp(error))
     }
 }
 

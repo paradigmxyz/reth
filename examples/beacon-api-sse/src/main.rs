@@ -5,7 +5,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p beacon-api-sse -- node
+//! cargo run -p example-beacon-api-sse -- node
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.

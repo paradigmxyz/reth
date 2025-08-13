@@ -98,7 +98,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
 
 impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
 where
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks + Debug,
     N: NodePrimitives,
 {
     fn validate_block_post_execution(
@@ -110,10 +110,10 @@ where
     }
 }
 
-impl<B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<B>
-    for EthBeaconConsensus<ChainSpec>
+impl<B, ChainSpec> Consensus<B> for EthBeaconConsensus<ChainSpec>
 where
     B: Block,
+    ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks + Debug + Send + Sync,
 {
     type Error = ConsensusError;
 
@@ -130,10 +130,10 @@ where
     }
 }
 
-impl<H, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> HeaderValidator<H>
-    for EthBeaconConsensus<ChainSpec>
+impl<H, ChainSpec> HeaderValidator<H> for EthBeaconConsensus<ChainSpec>
 where
     H: BlockHeader,
+    ChainSpec: EthChainSpec<Header = H> + EthereumHardforks + Debug + Send + Sync,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();
@@ -220,8 +220,6 @@ where
 
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
-        // TODO Check difficulty increment between parent and self
-        // Ace age did increment it by some formula that we need to follow.
         self.validate_against_parent_gas_limit(header, parent)?;
 
         validate_against_parent_eip1559_base_fee(

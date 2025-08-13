@@ -1,0 +1,93 @@
+# Using Standalone Components
+
+This guide demonstrates how to use Reth components independently without running a full node. This is useful for building tools, analyzers, indexers, or any application that needs direct access to blockchain data.
+
+## Direct Database Access
+
+Reth uses MDBX as its primary database backend, storing blockchain data in a structured format. You can access this database directly from external processes for read-only operations, which is useful for analytics, indexing, or building custom tools.
+
+### Understanding the Database Architecture
+
+Reth's storage architecture consists of two main components:
+
+1. **MDBX Database**: Primary storage for blockchain state, headers, bodies, receipts, and indices
+2. **Static Files**: Immutable historical data (headers, bodies, receipts, transactions) stored in compressed files for better performance
+
+Both components must be accessed together for complete data access.
+
+### Database Location
+
+The database is stored in the node's data directory:
+- **Default location**: `$HOME/.local/share/reth/mainnet/db` (Linux/macOS) or `%APPDATA%\reth\mainnet\db` (Windows)
+- **Custom location**: Set with `--datadir` flag when running reth
+- **Static files**: Located in `<datadir>/static_files` subdirectory
+
+### Opening the Database from External Processes
+
+When accessing the database while a node is running, you **must** open it in read-only mode to prevent corruption and conflicts.
+
+#### Using the High-Level API
+
+The safest way to access the database is through Reth's provider factory:
+
+```rust
+use reth_ethereum::node::EthereumNode;
+use reth_ethereum::chainspec::MAINNET;
+
+// Open with automatic configuration
+let factory = EthereumNode::provider_factory_builder()
+    .open_read_only(MAINNET.clone(), "path/to/datadir")?;
+
+// Get a provider for queries
+let provider = factory.provider()?;
+let latest_block = provider.last_block_number()?;
+```
+
+### Performance Implications
+
+External reads while the node is syncing or processing blocks:
+
+- **I/O Competition**: May compete with the node for disk I/O
+- **Cache Pollution**: Can evict hot data from OS page cache
+- **CPU Impact**: Complex queries can impact node performance
+
+### Important Considerations
+
+1. **Read-Only Access Only**: Never open the database in write mode while the regular reth process is running.
+
+2. **Consistency**: When reading from an external process:
+   - Data may be slightly behind the latest processed block (if it hasn't been written to disk yet)
+   - Use transactions for consistent views across multiple reads
+   - Be aware of potential reorgs affecting recent blocks
+
+3. **Performance**: 
+   - MDBX uses memory-mapped files for efficient access
+   - Multiple readers don't block each other
+   - Consider caching frequently accessed data
+
+### Disabling long-lived read transactions:
+
+By default long lived read transactions are terminated after a few minutes, this is because long read transaction can cause the free list to grow if changes to the database are made (reth node is running).
+To opt out of this, this safety mechanism can be disabled:
+
+```rust
+let factory = EthereumNode::provider_factory_builder()
+    .open_read_only(MAINNET.clone(),  ReadOnlyConfig::from_datadir("datadir").disable_long_read_transaction_safety())?;
+```
+
+### Real-time Block Access Configuration
+
+Reth buffers new blocks in memory before persisting them to disk for performance optimization. If your external process needs immediate access to the latest blocks, configure the node to persist blocks immediately:
+
+- `--engine.persistence-threshold 0` - Persists new canonical blocks to disk immediately
+- `--engine.memory-block-buffer-target 0` - Disables in-memory block buffering
+
+Use both flags together to ensure external processes can read new blocks without delay.
+
+As soon as the reth process has persisted the block data, the external reader can read it from the database.
+
+## Next Steps
+
+- Learn about [Modifying Nodes](/sdk/examples/modify-node) to add functionality
+- Explore the [Type System](/sdk/typesystem/block) for working with data
+- Check [Custom Node Building](/sdk/custom-node/prerequisites) for production use

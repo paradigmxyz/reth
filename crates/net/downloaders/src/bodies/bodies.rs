@@ -143,7 +143,7 @@ where
     /// Max requests to handle at the same time
     ///
     /// This depends on the number of active peers but will always be
-    /// [`min_concurrent_requests`..`max_concurrent_requests`]
+    /// `min_concurrent_requests..max_concurrent_requests`
     #[inline]
     fn concurrent_request_limit(&self) -> usize {
         let num_peers = self.client.num_connected_peers();
@@ -230,7 +230,7 @@ where
         self.metrics.buffered_responses.set(self.buffered_responses.len() as f64);
     }
 
-    /// Returns a response if it's first block number matches the next expected.
+    /// Returns a response if its first block number matches the next expected.
     fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
@@ -449,7 +449,7 @@ struct OrderedBodiesResponse<B: Block> {
 
 impl<B: Block> OrderedBodiesResponse<B> {
     #[inline]
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.resp.len()
     }
 

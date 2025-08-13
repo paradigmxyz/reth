@@ -85,7 +85,9 @@ impl StorageWatcherApiServer for StorageWatcherRpc {
             let Ok(mut rx) = resp_rx.await else { return };
 
             while let Some(diff) = rx.recv().await {
-                let msg = SubscriptionMessage::from_json(&diff).expect("serialize");
+                let msg = SubscriptionMessage::from(
+                    serde_json::value::to_raw_value(&diff).expect("serialize"),
+                );
                 if sink.send(msg).await.is_err() {
                     break;
                 }

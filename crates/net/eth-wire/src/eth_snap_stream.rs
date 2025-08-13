@@ -44,7 +44,7 @@ pub enum EthSnapStreamError {
     StatusNotInHandshake,
 }
 
-/// Combined message type that include either eth or snao protocol messages
+/// Combined message type that include either eth or snap protocol messages
 #[derive(Debug)]
 pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// An Ethereum protocol message
@@ -223,7 +223,7 @@ where
         // and eth message IDs are <= [`EthMessageID::max()`],
         // snap message IDs are > [`EthMessageID::max()`].
         // See also <https://github.com/paradigmxyz/reth/blob/main/crates/net/eth-wire/src/capability.rs#L272-L283>.
-        if message_id <= EthMessageID::max() {
+        if message_id <= EthMessageID::max(self.eth_version) {
             let mut buf = bytes.as_ref();
             match ProtocolMessage::decode_message(self.eth_version, &mut buf) {
                 Ok(protocol_msg) => {
@@ -236,8 +236,9 @@ where
                     Err(EthSnapStreamError::InvalidMessage(self.eth_version, err.to_string()))
                 }
             }
-        } else if message_id > EthMessageID::max() &&
-            message_id <= EthMessageID::max() + 1 + SnapMessageId::TrieNodes as u8
+        } else if message_id > EthMessageID::max(self.eth_version) &&
+            message_id <=
+                EthMessageID::max(self.eth_version) + 1 + SnapMessageId::TrieNodes as u8
         {
             // Checks for multiplexed snap message IDs :
             // - message_id > EthMessageID::max() : ensures it's not an eth message
@@ -245,7 +246,7 @@ where
             //   range
             // Message IDs are assigned lexicographically during capability negotiation
             // So real_snap_id = multiplexed_id - num_eth_messages
-            let adjusted_message_id = message_id - (EthMessageID::max() + 1);
+            let adjusted_message_id = message_id - (EthMessageID::max(self.eth_version) + 1);
             let mut buf = &bytes[1..];
 
             match SnapProtocolMessage::decode(adjusted_message_id, &mut buf) {
@@ -275,7 +276,7 @@ where
         let encoded = message.encode();
 
         let message_id = encoded[0];
-        let adjusted_id = message_id + EthMessageID::max() + 1;
+        let adjusted_id = message_id + EthMessageID::max(self.eth_version) + 1;
 
         let mut adjusted = Vec::with_capacity(encoded.len());
         adjusted.push(adjusted_id);
@@ -396,7 +397,7 @@ mod tests {
         let inner = EthSnapStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth67);
 
         // Create a bytes buffer with eth message ID at the max boundary with minimal content
-        let eth_max_id = EthMessageID::max();
+        let eth_max_id = EthMessageID::max(EthVersion::Eth67);
         let mut eth_boundary_bytes = BytesMut::new();
         eth_boundary_bytes.extend_from_slice(&[eth_max_id]);
         eth_boundary_bytes.extend_from_slice(&[0, 0]);

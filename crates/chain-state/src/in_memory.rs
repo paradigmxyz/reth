@@ -5,7 +5,7 @@ use crate::{
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
@@ -13,7 +13,8 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives_traits::{
-    BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
+    BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -159,7 +160,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
 }
 
 type PendingBlockAndReceipts<N> =
-    (SealedBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+    (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -480,7 +481,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (
-                block_state.block_ref().recovered_block().sealed_block().clone(),
+                block_state.block_ref().recovered_block().clone(),
                 block_state.executed_block_receipts(),
             )
         })
@@ -553,24 +554,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         for block_state in self.canonical_chain() {
-            if let Some((index, tx)) = block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-            {
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index: index as u64,
-                    block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().recovered_block().number(),
-                    base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                    timestamp: block_state.block_ref().recovered_block().timestamp(),
-                    excess_blob_gas: block_state.block_ref().recovered_block().excess_blob_gas(),
-                };
-                return Some((tx.clone(), meta))
+            if let Some(indexed) = block_state.find_indexed(tx_hash) {
+                return Some((indexed.tx().clone(), indexed.meta()));
             }
         }
         None
@@ -725,29 +710,13 @@ impl<N: NodePrimitives> BlockState<N> {
         tx_hash: TxHash,
     ) -> Option<(N::SignedTx, TransactionMeta)> {
         self.chain().find_map(|block_state| {
-            block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .enumerate()
-                .find(|(_, tx)| tx.trie_hash() == tx_hash)
-                .map(|(index, tx)| {
-                    let meta = TransactionMeta {
-                        tx_hash,
-                        index: index as u64,
-                        block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().recovered_block().number(),
-                        base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
-                        timestamp: block_state.block_ref().recovered_block().timestamp(),
-                        excess_blob_gas: block_state
-                            .block_ref()
-                            .recovered_block()
-                            .excess_blob_gas(),
-                    };
-                    (tx.clone(), meta)
-                })
+            block_state.find_indexed(tx_hash).map(|indexed| (indexed.tx().clone(), indexed.meta()))
         })
+    }
+
+    /// Finds a transaction by hash and returns it with its index and block context.
+    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<IndexedTx<'_, N::Block>> {
+        self.block_ref().recovered_block().find_indexed(tx_hash)
     }
 }
 
@@ -798,19 +767,71 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 }
 
+/// Trie updates that result from calculating the state root for the block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExecutedTrieUpdates {
+    /// Trie updates present. State root was calculated, and the trie updates can be applied to the
+    /// database.
+    Present(Arc<TrieUpdates>),
+    /// Trie updates missing. State root was calculated, but the trie updates cannot be applied to
+    /// the current database state. To apply the updates, the state root must be recalculated, and
+    /// new trie updates must be generated.
+    ///
+    /// This can happen when processing fork chain blocks that are building on top of the
+    /// historical database state. Since we don't store the historical trie state, we cannot
+    /// generate the trie updates for it.
+    Missing,
+}
+
+impl ExecutedTrieUpdates {
+    /// Creates a [`ExecutedTrieUpdates`] with present but empty trie updates.
+    pub fn empty() -> Self {
+        Self::Present(Arc::default())
+    }
+
+    /// Sets the trie updates to the provided value as present.
+    pub fn set_present(&mut self, updates: Arc<TrieUpdates>) {
+        *self = Self::Present(updates);
+    }
+
+    /// Takes the present trie updates, leaving the state as missing.
+    pub fn take_present(&mut self) -> Option<Arc<TrieUpdates>> {
+        match self {
+            Self::Present(updates) => {
+                let updates = core::mem::take(updates);
+                *self = Self::Missing;
+                Some(updates)
+            }
+            Self::Missing => None,
+        }
+    }
+
+    /// Returns a reference to the trie updates if present.
+    #[allow(clippy::missing_const_for_fn)] // false positive
+    pub fn as_ref(&self) -> Option<&TrieUpdates> {
+        match self {
+            Self::Present(updates) => Some(updates),
+            Self::Missing => None,
+        }
+    }
+
+    /// Returns `true` if the trie updates are present.
+    pub const fn is_present(&self) -> bool {
+        matches!(self, Self::Present(_))
+    }
+
+    /// Returns `true` if the trie updates are missing.
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+}
+
 /// An [`ExecutedBlock`] with its [`TrieUpdates`].
 ///
 /// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
 /// memory and can't be obtained for canonical persisted blocks.
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Default,
-    derive_more::Deref,
-    derive_more::DerefMut,
-    derive_more::Into,
+    Clone, Debug, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut, derive_more::Into,
 )]
 pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     /// Inner [`ExecutedBlock`].
@@ -818,8 +839,11 @@ pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     #[deref_mut]
     #[into]
     pub block: ExecutedBlock<N>,
-    /// Trie updates that result of applying the block.
-    pub trie: Arc<TrieUpdates>,
+    /// Trie updates that result from calculating the state root for the block.
+    ///
+    /// If [`ExecutedTrieUpdates::Missing`], the trie updates should be computed when persisting
+    /// the block **on top of the canonical parent**.
+    pub trie: ExecutedTrieUpdates,
 }
 
 impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
@@ -828,15 +852,15 @@ impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
+        trie: ExecutedTrieUpdates,
     ) -> Self {
         Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
     }
 
-    /// Returns a reference to the trie updates for the block
+    /// Returns a reference to the trie updates for the block, if present.
     #[inline]
-    pub fn trie_updates(&self) -> &TrieUpdates {
-        &self.trie
+    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
+        self.trie.as_ref()
     }
 
     /// Converts the value into [`SealedBlock`].
@@ -870,14 +894,14 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the length of the new chain.
-    pub fn new_block_count(&self) -> usize {
+    pub const fn new_block_count(&self) -> usize {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
         }
     }
 
     /// Returns the length of the reorged chain.
-    pub fn reorged_block_count(&self) -> usize {
+    pub const fn reorged_block_count(&self) -> usize {
         match self {
             Self::Commit { .. } => 0,
             Self::Reorg { old, .. } => old.len(),
@@ -941,8 +965,8 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-        StateRootProvider, StorageRootProvider,
+        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
+        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
         AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -990,7 +1014,9 @@ mod tests {
         ) -> ProviderResult<Option<StorageValue>> {
             Ok(None)
         }
+    }
 
+    impl BytecodeReader for MockStateProvider {
         fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
             Ok(None)
         }
@@ -1290,7 +1316,7 @@ mod tests {
         // Check the pending block and receipts
         assert_eq!(
             state.pending_block_and_receipts().unwrap(),
-            (block2.recovered_block().sealed_block().clone(), vec![])
+            (block2.recovered_block().clone(), vec![])
         );
     }
 

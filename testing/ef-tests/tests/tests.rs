@@ -7,6 +7,7 @@ macro_rules! general_state_test {
     ($test_name:ident, $dir:ident) => {
         #[test]
         fn $test_name() {
+            reth_tracing::init_test_tracing();
             BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run();
         }
     };
@@ -81,6 +82,7 @@ macro_rules! blockchain_test {
     ($test_name:ident, $dir:ident) => {
         #[test]
         fn $test_name() {
+            reth_tracing::init_test_tracing();
             BlockchainTests::new(format!("{}", stringify!($dir))).run();
         }
     };

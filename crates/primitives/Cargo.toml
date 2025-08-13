@@ -79,6 +79,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "reth-codecs/arbitrary",
     "alloy-primitives/arbitrary",
+    "c-kzg?/arbitrary",
 ]
 secp256k1 = [
     "reth-primitives-traits/secp256k1",
@@ -100,6 +101,7 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "reth-ethereum-primitives/serde-bincode-compat",
+    "alloy-genesis/serde-bincode-compat",
 ]
 
 [[bench]]

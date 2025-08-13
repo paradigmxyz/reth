@@ -14,12 +14,14 @@ use alloy_primitives::Address;
 use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
-use reth::{builder::NodeHandle, rpc::types::TransactionRequest};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    node::EthereumNode,
+    node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
+    rpc::eth::primitives::TransactionRequest,
 };
+
+mod submit;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()

@@ -215,7 +215,7 @@ pub struct NetworkManager<C> {
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
-    /// Tracks the number of active session (connected peers).
+    /// Tracks the number of active sessions (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
@@ -400,7 +400,7 @@ pub struct BodiesDownloader<Client, Consensus> {
 }
 ```
 
-Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
+Here, similarly, a `FetchClient` is passed into the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
 
 [File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
 ```rust,ignore
@@ -494,6 +494,7 @@ fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 }
                 IncomingEthRequest::GetNodeData { .. } => {}
                 IncomingEthRequest::GetReceipts { .. } => {}
+                IncomingEthRequest::GetReceipts69 { .. } => {}
             },
         }
     }
@@ -656,9 +657,9 @@ pub struct TransactionsManager<Pool> {
     pool: Pool,
     /// Network access.
     network: NetworkHandle,
-    /// Subscriptions to all network related events.
+    /// Subscriptions to all network-related events.
     ///
-    /// From which we get all new incoming transaction related messages.
+    /// From which we get all new incoming transaction-related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
     /// All currently active requests for pooled transactions.
     inflight_requests: Vec<GetPooledTxRequest>,
@@ -695,7 +696,7 @@ pub struct TransactionsHandle {
 ### Input Streams to the Transactions Task
 
 We'll touch on most of the fields in the `TransactionsManager` as the chapter continues, but some worth noting now are the 4 streams from which inputs to the task are fed:
-- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consist solely of events related to transactions emitted by the network.
+- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consists solely of events related to transactions emitted by the network.
 - `network_events`: A listener for `NetworkEvent`s sent from the `NetworkManager`, which consist of other "meta" events such as sessions with peers being established or closed.
 - `command_rx`: A listener for `TransactionsCommand`s sent from the `TransactionsHandle`
 - `pending`: A listener for new pending transactions added to the `TransactionPool`
@@ -1120,7 +1121,7 @@ It iterates over `TransactionsManager.pool_imports`, polling each one, and if it
 
 `on_good_import`, called when the transaction was successfully imported into the transaction pool, removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`.
 
-`on_bad_import` also removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`, but also calls `report_bad_message` for each peer in the entry, decreasing all of their reputation scores as they were propagating a transaction that could not validated.
+`on_bad_import` also removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`, but also calls `report_bad_message` for each peer in the entry, decreasing all of their reputation scores as they were propagating a transaction that could not be validated.
 
 #### Checking on `pending_transactions`
 

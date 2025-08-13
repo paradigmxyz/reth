@@ -3,7 +3,7 @@
 use alloy_consensus::{
     constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
+use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
@@ -132,8 +132,32 @@ where
 /// - Compares the ommer hash in the block header to the block body
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
-/// - (Optionally) Compares the receipts root in the block header to the block body
 pub fn validate_block_pre_execution<B, ChainSpec>(
+    block: &SealedBlock<B>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    ChainSpec: EthereumHardforks,
+{
+    post_merge_hardfork_fields(block, chain_spec)?;
+
+    // Check transaction root
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    }
+
+    Ok(())
+}
+
+/// Validates the ommers hash and other fork-specific fields.
+///
+/// These fork-specific validations are:
+/// * EIP-4895 withdrawals validation, if shanghai is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_shanghai_withdrawals`].
+/// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_cancun_gas`].
+pub fn post_merge_hardfork_fields<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError>
@@ -151,11 +175,6 @@ where
             }
             .into(),
         ))
-    }
-
-    // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -185,7 +204,6 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     blob_params: BlobParams,
 ) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
-    let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root().is_none() {
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
@@ -194,15 +212,6 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
     if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
-            blob_gas_per_blob: DATA_GAS_PER_BLOB,
-        })
-    }
-
-    // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
-    // (via `calc_excess_blob_gas`), but it doesn't hurt to catch the problem sooner.
-    if excess_blob_gas % DATA_GAS_PER_BLOB != 0 {
-        return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
-            excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
         })
     }
@@ -259,12 +268,9 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
 
 /// Validates the base fee against the parent and EIP-1559 rules.
 #[inline]
-pub fn validate_against_parent_eip1559_base_fee<
-    H: BlockHeader,
-    ChainSpec: EthChainSpec + EthereumHardforks,
->(
-    header: &H,
-    parent: &H,
+pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + EthereumHardforks>(
+    header: &ChainSpec::Header,
+    parent: &ChainSpec::Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     if chain_spec.is_london_active_at_block(header.number()) {
@@ -276,15 +282,9 @@ pub fn validate_against_parent_eip1559_base_fee<
         {
             alloy_eips::eip1559::INITIAL_BASE_FEE
         } else {
-            // This BaseFeeMissing will not happen as previous blocks are checked to have
-            // them.
-            let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
-            calc_next_block_base_fee(
-                parent.gas_used(),
-                parent.gas_limit(),
-                base_fee,
-                chain_spec.base_fee_params_at_timestamp(header.timestamp()),
-            )
+            chain_spec
+                .next_block_base_fee(parent, header.timestamp())
+                .ok_or(ConsensusError::BaseFeeMissing)?
         };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
@@ -393,7 +393,9 @@ mod tests {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             blob_gas_used: Some(1),
-            transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
             ..Default::default()
         };
         let body = BlockBody {

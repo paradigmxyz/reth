@@ -27,7 +27,6 @@ revm.workspace = true
 [dev-dependencies]
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
-alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 [features]
@@ -54,5 +53,6 @@ serde = [
     "reth-trie?/serde",
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
+    "reth-storage-api/serde",
 ]
 portable = ["revm/portable"]

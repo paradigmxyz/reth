@@ -1,5 +1,5 @@
-use crate::EraMeta;
-use alloy_primitives::{hex, hex::ToHexExt};
+use crate::{EraMeta, BLOCKS_PER_FILE};
+use alloy_primitives::{hex, hex::ToHexExt, BlockNumber};
 use eyre::{eyre, OptionExt};
 use futures_util::{stream, Stream};
 use reth_fs_util as fs;
@@ -9,6 +9,7 @@ use std::{fmt::Debug, io, io::BufRead, path::Path, str::FromStr};
 /// Creates a new ordered asynchronous [`Stream`] of ERA1 files read from `dir`.
 pub fn read_dir(
     dir: impl AsRef<Path> + Send + Sync + 'static,
+    start_from: BlockNumber,
 ) -> eyre::Result<impl Stream<Item = eyre::Result<EraLocalMeta>> + Send + Sync + 'static + Unpin> {
     let mut checksums = None;
     let mut entries = fs::read_dir(dir)?
@@ -44,27 +45,29 @@ pub fn read_dir(
 
     entries.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    Ok(stream::iter(entries.into_iter().map(move |(_, path)| {
-        let expected_checksum =
-            checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
-        let expected_checksum = hex::decode(expected_checksum)?;
+    Ok(stream::iter(entries.into_iter().skip(start_from as usize / BLOCKS_PER_FILE).map(
+        move |(_, path)| {
+            let expected_checksum =
+                checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
+            let expected_checksum = hex::decode(expected_checksum)?;
 
-        let mut hasher = Sha256::new();
-        let mut reader = io::BufReader::new(fs::open(&path)?);
+            let mut hasher = Sha256::new();
+            let mut reader = io::BufReader::new(fs::open(&path)?);
 
-        io::copy(&mut reader, &mut hasher)?;
-        let actual_checksum = hasher.finalize().to_vec();
+            io::copy(&mut reader, &mut hasher)?;
+            let actual_checksum = hasher.finalize().to_vec();
 
-        if actual_checksum != expected_checksum {
-            return Err(eyre!(
-                "Checksum mismatch, got: {}, expected: {}",
-                actual_checksum.encode_hex(),
-                expected_checksum.encode_hex()
-            ));
-        }
+            if actual_checksum != expected_checksum {
+                return Err(eyre!(
+                    "Checksum mismatch, got: {}, expected: {}",
+                    actual_checksum.encode_hex(),
+                    expected_checksum.encode_hex()
+                ));
+            }
 
-        Ok(EraLocalMeta::new(path))
-    })))
+            Ok(EraLocalMeta::new(path))
+        },
+    )))
 }
 
 /// Contains information about an ERA file that is on the local file-system and is read-only.
@@ -93,7 +96,11 @@ impl AsRef<Path> for EraLocalMeta {
 
 impl EraMeta for EraLocalMeta {
     /// A no-op.
-    fn mark_as_processed(self) -> eyre::Result<()> {
+    fn mark_as_processed(&self) -> eyre::Result<()> {
         Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }

@@ -220,3 +220,6 @@ pub type PrimitivesTy<N> = <N as NodeTypes>::Primitives;
 
 /// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
 pub type KeyHasherTy<N> = <<N as NodeTypes>::StateCommitment as StateCommitment>::KeyHasher;
+
+/// Helper adapter type for accessing [`PayloadTypes::PayloadAttributes`] on [`NodeTypes`].
+pub type PayloadAttrTy<N> = <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes;

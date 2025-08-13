@@ -1,0 +1,26 @@
+{
+  "name": "vocs",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vocs dev",
+    "build": "bash scripts/build-cargo-docs.sh && vocs build && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts",
+    "preview": "vocs preview",
+    "check-links": "bun scripts/check-links.ts",
+    "generate-redirects": "bun scripts/generate-redirects.ts",
+    "build-cargo-docs": "bash scripts/build-cargo-docs.sh",
+    "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vocs": "^1.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.14",
+    "@types/react": "^19.1.8",
+    "glob": "^11.0.3",
+    "typescript": "^5.8.3"
+  }
+}

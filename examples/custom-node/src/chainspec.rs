@@ -14,6 +14,12 @@ pub struct CustomChainSpec {
     genesis_header: SealedHeader<CustomHeader>,
 }
 
+impl CustomChainSpec {
+    pub const fn inner(&self) -> &OpChainSpec {
+        &self.inner
+    }
+}
+
 impl Hardforks for CustomChainSpec {
     fn fork<H: Hardfork>(&self, fork: H) -> reth_ethereum::chainspec::ForkCondition {
         self.inner.fork(fork)

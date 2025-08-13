@@ -20,7 +20,8 @@ use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     p2pstream::DisconnectP2P,
-    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
+    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnauthedEthStream,
+    UnifiedStatus,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
@@ -207,9 +208,9 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// primary protocol.
     pub async fn into_eth_satellite_stream<N: NetworkPrimitives>(
         self,
-        status: Status,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
-    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, Status), EthStreamError>
+    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, UnifiedStatus), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {

@@ -4,8 +4,9 @@ use futures::SinkExt;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::{EthRlpxHandshake, EthereumEthHandshake, UnauthEth},
+    UnifiedStatus,
 };
-use reth_eth_wire_types::{DisconnectReason, EthVersion, Status};
+use reth_eth_wire_types::{DisconnectReason, EthVersion};
 use reth_ethereum_forks::ForkFilter;
 use std::{future::Future, pin::Pin};
 use tokio::time::{timeout, Duration};
@@ -21,8 +22,8 @@ impl BscHandshake {
     /// Negotiate the upgrade status message.
     pub async fn upgrade_status(
         unauth: &mut dyn UnauthEth,
-        negotiated_status: Status,
-    ) -> Result<Status, EthStreamError> {
+        negotiated_status: UnifiedStatus,
+    ) -> Result<UnifiedStatus, EthStreamError> {
         if negotiated_status.version > EthVersion::Eth66 {
             // Send upgrade status message allowing peer to broadcast transactions
             let upgrade_msg = UpgradeStatus {
@@ -66,10 +67,10 @@ impl EthRlpxHandshake for BscHandshake {
     fn handshake<'a>(
         &'a self,
         unauth: &'a mut dyn UnauthEth,
-        status: Status,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
         timeout_limit: Duration,
-    ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<UnifiedStatus, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
             let fut = async {
                 let negotiated_status =

@@ -32,7 +32,9 @@ fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
+                // configure default ethereum node
                 .node(EthereumNode::default())
+                // extend the rpc modules with our custom `TxpoolExt` endpoints
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
                         return Ok(())
@@ -50,6 +52,7 @@ fn main() {
 
                     Ok(())
                 })
+                // launch the node with custom rpc
                 .launch()
                 .await?;
 
@@ -109,7 +112,7 @@ where
             let sink = match pending_subscription_sink.accept().await {
                 Ok(sink) => sink,
                 Err(e) => {
-                    println!("failed to accept subscription: {}", e);
+                    println!("failed to accept subscription: {e}");
                     return;
                 }
             };
@@ -117,8 +120,9 @@ where
             loop {
                 sleep(Duration::from_secs(delay)).await;
 
-                let msg = SubscriptionMessage::from_json(&pool.pool_size().total)
-                    .expect("Failed to serialize `usize`");
+                let msg = SubscriptionMessage::from(
+                    serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
+                );
                 let _ = sink.send(msg).await;
             }
         });
@@ -164,8 +168,10 @@ mod tests {
                 // Send pool size repeatedly, with a 10-second delay
                 loop {
                     sleep(Duration::from_millis(delay)).await;
-                    let message = SubscriptionMessage::from_json(&pool.pool_size().total)
-                        .expect("serialize usize");
+                    let message = SubscriptionMessage::from(
+                        serde_json::value::to_raw_value(&pool.pool_size().total)
+                            .expect("serialize usize"),
+                    );
 
                     // Just ignore errors if a client has dropped
                     let _ = sink.send(message).await;

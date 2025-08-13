@@ -14,18 +14,23 @@ extern crate alloc;
 mod receipt;
 pub use receipt::*;
 
-/// Kept for concistency tests
+/// Kept for consistency tests
 #[cfg(test)]
 mod transaction;
 
-use alloy_consensus::TxEip4844;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
+use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 
 /// Typed Transaction type without a signature
 pub type Transaction = alloy_consensus::EthereumTypedTransaction<TxEip4844>;
 
 /// Signed transaction.
 pub type TransactionSigned = alloy_consensus::EthereumTxEnvelope<TxEip4844>;
+
+/// A type alias for [`PooledTransaction`] that's also generic over blob sidecar.
+pub type PooledTransactionVariant =
+    alloy_consensus::EthereumTxEnvelope<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>;
 
 /// Bincode-compatible serde implementations.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]

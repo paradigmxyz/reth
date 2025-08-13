@@ -252,7 +252,12 @@ impl Discv4 {
         local_node_record.udp_port = local_addr.port();
         trace!(target: "discv4", ?local_addr,"opened UDP socket");
 
-        let service = Discv4Service::new(socket, local_addr, local_node_record, secret_key, config);
+        let mut service =
+            Discv4Service::new(socket, local_addr, local_node_record, secret_key, config);
+
+        // resolve the external address immediately
+        service.resolve_external_ip();
+
         let discv4 = service.handle();
         Ok((discv4, service))
     }
@@ -618,6 +623,15 @@ impl Discv4Service {
     /// Sets the [Interval] used for periodically looking up targets over the network
     pub fn set_lookup_interval(&mut self, duration: Duration) {
         self.lookup_interval = tokio::time::interval(duration);
+    }
+
+    /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`].
+    fn resolve_external_ip(&mut self) {
+        if let Some(r) = &self.resolve_external_ip_interval {
+            if let Some(external_ip) = r.resolver().as_external_ip() {
+                self.set_external_ip_addr(external_ip);
+            }
+        }
     }
 
     /// Sets the given ip address as the node's external IP in the node record announced in

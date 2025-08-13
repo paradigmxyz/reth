@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-/// Re-exported EIP-2124 forkid types.
+/// Re-exported [EIP-2124](https://eips.ethereum.org/EIPS/eip-2124) forkid types.
 pub use alloy_eip2124::*;
 
 mod display;

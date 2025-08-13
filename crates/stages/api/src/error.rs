@@ -4,7 +4,7 @@ use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_provider::ProviderError;
-use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
+use reth_prune::{PruneSegment, PruneSegmentError, PrunerError, UnwindTargetPrunedError};
 use reth_static_file_types::StaticFileSegment;
 use thiserror::Error;
 use tokio::sync::broadcast::error::SendError;
@@ -163,4 +163,7 @@ pub enum PipelineError {
     /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
     #[error("unexpected unwind")]
     UnexpectedUnwind,
+    /// Unwind target pruned error.
+    #[error(transparent)]
+    UnwindTargetPruned(#[from] UnwindTargetPrunedError),
 }
