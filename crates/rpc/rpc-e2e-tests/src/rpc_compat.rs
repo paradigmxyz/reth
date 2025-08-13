@@ -118,10 +118,22 @@ impl RunRpcCompatTests {
                             b.len()
                         ));
                     }
-                    // Add array elements to work stack in reverse order
-                    // so they are processed in correct order
-                    for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate().rev() {
-                        work_stack.push((av, bv, format!("{current_path}[{i}]")));
+
+                    // For large arrays, process elements in chunks to avoid overwhelming the stack
+                    const CHUNK_SIZE: usize = 100;
+                    if a.len() > CHUNK_SIZE {
+                        // Process large arrays in reverse chunks to maintain order
+                        for chunk_start in (0..a.len()).rev().step_by(CHUNK_SIZE) {
+                            let chunk_end = (chunk_start + CHUNK_SIZE).min(a.len());
+                            for i in (chunk_start..chunk_end).rev() {
+                                work_stack.push((&a[i], &b[i], format!("{current_path}[{i}]")));
+                            }
+                        }
+                    } else {
+                        // For smaller arrays, process normally
+                        for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate().rev() {
+                            work_stack.push((av, bv, format!("{current_path}[{i}]")));
+                        }
                     }
                 }
                 // Object comparison
