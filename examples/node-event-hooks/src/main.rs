@@ -4,7 +4,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p node-event-hooks -- node
+//! cargo run -p example-node-event-hooks -- node
 //! ```
 //!
 //! This launches a regular reth node and also print:
