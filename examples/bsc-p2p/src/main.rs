@@ -53,12 +53,17 @@ async fn main() {
 
     let bsc_boot_nodes = boot_nodes();
 
+    // Example: Allow transaction broadcasting (default behavior)
+    let bsc_handshake = BscHandshake(false);
+
+    info!("BSC P2P node configured with disable_peer_tx_broadcast={}", bsc_handshake.0);
+
     let net_cfg = NetworkConfig::builder(secret_key)
         .boot_nodes(bsc_boot_nodes.clone())
         .set_head(head())
         .with_pow()
         .listener_addr(local_addr)
-        .eth_rlpx_handshake(Arc::new(BscHandshake::default()))
+        .eth_rlpx_handshake(Arc::new(bsc_handshake))
         .build(NoopProvider::eth(bsc_chain_spec()));
 
     let net_cfg = net_cfg.set_discovery_v4(

@@ -15,20 +15,28 @@ use tracing::debug;
 
 #[derive(Debug, Default)]
 /// The Binance Smart Chain (BSC) P2P handshake.
+/// The boolean field indicates whether to disable peer transaction broadcasting.
 #[non_exhaustive]
-pub struct BscHandshake;
+pub struct BscHandshake(pub bool);
 
 impl BscHandshake {
     /// Negotiate the upgrade status message.
     pub async fn upgrade_status(
+        &self,
         unauth: &mut dyn UnauthEth,
         negotiated_status: UnifiedStatus,
     ) -> Result<UnifiedStatus, EthStreamError> {
         if negotiated_status.version > EthVersion::Eth66 {
-            // Send upgrade status message allowing peer to broadcast transactions
+            // Send upgrade status message with configurable transaction broadcast setting
             let upgrade_msg = UpgradeStatus {
-                extension: UpgradeStatusExtension { disable_peer_tx_broadcast: false },
+                extension: UpgradeStatusExtension { disable_peer_tx_broadcast: self.0 },
             };
+
+            debug!(
+                "BSC handshake: sending upgrade status with disable_peer_tx_broadcast={}",
+                self.0
+            );
+
             unauth.start_send_unpin(upgrade_msg.into_rlpx())?;
 
             // Receive peer's upgrade status response
@@ -75,7 +83,7 @@ impl EthRlpxHandshake for BscHandshake {
             let fut = async {
                 let negotiated_status =
                     EthereumEthHandshake(unauth).eth_handshake(status, fork_filter).await?;
-                Self::upgrade_status(unauth, negotiated_status).await
+                self.upgrade_status(unauth, negotiated_status).await
             };
             timeout(timeout_limit, fut).await.map_err(|_| EthStreamError::StreamTimeout)?
         })
