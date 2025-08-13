@@ -239,32 +239,35 @@ where
 /// more context. For example, some configuration parameters or access handles to database, network,
 /// etc.
 pub trait SimTxConverter<TxReq, SimTx>: Clone + Debug + Unpin + Send + Sync + 'static {
+    /// An associated error that can occur during the conversion.
+    type Err: Error;
+
     /// Performs the conversion from `tx_req` into `SimTx`.
     ///
     /// See [`SimTxConverter`] for more information.
-    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, ValueError<TxReq>>;
+    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, Self::Err>;
 }
 
 impl<TxReq, SimTx> SimTxConverter<TxReq, SimTx> for ()
 where
-    TxReq: TryIntoSimTx<SimTx>,
+    TxReq: TryIntoSimTx<SimTx> + Debug,
 {
-    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, ValueError<TxReq>> {
+    type Err = ValueError<TxReq>;
+
+    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, Self::Err> {
         tx_req.try_into_sim_tx()
     }
 }
 
-impl<TxReq, SimTx, F> SimTxConverter<TxReq, SimTx> for F
+impl<TxReq, SimTx, F, E> SimTxConverter<TxReq, SimTx> for F
 where
-    F: Fn(TxReq) -> Result<SimTx, ValueError<TxReq>>
-        + Clone
-        + Debug
-        + Unpin
-        + Send
-        + Sync
-        + 'static,
+    TxReq: Debug,
+    E: Error,
+    F: Fn(TxReq) -> Result<SimTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
 {
-    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, ValueError<TxReq>> {
+    type Err = E;
+
+    fn convert_sim_tx(&self, tx_req: TxReq) -> Result<SimTx, Self::Err> {
         self(tx_req)
     }
 }
