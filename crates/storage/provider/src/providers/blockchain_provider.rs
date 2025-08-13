@@ -1341,7 +1341,7 @@ mod tests {
     async fn test_canon_state_subscriptions() -> eyre::Result<()> {
         let factory = create_test_provider_factory();
 
-        // Generate a random block to initialise the blockchain provider.
+        // Generate a random block to initialize the blockchain provider.
         let mut test_block_builder = TestBlockBuilder::eth();
         let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
         let block_hash_1 = block_1.hash();
