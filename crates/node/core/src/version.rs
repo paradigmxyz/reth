@@ -19,6 +19,8 @@ pub fn try_init_version_metadata(
 }
 
 /// Constants for reth-cli
+///
+/// Global defaults can be set via [`try_init_version_metadata`].
 #[derive(Debug, Default)]
 pub struct RethCliVersionConsts {
     /// The human readable name of the client
@@ -89,10 +91,11 @@ pub fn default_extra_data_bytes() -> Bytes {
 
 /// The default client version accessing the database.
 pub fn default_client_version() -> ClientVersion {
+    let meta = version_metadata();
     ClientVersion {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        git_sha: env!("VERGEN_GIT_SHA_SHORT").to_string(),
-        build_timestamp: env!("VERGEN_BUILD_TIMESTAMP").to_string(),
+        version: meta.cargo_pkg_version.to_string(),
+        git_sha: meta.vergen_git_sha.to_string(),
+        build_timestamp: meta.vergen_build_timestamp.to_string(),
     }
 }
 
