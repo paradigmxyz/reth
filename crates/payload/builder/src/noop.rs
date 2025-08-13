@@ -1,7 +1,8 @@
 //! A payload builder service task that does nothing.
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
-use futures_util::{ready, StreamExt};
+use futures_core::ready;
+use futures_util::StreamExt;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadTypes};
 use std::{
     future::Future,
