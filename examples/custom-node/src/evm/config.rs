@@ -130,7 +130,7 @@ impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
 }
 
 /// Additional parameters required for executing next block custom transactions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CustomNextBlockEnvAttributes {
     inner: OpNextBlockEnvAttributes,
     extension: u64,

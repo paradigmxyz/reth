@@ -99,7 +99,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 }
 
 /// Additional parameters for executing custom transactions.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct CustomBlockExecutionCtx {
     pub inner: OpBlockExecutionCtx,
     pub extension: u64,
