@@ -7,7 +7,7 @@
 
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
-    hooks::NodeHooks,
+    hooks::{NodeHooks, OnNodeStartedHook, RpcHooks},
     launch::LaunchNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
     AddOns, ComponentsFor, FullNode,
@@ -244,22 +244,29 @@ where
     }
 }
 
+/// A builder that includes RPC hooks storage for types that use `RethRpcAddOns`.
+/// This type is created when `on_rpc_started` or `extend_rpc_modules` is called
+/// on a `NodeBuilderWithComponents` that has `RethRpcAddOns`.
+pub struct NodeBuilderWithRpcHooks<T, CB, AO>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>> + 'static,
+{
+    /// The base builder
+    pub(crate) inner: NodeBuilderWithComponents<T, CB, AO>,
+    /// RPC hooks storage with proper typing from `RethRpcAddOns::EthApi`
+    pub(crate) rpc_hooks: RpcHooks<NodeAdapter<T, CB::Components>, AO::EthApi>,
+}
+
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>> + 'static,
 {
-    /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
-    where
-        L: LaunchNode<Self>,
-    {
-        launcher.launch_node(self).await
-    }
-
     /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    pub fn on_rpc_started<F>(self, hook: F) -> NodeBuilderWithRpcHooks<T, CB, AO>
     where
         F: FnOnce(
                 RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
@@ -268,23 +275,261 @@ where
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_on_rpc_started(hook);
-            add_ons
-        })
+        let rpc_hooks = RpcHooks { on_rpc_started: Some(Box::new(hook)), ..Default::default() };
+        NodeBuilderWithRpcHooks { inner: self, rpc_hooks }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    pub fn extend_rpc_modules<F>(self, hook: F) -> NodeBuilderWithRpcHooks<T, CB, AO>
     where
         F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_extend_rpc_modules(hook);
-            add_ons
-        })
+        let rpc_hooks = RpcHooks { extend_rpc_modules: Some(Box::new(hook)), ..Default::default() };
+        NodeBuilderWithRpcHooks { inner: self, rpc_hooks }
+    }
+
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<Self>,
+    {
+        launcher.launch_node(self).await
+    }
+}
+
+impl<T, CB, AO> NodeBuilderWithRpcHooks<T, CB, AO>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>> + 'static,
+{
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.rpc_hooks.on_rpc_started = Some(Box::new(hook));
+        self
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.rpc_hooks.extend_rpc_modules = Some(Box::new(hook));
+        self
+    }
+
+    /// Sets the hook that is run once the node's components are initialized.
+    pub fn on_component_initialized<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
+    {
+        self.inner.add_ons.hooks.set_on_component_initialized(hook);
+        self
+    }
+
+    /// Sets the hook that is run once the node has started.
+    pub fn on_node_started<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>, AO>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        self.inner.add_ons.hooks.set_on_node_started(hook);
+        self
+    }
+
+    /// Installs an `ExEx` (Execution Extension) in the node.
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.inner.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
+        self
+    }
+
+    /// Modifies the addons with the given closure.
+    pub fn map_add_ons<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(AO) -> AO,
+    {
+        self.inner.add_ons.add_ons = f(self.inner.add_ons.add_ons);
+        self
+    }
+
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub const fn check_launch(self) -> Self {
+        self
+    }
+
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<
+            NodeBuilderWithComponents<
+                T,
+                CB,
+                AddOnsWithRpcHooks<NodeAdapter<T, CB::Components>, AO>,
+            >,
+        >,
+    {
+        // Wrap the addons with the RPC hooks
+        let wrapped_addons =
+            AddOnsWithRpcHooks { inner: self.inner.add_ons.add_ons, rpc_hooks: self.rpc_hooks };
+
+        // Create adapted hooks that can work with the wrapped addon type
+        let adapted_hooks =
+            adapt_node_hooks::<NodeAdapter<T, CB::Components>, AO>(self.inner.add_ons.hooks);
+
+        // Create a new builder with the wrapped addons
+        let builder_with_wrapped_addons: NodeBuilderWithComponents<
+            T,
+            CB,
+            AddOnsWithRpcHooks<NodeAdapter<T, CB::Components>, AO>,
+        > = NodeBuilderWithComponents {
+            config: self.inner.config,
+            adapter: self.inner.adapter,
+            components_builder: self.inner.components_builder,
+            add_ons: AddOns {
+                hooks: adapted_hooks,
+                exexs: self.inner.add_ons.exexs,
+                add_ons: wrapped_addons,
+            },
+        };
+
+        // Launch with the wrapped builder
+        launcher.launch_node(builder_with_wrapped_addons).await
+    }
+}
+
+/// Adapts node hooks from the original addon type to work with the wrapped addon type.
+/// This allows preserving node hooks when wrapping addons with RPC hooks.
+fn adapt_node_hooks<N, AO>(
+    original_hooks: NodeHooks<N, AO>,
+) -> NodeHooks<N, AddOnsWithRpcHooks<N, AO>>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N> + 'static,
+{
+    let mut new_hooks = NodeHooks::new();
+    new_hooks.on_component_initialized = original_hooks.on_component_initialized;
+    new_hooks.on_node_started = Box::new(NodeStartedHookAdapter {
+        inner: original_hooks.on_node_started,
+        _marker: std::marker::PhantomData,
+    });
+    new_hooks
+}
+
+/// Adapter that transforms `FullNode<Node, AddOnsWithRpcHooks<N, AO>>` to `FullNode<Node, AO>`
+/// for the original hook.
+struct NodeStartedHookAdapter<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N> + 'static,
+{
+    inner: Box<dyn OnNodeStartedHook<N, AO>>,
+    _marker: std::marker::PhantomData<(N, AO)>,
+}
+
+impl<N, AO> OnNodeStartedHook<N, AddOnsWithRpcHooks<N, AO>> for NodeStartedHookAdapter<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N> + 'static,
+{
+    fn on_event(self: Box<Self>, node: FullNode<N, AddOnsWithRpcHooks<N, AO>>) -> eyre::Result<()> {
+        // Transform the FullNode to use the original addon type
+        // Since AddOnsWithRpcHooks has the same Handle type as the inner AO,
+        // we can construct a FullNode with the original addon type
+        let unwrapped_node = FullNode {
+            evm_config: node.evm_config,
+            pool: node.pool,
+            network: node.network,
+            provider: node.provider,
+            payload_builder_handle: node.payload_builder_handle,
+            task_executor: node.task_executor,
+            config: node.config,
+            data_dir: node.data_dir,
+            add_ons_handle: node.add_ons_handle, // This is AO::Handle which is the same for both
+        };
+
+        // Call the original hook with the unwrapped node
+        self.inner.on_event(unwrapped_node)
+    }
+}
+
+/// A generic wrapper that wraps any addon type along with RPC hooks.
+/// This is used to pass RPC hooks through the launch process for any addon type
+/// that implements `RethRpcAddOns`.
+pub struct AddOnsWithRpcHooks<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N>,
+{
+    /// The inner addon implementation
+    pub inner: AO,
+    /// RPC hooks to be used during launch
+    pub rpc_hooks: RpcHooks<N, AO::EthApi>,
+}
+
+impl<N, AO> AddOnsWithRpcHooks<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N>,
+{
+    /// Get the inner addon
+    pub const fn inner(&self) -> &AO {
+        &self.inner
+    }
+}
+
+impl<N, AO> NodeAddOns<N> for AddOnsWithRpcHooks<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N>,
+{
+    type Handle = AO::Handle;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        // Use the new trait method to pass hooks to the inner addon
+        self.inner.launch_add_ons_with_hooks(ctx, self.rpc_hooks).await
+    }
+}
+
+impl<N, AO> RethRpcAddOns<N> for AddOnsWithRpcHooks<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N>,
+{
+    type EthApi = AO::EthApi;
+}
+
+impl<N, AO> crate::rpc::EngineValidatorAddOn<N> for AddOnsWithRpcHooks<N, AO>
+where
+    N: FullNodeComponents,
+    AO: RethRpcAddOns<N> + crate::rpc::EngineValidatorAddOn<N>,
+{
+    type ValidatorBuilder = AO::ValidatorBuilder;
+
+    fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
+        self.inner.engine_validator_builder()
     }
 }
 
