@@ -10,7 +10,7 @@ use reth_op::rpc::RpcTypes;
 use reth_rpc_api::eth::{
     transaction::TryIntoTxEnv, EthTxEnvError, SignTxRequestError, SignableTxRequest, TryIntoSimTx,
 };
-use revm::context::{BlockEnv, CfgEnv};
+use revm::context::BlockEnv;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
@@ -32,12 +32,12 @@ impl TryIntoSimTx<CustomTransaction> for OpTransactionRequest {
 impl TryIntoTxEnv<CustomTxEnv> for OpTransactionRequest {
     type Err = EthTxEnvError;
 
-    fn try_into_tx_env<Spec>(
+    fn try_into_tx_env(
         self,
-        cfg_env: &CfgEnv<Spec>,
+        cfg_env_chain_id: &u64,
         block_env: &BlockEnv,
     ) -> Result<CustomTxEnv, Self::Err> {
-        Ok(CustomTxEnv::Op(self.try_into_tx_env(cfg_env, block_env)?))
+        Ok(CustomTxEnv::Op(self.try_into_tx_env(cfg_env_chain_id, block_env)?))
     }
 }
 
