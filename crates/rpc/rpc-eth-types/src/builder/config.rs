@@ -3,8 +3,10 @@
 use std::time::Duration;
 
 use crate::{
-    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
 };
+use alloy_rpc_client::RpcClient;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
@@ -16,7 +18,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// Additional config values for the eth namespace.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
@@ -45,6 +47,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
+    /// The raw transaction forwarder.
+    pub raw_tx_forwarder: ForwardConfig,
 }
 
 impl EthConfig {
@@ -72,6 +76,7 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -134,6 +139,15 @@ impl EthConfig {
     /// Configures the number of getproof requests
     pub const fn proof_permits(mut self, permits: usize) -> Self {
         self.proof_permits = permits;
+        self
+    }
+
+    /// Configures the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
+        if let Some(tx_forwarder) = tx_forwarder {
+            self.raw_tx_forwarder.tx_forwarder =
+                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
+        }
         self
     }
 }
