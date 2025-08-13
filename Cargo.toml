@@ -480,9 +480,9 @@ alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.2"
 
-alloy-consensus = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
-alloy-contract = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
-alloy-eips = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
+alloy-consensus = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
+alloy-contract = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
+alloy-eips = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
 alloy-genesis = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
 alloy-json-rpc = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
 alloy-network = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil" }
