@@ -74,7 +74,8 @@ impl<W: Write> E2StoreWriter<W> {
     }
 
     /// Write the version entry as the first entry in the file.
-    /// If not called explicitly, it will be written automatically before the first non-version entry.
+    /// If not called explicitly, it will be written automatically before the first non-version
+    /// entry.
     pub fn write_version(&mut self) -> Result<(), E2sError> {
         if self.has_written_version {
             return Ok(());
