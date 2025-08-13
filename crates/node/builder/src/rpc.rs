@@ -19,7 +19,7 @@ use reth_node_api::{
 };
 use reth_node_core::{
     node_config::NodeConfig,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
+    version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
@@ -1236,9 +1236,9 @@ where
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
+            name: version_metadata().name_client.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
         Ok(EngineApi::new(
             ctx.node.provider().clone(),
