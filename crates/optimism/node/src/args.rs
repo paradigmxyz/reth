@@ -66,6 +66,10 @@ pub struct RollupArgs {
     /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
     #[arg(long, default_value_t = 1_000_000)]
     pub min_suggested_priority_fee: u64,
+
+    /// Optional websocket endpoint for Flashblocks connection.
+    #[arg(long = "flashblocks-url", value_name = "FLASHBLOCKS_WS_URL")]
+    pub flashblocks_url: Option<String>,
 }
 
 impl Default for RollupArgs {
@@ -81,6 +85,7 @@ impl Default for RollupArgs {
             sequencer_headers: Vec::new(),
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
+            flashblocks_url: None,
         }
     }
 }
