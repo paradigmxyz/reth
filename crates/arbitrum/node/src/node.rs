@@ -17,7 +17,7 @@ impl ArbNode {
 use std::sync::Arc;
 
 use reth_chainspec::ChainSpec;
-use reth_node_api::{FullNodeComponents, NodeTypes, PayloadAttributesBuilder};
+use reth_node_api::{FullNodeComponents, NodeTypes, PayloadAttributesBuilder, PayloadTypes};
 use reth_node_builder::{DebugNode, Node};
 use reth_node_builder::{
     components::{
@@ -32,7 +32,6 @@ use reth_node_builder::{
     },
     BuilderContext, DebugNode as _, NodeAdapter,
 };
-use reth_payload_primitives::PayloadTypes;
 use reth_provider::providers::ProviderFactoryBuilder;
 use reth_arbitrum_storage::ArbStorage;
 use reth_rpc_api::servers::DebugApiServer;
@@ -59,11 +58,11 @@ where
     Types: NodeTypes<ChainSpec = ChainSpec, Primitives = reth_arbitrum_primitives::ArbPrimitives>,
     N: FullNodeTypes<Types = Types>,
 {
-    type EVM = ArbEvmConfig<Arc<ChainSpec>, Types::Primitives>;
+    type EVM = ArbEvmConfig<ChainSpec, Types::Primitives>;
 
     async fn build_evm(self, ctx: &BuilderContext<N>) -> eyre::Result<Self::EVM> {
         let evm_config =
-            ArbEvmConfig::new(Arc::new(ctx.chain_spec().clone()), ArbRethReceiptBuilder::default());
+            ArbEvmConfig::new(ctx.chain_spec().clone(), ArbRethReceiptBuilder::default());
         Ok(evm_config)
     }
 }
@@ -91,7 +90,7 @@ where
     N: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
     Pool: reth_transaction_pool::TransactionPool<
             Transaction: reth_transaction_pool::PoolTransaction<
-                Consensus = reth_node_types::TxTy<N::Types>
+                Consensus = reth_node_api::TxTy<N::Types>
             >
         > + Unpin + 'static,
 {

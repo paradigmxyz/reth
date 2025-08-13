@@ -17,6 +17,12 @@ pub struct ArbEngineApiBuilder<EV> {
     engine_validator_builder: EV,
 }
 
+impl<EV> ArbEngineApiBuilder<EV> {
+    pub fn new(engine_validator_builder: EV) -> Self {
+        Self { engine_validator_builder }
+    }
+}
+
 impl<N, EV> EngineApiBuilder<N> for ArbEngineApiBuilder<EV>
 where
     N: FullNodeComponents<
