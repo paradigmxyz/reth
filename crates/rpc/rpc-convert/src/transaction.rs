@@ -241,26 +241,38 @@ where
 /// for free, thanks to the blanket implementation, unless the conversion requires more context. For
 /// example, some configuration parameters or access handles to database, network, etc.
 pub trait RpcTxConverter<Tx, RpcTx, TxInfo>: Clone + Debug + Unpin + Send + Sync + 'static {
+    /// An associated error that can happen during the conversion.
+    type Err;
+
     /// Performs the conversion of `tx` from `Tx` into `RpcTx`.
     ///
     /// See [`RpcTxConverter`] for more information.
-    fn convert_rpc_tx(&self, tx: Tx, signer: Address, tx_info: TxInfo) -> RpcTx;
+    fn convert_rpc_tx(&self, tx: Tx, signer: Address, tx_info: TxInfo) -> Result<RpcTx, Self::Err>;
 }
 
 impl<Tx, RpcTx> RpcTxConverter<Tx, RpcTx, Tx::TxInfo> for ()
 where
     Tx: IntoRpcTx<RpcTx>,
 {
-    fn convert_rpc_tx(&self, tx: Tx, signer: Address, tx_info: Tx::TxInfo) -> RpcTx {
-        tx.into_rpc_tx(signer, tx_info)
+    type Err = Infallible;
+
+    fn convert_rpc_tx(
+        &self,
+        tx: Tx,
+        signer: Address,
+        tx_info: Tx::TxInfo,
+    ) -> Result<RpcTx, Self::Err> {
+        Ok(tx.into_rpc_tx(signer, tx_info))
     }
 }
 
-impl<Tx, RpcTx, F, TxInfo> RpcTxConverter<Tx, RpcTx, TxInfo> for F
+impl<Tx, RpcTx, F, TxInfo, E> RpcTxConverter<Tx, RpcTx, TxInfo> for F
 where
-    F: Fn(Tx, Address, TxInfo) -> RpcTx + Clone + Debug + Unpin + Send + Sync + 'static,
+    F: Fn(Tx, Address, TxInfo) -> Result<RpcTx, E> + Clone + Debug + Unpin + Send + Sync + 'static,
 {
-    fn convert_rpc_tx(&self, tx: Tx, signer: Address, tx_info: TxInfo) -> RpcTx {
+    type Err = E;
+
+    fn convert_rpc_tx(&self, tx: Tx, signer: Address, tx_info: TxInfo) -> Result<RpcTx, Self::Err> {
         self(tx, signer, tx_info)
     }
 }
@@ -696,6 +708,7 @@ where
             Error: From<TransactionConversionError>
                        + From<<RpcTxReq<Network> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
+                       + From<RpcTx::Err>
                        + Error
                        + Unpin
                        + Sync
@@ -725,7 +738,7 @@ where
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
-        Ok(self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info))
+        Ok(self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info)?)
     }
 
     fn build_simulate_v1_transaction(
