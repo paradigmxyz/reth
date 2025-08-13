@@ -14,7 +14,7 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult, StateCommitmentProvider,
+    ProviderResult,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -114,7 +114,7 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
 
 impl<Factory> ProofTaskManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
     /// Inserts the task into the pending tasks queue.
     pub fn queue_proof_task(&mut self, task: ProofTaskKind) {

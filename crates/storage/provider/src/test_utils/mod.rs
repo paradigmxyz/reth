@@ -29,7 +29,6 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
     reth_ethereum_primitives::EthPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
-    reth_trie_db::MerklePatriciaTrie,
     crate::EthStorage,
     EthEngineTypes,
 >;

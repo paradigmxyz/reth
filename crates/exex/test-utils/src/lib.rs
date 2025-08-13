@@ -116,7 +116,6 @@ pub struct TestNode;
 impl NodeTypes for TestNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = reth_trie_db::MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = EthEngineTypes;
 }

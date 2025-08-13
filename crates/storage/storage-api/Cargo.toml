@@ -22,7 +22,6 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
-reth-trie-db = { workspace = true, optional = true }
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
 
@@ -55,7 +54,6 @@ std = [
 
 db-api = [
     "dep:reth-db-api",
-    "dep:reth-trie-db",
 ]
 
 serde = [
@@ -66,7 +64,6 @@ serde = [
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "reth-trie-common/serde",
-    "reth-trie-db?/serde",
     "revm-database/serde",
     "reth-ethereum-primitives/serde",
     "alloy-eips/serde",

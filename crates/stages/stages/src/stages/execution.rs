@@ -12,8 +12,8 @@ use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimit
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -260,8 +260,7 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
-        + StateCommitmentProvider,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {

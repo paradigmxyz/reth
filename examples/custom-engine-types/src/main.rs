@@ -60,7 +60,6 @@ use reth_ethereum::{
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
-use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
@@ -269,7 +268,6 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = CustomEngineTypes;
 }

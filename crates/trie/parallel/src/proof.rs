@@ -14,7 +14,7 @@ use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError, StateCommitmentProvider,
+    ProviderError,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -88,8 +88,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory>
 where
-    Factory:
-        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
     fn spawn_storage_proof(

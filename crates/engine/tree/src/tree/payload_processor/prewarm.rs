@@ -14,7 +14,7 @@ use metrics::{Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
-use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -53,7 +53,7 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -226,7 +226,7 @@ where
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
