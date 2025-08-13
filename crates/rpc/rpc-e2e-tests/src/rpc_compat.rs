@@ -523,4 +523,42 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Number mismatch"));
     }
+
+    #[test]
+    fn test_compare_json_values_large_array() {
+        let mut large_array = Vec::new();
+        let mut expected_array = Vec::new();
+
+        // Create a large array with complex objects (similar to eth_getLogs response)
+        // Use 1000 elements to test chunking (larger than CHUNK_SIZE of 100)
+        for i in 0..1000 {
+            large_array.push(json!({
+                "address": format!("0x{:040x}", i),
+                "topics": [format!("0x{:064x}", i)],
+                "data": format!("0x{:064x}", i),
+                "blockNumber": format!("0x{:x}", i),
+                "transactionHash": format!("0x{:064x}", i),
+                "transactionIndex": format!("0x{:x}", i % 10),
+                "blockHash": format!("0x{:064x}", i),
+                "logIndex": format!("0x{:x}", i % 10),
+                "removed": false
+            }));
+            expected_array.push(json!({
+                "address": format!("0x{:040x}", i),
+                "topics": [format!("0x{:064x}", i)],
+                "data": format!("0x{:064x}", i),
+                "blockNumber": format!("0x{:x}", i),
+                "transactionHash": format!("0x{:064x}", i),
+                "transactionIndex": format!("0x{:x}", i % 10),
+                "blockHash": format!("0x{:064x}", i),
+                "logIndex": format!("0x{:x}", i % 10),
+                "removed": false
+            }));
+        }
+
+        let actual = json!({"result": large_array});
+        let expected = json!({"result": expected_array});
+
+        RunRpcCompatTests::compare_json_values(&actual, &expected, "root").unwrap();
+    }
 }
