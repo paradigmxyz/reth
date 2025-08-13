@@ -11,6 +11,8 @@ use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use crate::ARB_NAME_CLIENT;
 use reth_arbitrum_rpc::engine::ARB_ENGINE_CAPABILITIES;
 use reth_arbitrum_payload::ArbExecutionData;
+use reth_arbitrum_rpc::nitro::ArbNitroRpc;
+use reth_rpc_api::servers::RpcServer;
 
 #[derive(Debug, Default, Clone)]
 pub struct ArbEngineApiBuilder<EV> {
@@ -64,6 +66,8 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
         );
+
+        let _ = ctx.rpc_registry.register_methods(ArbNitroRpc::default().into_rpc_module());
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }
