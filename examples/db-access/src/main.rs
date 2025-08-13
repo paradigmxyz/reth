@@ -7,7 +7,7 @@ use reth_ethereum::{
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionsProvider,
+        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -126,7 +126,9 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     // Can query a block with its senders, this is useful when you'd want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let _recovered_block = provider
+        .sealed_block_with_senders(number.into(), TransactionVariant::WithHash)?
+        .ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
     let sealed_block = SealedBlock::seal_slow(block.clone());
