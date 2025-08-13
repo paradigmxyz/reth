@@ -11,6 +11,9 @@ pub use node::*;
 pub mod rpc;
 pub use rpc::ArbEngineApiBuilder;
 
+pub mod validator;
+pub use validator::ArbPayloadValidatorBuilder;
+
 pub mod version;
 pub use version::ARB_NAME_CLIENT;
 
