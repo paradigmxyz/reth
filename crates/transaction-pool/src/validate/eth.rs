@@ -132,7 +132,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one_with_provider(origin, transaction, &mut None)
+        self.inner.validate_one_with_provider(origin, transaction, None)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -145,11 +145,11 @@ where
     /// Convenience method for applying stateless and stateful checks on transaction. Under the
     /// hood this calls same validations as [`validate_one_no_state`](Self::validate_one_no_state)
     /// followed by [`validate_one_against_state`](Self::validate_one_against_state).
-    pub fn validate_one_with_state<P>(
+    pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
     }
@@ -175,7 +175,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: StateProvider,
+        P: AccountInfoReader,
     {
         self.inner.validate_one_against_state(origin, transaction, state)
     }
@@ -303,28 +303,27 @@ where
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
-    fn validate_one_with_provider<P>(
+    fn validate_one_with_provider(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
+        maybe_state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
-                if maybe_state.is_none() {
-                    match self.client.latest() {
-                        Ok(new_state) => {
-                            *maybe_state = Some(Box::new(new_state));
-                        }
+                let state = match maybe_state {
+                    Some(s) => s,
+                    None => match self.client.latest() {
+                        Ok(new_state) => Box::new(new_state),
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
                                 *transaction.hash(),
                                 Box::new(err),
                             )
                         }
-                    }
+                    },
                 };
 
                 self.validate_one_against_state(origin, transaction, state)
@@ -749,15 +748,6 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_provider(origin, transaction, None)
-    }
-
     /// Validates all given transactions.
     fn validate_batch(
         &self,
@@ -765,9 +755,7 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         transactions
             .into_iter()
-            .map(|(origin, tx)| {
-                self.validate_one_with_provider::<StateProviderBox>(origin, tx, None)
-            })
+            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, None))
             .collect()
     }
 
@@ -777,10 +765,9 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
         transactions
             .into_iter()
-            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
+            .map(|tx| self.validate_one_with_provider(origin, tx, None))
             .collect()
     }
 

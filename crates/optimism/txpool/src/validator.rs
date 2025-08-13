@@ -163,7 +163,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_state::<StateProviderBox>(origin, transaction, None).await
+        self.validate_one_with_state(origin, transaction, None).await
     }
 
     /// Validates a single transaction with a provided state provider.
@@ -177,11 +177,11 @@ where
     /// - ensures tx is not eip4844
     /// - ensures cross chain transactions are valid wrt locally configured safety level
     /// - ensures that the account has enough balance to cover the L1 gas cost
-    pub async fn validate_one_with_state<P>(
+    pub async fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         // OP checks without state
         let transaction = match self.apply_op_checks_no_state(transaction) {
@@ -221,8 +221,8 @@ where
         }
 
         // otherwise load state from DB for checks against state
-        let state: Arc<dyn StateProvider> = match self.client().latest() {
-            Ok(s) => s.into(),
+        let state: Arc<dyn AccountInfoReader> = match self.client().latest() {
+            Ok(s) => Arc::new(s),
             Err(err) => {
                 return transactions
                     .into_iter()
