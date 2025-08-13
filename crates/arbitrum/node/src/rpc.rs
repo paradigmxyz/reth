@@ -1,3 +1,5 @@
+use reth_rpc_api::servers::RpcServer; use reth_arbitrum_rpc::nitro::ArbNitroApi;
+use reth_arbitrum_rpc::nitro::ArbNitroRpc;
 #![allow(unused)]
 
 use alloy_rpc_types_engine::ClientVersionV1;
@@ -64,6 +66,7 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
         );
+        let _ = ctx.rpc_registry.register_methods(ArbNitroRpc::default().into_rpc_module());
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }
