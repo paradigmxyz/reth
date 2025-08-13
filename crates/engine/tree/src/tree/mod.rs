@@ -720,10 +720,29 @@ where
         let new_head_number = canonical_header.number();
         let new_head_hash = canonical_header.hash();
 
-        // Detect and log the type of chain state update
+        // Log the type of chain state update being performed
+        self.log_chain_update_type(current_head_number, new_head_number, new_head_hash);
+
+        // Update tree state with the new canonical head
+        self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+
+        // Handle the state update based on whether this is an unwind scenario
+        if new_head_number < current_head_number {
+            self.handle_chain_unwind(current_head_number, canonical_header)
+        } else {
+            self.handle_chain_advance_or_same_height(canonical_header)
+        }
+    }
+
+    /// Logs the type of chain state update being performed.
+    fn log_chain_update_type(
+        &self,
+        current_head_number: u64,
+        new_head_number: u64,
+        new_head_hash: B256,
+    ) {
         match new_head_number.cmp(&current_head_number) {
             std::cmp::Ordering::Less => {
-                // Unwind scenario: we're reverting to an earlier canonical block
                 debug!(
                     target: "engine::tree",
                     current_head = current_head_number,
@@ -733,7 +752,6 @@ where
                 );
             }
             std::cmp::Ordering::Greater => {
-                // Forward progress: updating to a later canonical block
                 debug!(
                     target: "engine::tree",
                     previous_head = current_head_number,
@@ -743,7 +761,6 @@ where
                 );
             }
             std::cmp::Ordering::Equal => {
-                // Same block number, potentially different hash (shouldn't normally happen)
                 debug!(
                     target: "engine::tree",
                     head_number = new_head_number,
@@ -752,38 +769,153 @@ where
                 );
             }
         }
+    }
 
-        // Update tree state
-        self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+    /// Handles chain unwind scenarios by collecting blocks to remove and performing a reorg.
+    fn handle_chain_unwind(
+        &mut self,
+        current_head_number: u64,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<()> {
+        let new_head_number = canonical_header.number();
+        let new_head_hash = canonical_header.hash();
 
-        // CRITICAL: Load the canonical ancestor's block into memory to ensure
-        // state provider can access it. Without this, the state provider will
-        // fall back to stale database state causing "nonce too low" errors.
-        
-        // For now, just update the canonical head header
-        // A more complete fix would load the block state into memory,
-        // but that requires handling the reorg properly (removing higher blocks)
-        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
-        
-        // Try to load the block if available (for debugging/logging)
-        if let Some(_executed_block) = self.canonical_block_by_hash(new_head_hash)? {
+        debug!(
+            target: "engine::tree",
+            from = current_head_number,
+            to = new_head_number,
+            "Handling unwind: collecting blocks to remove from in-memory state"
+        );
+
+        // Collect blocks that need to be removed from memory
+        let old_blocks = self.collect_blocks_for_removal(new_head_number, current_head_number);
+
+        // Load and apply the canonical ancestor block
+        self.apply_canonical_ancestor_via_reorg(canonical_header, old_blocks)
+    }
+
+    /// Collects blocks from memory that need to be removed during an unwind.
+    fn collect_blocks_for_removal(
+        &self,
+        new_head_number: u64,
+        current_head_number: u64,
+    ) -> Vec<ExecutedBlock<N>> {
+        let mut old_blocks = Vec::new();
+        let mut found_blocks_to_remove = false;
+
+        for block_num in (new_head_number + 1)..=current_head_number {
+            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_num) {
+                let executed_block = block_state.block_ref().block.clone();
+                old_blocks.push(executed_block);
+                found_blocks_to_remove = true;
+                debug!(
+                    target: "engine::tree",
+                    block_number = block_num,
+                    "Collected block for removal from in-memory state"
+                );
+            }
+        }
+
+        if !found_blocks_to_remove {
             debug!(
                 target: "engine::tree",
-                block_number = new_head_number,
-                block_hash = ?new_head_hash,
-                "Found canonical ancestor block (but not loading into memory yet)"
+                "No blocks found in memory to remove, will clear and reset state"
             );
-            
-            // TODO: To properly fix the state issue, we need to:
-            // 1. Remove blocks higher than canonical ancestor from in-memory state
-            // 2. Load the canonical ancestor's state into memory
-            // 3. Update as a reorg rather than a commit
-            // This requires more complex handling of the in-memory state
-        } else {
-            warn!(
+        }
+
+        old_blocks
+    }
+
+    /// Applies the canonical ancestor block via a reorg operation.
+    fn apply_canonical_ancestor_via_reorg(
+        &mut self,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+        old_blocks: Vec<ExecutedBlock<N>>,
+    ) -> ProviderResult<()> {
+        let new_head_hash = canonical_header.hash();
+        let new_head_number = canonical_header.number();
+
+        // Try to load the canonical ancestor's block
+        match self.canonical_block_by_hash(new_head_hash)? {
+            Some(executed_block) => {
+                let block_with_trie = ExecutedBlockWithTrieUpdates {
+                    block: executed_block,
+                    trie: ExecutedTrieUpdates::Missing,
+                };
+
+                // Perform the reorg to properly handle the unwind
+                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+                    new: vec![block_with_trie],
+                    old: old_blocks,
+                });
+
+                // CRITICAL: Update the canonical head after the reorg
+                // This ensures get_canonical_head() returns the correct block
+                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                debug!(
+                    target: "engine::tree",
+                    block_number = new_head_number,
+                    block_hash = ?new_head_hash,
+                    "Successfully loaded canonical ancestor into memory via reorg"
+                );
+            }
+            None => {
+                // Fallback: update header only if block cannot be found
+                warn!(
+                    target: "engine::tree",
+                    block_hash = ?new_head_hash,
+                    "Could not find canonical ancestor block, updating header only"
+                );
+                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles chain advance or same height scenarios.
+    fn handle_chain_advance_or_same_height(
+        &mut self,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<()> {
+        let new_head_number = canonical_header.number();
+        let new_head_hash = canonical_header.hash();
+
+        // Update the canonical head header
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+        // Load the block into memory if it's not already present
+        self.ensure_block_in_memory(new_head_number, new_head_hash)
+    }
+
+    /// Ensures a block is loaded into memory if not already present.
+    fn ensure_block_in_memory(
+        &mut self,
+        block_number: u64,
+        block_hash: B256,
+    ) -> ProviderResult<()> {
+        // Check if block is already in memory
+        if self.canonical_in_memory_state.state_by_number(block_number).is_some() {
+            return Ok(());
+        }
+
+        // Try to load the block from storage
+        if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
+            let block_with_trie = ExecutedBlockWithTrieUpdates {
+                block: executed_block,
+                trie: ExecutedTrieUpdates::Missing,
+            };
+
+            self.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit {
+                new: vec![block_with_trie],
+            });
+
+            debug!(
                 target: "engine::tree",
-                block_hash = ?new_head_hash,
-                "Could not find canonical ancestor block"
+                block_number,
+                block_hash = ?block_hash,
+                "Added canonical block to in-memory state"
             );
         }
 
