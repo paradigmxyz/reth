@@ -12,13 +12,15 @@ use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadState, SpawnBlocking, Trace,
+        pending_block::{PendingEnvBuilder, BuildPendingEnv},
+        spec::SignersForApi,
+        AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes,
 };
-use reth_rpc_eth_types::{EthApiError, EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use crate::error::ArbEthApiError;
 use reth_storage_api::{ProviderHeader, ProviderTx};
 pub mod txinfo;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
@@ -32,7 +34,7 @@ impl reth_rpc_eth_api::RpcTypes for ArbRpcTypes {
     type Header = alloy_rpc_types_eth::Header<alloy_consensus::Header>;
     type Receipt = alloy_rpc_types_eth::TransactionReceipt;
     type TransactionResponse = alloy_rpc_types_eth::Transaction<ArbTransactionSigned>;
-    type TransactionRequest = alloy_rpc_types_eth::request::TransactionRequest;
+    type TransactionRequest = crate::eth::transaction::ArbTransactionRequest;
 }
 
 pub mod receipt;
@@ -72,7 +74,7 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-    type Error = EthApiError;
+    type Error = ArbEthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
@@ -131,8 +133,8 @@ where
 impl<N, Rpc> LoadFee for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
+    ArbEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = ArbEthApiError>,
 {
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> { self.inner.eth_api.gas_oracle() }
     fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
@@ -158,15 +160,15 @@ where
 impl<N, Rpc> EthFees for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
+    ArbEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = ArbEthApiError>,
 {
 }
 
 impl<N, Rpc> Trace for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    EthApiError: FromEvmError<N::Evm>,
+    ArbEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
@@ -247,6 +249,6 @@ where
 impl<N, Rpc> reth_rpc_eth_api::helpers::LoadReceipt for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives, Error = reth_rpc_eth_types::EthApiError>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = crate::error::ArbEthApiError>,
 {
 }
