@@ -360,7 +360,7 @@ where
                     ))
                 }
             }
-        }
+        } // else is not cross-chain tx
 
         Ok(transaction)
     }
