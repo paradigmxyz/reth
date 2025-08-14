@@ -538,7 +538,7 @@ impl ChunkedFileReader {
         // For gzipped files, if we have no data in chunk, try to read some to check EOF
         if self.is_gzip && self.chunk.is_empty() {
             // Try to read a small amount to check if we're at EOF
-            let mut buf = vec![0u8; 1024];
+            let mut buf = vec![0u8; 128];
             match self.file.read(&mut buf).await {
                 Ok(0) => return Ok(None), // EOF
                 Ok(n) => {
@@ -616,61 +616,60 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
+    /// Reads gzipped data until we accumulate at least chunk_byte_len bytes.
+    ///
+    /// Returns `Ok(true)` if data was successfully read and we have enough bytes,
+    /// or `Ok(false)` if EOF was reached with no remaining data.
+    async fn read_gzip_chunk(&mut self) -> Result<bool, FileClientError> {
+        loop {
+            // If we already have enough data, return true
+            if self.chunk.len() > self.chunk_byte_len as usize {
+                return Ok(true)
+            }
+
+            // Read more data from the gzipped stream
+            let mut buffer = vec![0u8; 64 * 1024];
+
+            // Note: gzip decoder may not utilize the full buffer size due to internal
+            // limitations
+            match self.file.read(&mut buffer).await {
+                Ok(0) => {
+                    // EOF reached - return whether have any remaining data
+                    return Ok(!self.chunk.is_empty())
+                }
+                Ok(n) => {
+                    buffer.truncate(n);
+                    self.chunk.extend_from_slice(&buffer);
+                    // Continue the loop to check if we have enough data now
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
+    ///
+    /// For gzipped files, this method accumulates data until at least `chunk_byte_len` bytes
+    /// are available before processing. For plain files, it uses the original chunking logic.
     pub async fn next_chunk<B: FullBlock>(
         &mut self,
         consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
-        // For gzipped files, we need to accumulate data until we have complete blocks
-        // because chunk boundaries don't align with block boundaries in compressed data
-        if self.is_gzip {
-            // Keep reading until we accumulate at least chunk_byte_len bytes
-            loop {
-                // If we already have enough data, process it
-                if self.chunk.len() > self.chunk_byte_len as usize {
-                    let DecodedFileChunk { file_client, remaining_bytes, .. } =
-                        FileClientBuilder { consensus, parent_header }
-                            .build(&self.chunk[..], self.chunk.len() as u64)
-                            .await?;
-                    self.chunk = remaining_bytes; // Save leftover bytes for next iteration
-                    return Ok(Some(file_client))
-                }
-
-                // Read more data from the gzipped stream
-                let mut buffer = vec![0u8; 8 * 1024 * 1024]; // Read up to chunk_byte_len for better performance
-
-                // Note: gzip decoder may not utilize the full buffer size due to internal
-                // limitations
-                match self.file.read(&mut buffer).await {
-                    Ok(0) => {
-                        // EOF reached - if we have any remaining data, try to parse it
-                        if !self.chunk.is_empty() {
-                            let DecodedFileChunk { file_client, remaining_bytes, .. } =
-                                FileClientBuilder { consensus, parent_header }
-                                    .build(&self.chunk[..], self.chunk.len() as u64)
-                                    .await?;
-                            self.chunk = remaining_bytes; // Save leftover bytes for next iteration
-                            return Ok(Some(file_client))
-                        }
-                        return Ok(None)
-                    }
-                    Ok(n) => {
-                        buffer.truncate(n);
-                        self.chunk.extend_from_slice(&buffer);
-                        // Continue the loop to check if we have enough data now
-                    }
-                    Err(e) => return Err(e.into()),
-                }
+        let chunk_len = if self.is_gzip {
+            if !self.read_gzip_chunk().await? {
+                return Ok(None)
             }
-        }
-
-        // For non-gzipped files, use the original chunking logic
-        let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
+            self.chunk.len() as u64
+        } else {
+            let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };
+            chunk_len
+        };
 
         // make new file client from chunk
         let DecodedFileChunk { file_client, remaining_bytes, .. } =
             FileClientBuilder { consensus, parent_header }
-                .build(&self.chunk[..], next_chunk_byte_len)
+                .build(&self.chunk[..], chunk_len)
                 .await?;
 
         // save left over bytes
