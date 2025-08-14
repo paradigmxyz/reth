@@ -185,7 +185,10 @@ where
         state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         // OP checks without state
-        let transaction = self.apply_op_checks_no_state(transaction)?;
+        let transaction = match self.apply_op_checks_no_state(transaction) {
+            Ok(tx) => tx,
+            Err(invalid_tx) => return invalid_tx,
+        };
 
         // l1 checks, will load state from DB (costly) unless state has been passed as param
         let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, state);
@@ -285,6 +288,7 @@ where
             // no need to check L1 gas fee
             return outcome
         }
+
         // ensure that the account has enough balance to cover the L1 gas cost
         if let TransactionValidationOutcome::Valid {
             balance,
@@ -296,12 +300,13 @@ where
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
+            let block_timestamp = self.block_timestamp();
 
             let encoded = valid_tx.transaction().encoded_2718();
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
-                self.block_timestamp(),
+                block_timestamp,
                 &encoded,
                 false,
             ) {
@@ -324,8 +329,11 @@ where
             }
 
             // Interop cross tx validation
-            let transaction = if self.chain_spec().is_interop_active() {
-                self.apply_checks_against_superchain_state(valid_tx).await?
+            let transaction = if self.chain_spec().is_interop_active_at_timestamp(block_timestamp) {
+                match self.apply_checks_against_superchain_state(valid_tx).await {
+                    Ok(tx) => tx,
+                    Err(invalid_tx) => return invalid_tx,
+                }
             } else {
                 valid_tx
             };
