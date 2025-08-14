@@ -401,8 +401,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        future::join_all(transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)))
-            .await
+        self.validate_all(transactions).await
     }
 
     async fn validate_transactions_with_origin(
@@ -410,10 +409,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
-        )
-        .await
+        self.validate_all(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
