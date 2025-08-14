@@ -23,6 +23,8 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
+reth-revm.workspace = true
+reth-errors.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
@@ -37,6 +39,8 @@ reth-optimism-primitives = { workspace = true, features = ["reth-codec", "serde-
 reth-optimism-forks.workspace = true
 
 # ethereum
+alloy-pubsub.workspace = true
+alloy-rpc-types-mev.workspace=true
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
