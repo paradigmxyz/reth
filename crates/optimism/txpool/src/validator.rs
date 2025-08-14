@@ -329,19 +329,15 @@ where
             }
 
             // Interop cross tx validation
-            let transaction = if self.chain_spec().is_interop_active_at_timestamp(block_timestamp) {
-                match self.apply_checks_against_superchain_state(valid_tx).await {
-                    Ok(super_valid_tx) => super_valid_tx,
-                    Err(invalid_tx) => return invalid_tx,
-                }
-            } else {
-                valid_tx
+            let valid_tx = match self.apply_checks_against_superchain_state(valid_tx).await {
+                Ok(super_valid_tx) => super_valid_tx,
+                Err(invalid_tx) => return invalid_tx,
             };
 
             return TransactionValidationOutcome::Valid {
                 balance,
                 state_nonce,
-                transaction,
+                transaction: valid_tx,
                 propagate,
                 bytecode_hash,
                 authorities,
@@ -359,26 +355,27 @@ where
         transaction: ValidTransaction<Tx>,
     ) -> Result<ValidTransaction<Tx>, TransactionValidationOutcome<Tx>> {
         // Interop cross tx validation
-        match self.is_valid_cross_tx(transaction.transaction()).await {
-            Some(Err(err)) => {
-                let err = match err {
-                    InvalidCrossTx::CrossChainTxPreInterop => {
-                        InvalidTransactionError::TxTypeNotSupported.into()
-                    }
-                    err => InvalidPoolTransactionError::Other(Box::new(err)),
-                };
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction.into_transaction(),
-                    err,
-                ))
+        if let Some(cross_chain_tx_res) = self.is_valid_cross_tx(transaction.transaction()).await {
+            match cross_chain_tx_res {
+                Ok(_) => {
+                    // valid interop tx
+                    transaction.transaction().set_interop_deadline(
+                        self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                    )
+                }
+                Err(err) => {
+                    let err = match err {
+                        InvalidCrossTx::CrossChainTxPreInterop => {
+                            InvalidTransactionError::TxTypeNotSupported.into()
+                        }
+                        err => InvalidPoolTransactionError::Other(Box::new(err)),
+                    };
+                    return Err(TransactionValidationOutcome::Invalid(
+                        transaction.into_transaction(),
+                        err,
+                    ))
+                }
             }
-            Some(Ok(_)) => {
-                // valid interop tx
-                transaction
-                    .transaction()
-                    .set_interop_deadline(self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS)
-            }
-            None => {} // not an interop (cross-chain) tx
         }
 
         Ok(transaction)
