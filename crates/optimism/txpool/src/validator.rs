@@ -387,7 +387,7 @@ where
         // Interop cross tx validation
         if let Some(cross_chain_tx_res) = self.is_valid_cross_tx(transaction.transaction()).await {
             match cross_chain_tx_res {
-                Ok(_) => {
+                Ok(()) => {
                     // valid interop tx
                     transaction.transaction().set_interop_deadline(
                         self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
