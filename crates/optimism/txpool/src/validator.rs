@@ -333,7 +333,7 @@ where
     /// Applies Superchain validity check to single transaction.
     ///
     /// RPC queries OP supervisor (cross-chain oracle), which stores superchain state, about
-    ///transaction's validity, given transaction is a cross-chain transaction.
+    /// transaction's validity, given transaction is a cross-chain transaction.
     pub async fn apply_checks_against_superchain_state(
         &self,
         transaction: ValidTransaction<Tx>,
