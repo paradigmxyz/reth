@@ -14,7 +14,8 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
-///
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineEvent instead")]
 pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
 
 /// Events emitted by the consensus engine.

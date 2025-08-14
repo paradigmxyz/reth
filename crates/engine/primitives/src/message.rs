@@ -17,7 +17,9 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
-type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineHandle instead")]
+pub type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -200,7 +202,7 @@ where
     to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
-impl<Payload> BeaconConsensusEngineHandle<Payload>
+impl<Payload> ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {
