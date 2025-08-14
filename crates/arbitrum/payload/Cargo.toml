@@ -27,7 +27,7 @@ alloy-rlp = { workspace = true }
 reth-payload-builder = { workspace = true }
 
 # new deps for builder.rs
-reth-basic-payload-builder = { path = "../../payload/basic-builder" }
+reth-payload-basic = { path = "../../payload/basic" }
 reth-revm = { path = "../../evm/revm" }
 reth-storage-api = { path = "../../storage/storage-api" }
 reth-evm = { path = "../../evm/evm" }

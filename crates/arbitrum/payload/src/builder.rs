@@ -1,6 +1,6 @@
 use crate::{ArbBuiltPayload, ArbPayloadTypes};
 use alloy_primitives::U256;
-use reth_basic_payload_builder::{
+use reth_payload_basic::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder,
     PayloadConfig,
 };
@@ -39,14 +39,14 @@ where
 {
     fn build_payload_internal(
         &self,
-        args: reth_basic_payload_builder::BuildArguments<Attrs, ArbBuiltPayload<N>>,
-    ) -> Result<reth_basic_payload_builder::BuildOutcome<ArbBuiltPayload<N>>, PayloadBuilderError> {
-        let reth_basic_payload_builder::BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        args: reth_payload_basic::BuildArguments<Attrs, ArbBuiltPayload<N>>,
+    ) -> Result<reth_payload_basic::BuildOutcome<ArbBuiltPayload<N>>, PayloadBuilderError> {
+        let reth_payload_basic::BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
         let parent = config.parent_header.clone();
         let parent_hash = parent.hash();
 
-        let ctx = reth_basic_payload_builder::BuildContext {
+        let ctx = reth_payload_basic::BuildContext {
             evm_config: self.evm_config.clone(),
             chain_spec: self.client.chain_spec(),
             config,
@@ -59,8 +59,8 @@ where
 
         let block_builder = ctx.block_builder::<BlockExecutor<Evm::Primitives, _>>(&state_provider)?;
 
-        let reth_basic_payload_builder::BuiltBlock { executed, payload } =
-            reth_basic_payload_builder::build_block::<_, _, ArbBuiltPayload<N>, _, _>(
+        let reth_payload_basic::BuiltBlock { executed, payload } =
+            reth_payload_basic::build_block::<_, _, ArbBuiltPayload<N>, _, _>(
                 block_builder,
                 &state_provider,
                 &state_db,
@@ -74,7 +74,7 @@ where
         let executed_block: Option<ExecutedBlockWithTrieUpdates<N>> = executed.map(|e| e.into());
         let payload = ArbBuiltPayload::new(ctx.payload_id(), Arc::new(payload), U256::ZERO, executed_block);
 
-        Ok(reth_basic_payload_builder::BuildOutcome {
+        Ok(reth_payload_basic::BuildOutcome {
             cached_reads,
             payload,
         })
@@ -97,8 +97,8 @@ where
 
     fn try_build(
         &self,
-        args: reth_basic_payload_builder::BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<reth_basic_payload_builder::BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        args: reth_payload_basic::BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<reth_payload_basic::BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         self.build_payload_internal(args)
     }
 
@@ -115,8 +115,8 @@ where
         parent: SealedHeader<HeaderForPayload<Self::BuiltPayload>>,
         attributes: Self::Attributes,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let ctx = reth_basic_payload_builder::PayloadConfig { parent_header: Arc::new(parent), attributes };
-        let args = reth_basic_payload_builder::BuildArguments {
+        let ctx = reth_payload_basic::PayloadConfig { parent_header: Arc::new(parent), attributes };
+        let args = reth_payload_basic::BuildArguments {
             cached_reads: State::default(),
             config: ctx,
             cancel: Default::default(),
