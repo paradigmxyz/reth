@@ -394,15 +394,14 @@ where
                     )
                 }
                 Err(err) => {
-                    let err = match err {
-                        InvalidCrossTx::CrossChainTxPreInterop => {
-                            InvalidTransactionError::TxTypeNotSupported.into()
-                        }
-                        err => InvalidPoolTransactionError::Other(Box::new(err)),
-                    };
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction.into_transaction(),
-                        err,
+                        match err {
+                            InvalidCrossTx::CrossChainTxPreInterop => {
+                                InvalidTransactionError::TxTypeNotSupported.into()
+                            }
+                            err => InvalidPoolTransactionError::Other(Box::new(err)),
+                        },
                     ))
                 }
             }
