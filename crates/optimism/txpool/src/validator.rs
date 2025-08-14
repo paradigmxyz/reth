@@ -326,10 +326,7 @@ where
             }
 
             // Interop cross tx validation
-            let super_valid_tx = match self.apply_checks_against_superchain_state(valid_tx).await {
-                Ok(tx) => tx,
-                Err(err) => return err,
-            };
+            let super_valid_tx = self.apply_checks_against_superchain_state(valid_tx).await?;
 
             return TransactionValidationOutcome::Valid {
                 balance,
