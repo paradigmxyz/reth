@@ -1,6 +1,6 @@
-//! Represents era Era file operations for reading and writing
+//! Represents reading and writing operations' era file
 
-use crate::{e2s_types::Version, E2sError};
+use crate::{e2s_types::Version, execution_types::Accumulator, E2sError};
 use std::{
     fs::File,
     io::{Read, Seek, Write},
@@ -20,9 +20,6 @@ pub trait EraFile: Sized {
 
     /// Get the content group
     fn group(&self) -> &Self::EraGroup;
-
-    /// Get mutable reference to the content group
-    fn group_mut(&mut self) -> &mut Self::EraGroup;
 
     /// Get the file identifier
     fn id(&self) -> &Self::Id;
@@ -65,7 +62,7 @@ pub trait EraReader<R: Read + Seek>: Sized {
 }
 
 /// [`EraReader`] provides reading file operations for era files
-pub trait EraFileReaderFile: EraReader<File> {
+pub trait EraFileReader: EraReader<File> {
     /// Opens and reads an era file from the given path
     fn open<P: AsRef<Path>>(
         path: P,
@@ -86,13 +83,13 @@ pub trait EraWriter<W: Write>: Sized {
     fn new(writer: W) -> Self;
 
     /// Writer version
-    fn writer_version(&self) -> Result<(), E2sError>;
+    fn write_version(&mut self) -> Result<(), E2sError>;
 
     /// Write a complete era file
     fn write_file(&mut self, file: &Self::File) -> Result<(), E2sError>;
 
     /// Writer accumulator
-    fn write_accumulator(&mut self, accumulator: &[u8]) -> Result<(), E2sError>;
+    fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError>;
 
     /// Flush any buffered data
     fn flush(&mut self) -> Result<(), E2sError>;
