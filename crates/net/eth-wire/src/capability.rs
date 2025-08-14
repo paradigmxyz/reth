@@ -238,13 +238,13 @@ impl SharedCapabilities {
 
     /// Returns the number of shared capabilities.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Returns true if there are no shared capabilities.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -534,7 +534,7 @@ mod tests {
         let mut encoded = Vec::new();
         msg.encode(&mut encoded);
 
-        // Decode the bytes back into RawCapbailitMessage
+        // Decode the bytes back into RawCapabilityMessage
         let decoded = RawCapabilityMessage::decode(&mut &encoded[..]).unwrap();
 
         // Verify that the decoded message matches the original

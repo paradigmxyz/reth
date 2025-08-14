@@ -1,10 +1,11 @@
 //! Logic to export from database era1 block history
 //! and injecting them into era1 files with `Era1Writer`.
 
-use alloy_consensus::{BlockBody, BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
+    e2s_types::IndexEntry,
     era1_file::Era1Writer,
     era1_types::{BlockIndex, Era1Id},
     execution_types::{
@@ -18,7 +19,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const REPORT_INTERVAL_SECS: u64 = 10;
 const ENTRY_HEADER_SIZE: usize = 8;
@@ -38,7 +39,7 @@ pub struct ExportConfig {
     /// It can never be larger than `MAX_BLOCKS_PER_ERA1 = 8192`
     /// See also <`https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md`>
     pub max_blocks_per_file: u64,
-    /// Network name
+    /// Network name.
     pub network: String,
 }
 
@@ -76,11 +77,9 @@ impl ExportConfig {
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files
 /// for a given number of blocks then writes them to disk.
-pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
+pub fn export<P>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
-    P: BlockReader<Block = B>,
-    B: Into<BlockBody<P::Transaction, Header>>,
-    P::Header: Into<Header>,
+    P: BlockReader,
 {
     config.validate()?;
     info!(
@@ -135,14 +134,26 @@ where
 
         let headers = provider.headers_range(start_block..=end_block)?;
 
-        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32);
+        // Extract first 4 bytes of last block's state root as historical identifier
+        let historical_root = headers
+            .last()
+            .map(|header| {
+                let state_root = header.state_root();
+                [state_root[0], state_root[1], state_root[2], state_root[3]]
+            })
+            .unwrap_or([0u8; 4]);
+
+        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
+            .with_hash(historical_root);
+
+        debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
         let file = std::fs::File::create(&file_path)?;
         let mut writer = Era1Writer::new(file);
         writer.write_version()?;
 
-        let mut offsets = Vec::with_capacity(block_count);
-        let mut position = VERSION_ENTRY_SIZE as i64;
+        let mut offsets = Vec::<u64>::with_capacity(block_count);
+        let mut position = VERSION_ENTRY_SIZE as u64;
         let mut blocks_written = 0;
         let mut final_header_data = Vec::new();
 
@@ -167,7 +178,7 @@ where
             let body_size = compressed_body.data.len() + ENTRY_HEADER_SIZE;
             let receipts_size = compressed_receipts.data.len() + ENTRY_HEADER_SIZE;
             let difficulty_size = 32 + ENTRY_HEADER_SIZE; // U256 is 32 + 8 bytes header overhead
-            let total_size = header_size + body_size + receipts_size + difficulty_size;
+            let total_size = (header_size + body_size + receipts_size + difficulty_size) as u64;
 
             let block_tuple = BlockTuple::new(
                 compressed_header,
@@ -177,7 +188,7 @@ where
             );
 
             offsets.push(position);
-            position += total_size as i64;
+            position += total_size;
 
             writer.write_block(&block_tuple)?;
             blocks_written += 1;
@@ -259,16 +270,14 @@ where
 }
 
 // Compresses block data and returns compressed components with metadata
-fn compress_block_data<P, B>(
+fn compress_block_data<P>(
     provider: &P,
     header: P::Header,
     expected_block_number: BlockNumber,
     total_difficulty: &mut U256,
 ) -> Result<(CompressedHeader, CompressedBody, CompressedReceipts)>
 where
-    P: BlockReader<Block = B>,
-    B: Into<BlockBody<P::Transaction, Header>>,
-    P::Header: Into<Header>,
+    P: BlockReader,
 {
     let actual_block_number = header.number();
 
@@ -286,8 +295,8 @@ where
 
     *total_difficulty += header.difficulty();
 
-    let compressed_header = CompressedHeader::from_header(&header.into())?;
-    let compressed_body = CompressedBody::from_body(&body.into())?;
+    let compressed_header = CompressedHeader::from_header(&header)?;
+    let compressed_body = CompressedBody::from_body(&body)?;
     let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
         .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
 

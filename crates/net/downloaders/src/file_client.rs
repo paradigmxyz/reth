@@ -437,7 +437,7 @@ impl ChunkedFileReader {
 
     /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
     /// length and the remaining file length.
-    fn chunk_len(&self) -> u64 {
+    const fn chunk_len(&self) -> u64 {
         let Self { chunk_byte_len, file_byte_len, .. } = *self;
         let file_byte_len = file_byte_len + self.chunk.len() as u64;
 

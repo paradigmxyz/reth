@@ -3,10 +3,11 @@
 use alloy_network::Ethereum;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_rpc_convert::RpcConverter;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::receipt::EthReceiptConverter;
 
 /// An [`RpcConverter`] with its generics set to Ethereum specific.
-pub type EthRpcConverter = RpcConverter<Ethereum, EthEvmConfig, EthApiError>;
+pub type EthRpcConverter<ChainSpec> =
+    RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
 
 //tests for simulate
 #[cfg(test)]
@@ -14,12 +15,13 @@ mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
     use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chainspec::MAINNET;
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;
 
     #[test]
     fn test_resolve_transaction_empty_request() {
-        let builder = EthRpcConverter::default();
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let tx = TransactionRequest::default();
         let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
@@ -34,7 +36,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_legacy() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let builder = EthRpcConverter::default();
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
@@ -50,7 +52,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_partial_eip1559() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let builder = EthRpcConverter::default();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest {
             max_fee_per_gas: Some(200),
@@ -58,7 +60,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &rpc_converter).unwrap();
 
         assert_eq!(result.tx_type(), TxType::Eip1559);
         let tx = result.into_inner();

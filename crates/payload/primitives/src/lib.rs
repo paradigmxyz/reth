@@ -26,7 +26,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
+    BuildNextEnv, BuiltPayload, PayloadAttributes, PayloadAttributesBuilder,
+    PayloadBuilderAttributes,
 };
 
 mod payload;
@@ -412,6 +413,17 @@ impl EngineApiMessageVersion {
     /// Returns true if the version is V5.
     pub const fn is_v5(&self) -> bool {
         matches!(self, Self::V5)
+    }
+
+    /// Returns the method name for the given version.
+    pub const fn method_name(&self) -> &'static str {
+        match self {
+            Self::V1 => "engine_newPayloadV1",
+            Self::V2 => "engine_newPayloadV2",
+            Self::V3 => "engine_newPayloadV3",
+            Self::V4 => "engine_newPayloadV4",
+            Self::V5 => "engine_newPayloadV5",
+        }
     }
 }
 

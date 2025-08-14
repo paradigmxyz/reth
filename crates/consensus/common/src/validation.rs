@@ -132,8 +132,32 @@ where
 /// - Compares the ommer hash in the block header to the block body
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
-/// - (Optionally) Compares the receipts root in the block header to the block body
 pub fn validate_block_pre_execution<B, ChainSpec>(
+    block: &SealedBlock<B>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    ChainSpec: EthereumHardforks,
+{
+    post_merge_hardfork_fields(block, chain_spec)?;
+
+    // Check transaction root
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    }
+
+    Ok(())
+}
+
+/// Validates the ommers hash and other fork-specific fields.
+///
+/// These fork-specific validations are:
+/// * EIP-4895 withdrawals validation, if shanghai is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_shanghai_withdrawals`].
+/// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_cancun_gas`].
+pub fn post_merge_hardfork_fields<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError>
@@ -151,11 +175,6 @@ where
             }
             .into(),
         ))
-    }
-
-    // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -190,7 +209,7 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
     }
 
-    if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
+    if !blob_gas_used.is_multiple_of(DATA_GAS_PER_BLOB) {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,

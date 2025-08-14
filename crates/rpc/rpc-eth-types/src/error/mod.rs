@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
-use reth_errors::{BlockExecutionError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -187,6 +187,14 @@ impl EthApiError {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
 
+    /// Returns the [`RpcInvalidTransactionError`] if this is a [`EthApiError::InvalidTransaction`]
+    pub const fn as_invalid_transaction(&self) -> Option<&RpcInvalidTransactionError> {
+        match self {
+            Self::InvalidTransaction(e) => Some(e),
+            _ => None,
+        }
+    }
+
     /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
     pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
     where
@@ -201,6 +209,11 @@ impl EthApiError {
         E: Into<Self>,
     {
         err.into()
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 
@@ -358,7 +371,30 @@ impl From<RethError> for EthApiError {
 
 impl From<BlockExecutionError> for EthApiError {
     fn from(error: BlockExecutionError) -> Self {
-        Self::Internal(error.into())
+        match error {
+            BlockExecutionError::Validation(validation_error) => match validation_error {
+                BlockValidationError::InvalidTx { error, .. } => {
+                    if let Some(invalid_tx) = error.as_invalid_tx_err() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::other(
+                            rpc_error_with_code(
+                                EthRpcErrorCode::TransactionRejected.code(),
+                                error.to_string(),
+                            ),
+                        ))
+                    }
+                }
+                _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                    validation_error,
+                ))),
+            },
+            BlockExecutionError::Internal(internal_error) => {
+                Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
+            }
+        }
     }
 }
 
@@ -586,9 +622,7 @@ impl RpcInvalidTransactionError {
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
-}
 
-impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     pub const fn error_code(&self) -> i32 {
         match self {
@@ -626,6 +660,11 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
         }
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 

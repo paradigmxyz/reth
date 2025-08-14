@@ -37,3 +37,7 @@ reth-tracing.workspace = true
 reth-chainspec.workspace = true
 reth-node-ethereum.workspace = true
 alloy-genesis.workspace = true
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"

@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use proptest::{prelude::*, strategy::ValueTree};
 use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie, SparseTrie};
+use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
 
 const LEAF_COUNTS: [usize; 2] = [1_000, 5_000];
 
@@ -16,11 +16,11 @@ fn update_leaf(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(leaf_count), |b| {
             let leaves = generate_leaves(leaf_count);
             // Start with an empty trie
-            let provider = DefaultBlindedProvider;
+            let provider = DefaultTrieNodeProvider;
 
             b.iter_batched(
                 || {
-                    let mut trie = SparseTrie::<RevealedSparseTrie>::revealed_empty();
+                    let mut trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
                     // Pre-populate with data
                     for (path, value) in leaves.iter().cloned() {
                         trie.update_leaf(path, value, &provider).unwrap();
@@ -60,11 +60,11 @@ fn remove_leaf(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(leaf_count), |b| {
             let leaves = generate_leaves(leaf_count);
             // Start with an empty trie
-            let provider = DefaultBlindedProvider;
+            let provider = DefaultTrieNodeProvider;
 
             b.iter_batched(
                 || {
-                    let mut trie = SparseTrie::<RevealedSparseTrie>::revealed_empty();
+                    let mut trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
                     // Pre-populate with data
                     for (path, value) in leaves.iter().cloned() {
                         trie.update_leaf(path, value, &provider).unwrap();

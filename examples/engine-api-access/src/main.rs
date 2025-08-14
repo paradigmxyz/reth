@@ -10,9 +10,7 @@ use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{EngineApiExt, FullNodeComponents, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
-    args::RollupArgs,
-    node::{OpAddOns, OpEngineValidatorBuilder},
-    OpEngineApiBuilder, OpNode,
+    args::RollupArgs, node::OpEngineValidatorBuilder, OpAddOns, OpEngineApiBuilder, OpNode,
 };
 use tokio::sync::oneshot;
 

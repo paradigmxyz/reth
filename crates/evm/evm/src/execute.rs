@@ -1,16 +1,15 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook};
+use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory,
+    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::B256;
-use core::fmt::Debug;
+use alloy_primitives::{Address, B256};
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -344,15 +343,22 @@ pub trait BlockBuilder {
     fn into_executor(self) -> Self::Executor;
 }
 
-pub(crate) struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
+/// A type that constructs a block from transactions and execution results.
+#[derive(Debug)]
+pub struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
 where
     F: BlockExecutorFactory,
 {
-    pub(crate) executor: Executor,
-    pub(crate) transactions: Vec<Recovered<TxTy<N>>>,
-    pub(crate) ctx: F::ExecutionCtx<'a>,
-    pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
-    pub(crate) assembler: Builder,
+    /// The block executor used to execute transactions.
+    pub executor: Executor,
+    /// The transactions executed in this block.
+    pub transactions: Vec<Recovered<TxTy<N>>>,
+    /// The parent block execution context.
+    pub ctx: F::ExecutionCtx<'a>,
+    /// The sealed parent block header.
+    pub parent: &'a SealedHeader<HeaderTy<N>>,
+    /// The assembler used to build the block.
+    pub assembler: Builder,
 }
 
 /// Conversions for executable transactions.
@@ -542,6 +548,43 @@ where
 
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
+    }
+}
+
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
+pub trait ExecutableTxFor<Evm: ConfigureEvm>:
+    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+{
+}
+
+impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
+    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
+{
+}
+
+/// A container for a transaction and a transaction environment.
+#[derive(Debug, Clone)]
+pub struct WithTxEnv<TxEnv, T> {
+    /// The transaction environment for EVM.
+    pub tx_env: TxEnv,
+    /// The recovered transaction.
+    pub tx: T,
+}
+
+impl<TxEnv, Tx, T: RecoveredTx<Tx>> RecoveredTx<Tx> for WithTxEnv<TxEnv, T> {
+    fn tx(&self) -> &Tx {
+        self.tx.tx()
+    }
+
+    fn signer(&self) -> &Address {
+        self.tx.signer()
+    }
+}
+
+impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
+    fn to_tx_env(&self) -> TxEnv {
+        self.tx_env.clone()
     }
 }
 

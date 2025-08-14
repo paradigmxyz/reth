@@ -1,5 +1,3 @@
-import React from 'react'
-
 interface TrustedCompany {
   name: string
   logoUrl: string
@@ -27,9 +25,9 @@ const companies: TrustedCompany[] = [
 export function TrustedBy() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-      {companies.map((company, index) => (
+      {companies.map((company) => (
         <div
-          key={index}
+          key={company.name}
           className="relative bg-white/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl p-8 hover:bg-black/5 dark:hover:bg-white/10 transition-colors flex flex-col items-center justify-center h-40 group"
         >
           {/* Company Logo */}

@@ -216,6 +216,17 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
 
+/// Trait for block headers that can be modified through CLI operations.
+pub trait CliHeader {
+    fn set_number(&mut self, number: u64);
+}
+
+impl CliHeader for alloy_consensus::Header {
+    fn set_number(&mut self, number: u64) {
+        self.number = number;
+    }
+}
+
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: NodeTypesForProvider {
@@ -232,7 +243,7 @@ where
 }
 
 /// Helper trait aggregating components required for the CLI.
-pub trait CliNodeComponents<N: CliNodeTypes> {
+pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static {
     /// Evm to use.
     type Evm: ConfigureEvm<Primitives = N::Primitives> + 'static;
     /// Consensus implementation.
@@ -259,4 +270,19 @@ where
     fn consensus(&self) -> &Self::Consensus {
         &self.1
     }
+}
+
+/// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
+pub trait CliComponentsBuilder<N: CliNodeTypes>:
+    FnOnce(Arc<N::ChainSpec>) -> Self::Components + Send + Sync + 'static
+{
+    type Components: CliNodeComponents<N>;
+}
+
+impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
+where
+    F: FnOnce(Arc<N::ChainSpec>) -> Comp + Send + Sync + 'static,
+    Comp: CliNodeComponents<N>,
+{
+    type Components = Comp;
 }

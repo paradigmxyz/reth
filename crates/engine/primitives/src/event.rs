@@ -14,7 +14,8 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
-type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
+///
+pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
 
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
@@ -35,9 +36,9 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
 }
 
-impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
+impl<N: NodePrimitives> ConsensusEngineEvent<N> {
     /// Returns the canonical header if the event is a
-    /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
+    /// [`ConsensusEngineEvent::CanonicalChainCommitted`].
     pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
@@ -46,7 +47,7 @@ impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
     }
 }
 
-impl<N> Display for BeaconConsensusEngineEvent<N>
+impl<N> Display for ConsensusEngineEvent<N>
 where
     N: NodePrimitives<BlockHeader: BlockHeader>,
 {
