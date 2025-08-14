@@ -169,7 +169,7 @@ where
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         // stateless checks
-        let transaction = match self.validate_one_no_state(origin, transaction) {
+        let transaction = match self.apply_checks_no_state(origin, transaction) {
             Ok(tx) => tx,
             Err(invalid_tx) => return invalid_tx,
         };
@@ -181,7 +181,7 @@ where
             }
         };
         // checks against state
-        self.validate_one_against_state(origin, transaction, state).await
+        self.apply_checks_against_state(origin, transaction, state).await
     }
 
     /// Validates all given transactions.
@@ -197,7 +197,7 @@ where
             .into_iter()
             .map(|(origin, tx)| {
                 self.apply_op_checks_no_state(tx)
-                    .and_then(|tx| self.inner.validate_one_no_state(origin, tx))
+                    .and_then(|tx| self.inner.apply_checks_no_state(origin, tx))
                     .map(|tx| (origin, tx))
             })
             .collect::<Vec<_>>();
@@ -226,7 +226,7 @@ where
 
         future::join_all(transactions.into_iter().map(async |res| match res {
             Ok((origin, tx)) => {
-                let outcome = self.inner.validate_one_against_state(origin, tx, state.clone());
+                let outcome = self.inner.apply_checks_against_state(origin, tx, state.clone());
                 self.apply_op_checks_against_state(outcome).await
             }
             Err(invalid_outcome) => invalid_outcome,
@@ -243,8 +243,8 @@ where
     ///
     /// Under the hood calls
     /// [`apply_op_checks_no_state`](Self::apply_op_checks_no_state), then checks inherited from L1
-    /// [`validate_one_no_state`](EthTransactionValidator::validate_one_no_state).
-    pub fn validate_one_no_state(
+    /// [`apply_checks_no_state`](EthTransactionValidator::apply_checks_no_state).
+    pub fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -252,15 +252,15 @@ where
         // OP checks without state
         let transaction = self.apply_op_checks_no_state(transaction)?;
         // checks inherited from L1
-        self.inner.validate_one_no_state(origin, transaction)
+        self.inner.apply_checks_no_state(origin, transaction)
     }
 
     /// Validates single transaction using given state.
     ///
     /// Under the hood calls checks inherited from L1
-    /// [`validate_one_no_state`](EthTransactionValidator::validate_one_against_state), then
+    /// [`apply_checks_no_state`](EthTransactionValidator::apply_checks_against_state), then
     /// [`apply_op_checks_against_state`](Self::apply_op_checks_against_state).
-    pub async fn validate_one_against_state<P>(
+    pub async fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -271,7 +271,7 @@ where
     {
         // checks inherited from L1
         let l1_validation_outcome =
-            self.inner.validate_one_against_state(origin, transaction, state);
+            self.inner.apply_checks_against_state(origin, transaction, state);
         // OP checks against state bundled in L1 validation outcome and then superchain state (by
         // RPC call to supervisor).
         self.apply_op_checks_against_state(l1_validation_outcome).await
@@ -303,7 +303,7 @@ where
     /// relevant state.
     ///
     /// Takes as parameter a transaction that has successfully passed pipeline for inherited L1
-    /// checks [`validate_one_against_state`](EthTransactionValidator::validate_one_against_state).
+    /// checks [`apply_checks_against_state`](EthTransactionValidator::apply_checks_against_state).
     ///
     /// Applies OP-protocol specific checks:
     /// - ensures that the account has enough balance to cover the L1 gas cost
