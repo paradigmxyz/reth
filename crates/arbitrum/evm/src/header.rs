@@ -1,5 +1,5 @@
 use alloy_consensus::Header;
-use alloy_primitives::{keccak256, Address, B256, Bytes};
+use alloy_primitives::{keccak256, Address, B256, Bytes, U256};
 use reth_storage_api::StateProvider;
 
 #[derive(Clone, Debug, Default)]
@@ -22,7 +22,7 @@ impl ArbHeaderInfo {
 }
 
 const fn arbos_state_address() -> Address {
-    Address::from_bytes([
+    Address::new([
         0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
     ])
@@ -54,14 +54,17 @@ fn subspace(parent: &[u8], id: &[u8]) -> [u8; 32] {
 }
 
 fn read_storage_u64_be(provider: &dyn StateProvider, addr: Address, slot: B256) -> Option<u64> {
-    let val = provider.storage(addr, slot).ok()??;
+    let val: U256 = provider.storage(addr, slot).ok()??;
+    let bytes: [u8; 32] = val.to_be_bytes::<32>();
     let mut buf = [0u8; 8];
-    buf.copy_from_slice(&val.0[24..32]);
+    buf.copy_from_slice(&bytes[24..32]);
     Some(u64::from_be_bytes(buf))
 }
 
 fn read_storage_hash(provider: &dyn StateProvider, addr: Address, slot: B256) -> Option<B256> {
-    provider.storage(addr, slot).ok().flatten().map(B256::from)
+    let val: U256 = provider.storage(addr, slot).ok()??;
+    let bytes: [u8; 32] = val.to_be_bytes::<32>();
+    Some(B256::from(bytes))
 }
 
 fn calc_num_partials(size: u64) -> u64 {

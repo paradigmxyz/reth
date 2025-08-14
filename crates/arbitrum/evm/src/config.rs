@@ -133,3 +133,28 @@ impl<H: alloy_consensus::BlockHeader>
         }
     }
 }
+impl<Attrs, H, CS> reth_payload_primitives::BuildNextEnv<Attrs, H, CS> for ArbNextBlockEnvAttributes
+where
+    Attrs: Into<reth_payload_builder::EthPayloadBuilderAttributes> + Clone,
+    H: alloy_consensus::BlockHeader,
+    CS: crate::ArbitrumChainSpec,
+{
+    fn build_next_env(
+        attrs: &Attrs,
+        parent: &reth_primitives_traits::SealedHeader<H>,
+        _chain_spec: &CS,
+    ) -> Result<Self, reth_payload_primitives::PayloadBuilderError> {
+        let attrs: reth_payload_builder::EthPayloadBuilderAttributes = attrs.clone().into();
+        Ok(ArbNextBlockEnvAttributes {
+            timestamp: attrs.timestamp,
+            suggested_fee_recipient: attrs.suggested_fee_recipient,
+            prev_randao: attrs.prev_randao,
+            gas_limit: parent.gas_limit(),
+            withdrawals: None,
+            parent_beacon_block_root: attrs.parent_beacon_block_root.or_else(|| parent.parent_beacon_block_root()),
+            extra_data: alloy_primitives::Bytes::new(),
+            max_fee_per_gas: None,
+            blob_gas_price: None,
+        })
+    }
+}
