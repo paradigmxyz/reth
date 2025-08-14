@@ -4,15 +4,13 @@ use alloy_rpc_types_engine::ClientVersionV1;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes};
 use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
-use reth_node_core::version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA};
+use reth_node_core::version::{version_metadata, CLIENT_CODE};
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 
 use crate::ARB_NAME_CLIENT;
 use reth_arbitrum_rpc::engine::ARB_ENGINE_CAPABILITIES;
 use reth_arbitrum_payload::ArbExecutionData;
-use reth_arbitrum_rpc::nitro::ArbNitroRpc;
-use reth_rpc_api::servers::RpcServer;
 
 #[derive(Debug, Default, Clone)]
 pub struct ArbEngineApiBuilder<EV> {
@@ -51,8 +49,8 @@ where
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
             name: ARB_NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
         let inner = EngineApi::new(
             ctx.node.provider().clone(),
@@ -67,7 +65,6 @@ where
             ctx.config.engine.accept_execution_requests_hash,
         );
 
-        let _ = ctx.rpc_registry.register_methods(ArbNitroRpc::default().into_rpc_module());
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }

@@ -379,7 +379,7 @@ reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
-reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
+reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false, features = ["serde", "serde-bincode-compat"] }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm/evm", default-features = false }

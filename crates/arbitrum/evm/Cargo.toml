@@ -28,10 +28,14 @@ reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, fea
 reth-rpc-eth-api = { path = "../../rpc/rpc-eth-api", default-features = false, optional = true }
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
 
+reth-storage-api = { path = "../../storage/storage-api", default-features = false, features = ["std"] }
 # Additional workspace deps mirroring Optimism patterns
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-storage-errors.workspace = true
+
+reth-payload-primitives = { path = "../../payload/primitives", default-features = false, features = ["std"] }
+reth-payload-builder = { path = "../../payload/builder" }
 
 # ethereum evm adapter
 reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }

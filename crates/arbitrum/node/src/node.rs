@@ -132,7 +132,7 @@ where
 pub type ArbNodeComponents<N> = ComponentsBuilder<
     N,
     ArbPoolBuilder,
-    reth_node_builder::components::NoopPayloadServiceBuilder,
+    BasicPayloadServiceBuilder<crate::payload::ArbPayloadBuilderBuilder>,
     ArbNetworkBuilder,
     ArbExecutorBuilder,
     ArbConsensusBuilder,
@@ -276,7 +276,7 @@ where
             .node_types::<N>()
             .pool(ArbPoolBuilder::default())
             .executor(ArbExecutorBuilder::default())
-            .payload(reth_node_builder::components::NoopPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(crate::payload::ArbPayloadBuilderBuilder::default()))
             .network(ArbNetworkBuilder::default())
             .consensus(ArbConsensusBuilder::default())
     }

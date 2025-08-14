@@ -6,6 +6,7 @@ use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{Receipt, SignedTransaction};
 use crate::ArbitrumChainSpec;
+use crate::header::{ArbHeaderInfo, derive_arb_header_info_from_state};
 
 pub struct ArbBlockAssembler<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
@@ -42,7 +43,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts);
         let logs_bloom = alloy_primitives::logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
-        let header = alloy_consensus::Header {
+        let mut header = alloy_consensus::Header {
             parent_hash: input.execution_ctx.parent_hash,
             ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
             beneficiary: input.evm_env.block_env.beneficiary,
@@ -65,6 +66,10 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
+
+        if let Some(info) = derive_arb_header_info_from_state(&input) {
+            info.apply_to_header(&mut header);
+        }
 
         Ok(alloy_consensus::Block::new(
             header,
@@ -126,5 +131,30 @@ impl<H: alloy_consensus::BlockHeader>
             max_fee_per_gas: None,
             blob_gas_price: None,
         }
+    }
+}
+impl<Attrs, H, CS> reth_payload_primitives::BuildNextEnv<Attrs, H, CS> for ArbNextBlockEnvAttributes
+where
+    Attrs: Into<reth_payload_builder::EthPayloadBuilderAttributes> + Clone,
+    H: alloy_consensus::BlockHeader,
+    CS: crate::ArbitrumChainSpec,
+{
+    fn build_next_env(
+        attrs: &Attrs,
+        parent: &reth_primitives_traits::SealedHeader<H>,
+        _chain_spec: &CS,
+    ) -> Result<Self, reth_payload_primitives::PayloadBuilderError> {
+        let attrs: reth_payload_builder::EthPayloadBuilderAttributes = attrs.clone().into();
+        Ok(ArbNextBlockEnvAttributes {
+            timestamp: attrs.timestamp,
+            suggested_fee_recipient: attrs.suggested_fee_recipient,
+            prev_randao: attrs.prev_randao,
+            gas_limit: parent.gas_limit(),
+            withdrawals: None,
+            parent_beacon_block_root: attrs.parent_beacon_block_root.or_else(|| parent.parent_beacon_block_root()),
+            extra_data: alloy_primitives::Bytes::new(),
+            max_fee_per_gas: None,
+            blob_gas_price: None,
+        })
     }
 }
