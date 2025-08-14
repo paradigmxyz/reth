@@ -304,7 +304,7 @@ where
                 let state = match maybe_state {
                     Some(s) => s,
                     None => match self.client.latest() {
-                        Ok(new_state) => Box::new(new_state),
+                        Ok(new_state) => Box::new(new_state) as Box<dyn AccountInfoReader>,
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
                                 *transaction.hash(),
