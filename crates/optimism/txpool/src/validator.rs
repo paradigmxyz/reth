@@ -184,10 +184,7 @@ where
         state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         // OP checks without state
-        let transaction = match self.apply_op_checks_no_state(transaction) {
-            Ok(tx) => tx,
-            Err(invalid_outcome) => return invalid_outcome,
-        };
+        let transaction = self.apply_op_checks_no_state(transaction)?;
 
         // l1 checks, will load state from DB (costly) unless state has been passed as param
         let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, state);
@@ -327,7 +324,7 @@ where
 
             // Interop cross tx validation
             let transaction = if self.chain_spec().is_interop_active() {
-                self.apply_checks_against_superchain_state(valid_tx).await?;
+                self.apply_checks_against_superchain_state(valid_tx).await?
             } else {
                 valid_tx
             };
