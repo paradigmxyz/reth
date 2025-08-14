@@ -33,11 +33,6 @@ use crate::receipt_file_client::FromReceiptReader;
 /// Default is 1 GB.
 pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 
-/// Maximum memory limit for gzip decompression.
-///
-/// 10MB limit
-const MAX_GZIP_MEMORY: usize = 10 * 1024 * 1024;
-
 /// Front-end API for fetching chain data from a file.
 ///
 /// Blocks are assumed to be written one after another in a file, as rlp bytes.
@@ -415,15 +410,10 @@ impl FileReader {
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
         use tokio::io::AsyncReadExt;
         match self {
-            FileReader::Plain(file) => {
-                file.read_exact(buf).await?;
-                Ok(())
-            }
-            FileReader::Gzip(decoder) => {
-                decoder.read_exact(buf).await?;
-                Ok(())
-            }
-        }
+            FileReader::Plain(file) => file.read_exact(buf).await?,
+            FileReader::Gzip(decoder) => decoder.read_exact(buf).await?,
+        };
+        Ok(())
     }
 
     /// Read some data into the provided buffer, returning the number of bytes read.
@@ -634,64 +624,40 @@ impl ChunkedFileReader {
         // For gzipped files, we need to accumulate data until we have complete blocks
         // because chunk boundaries don't align with block boundaries in compressed data
         if self.is_gzip {
-            // Keep reading and accumulating data until we can parse complete blocks
+            // Keep reading until we accumulate at least chunk_byte_len bytes
             loop {
-                // Try to parse what we have so far
-                if !self.chunk.is_empty() {
-                    let DecodedFileChunk { file_client, remaining_bytes, .. } = FileClientBuilder {
-                        consensus: consensus.clone(),
-                        parent_header: parent_header.clone(),
-                    }
-                    .build(&self.chunk[..], self.chunk.len() as u64)
-                    .await?;
-
-                    // If we successfully parsed some blocks, return them
-                    if file_client.headers_len() > 0 {
-                        self.chunk = remaining_bytes;
-                        return Ok(Some(file_client))
-                    }
+                // If we already have enough data, process it
+                if self.chunk.len() > self.chunk_byte_len as usize {
+                    let DecodedFileChunk { file_client, remaining_bytes, .. } =
+                        FileClientBuilder { consensus, parent_header }
+                            .build(&self.chunk[..], self.chunk.len() as u64)
+                            .await?;
+                    self.chunk = remaining_bytes; // Save leftover bytes for next iteration
+                    return Ok(Some(file_client))
                 }
 
                 // Read more data from the gzipped stream
-                let mut buffer = vec![0u8; 8192]; // Read in 8KB chunks
+                let mut buffer = vec![0u8; 8 * 1024 * 1024]; // Read up to chunk_byte_len for better performance
+
+                // Note: gzip decoder may not utilize the full buffer size due to internal
+                // limitations
                 match self.file.read(&mut buffer).await {
                     Ok(0) => {
                         // EOF reached - if we have any remaining data, try to parse it
                         if !self.chunk.is_empty() {
-                            let DecodedFileChunk { file_client, .. } =
+                            let DecodedFileChunk { file_client, remaining_bytes, .. } =
                                 FileClientBuilder { consensus, parent_header }
                                     .build(&self.chunk[..], self.chunk.len() as u64)
                                     .await?;
-                            self.chunk.clear(); // Mark as processed
+                            self.chunk = remaining_bytes; // Save leftover bytes for next iteration
                             return Ok(Some(file_client))
                         }
-                        return Ok(None);
+                        return Ok(None)
                     }
                     Ok(n) => {
                         buffer.truncate(n);
                         self.chunk.extend_from_slice(&buffer);
-
-                        // Prevent unbounded memory growth - if chunk gets too large,
-                        // try to parse partial data
-                        if self.chunk.len() > MAX_GZIP_MEMORY {
-                            let DecodedFileChunk { file_client, remaining_bytes, .. } =
-                                FileClientBuilder {
-                                    consensus: consensus.clone(),
-                                    parent_header: parent_header.clone(),
-                                }
-                                .build(&self.chunk[..], self.chunk.len() as u64)
-                                .await?;
-
-                            self.chunk = remaining_bytes;
-                            if file_client.headers_len() > 0 {
-                                return Ok(Some(file_client))
-                            }
-                            // If still no blocks parsed and we're at the limit,
-                            // there might be an issue with the data
-                            if self.chunk.len() > MAX_GZIP_MEMORY {
-                                return Err(FileClientError::Custom("Gzipped file contains unparseable data that exceeds memory limit"))
-                            }
-                        }
+                        // Continue the loop to check if we have enough data now
                     }
                     Err(e) => return Err(e.into()),
                 }
