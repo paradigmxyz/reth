@@ -254,6 +254,14 @@ where
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_rpc_middleware(rpc_middleware))
     }
+
+    /// Sets the tokio runtime for the RPC servers.
+    ///
+    /// Caution: This runtime must not be created from within asynchronous context.
+    pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        let Self { inner } = self;
+        Self { inner: inner.with_tokio_runtime(tokio_runtime) }
+    }
 }
 
 impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
