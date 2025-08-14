@@ -144,6 +144,7 @@ pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
     header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
+    recovered::IndexedTx,
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 

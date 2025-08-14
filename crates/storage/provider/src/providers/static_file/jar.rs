@@ -11,16 +11,12 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
-    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
-    TDWithHashMask, TotalDifficultyMask, TransactionMask,
+    BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor, TDWithHashMask,
+    TotalDifficultyMask, TransactionMask,
 };
-use reth_db_api::{
-    models::StoredBlockBodyIndices,
-    table::{Decompress, Value},
-};
+use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
-use reth_storage_api::BlockBodyIndicesProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -358,26 +354,5 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
         // Related to indexing tables. StaticFile should get the tx_range and call static file
         // provider with `receipt()` instead for each
         Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.cursor()?.get_one::<BodyIndicesMask>(num.into())
-    }
-
-    fn block_body_indices_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        let mut cursor = self.cursor()?;
-        let mut indices = Vec::with_capacity((range.end() - range.start() + 1) as usize);
-
-        for num in range {
-            if let Some(block) = cursor.get_one::<BodyIndicesMask>(num.into())? {
-                indices.push(block)
-            }
-        }
-        Ok(indices)
     }
 }

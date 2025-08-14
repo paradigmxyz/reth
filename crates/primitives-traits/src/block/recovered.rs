@@ -6,9 +6,14 @@ use crate::{
     Block, BlockBody, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
-use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, Sealed, B256, B64, U256};
+use alloy_consensus::{
+    transaction::{Recovered, TransactionMeta},
+    BlockHeader,
+};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, Encodable2718};
+use alloy_primitives::{
+    Address, BlockHash, BlockNumber, Bloom, Bytes, Sealed, TxHash, B256, B64, U256,
+};
 use derive_more::Deref;
 
 /// A block with senders recovered from the block's transactions.
@@ -307,6 +312,15 @@ impl<B: Block> RecoveredBlock<B> {
         self.block.body().transactions().get(idx).map(|tx| Recovered::new_unchecked(tx, sender))
     }
 
+    /// Finds a transaction by hash and returns it with its index and block context.
+    pub fn find_indexed(&self, tx_hash: TxHash) -> Option<IndexedTx<'_, B>> {
+        self.body()
+            .transactions_iter()
+            .enumerate()
+            .find(|(_, tx)| tx.trie_hash() == tx_hash)
+            .map(|(index, tx)| IndexedTx { block: self, tx, index })
+    }
+
     /// Returns an iterator over all transactions and their sender.
     #[inline]
     pub fn transactions_with_sender(
@@ -582,6 +596,52 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.block.set_difficulty(difficulty);
+    }
+}
+
+/// Transaction with its index and block reference for efficient metadata access.
+#[derive(Debug)]
+pub struct IndexedTx<'a, B: Block> {
+    /// Recovered block containing the transaction
+    block: &'a RecoveredBlock<B>,
+    /// Transaction matching the hash
+    tx: &'a <B::Body as BlockBody>::Transaction,
+    /// Index of the transaction in the block
+    index: usize,
+}
+
+impl<'a, B: Block> IndexedTx<'a, B> {
+    /// Returns the transaction.
+    pub const fn tx(&self) -> &<B::Body as BlockBody>::Transaction {
+        self.tx
+    }
+
+    /// Returns the transaction hash.
+    pub fn tx_hash(&self) -> TxHash {
+        self.tx.trie_hash()
+    }
+
+    /// Returns the block hash.
+    pub fn block_hash(&self) -> B256 {
+        self.block.hash()
+    }
+
+    /// Returns the index of the transaction in the block.
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Builds a [`TransactionMeta`] for the indexed transaction.
+    pub fn meta(&self) -> TransactionMeta {
+        TransactionMeta {
+            tx_hash: self.tx.trie_hash(),
+            index: self.index as u64,
+            block_hash: self.block.hash(),
+            block_number: self.block.number(),
+            base_fee: self.block.base_fee_per_gas(),
+            timestamp: self.block.timestamp(),
+            excess_blob_gas: self.block.excess_blob_gas(),
+        }
     }
 }
 

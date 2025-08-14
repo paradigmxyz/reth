@@ -99,7 +99,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// time in pool (were added earlier) are returned first.
     ///
     /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
-    /// could potentially be become invalid at point of execution. Therefore, this iterator
+    /// could potentially become invalid at point of execution. Therefore, this iterator
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.

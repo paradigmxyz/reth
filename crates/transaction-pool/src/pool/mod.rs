@@ -341,7 +341,8 @@ where
         }
     }
 
-    /// Returns pooled transactions for the given transaction hashes.
+    /// Returns pooled transactions for the given transaction hashes that are allowed to be
+    /// propagated.
     pub fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
@@ -350,7 +351,7 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        let transactions = self.get_all(tx_hashes);
+        let transactions = self.get_all_propagatable(tx_hashes);
         let mut elements = Vec::with_capacity(transactions.len());
         let mut size = 0;
         for transaction in transactions {
@@ -573,22 +574,24 @@ where
         Ok(listener)
     }
 
-    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    /// Adds all transactions in the iterator to the pool, each with its individual origin,
+    /// returning a list of results.
     ///
     /// Note: A large batch may lock the pool for a long time that blocks important operations
     /// like updating the pool on canonical state changes. The caller should consider having
     /// a max batch size to balance transaction insertions with other updates.
-    pub fn add_transactions(
+    pub fn add_transactions_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+        transactions: impl IntoIterator<
+            Item = (TransactionOrigin, TransactionValidationOutcome<T::Transaction>),
+        >,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
-        // Add the transactions and enforce the pool size limits in one write lock
+        // Process all transactions in one write lock, maintaining individual origins
         let (mut added, discarded) = {
             let mut pool = self.pool.write();
             let added = transactions
                 .into_iter()
-                .map(|tx| self.add_transaction(&mut pool, origin, tx))
+                .map(|(origin, tx)| self.add_transaction(&mut pool, origin, tx))
                 .collect::<Vec<_>>();
 
             // Enforce the pool size limits if at least one transaction was added successfully
@@ -621,6 +624,19 @@ where
         }
 
         added
+    }
+
+    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    ///
+    /// Note: A large batch may lock the pool for a long time that blocks important operations
+    /// like updating the pool on canonical state changes. The caller should consider having
+    /// a max batch size to balance transaction insertions with other updates.
+    pub fn add_transactions(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        self.add_transactions_with_origins(transactions.into_iter().map(|tx| (origin, tx)))
     }
 
     /// Notify all listeners about a new pending transaction.
@@ -951,6 +967,19 @@ where
             return Vec::new()
         }
         self.get_pool_data().get_all(txs).collect()
+    }
+
+    /// Returns all the transactions belonging to the hashes that are propagatable.
+    ///
+    /// If no transaction exists, it is skipped.
+    fn get_all_propagatable(
+        &self,
+        txs: Vec<TxHash>,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        if txs.is_empty() {
+            return Vec::new()
+        }
+        self.get_pool_data().get_all(txs).filter(|tx| tx.propagate).collect()
     }
 
     /// Notify about propagated transactions.

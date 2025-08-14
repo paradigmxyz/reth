@@ -498,7 +498,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         if let Some(interval) = self.dev.block_time {
             MiningMode::interval(interval)
         } else {
-            MiningMode::instant(pool)
+            MiningMode::instant(pool, self.dev.block_max_transactions)
         }
     }
 }

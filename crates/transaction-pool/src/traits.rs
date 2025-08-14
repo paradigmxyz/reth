@@ -76,7 +76,6 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -165,7 +164,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         transaction: Self::Transaction,
     ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send;
 
-    /// Adds the given _unvalidated_ transaction into the pool.
+    /// Adds the given _unvalidated_ transactions into the pool.
+    ///
+    /// All transactions will use the same `origin`.
     ///
     /// Returns a list of results.
     ///
@@ -174,6 +175,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
+
+    /// Adds multiple _unvalidated_ transactions with individual origins.
+    ///
+    /// Each transaction can have its own [`TransactionOrigin`].
+    ///
+    /// Consumer: RPC
+    fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Submit a consensus transaction directly to the pool
@@ -668,7 +679,7 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
     /// Returns the combined number of all transactions.
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.pending.len() + self.queued.len()
     }
 
@@ -757,7 +768,7 @@ pub struct NewBlobSidecar {
 ///
 /// Depending on where the transaction was picked up, it affects how the transaction is handled
 /// internally, e.g. limits for simultaneous transaction of one sender.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum TransactionOrigin {
     /// Transaction is coming from a local source.
     #[default]

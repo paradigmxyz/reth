@@ -94,7 +94,6 @@ compact_types!(
         Log,
         // BranchNodeCompact, // todo requires arbitrary
         TrieMask,
-        // TxDeposit, TODO(joshie): optimism
         // reth_prune_types
         PruneCheckpoint,
         PruneMode,

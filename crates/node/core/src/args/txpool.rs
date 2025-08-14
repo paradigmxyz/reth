@@ -132,6 +132,10 @@ pub struct TxPoolArgs {
         conflicts_with = "transactions_backup_path"
     )]
     pub disable_transactions_backup: bool,
+
+    /// Max batch size for transaction pool insertions
+    #[arg(long = "txpool.max-batch-size", default_value_t = 1)]
+    pub max_batch_size: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -165,6 +169,7 @@ impl Default for TxPoolArgs {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
+            max_batch_size: 1,
         }
     }
 }
@@ -208,6 +213,11 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
         }
+    }
+
+    /// Returns max batch size for transaction batch insertion.
+    fn max_batch_size(&self) -> usize {
+        self.max_batch_size
     }
 }
 

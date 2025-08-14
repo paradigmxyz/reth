@@ -230,7 +230,7 @@ impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
 
     /// Returns true if there are no listeners installed.
     #[inline]
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.senders.is_empty()
     }
 }
@@ -246,7 +246,7 @@ struct PoolEventBroadcaster {
 
 impl PoolEventBroadcaster {
     /// Returns `true` if there are no more listeners remaining.
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.senders.is_empty()
     }
 

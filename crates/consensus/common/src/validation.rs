@@ -209,7 +209,7 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
     }
 
-    if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
+    if !blob_gas_used.is_multiple_of(DATA_GAS_PER_BLOB) {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,

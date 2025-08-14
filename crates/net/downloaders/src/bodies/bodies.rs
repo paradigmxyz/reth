@@ -449,7 +449,7 @@ struct OrderedBodiesResponse<B: Block> {
 
 impl<B: Block> OrderedBodiesResponse<B> {
     #[inline]
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.resp.len()
     }
 

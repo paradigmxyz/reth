@@ -31,7 +31,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Checkout base
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.base_ref || 'main' }}
       # On `main` branch, generates test vectors and serializes them to disk using `Compact`.
@@ -39,7 +39,7 @@ jobs:
         run: |
           ${{ matrix.bin }} -- test-vectors compact --write
       - name: Checkout PR
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           clean: false
       # On incoming merge try to read and decode previously generated vectors with `Compact`

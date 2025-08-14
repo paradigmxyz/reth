@@ -111,7 +111,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
 
-            if index % 100_000 == 0 {
+            if index.is_multiple_of(100_000) {
                 info!("Hashed {index} entries.");
             }
 

@@ -1,5 +1,5 @@
 use crate::{
-    engine::{CustomExecutionData, CustomPayloadTypes},
+    engine::{CustomExecutionData, CustomPayloadAttributes, CustomPayloadTypes},
     primitives::CustomNodePrimitives,
     CustomNode,
 };
@@ -8,7 +8,6 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_ethereum::node::api::{
     AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
 };
@@ -51,7 +50,7 @@ pub trait CustomEngineApi {
     async fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<CustomPayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     #[method(name = "getPayload")]
@@ -91,7 +90,7 @@ impl CustomEngineApiServer for CustomEngineApi {
     async fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<CustomPayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         Ok(self
             .inner

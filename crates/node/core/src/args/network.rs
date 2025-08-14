@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
 };
 
+use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
 use reth_config::Config;
@@ -36,8 +37,6 @@ use reth_network::{
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use tracing::error;
-
-use crate::version::P2P_CLIENT_VERSION;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -74,7 +73,7 @@ pub struct NetworkArgs {
     pub peers_file: Option<PathBuf>,
 
     /// Custom node identity
-    #[arg(long, value_name = "IDENTITY", default_value = P2P_CLIENT_VERSION)]
+    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version.as_ref())]
     pub identity: String,
 
     /// Secret key to use for this node.
@@ -333,7 +332,7 @@ impl Default for NetworkArgs {
             bootnodes: None,
             dns_retries: 0,
             peers_file: None,
-            identity: P2P_CLIENT_VERSION.to_string(),
+            identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
             no_persist_peers: false,
             nat: NatResolver::Any,

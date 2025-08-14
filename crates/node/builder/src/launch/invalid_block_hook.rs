@@ -31,8 +31,6 @@ pub trait InvalidBlockHookExt {
 impl<N> InvalidBlockHookExt for AddOnsContext<'_, N>
 where
     N: FullNodeComponents,
-    N::Provider: ChainSpecProvider,
-    <N::Types as NodeTypes>::ChainSpec: reth_chainspec::EthereumHardforks,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
@@ -64,8 +62,8 @@ where
 /// * `provider` - The blockchain database provider
 /// * `evm_config` - The EVM configuration
 /// * `chain_id` - The chain ID for verification
-pub async fn create_invalid_block_hook<N, P, E, C>(
-    config: &NodeConfig<C>,
+pub async fn create_invalid_block_hook<N, P, E>(
+    config: &NodeConfig<P::ChainSpec>,
     data_dir: &ChainPath<DataDirPath>,
     provider: P,
     evm_config: E,
@@ -74,13 +72,12 @@ pub async fn create_invalid_block_hook<N, P, E, C>(
 where
     N: NodePrimitives,
     P: reth_provider::StateProviderFactory
-        + reth_provider::ChainSpecProvider<ChainSpec = C>
+        + reth_provider::ChainSpecProvider
         + Clone
         + Send
         + Sync
         + 'static,
     E: reth_evm::ConfigureEvm<Primitives = N> + Clone + 'static,
-    C: EthChainSpec + reth_chainspec::EthereumHardforks,
 {
     use reth_engine_primitives::{InvalidBlockHooks, NoopInvalidBlockHook};
     use reth_invalid_block_hooks::InvalidBlockWitnessHook;

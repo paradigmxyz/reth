@@ -6,7 +6,7 @@ pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, BeaconConsensusEngineEvent,
-    BeaconConsensusEngineHandle,
+    BeaconConsensusEngineHandle, ConfigureEngineEvm,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -14,12 +14,13 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns,
-    NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
+    cli::config::RethTransactionPoolConfig,
     node_config::NodeConfig,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
+    version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
@@ -863,7 +864,8 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
+        let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
+        let ctx = EthApiCtx { components: &node, config: eth_config, cache };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1040,6 +1042,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
+            .max_batch_size(self.config.max_batch_size)
     }
 }
 
@@ -1169,12 +1172,15 @@ where
 
 impl<Node, EV> EngineValidatorBuilder<Node> for BasicEngineValidatorBuilder<EV>
 where
-    Node: FullNodeComponents,
-    <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks + reth_chainspec::EthChainSpec,
+    Node: FullNodeComponents<
+        Evm: ConfigureEngineEvm<
+            <<Node::Types as NodeTypes>::Payload as PayloadTypes>::ExecutionData,
+        >,
+    >,
     EV: PayloadValidatorBuilder<Node>,
     EV::Validator: reth_engine_primitives::PayloadValidator<
         <Node::Types as NodeTypes>::Payload,
-        Block = <<Node::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block,
+        Block = BlockTy<Node::Types>,
     >,
 {
     type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
@@ -1233,9 +1239,9 @@ where
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
+            name: version_metadata().name_client.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
         Ok(EngineApi::new(
             ctx.node.provider().clone(),

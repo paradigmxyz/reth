@@ -154,7 +154,7 @@ where
                 let interval = (total_hashes / 10).max(1);
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
-                    if index > 0 && index % interval == 0 {
+                    if index > 0 && index.is_multiple_of(interval) {
                         info!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
