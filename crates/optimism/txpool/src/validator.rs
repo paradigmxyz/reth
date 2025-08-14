@@ -1,5 +1,6 @@
 use crate::{supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
 use alloy_consensus::{BlockHeader, Transaction};
+use futures_util::future;
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
@@ -411,10 +412,8 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
-        )
-        .await
+        future::join_all(transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)))
+            .await
     }
 
     async fn validate_transactions_with_origin(
