@@ -45,6 +45,9 @@ alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+# async
+tokio.workspace = true
+
 # revm with required ethereum features
 # Note: this must be kept to ensure all features are properly enabled/forwarded
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }

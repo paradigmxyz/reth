@@ -70,14 +70,14 @@ impl IntegerList {
         self.0.clear();
     }
 
-    /// Serializes a [`IntegerList`] into a sequence of bytes.
+    /// Serializes an [`IntegerList`] into a sequence of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.0.serialized_size());
         self.0.serialize_into(&mut vec).expect("not able to encode IntegerList");
         vec
     }
 
-    /// Serializes a [`IntegerList`] into a sequence of bytes.
+    /// Serializes an [`IntegerList`] into a sequence of bytes.
     pub fn to_mut_bytes<B: bytes::BufMut>(&self, buf: &mut B) {
         self.0.serialize_into(buf.writer()).unwrap();
     }

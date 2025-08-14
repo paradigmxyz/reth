@@ -45,6 +45,13 @@ impl TriePrefixSetsMut {
             destroyed_accounts: self.destroyed_accounts,
         }
     }
+
+    /// Clears the prefix sets and destroyed accounts map.
+    pub fn clear(&mut self) {
+        self.destroyed_accounts.clear();
+        self.storage_prefix_sets.clear();
+        self.account_prefix_set.clear();
+    }
 }
 
 /// Collection of trie prefix sets.
@@ -134,12 +141,12 @@ impl PrefixSetMut {
     }
 
     /// Returns the number of elements in the set.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.keys.len()
     }
 
     /// Returns `true` if the set is empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
 

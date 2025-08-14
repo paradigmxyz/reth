@@ -115,7 +115,7 @@ impl SubPoolLimit {
         Self { max_txs, max_size }
     }
 
-    /// Creates a an unlimited [`SubPoolLimit`]
+    /// Creates an unlimited [`SubPoolLimit`]
     pub const fn max() -> Self {
         Self::new(usize::MAX, usize::MAX)
     }

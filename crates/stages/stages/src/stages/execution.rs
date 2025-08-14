@@ -1,5 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -256,8 +256,9 @@ where
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
             Header = <E::Primitives as NodePrimitives>::BlockHeader,
-        > + StaticFileProviderFactory
-        + StatsReader
+        > + StaticFileProviderFactory<
+            Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+        > + StatsReader
         + BlockHashReader
         + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StateCommitmentProvider,
@@ -560,12 +561,15 @@ where
     }
 }
 
-fn execution_checkpoint<N: NodePrimitives>(
+fn execution_checkpoint<N>(
     provider: &StaticFileProvider<N>,
     start_block: BlockNumber,
     max_block: BlockNumber,
     checkpoint: StageCheckpoint,
-) -> Result<ExecutionCheckpoint, ProviderError> {
+) -> Result<ExecutionCheckpoint, ProviderError>
+where
+    N: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+{
     Ok(match checkpoint.execution_stage_checkpoint() {
         // If checkpoint block range fully matches our range,
         // we take the previously used stage checkpoint as-is.
@@ -628,10 +632,13 @@ fn execution_checkpoint<N: NodePrimitives>(
 }
 
 /// Calculates the total amount of gas used from the headers in the given range.
-pub fn calculate_gas_used_from_headers<N: NodePrimitives>(
+pub fn calculate_gas_used_from_headers<N>(
     provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
-) -> Result<u64, ProviderError> {
+) -> Result<u64, ProviderError>
+where
+    N: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
+{
     debug!(target: "sync::stages::execution", ?range, "Calculating gas used from headers");
 
     let mut gas_total = 0;
@@ -641,10 +648,10 @@ pub fn calculate_gas_used_from_headers<N: NodePrimitives>(
     for entry in provider.fetch_range_iter(
         StaticFileSegment::Headers,
         *range.start()..*range.end() + 1,
-        |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+        |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let Header { gas_used, .. } = entry?;
-        gas_total += gas_used;
+        let entry = entry?;
+        gas_total += entry.gas_used();
     }
 
     let duration = start.elapsed();

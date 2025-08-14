@@ -2,7 +2,7 @@ use alloc::{boxed::Box, fmt, vec::Vec};
 use alloy_primitives::B256;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_trie::updates::TrieUpdates;
+use reth_trie_common::updates::TrieUpdates;
 
 /// An invalid block hook.
 pub trait InvalidBlockHook<N: NodePrimitives>: Send + Sync {

@@ -8,6 +8,7 @@ use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
+use reth_execution_errors::StateRootError;
 use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
@@ -63,6 +64,9 @@ pub enum InitStorageError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// State root error while computing the state root
+    #[error(transparent)]
+    StateRootError(#[from] StateRootError),
     /// State root doesn't match the expected one.
     #[error("state root mismatch: {_0}")]
     StateRootMismatch(GotExpected<B256>),
@@ -88,6 +92,7 @@ where
         + HeaderProvider
         + HashingWriter
         + StateWriter
+        + TrieWriter
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
@@ -137,6 +142,9 @@ where
     insert_genesis_header(&provider_rw, &chain)?;
 
     insert_genesis_state(&provider_rw, alloc.iter())?;
+
+    // compute state root to populate trie tables
+    compute_state_root(&provider_rw)?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -385,7 +393,9 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
-    let hash = provider_rw.block_hash(block)?.unwrap();
+    let hash = provider_rw
+        .block_hash(block)?
+        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
@@ -476,7 +486,8 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if !collector.is_empty() && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0
+        if !collector.is_empty() &&
+            collector.len().is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)
         {
             info!(target: "reth::cli",
                 parsed_new_accounts=collector.len(),
@@ -515,7 +526,7 @@ where
 
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
+        if (index > 0 && index.is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)) ||
             index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
@@ -552,7 +563,7 @@ where
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
-fn compute_state_root<Provider>(provider: &Provider) -> eyre::Result<B256>
+fn compute_state_root<Provider>(provider: &Provider) -> Result<B256, InitStorageError>
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
 {
@@ -580,7 +591,7 @@ where
 
                 intermediate_state = Some(*state);
 
-                if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
                     info!(target: "reth::cli",
                         total_flushed_updates,
                         "Flushing trie updates"

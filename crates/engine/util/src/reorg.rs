@@ -7,8 +7,8 @@ use itertools::Either;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload as _, OnForkChoiceUpdated,
-    PayloadValidator,
 };
+use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -103,7 +103,7 @@ where
         + StateProviderFactory
         + ChainSpecProvider,
     Evm: ConfigureEvm,
-    Validator: PayloadValidator<T, Block = BlockTy<Evm::Primitives>>,
+    Validator: EngineValidator<T, Evm::Primitives>,
 {
     type Item = S::Item;
 
@@ -248,8 +248,8 @@ where
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
-    T: PayloadTypes,
-    Validator: PayloadValidator<T, Block = BlockTy<Evm::Primitives>>,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    Validator: EngineValidator<T, Evm::Primitives>,
 {
     // Ensure next payload is valid.
     let next_block =
