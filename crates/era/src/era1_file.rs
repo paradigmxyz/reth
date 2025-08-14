@@ -323,26 +323,6 @@ impl<W: Write> EraWriter<W> for Era1Writer<W> {
     fn flush(&mut self) -> Result<(), E2sError> {
         self.writer.flush()
     }
-
-    /// Write the accumulator
-    fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError> {
-        if !self.has_written_version {
-            self.write_version()?;
-        }
-
-        if self.has_written_accumulator {
-            return Err(E2sError::Ssz("Accumulator already written".to_string()));
-        }
-
-        if self.has_written_block_index {
-            return Err(E2sError::Ssz("Cannot write accumulator after block index".to_string()));
-        }
-
-        let accumulator_entry = accumulator.to_entry();
-        self.writer.write_entry(&accumulator_entry)?;
-        self.has_written_accumulator = true;
-        Ok(())
-    }
 }
 
 impl<W: Write> Era1Writer<W> {
@@ -396,6 +376,26 @@ impl<W: Write> Era1Writer<W> {
         self.writer.write_entry(&block_index_entry)?;
         self.has_written_block_index = true;
 
+        Ok(())
+    }
+
+    /// Write the accumulator
+    pub fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
+
+        if self.has_written_accumulator {
+            return Err(E2sError::Ssz("Accumulator already written".to_string()));
+        }
+
+        if self.has_written_block_index {
+            return Err(E2sError::Ssz("Cannot write accumulator after block index".to_string()));
+        }
+
+        let accumulator_entry = accumulator.to_entry();
+        self.writer.write_entry(&accumulator_entry)?;
+        self.has_written_accumulator = true;
         Ok(())
     }
 }

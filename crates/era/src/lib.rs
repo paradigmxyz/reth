@@ -17,6 +17,7 @@ pub mod e2s_file;
 pub mod e2s_types;
 pub mod era1_file;
 pub mod era1_types;
+pub mod era_file;
 pub mod era_file_ops;
 pub mod era_types;
 pub mod execution_types;
