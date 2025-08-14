@@ -109,7 +109,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             });
         }
 
-        future::join_all(exexes).await;
+        future::try_join_all(exexes).await?;
 
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");
