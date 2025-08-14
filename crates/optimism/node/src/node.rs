@@ -716,6 +716,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     }
 
     /// Configures a custom tokio runtime for the RPC server.
+    ///
+    /// Caution: This runtime must not be created from within asynchronous context.
     pub fn with_tokio_runtime(mut self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
         self.tokio_runtime = tokio_runtime;
         self
