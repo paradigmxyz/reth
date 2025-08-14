@@ -451,7 +451,7 @@ impl ChunkedFileReader {
 
     /// Opens the file to import from given path. Returns a new instance. If no chunk byte length
     /// is passed, chunks have [`DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE`] (one static file).
-    /// Automatically detects gzip files by extension (.gz) or magic bytes.
+    /// Automatically detects gzip files by extension (.gz, .gzip).
     pub async fn new<P: AsRef<Path>>(
         path: P,
         chunk_byte_len: Option<u64>,
@@ -463,7 +463,9 @@ impl ChunkedFileReader {
         Self::from_file(
             file,
             chunk_byte_len,
-            path.extension().and_then(|ext| ext.to_str()) == Some("gz"),
+            path.extension()
+                .and_then(|ext| ext.to_str())
+                .map_or(false, |ext| ["gz", "gzip"].contains(&ext)),
         )
         .await
     }
