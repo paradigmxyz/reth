@@ -155,34 +155,18 @@ where
 
     /// Validates a single transaction.
     ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    ///
-    /// This behaves the same as [`OpTransactionValidator::validate_one_with_state`], but creates
-    /// a new state provider internally.
-    pub async fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_state(origin, transaction, None).await
-    }
-
-    /// Validates a single transaction with a provided state provider.
-    ///
-    /// This allows reusing the same state provider across multiple transaction validations.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
+    /// Costly because it creates a new state provider internally. For batch validation use
+    /// [`validate_all`](Self::validate_all).
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one_with_state`], but in
     /// addition applies OP validity checks:
     /// - ensures tx is not eip4844
     /// - ensures cross chain transactions are valid wrt locally configured safety level
     /// - ensures that the account has enough balance to cover the L1 gas cost
-    pub async fn validate_one_with_state(
+    pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         // OP checks without state
         let transaction = match self.apply_op_checks_no_state(transaction) {
@@ -191,7 +175,7 @@ where
         };
 
         // l1 checks, will load state from DB (costly) unless state has been passed as param
-        let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, state);
+        let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, None);
 
         // OP checks against state bundled in L1 validation outcome and superchain state
         self.apply_op_checks_against_state(l1_validation_outcome).await
