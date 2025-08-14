@@ -260,6 +260,12 @@ where
         PayloadBuilderHandle::new(self.service_tx.clone())
     }
 
+    /// Create clone on `payload_events` sending handle that could be used by builder to produce
+    /// additional events during block building
+    pub fn payload_events_handle(&self) -> broadcast::Sender<Events<T>> {
+        self.payload_events.clone()
+    }
+
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
         self.payload_jobs.iter().any(|(_, job_id)| *job_id == id)

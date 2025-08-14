@@ -614,6 +614,7 @@ where
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
+            self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
         };
 
@@ -782,6 +783,9 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
         self.metrics.engine.forkchoice_updated_messages.increment(1);
+        if attrs.is_some() {
+            self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
+        }
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {

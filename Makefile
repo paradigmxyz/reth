@@ -42,14 +42,14 @@ help: ## Display this help.
 ##@ Build
 
 .PHONY: install
-install: ## Build and install the reth binary under `~/.cargo/bin`.
+install: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
 	cargo install --path bin/reth --bin reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
 .PHONY: install-op
-install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
+install-op: ## Build and install the op-reth binary under `$(CARGO_HOME)/bin`.
 	cargo install --path crates/optimism/bin --bin op-reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
@@ -213,7 +213,7 @@ reth-bench: ## Build the reth-bench binary into the `target` directory.
 	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
 
 .PHONY: install-reth-bech
-install-reth-bench: ## Build and install the reth binary under `~/.cargo/bin`.
+install-reth-bench: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
 	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)"

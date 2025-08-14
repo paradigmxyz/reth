@@ -24,6 +24,7 @@ use revm::context_interface::result::{
 };
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
+use tokio::sync::oneshot::error::RecvError;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -166,6 +167,12 @@ pub enum EthApiError {
         /// Duration that was waited before timing out
         duration: Duration,
     },
+    /// Error thrown when batch tx response channel fails
+    #[error(transparent)]
+    BatchTxRecvError(#[from] RecvError),
+    /// Error thrown when batch tx send channel fails
+    #[error("Batch transaction sender channel closed")]
+    BatchTxSendError,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -279,6 +286,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxSendError => {
+                internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
         }
     }
 }

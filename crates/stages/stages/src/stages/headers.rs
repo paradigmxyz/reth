@@ -119,7 +119,7 @@ where
         for (index, header) in self.header_collector.iter()?.enumerate() {
             let (_, header_buf) = header?;
 
-            if index > 0 && index % interval == 0 && total_headers > 100 {
+            if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers");
             }
 
@@ -164,7 +164,7 @@ where
         for (index, hash_to_number) in self.hash_collector.iter()?.enumerate() {
             let (hash, number) = hash_to_number?;
 
-            if index > 0 && index % interval == 0 && total_headers > 100 {
+            if index > 0 && index.is_multiple_of(interval) && total_headers > 100 {
                 info!(target: "sync::stages::headers", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
             }
 

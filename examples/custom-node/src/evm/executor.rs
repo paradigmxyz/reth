@@ -70,7 +70,7 @@ where
 
 impl BlockExecutorFactory for CustomEvmConfig {
     type EvmFactory = CustomEvmFactory;
-    type ExecutionCtx<'a> = OpBlockExecutionCtx;
+    type ExecutionCtx<'a> = CustomBlockExecutionCtx;
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
 
@@ -81,7 +81,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
     fn create_executor<'a, DB, I>(
         &'a self,
         evm: CustomEvm<&'a mut State<DB>, I, PrecompilesMap>,
-        ctx: OpBlockExecutionCtx,
+        ctx: CustomBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
@@ -90,10 +90,23 @@ impl BlockExecutorFactory for CustomEvmConfig {
         CustomBlockExecutor {
             inner: OpBlockExecutor::new(
                 evm,
-                ctx,
+                ctx.inner,
                 self.inner.chain_spec().clone(),
                 *self.inner.executor_factory.receipt_builder(),
             ),
         }
+    }
+}
+
+/// Additional parameters for executing custom transactions.
+#[derive(Debug, Clone)]
+pub struct CustomBlockExecutionCtx {
+    pub inner: OpBlockExecutionCtx,
+    pub extension: u64,
+}
+
+impl From<CustomBlockExecutionCtx> for OpBlockExecutionCtx {
+    fn from(value: CustomBlockExecutionCtx) -> Self {
+        value.inner
     }
 }

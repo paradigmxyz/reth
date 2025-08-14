@@ -1633,27 +1633,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     for DatabaseProvider<TX, N>
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::BlockMeta,
-            num,
-            |static_file| static_file.block_body_indices(num),
-            || Ok(self.tx.get::<tables::BlockBodyIndices>(num)?),
-        )
+        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 
     fn block_body_indices_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::BlockMeta,
-            *range.start()..*range.end() + 1,
-            |static_file, range, _| {
-                static_file.block_body_indices_range(range.start..=range.end.saturating_sub(1))
-            },
-            |range, _| self.cursor_read_collect::<tables::BlockBodyIndices>(range),
-            |_| true,
-        )
+        self.cursor_read_collect::<tables::BlockBodyIndices>(range)
     }
 }
 

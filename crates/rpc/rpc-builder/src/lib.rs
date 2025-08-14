@@ -503,7 +503,7 @@ pub struct RpcRegistryInner<
     executor: Box<dyn TaskSpawner + 'static>,
     evm_config: EvmConfig,
     consensus: Consensus,
-    /// Holds a all `eth_` namespace handlers
+    /// Holds all `eth_` namespace handlers
     eth: EthHandlers<EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,

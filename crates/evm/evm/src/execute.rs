@@ -10,7 +10,6 @@ use alloy_evm::{
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
-use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
