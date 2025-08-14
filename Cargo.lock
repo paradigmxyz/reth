@@ -2537,9 +2537,9 @@ dependencies = [
 
 [[package]]
 name = "crunchy"
-version = "0.2.2"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-bigint"
@@ -3059,7 +3059,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "crunchy",
  "rayon",
  "reth-chainspec",
  "reth-consensus",
@@ -10509,10 +10508,12 @@ dependencies = [
  "auto_impl",
  "bitflags 2.9.1",
  "codspeed-criterion-compat",
+ "futures",
  "futures-util",
  "metrics",
  "parking_lot",
  "paste",
+ "pin-project",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.9.2",
