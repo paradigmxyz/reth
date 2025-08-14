@@ -173,13 +173,14 @@ where
             Ok(tx) => tx,
             Err(invalid_tx) => return invalid_tx,
         };
-        // checks against state
+        // loads state provider
         let state = match self.client().latest() {
             Ok(s) => s,
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
             }
         };
+        // checks against state
         self.validate_one_against_state(origin, transaction, state).await
     }
 
