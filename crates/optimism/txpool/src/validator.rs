@@ -168,17 +168,19 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        // OP checks without state
-        let transaction = match self.apply_op_checks_no_state(transaction) {
+        // stateless checks
+        let transaction = match self.validate_one_no_state(origin, transaction) {
             Ok(tx) => tx,
             Err(invalid_tx) => return invalid_tx,
         };
-
-        // l1 checks, will load state from DB (costly) unless state has been passed as param
-        let l1_validation_outcome = self.inner.validate_one_with_state(origin, transaction, None);
-
-        // OP checks against state bundled in L1 validation outcome and superchain state
-        self.apply_op_checks_against_state(l1_validation_outcome).await
+        // checks against state
+        let state = match self.client().latest() {
+            Ok(s) => s,
+            Err(err) => {
+                return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+            }
+        };
+        self.validate_one_against_state(origin, transaction, state).await
     }
 
     /// Validates all given transactions.
@@ -229,6 +231,49 @@ where
             Err(invalid_outcome) => invalid_outcome,
         }))
         .await
+    }
+
+    /// Performs stateless validation on single transaction.
+    ///
+    /// Returns unaltered input transaction if all checks pass, so transaction can continue
+    /// through to stateful validation as argument to. Failed checks return
+    /// [`TransactionValidationOutcome::Invalid`] wrapping the transaction or
+    /// [`TransactionValidationOutcome::Error`].
+    ///
+    /// Under the hood calls
+    /// [`apply_op_checks_no_state`](Self::apply_op_checks_no_state), then checks inherited from L1
+    /// [`validate_one_no_state`](EthTransactionValidator::validate_one_no_state).
+    pub fn validate_one_no_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
+        // OP checks without state
+        let transaction = self.apply_op_checks_no_state(transaction)?;
+        // checks inherited from L1
+        self.inner.validate_one_no_state(origin, transaction)
+    }
+
+    /// Validates single transaction using given state.
+    ///
+    /// Under the hood calls checks inherited from L1
+    /// [`validate_one_no_state`](EthTransactionValidator::validate_one_against_state), then
+    /// [`apply_op_checks_against_state`](Self::apply_op_checks_against_state).
+    pub async fn validate_one_against_state<P>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: P,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: AccountInfoReader,
+    {
+        // checks inherited from L1
+        let l1_validation_outcome =
+            self.inner.validate_one_against_state(origin, transaction, state);
+        // OP checks against state bundled in L1 validation outcome and then superchain state (by
+        // RPC call to supervisor).
+        self.apply_op_checks_against_state(l1_validation_outcome).await
     }
 
     /// Applies OP validity checks, that do _not_ require reading latest state from DB (or from
