@@ -10,11 +10,9 @@ on:
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
-  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   CARGO_TERM_COLOR: always
-  DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth
-  OP_DOCKER_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/op-reth
-  DOCKER_USERNAME: ${{ github.actor }}
+  DOCKER_IMAGE_NAME: ultrasoundorg/reth
+  BUILD_PLATFORMS: linux/amd64
   GIT_SHA: ${{ github.sha }}
 
 jobs:
@@ -28,10 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - name: 'Build and push the git-sha-tagged reth image'
-            command: 'make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha'
-          - name: 'Build and push the git-sha-tagged op-reth image'
-            command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha'
+          - name: "Build and push the git-sha-tagged reth image"
+            command: "make PROFILE=maxperf GIT_SHA=$GIT_SHA docker-build-push-git-sha"
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -43,9 +39,13 @@ jobs:
         id: cross_main
         run: |
           cargo install cross --git https://github.com/cross-rs/cross
-      - name: Log in to Docker
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: alextes
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Extract short SHA (9 chars)
+        run: echo "GIT_SHA=$(echo ${{ github.sha }} | cut -c 1-9)" >> $GITHUB_ENV
       - name: Set up Docker builder
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
