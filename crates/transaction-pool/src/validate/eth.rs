@@ -744,9 +744,10 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
         transactions
             .into_iter()
-            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut None))
+            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
             .collect()
     }
 
@@ -756,9 +757,10 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
         transactions
             .into_iter()
-            .map(|tx| self.validate_one_with_provider(origin, tx, &mut None))
+            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
             .collect()
     }
 
