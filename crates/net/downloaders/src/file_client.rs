@@ -408,7 +408,6 @@ enum FileReader {
 impl FileReader {
     /// Read data into the provided buffer.
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
-        use tokio::io::AsyncReadExt;
         match self {
             FileReader::Plain(file) => file.read_exact(buf).await?,
             FileReader::Gzip(decoder) => decoder.read_exact(buf).await?,
@@ -574,30 +573,25 @@ impl ChunkedFileReader {
                 }
                 new_read_bytes_target_len
             }
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+            Err(e) if self.is_gzip && e.kind() == io::ErrorKind::UnexpectedEof => {
                 // For gzipped files, this indicates we've reached the end
-                if self.is_gzip {
-                    // Try to read whatever bytes are available
-                    let mut actual_read = 0;
-                    while actual_read < new_read_bytes_target_len as usize {
-                        match self.file.read(&mut reader[actual_read..]).await {
-                            Ok(0) => break, // EOF reached
-                            Ok(n) => actual_read += n,
-                            Err(_) => break, // Error reading
-                        }
+                // Try to read whatever bytes are available
+                let mut actual_read = 0;
+                while actual_read < new_read_bytes_target_len as usize {
+                    match self.file.read(&mut reader[actual_read..]).await {
+                        Ok(0) => break,
+                        Ok(n) => actual_read += n,
+                        Err(_) => break,
                     }
-                    // Truncate the chunk to the actual size
-                    self.chunk.truncate(prev_read_bytes_len + actual_read);
-
-                    // If no new data was read and we have no data in chunk, we're at EOF
-                    if actual_read == 0 && self.chunk.is_empty() {
-                        return Ok(None)
-                    }
-
-                    actual_read as u64
-                } else {
-                    return Err(e)
                 }
+                self.chunk.truncate(prev_read_bytes_len + actual_read);
+
+                // If no new data was read and we have no data in chunk, we're at EOF
+                if actual_read == 0 && self.chunk.is_empty() {
+                    return Ok(None)
+                }
+
+                actual_read as u64
             }
             Err(e) => return Err(e),
         };
