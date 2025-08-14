@@ -154,7 +154,7 @@ where
         self.inner.validate_one_with_provider(origin, transaction, state)
     }
 
-    /// Performs stateless validation on single transaction.
+    /// Performs validation, not requiring chain state, on single transaction.
     ///
     /// Returns unaltered input transaction if all checks pass, so transaction can continue
     /// through to stateful validation as argument to
