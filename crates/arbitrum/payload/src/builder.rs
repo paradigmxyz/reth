@@ -1,4 +1,5 @@
 use crate::ArbBuiltPayload;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
@@ -29,6 +30,7 @@ impl<Evm, ChainSpec, Attrs> ArbPayloadBuilderCtx<Evm, ChainSpec, Attrs>
 where
     Evm: ConfigureEvm,
     Evm::Primitives: NodePrimitives,
+    Evm::NextBlockEnvCtx: BuildNextEnv<Attrs, HeaderTy<Evm::Primitives>, ChainSpec>,
     Attrs: PayloadBuilderAttributes,
 {
     pub fn parent(&self) -> &SealedHeaderFor<Evm::Primitives> {
@@ -190,7 +192,7 @@ where
             Default::default(),
         );
         let out = self.build_payload_internal(args)?;
-        Ok(out.into_payload())
+        out.into_payload().ok_or(PayloadBuilderError::MissingPayload)
     }
 }
 
