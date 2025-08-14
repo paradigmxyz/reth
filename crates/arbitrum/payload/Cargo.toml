@@ -16,7 +16,7 @@ std = [
 [dependencies]
 alloy-consensus = { workspace = true }
 reth-chain-state = { path = "../../chain-state", default-features = false }
-reth-arbitrum-primitives = { path = "../primitives", default-features = false }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["serde-bincode-compat"] }
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-eips = { workspace = true }
 alloy-rpc-types-engine = { workspace = true }
