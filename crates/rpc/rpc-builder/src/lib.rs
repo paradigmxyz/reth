@@ -1192,7 +1192,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     }
 
     /// Configures a custom tokio runtime for the rpc server.
-    pub fn with_tokio_runtime(mut self, tokio_runtime: tokio::runtime::Handle) -> Self {
+    pub fn with_tokio_runtime(mut self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        let Some(tokio_runtime) = tokio_runtime else { return self };
         if let Some(http_server_config) = self.http_server_config {
             self.http_server_config =
                 Some(http_server_config.custom_tokio_runtime(tokio_runtime.clone()));
