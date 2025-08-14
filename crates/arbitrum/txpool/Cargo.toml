@@ -1,0 +1,16 @@
+[package]
+name = "reth-arbitrum-txpool"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-transaction-pool.workspace = true
+reth-arbitrum-primitives.workspace = true
+c-kzg.workspace = true
+
+derive_more = "0.99"

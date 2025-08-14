@@ -32,16 +32,25 @@ reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-engine-local.workspace = true
 reth-rpc-api.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-engine-primitives.workspace = true
+reth-payload-primitives.workspace = true
+
+
 
 # arbitrum-specific crates
 reth-arbitrum-evm = { workspace = true }
 reth-arbitrum-rpc = { workspace = true }
 reth-arbitrum-payload = { workspace = true }
 reth-arbitrum-chainspec = { workspace = true }
+reth-arbitrum-primitives = { workspace = true }
+reth-arbitrum-txpool = { workspace = true }
+reth-arbitrum-storage = { workspace = true }
 
 # ethereum/alloy types
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
 # misc

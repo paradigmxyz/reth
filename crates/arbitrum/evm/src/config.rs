@@ -110,3 +110,21 @@ pub struct ArbNextBlockEnvAttributes {
     pub max_fee_per_gas: Option<U256>,
     pub blob_gas_price: Option<u128>,
 }
+#[cfg(feature = "rpc")]
+impl<H: alloy_consensus::BlockHeader>
+    reth_rpc_eth_api::helpers::pending_block::BuildPendingEnv<H> for ArbNextBlockEnvAttributes
+{
+    fn build_pending_env(parent: &reth_primitives_traits::SealedHeader<H>) -> Self {
+        Self {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: alloy_primitives::B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| alloy_primitives::B256::ZERO),
+            withdrawals: parent.withdrawals_root().map(|_| ()),
+            extra_data: alloy_primitives::Bytes::new(),
+            max_fee_per_gas: None,
+            blob_gas_price: None,
+        }
+    }
+}

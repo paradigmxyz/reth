@@ -1,3 +1,5 @@
+
+
 [package]
 name = "reth-arbitrum-payload"
 version = "0.1.0"
@@ -12,8 +14,16 @@ std = [
 ]
 
 [dependencies]
+alloy-consensus = { workspace = true }
+reth-chain-state = { path = "../../chain-state", default-features = false }
+reth-arbitrum-primitives = { path = "../primitives", default-features = false }
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-eips = { workspace = true }
 alloy-rpc-types-engine = { workspace = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 reth-payload-primitives = { path = "../../payload/primitives", default-features = false }
+reth-primitives-traits = { workspace = true }
+alloy-rlp = { workspace = true }
+
+
+reth-payload-builder = { workspace = true }

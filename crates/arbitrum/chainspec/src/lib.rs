@@ -21,3 +21,11 @@ impl ArbitrumChainSpec for ArbChainSpec {
         SpecId::CANCUN
     }
 }
+impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
+    fn chain_id(&self) -> u64 {
+        self.chain().id()
+    }
+    fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
+        SpecId::CANCUN
+    }
+}

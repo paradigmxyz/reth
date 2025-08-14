@@ -1,4 +1,4 @@
-#![allow(unused)]
+#[allow(unused)]
 
 use alloy_rpc_types_engine::ClientVersionV1;
 use reth_chainspec::EthereumHardforks;
@@ -11,10 +11,18 @@ use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use crate::ARB_NAME_CLIENT;
 use reth_arbitrum_rpc::engine::ARB_ENGINE_CAPABILITIES;
 use reth_arbitrum_payload::ArbExecutionData;
+use reth_arbitrum_rpc::nitro::ArbNitroRpc;
+use reth_rpc_api::servers::RpcServer;
 
 #[derive(Debug, Default, Clone)]
 pub struct ArbEngineApiBuilder<EV> {
     engine_validator_builder: EV,
+}
+
+impl<EV> ArbEngineApiBuilder<EV> {
+    pub fn new(engine_validator_builder: EV) -> Self {
+        Self { engine_validator_builder }
+    }
 }
 
 impl<N, EV> EngineApiBuilder<N> for ArbEngineApiBuilder<EV>
@@ -58,6 +66,8 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
         );
+
+        let _ = ctx.rpc_registry.register_methods(ArbNitroRpc::default().into_rpc_module());
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }

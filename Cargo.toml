@@ -179,8 +179,11 @@ members = [
     "crates/arbitrum/rpc",
     "crates/arbitrum/stf-wasm",
 
+    "crates/arbitrum/txpool",
+    "crates/arbitrum/storage",
 ]
 default-members = ["bin/reth"]
+
 exclude = ["docs/cli"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
@@ -466,17 +469,20 @@ reth-ress-provider = { path = "crates/ress/provider" }
 
 # arbitrum crates
 reth-arbitrum-chainspec = { path = "crates/arbitrum/chainspec", default-features = false }
-reth-arbitrum-evm = { path = "crates/arbitrum/evm", default-features = false }
+reth-arbitrum-evm = { path = "crates/arbitrum/evm", default-features = false, features = ["std"] }
 reth-arbitrum-payload = { path = "crates/arbitrum/payload", default-features = false }
-reth-arbitrum-primitives = { path = "crates/arbitrum/primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
+reth-arbitrum-primitives = { path = "crates/arbitrum/primitives", default-features = false, features = ["std", "serde", "reth-codec", "serde-bincode-compat"] }
 reth-arbitrum-node = { path = "crates/arbitrum/node" }
 reth-arbitrum-rpc = { path = "crates/arbitrum/rpc" }
 reth-arbitrum-stf-wasm = { path = "crates/arbitrum/stf-wasm" }
+reth-arbitrum-storage = { path = "crates/arbitrum/storage", default-features = false }
+reth-arbitrum-txpool = { path = "crates/arbitrum/txpool" }
 
 # arb-alloy
 arb-alloy-consensus = { version = "0.1.1", default-features = false }
 arb-alloy-predeploys = { version = "0.1.1", default-features = false }
 arb-alloy-util = { version = "0.1.1", default-features = false }
+arb-alloy-network = { version = "0.1.2", default-features = false }
 
 # revm
 revm = { version = "27.0.3", default-features = false }
@@ -736,6 +742,7 @@ vergen = "9.0.4"
 visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
+
 
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

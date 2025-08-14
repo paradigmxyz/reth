@@ -1,5 +1,13 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
+use clap::Parser;
+use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, Cli};
+use reth_arbitrum_node::{args::RollupArgs, ArbNode};
+use tracing::info;
+
+#[global_allocator]
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
+
 fn main() {
     reth_cli_util::sigsegv_handler::install();
 
@@ -7,5 +15,14 @@ fn main() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    println!("arb-reth starting (placeholder)");
+    if let Err(err) =
+        Cli::<EthereumChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
+            info!(target: "reth::cli", "Launching arb-reth node");
+            let handle = builder.node(ArbNode::new(rollup_args)).launch().await?;
+            handle.node_exit_future.await
+        })
+    {
+        eprintln!("Error: {err:?}");
+        std::process::exit(1);
+    }
 }
