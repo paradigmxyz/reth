@@ -331,7 +331,7 @@ where
             // Interop cross tx validation
             let transaction = if self.chain_spec().is_interop_active_at_timestamp(block_timestamp) {
                 match self.apply_checks_against_superchain_state(valid_tx).await {
-                    Ok(tx) => tx,
+                    Ok(super_valid_tx) => super_valid_tx,
                     Err(invalid_tx) => return invalid_tx,
                 }
             } else {
