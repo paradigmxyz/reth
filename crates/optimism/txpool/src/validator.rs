@@ -326,12 +326,16 @@ where
             }
 
             // Interop cross tx validation
-            let super_valid_tx = self.apply_checks_against_superchain_state(valid_tx).await?;
+            let transaction = if self.chain_spec().is_interop_active() {
+                self.apply_checks_against_superchain_state(valid_tx).await?;
+            } else {
+                valid_tx
+            };
 
             return TransactionValidationOutcome::Valid {
                 balance,
                 state_nonce,
-                transaction: super_valid_tx,
+                transaction,
                 propagate,
                 bytecode_hash,
                 authorities,
