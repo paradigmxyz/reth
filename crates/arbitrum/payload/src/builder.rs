@@ -1,24 +1,44 @@
-use crate::{ArbBuiltPayload, ArbPayloadTypes};
+use crate::ArbBuiltPayload;
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
-    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder,
-    PayloadConfig,
+    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildContext,
+    BuildOutcome, BuildOutcomeKind, HeaderForPayload, PayloadBuilder, PayloadConfig,
+    BuiltBlock, build_block,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chainspec::ChainSpecProvider;
 use reth_evm::{execute::BlockExecutor, ConfigureEvm};
-use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
-use reth_payload_primitives::{BuildNextEnv, BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_payload_builder::PayloadJobGenerator;
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_storage_api::StateProviderFactory;
+use reth_payload_util::NoopPayloadTransactions;
 use std::{marker::PhantomData, sync::Arc};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ArbPayloadBuilder<Pool, Client, Evm, N, Attrs> {
     pub evm_config: Evm,
     pub pool: Pool,
     pub client: Client,
     _pd: PhantomData<(N, Attrs)>,
+}
+
+impl<Pool, Client, Evm, N, Attrs> Clone for ArbPayloadBuilder<Pool, Client, Evm, N, Attrs>
+where
+    Pool: Clone,
+    Client: Clone,
+    Evm: ConfigureEvm,
+{
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            pool: self.pool.clone(),
+            client: self.client.clone(),
+            _pd: PhantomData,
+        }
+    }
 }
 
 impl<Pool, Client, Evm, N, Attrs> ArbPayloadBuilder<Pool, Client, Evm, N, Attrs> {
@@ -29,24 +49,25 @@ impl<Pool, Client, Evm, N, Attrs> ArbPayloadBuilder<Pool, Client, Evm, N, Attrs>
 
 impl<Pool, Client, Evm, N, Attrs> ArbPayloadBuilder<Pool, Client, Evm, N, Attrs>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Pool: Send + Sync + Clone + 'static,
+    Client: StateProviderFactory + ChainSpecProvider + Clone + Send + Sync + 'static,
     N: NodePrimitives,
     Evm: ConfigureEvm<
         Primitives = N,
         NextBlockEnvCtx: BuildNextEnv<Attrs, N::BlockHeader, Client::ChainSpec>,
     >,
-    Attrs: PayloadBuilderAttributes,
+    Attrs: PayloadBuilderAttributes + Clone,
 {
     fn build_payload_internal(
         &self,
-        args: reth_basic_payload_builder::BuildArguments<Attrs, ArbBuiltPayload<N>>,
-    ) -> Result<reth_basic_payload_builder::BuildOutcome<ArbBuiltPayload<N>>, PayloadBuilderError> {
-        let reth_basic_payload_builder::BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        args: BuildArguments<Attrs, ArbBuiltPayload<N>>,
+    ) -> Result<BuildOutcome<ArbBuiltPayload<N>>, PayloadBuilderError> {
+        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
         let parent = config.parent_header.clone();
         let parent_hash = parent.hash();
 
-        let ctx = reth_basic_payload_builder::BuildContext {
+        let ctx = BuildContext {
             evm_config: self.evm_config.clone(),
             chain_spec: self.client.chain_spec(),
             config,
@@ -59,37 +80,34 @@ where
 
         let block_builder = ctx.block_builder::<BlockExecutor<Evm::Primitives, _>>(&state_provider)?;
 
-        let reth_basic_payload_builder::BuiltBlock { executed, payload } =
-            reth_basic_payload_builder::build_block::<_, _, ArbBuiltPayload<N>, _, _>(
+        let BuiltBlock { executed, payload } =
+            build_block::<_, _, ArbBuiltPayload<N>, _, _>(
                 block_builder,
                 &state_provider,
                 &state_db,
                 &ctx,
-                |best_attrs| {
-                    reth_payload_util::NoopPayloadTransactions::default()
-                        .best_transactions(best_attrs)
+                |_best_attrs| {
+                    NoopPayloadTransactions::<()> ::default()
                 },
             )?;
 
         let executed_block: Option<ExecutedBlockWithTrieUpdates<N>> = executed.map(|e| e.into());
         let payload = ArbBuiltPayload::new(ctx.payload_id(), Arc::new(payload), U256::ZERO, executed_block);
 
-        Ok(reth_basic_payload_builder::BuildOutcome {
-            cached_reads,
-            payload,
-        })
+        Ok(BuildOutcomeKind::Better { payload }.with_cached_reads(cached_reads))
     }
 }
 
 impl<Pool, Client, Evm, N, Attrs> PayloadBuilder for ArbPayloadBuilder<Pool, Client, Evm, N, Attrs>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Pool: Send + Sync + Clone + 'static,
+    Client: StateProviderFactory + ChainSpecProvider + Clone + Send + Sync + 'static,
     N: NodePrimitives,
     Evm: ConfigureEvm<
         Primitives = N,
         NextBlockEnvCtx: BuildNextEnv<Attrs, N::BlockHeader, Client::ChainSpec>,
     >,
-    Attrs: PayloadBuilderAttributes,
+    Attrs: PayloadBuilderAttributes + Clone,
 {
     type Primitives = N;
     type BuiltPayload = ArbBuiltPayload<N>;
@@ -97,33 +115,30 @@ where
 
     fn try_build(
         &self,
-        args: reth_basic_payload_builder::BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<reth_basic_payload_builder::BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         self.build_payload_internal(args)
     }
 
     fn on_missing_payload(
         &self,
-        _parent: SealedHeader<HeaderForPayload<Self::BuiltPayload>>,
-        _attributes: Self::Attributes,
-    ) -> Result<(), PayloadBuilderError> {
-        Ok(())
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> reth_basic_payload_builder::MissingPayloadBehaviour<Self::BuiltPayload> {
+        Default::default()
     }
 
     fn build_empty_payload(
         &self,
-        parent: SealedHeader<HeaderForPayload<Self::BuiltPayload>>,
-        attributes: Self::Attributes,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let ctx = reth_basic_payload_builder::PayloadConfig { parent_header: Arc::new(parent), attributes };
-        let args = reth_basic_payload_builder::BuildArguments {
-            cached_reads: State::default(),
-            config: ctx,
-            cancel: Default::default(),
-            best_payload: Default::default(),
-        };
+        let args = BuildArguments::new(
+            CachedReads::default(),
+            config,
+            Default::default(),
+            Default::default(),
+        );
         let out = self.build_payload_internal(args)?;
-        Ok(out.payload)
+        Ok(out.into_payload())
     }
 }
 
@@ -138,5 +153,3 @@ pub fn arb_job_generator_with_builder<Client, Tasks, Builder>(
 ) -> ArbBasicPayloadJobGenerator<Client, Tasks, Builder> {
     BasicPayloadJobGenerator::with_builder(client, executor, config, builder)
 }
-
-pub type ArbPayloadBuilderFor<Node, Pool, Evm> = reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, <Node as reth_node_api::FullNodeTypes>::Provider, Evm>;
