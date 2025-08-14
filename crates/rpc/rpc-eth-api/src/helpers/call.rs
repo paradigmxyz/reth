@@ -700,7 +700,7 @@ pub trait Call:
             request.as_mut().set_nonce(nonce);
         }
 
-        Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
+        Ok(self.tx_resp_builder().tx_env(request, evm_env.cfg_env.chain_id, &evm_env.block_env)?)
     }
 
     /// Prepares the [`EvmEnv`] for execution of calls.
