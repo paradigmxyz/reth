@@ -302,8 +302,8 @@ where
     /// Performs the necessary opstack specific checks on single transaction and its corresponding
     /// relevant state.
     ///
-    /// Takes as parameter a transaction that has successfully passed pipeline for L1
-    /// [`validate_one_against_state`](EthTransactionValidator::validate_one_against_state).
+    /// Takes as parameter a transaction that has successfully passed pipeline for inherited L1
+    /// checks [`validate_one_against_state`](EthTransactionValidator::validate_one_against_state).
     ///
     /// Applies OP-protocol specific checks:
     /// - ensures that the account has enough balance to cover the L1 gas cost
