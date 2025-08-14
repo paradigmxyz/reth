@@ -25,6 +25,8 @@ reth-payload-primitives = { path = "../../payload/primitives", default-features 
 reth-primitives-traits = { workspace = true }
 alloy-rlp = { workspace = true }
 reth-payload-builder = { workspace = true }
+reth-payload-builder-primitives = { path = "../../payload/builder/primitives" }
+reth-chainspec = { path = "../../chainspec" }
 
 # new deps for builder.rs
 reth-basic-payload-builder = { path = "../../payload/basic" }
@@ -32,3 +34,4 @@ reth-revm = { path = "../../revm" }
 reth-storage-api = { path = "../../storage/storage-api" }
 reth-evm = { path = "../../evm/evm" }
 reth-payload-util = { path = "../../payload/util" }
+reth-execution-types = { path = "../../evm/execution-types" }
