@@ -455,7 +455,8 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
+        let transactions = transactions.into_iter().map(|tx| (origin, tx)).collect();
+        self.validate_transactions(transactions).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
