@@ -9,15 +9,13 @@ use reth_chainspec::ChainSpecProvider;
 use reth_evm::{ConfigureEvm, execute::BlockBuilder};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::PayloadJobGenerator;
-use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_builder::PayloadBuilderError;
 use reth_payload_primitives::{BuildNextEnv, PayloadBuilderAttributes};
 use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use std::{marker::PhantomData, sync::Arc};
 
-#[derive(Debug)]
-pub struct ArbPayloadBuilder<Pool, Client, Evm, N, Attrs> {
 #[derive(Debug)]
 pub struct ArbPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec, Attrs> {
     pub evm_config: Evm,
@@ -61,6 +59,9 @@ where
     }
 }
 
+
+#[derive(Debug)]
+pub struct ArbPayloadBuilder<Pool, Client, Evm, N, Attrs> {
     pub evm_config: Evm,
     pub pool: Pool,
     pub client: Client,
