@@ -6,6 +6,7 @@ use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{Receipt, SignedTransaction};
 use crate::ArbitrumChainSpec;
+use crate::header::{ArbHeaderInfo, derive_arb_header_info_from_state};
 
 pub struct ArbBlockAssembler<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
@@ -42,7 +43,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts);
         let logs_bloom = alloy_primitives::logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
-        let header = alloy_consensus::Header {
+        let mut header = alloy_consensus::Header {
             parent_hash: input.execution_ctx.parent_hash,
             ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
             beneficiary: input.evm_env.block_env.beneficiary,
@@ -65,6 +66,10 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
+
+        if let Some(info) = derive_arb_header_info_from_state(&input) {
+            info.apply_to_header(&mut header);
+        }
 
         Ok(alloy_consensus::Block::new(
             header,
