@@ -237,7 +237,7 @@ where
             }
         };
 
-        futures_util::future::join_all(transactions.into_iter().map(async |res| match res {
+        future::join_all(transactions.into_iter().map(async |res| match res {
             Ok((origin, tx)) => {
                 let outcome = self.inner.validate_one_against_state(origin, tx, state.clone());
                 self.apply_op_checks_against_state(outcome).await
