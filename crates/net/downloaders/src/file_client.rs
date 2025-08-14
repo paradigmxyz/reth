@@ -33,6 +33,11 @@ use crate::receipt_file_client::FromReceiptReader;
 /// Default is 1 GB.
 pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 
+/// Maximum memory limit for gzip decompression.
+///
+/// 10MB limit
+const MAX_GZIP_MEMORY: usize = 10 * 1024 * 1024;
+
 /// Front-end API for fetching chain data from a file.
 ///
 /// Blocks are assumed to be written one after another in a file, as rlp bytes.
@@ -420,6 +425,14 @@ impl FileReader {
             }
         }
     }
+
+    /// Read some data into the provided buffer, returning the number of bytes read.
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
+        match self {
+            FileReader::Plain(file) => file.read(buf).await,
+            FileReader::Gzip(decoder) => decoder.read(buf).await,
+        }
+    }
 }
 
 /// Chunks file into several [`FileClient`]s.
@@ -527,8 +540,33 @@ impl ChunkedFileReader {
         let chunk_target_len = self.chunk_len();
         let old_bytes_len = self.chunk.len() as u64;
 
+        // If we already have enough data in the chunk, return it
+        if old_bytes_len >= chunk_target_len {
+            return Ok(Some(old_bytes_len))
+        }
+
+        // For gzipped files, if we have no data in chunk, try to read some to check EOF
+        if self.is_gzip && self.chunk.is_empty() {
+            // Try to read a small amount to check if we're at EOF
+            let mut buf = vec![0u8; 1024];
+            match self.file.read(&mut buf).await {
+                Ok(0) => return Ok(None), // EOF
+                Ok(n) => {
+                    // We read some bytes, put them in the chunk
+                    self.chunk.extend_from_slice(&buf[..n]);
+                    // If we have enough data now, return it
+                    if self.chunk.len() as u64 >= chunk_target_len {
+                        return Ok(Some(chunk_target_len))
+                    }
+                    // Otherwise continue to read more
+                }
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+                Err(e) => return Err(e),
+            }
+        }
+
         // calculate reserved space in chunk
-        let new_read_bytes_target_len = chunk_target_len - old_bytes_len;
+        let new_read_bytes_target_len = chunk_target_len - self.chunk.len() as u64;
 
         // read new bytes from file
         let prev_read_bytes_len = self.chunk.len();
@@ -547,12 +585,24 @@ impl ChunkedFileReader {
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                 // For gzipped files, this indicates we've reached the end
                 if self.is_gzip {
-                    // Truncate the chunk to remove the unread bytes
-                    self.chunk.truncate(prev_read_bytes_len);
-                    if self.chunk.is_empty() {
+                    // Try to read whatever bytes are available
+                    let mut actual_read = 0;
+                    while actual_read < new_read_bytes_target_len as usize {
+                        match self.file.read(&mut reader[actual_read..]).await {
+                            Ok(0) => break, // EOF reached
+                            Ok(n) => actual_read += n,
+                            Err(_) => break, // Error reading
+                        }
+                    }
+                    // Truncate the chunk to the actual size
+                    self.chunk.truncate(prev_read_bytes_len + actual_read);
+
+                    // If no new data was read and we have no data in chunk, we're at EOF
+                    if actual_read == 0 && self.chunk.is_empty() {
                         return Ok(None)
                     }
-                    0 // No new bytes were read
+
+                    actual_read as u64
                 } else {
                     return Err(e)
                 }
@@ -581,6 +631,74 @@ impl ChunkedFileReader {
         consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
+        // For gzipped files, we need to accumulate data until we have complete blocks
+        // because chunk boundaries don't align with block boundaries in compressed data
+        if self.is_gzip {
+            // Keep reading and accumulating data until we can parse complete blocks
+            loop {
+                // Try to parse what we have so far
+                if !self.chunk.is_empty() {
+                    let DecodedFileChunk { file_client, remaining_bytes, .. } = FileClientBuilder {
+                        consensus: consensus.clone(),
+                        parent_header: parent_header.clone(),
+                    }
+                    .build(&self.chunk[..], self.chunk.len() as u64)
+                    .await?;
+
+                    // If we successfully parsed some blocks, return them
+                    if file_client.headers_len() > 0 {
+                        self.chunk = remaining_bytes;
+                        return Ok(Some(file_client))
+                    }
+                }
+
+                // Read more data from the gzipped stream
+                let mut buffer = vec![0u8; 8192]; // Read in 8KB chunks
+                match self.file.read(&mut buffer).await {
+                    Ok(0) => {
+                        // EOF reached - if we have any remaining data, try to parse it
+                        if !self.chunk.is_empty() {
+                            let DecodedFileChunk { file_client, .. } =
+                                FileClientBuilder { consensus, parent_header }
+                                    .build(&self.chunk[..], self.chunk.len() as u64)
+                                    .await?;
+                            self.chunk.clear(); // Mark as processed
+                            return Ok(Some(file_client))
+                        }
+                        return Ok(None);
+                    }
+                    Ok(n) => {
+                        buffer.truncate(n);
+                        self.chunk.extend_from_slice(&buffer);
+
+                        // Prevent unbounded memory growth - if chunk gets too large,
+                        // try to parse partial data
+                        if self.chunk.len() > MAX_GZIP_MEMORY {
+                            let DecodedFileChunk { file_client, remaining_bytes, .. } =
+                                FileClientBuilder {
+                                    consensus: consensus.clone(),
+                                    parent_header: parent_header.clone(),
+                                }
+                                .build(&self.chunk[..], self.chunk.len() as u64)
+                                .await?;
+
+                            self.chunk = remaining_bytes;
+                            if file_client.headers_len() > 0 {
+                                return Ok(Some(file_client))
+                            }
+                            // If still no blocks parsed and we're at the limit,
+                            // there might be an issue with the data
+                            if self.chunk.len() > MAX_GZIP_MEMORY {
+                                return Err(FileClientError::Custom("Gzipped file contains unparseable data that exceeds memory limit"))
+                            }
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+
+        // For non-gzipped files, use the original chunking logic
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
 
         // make new file client from chunk
@@ -659,6 +777,7 @@ mod tests {
         test_utils::{generate_bodies, generate_bodies_file},
     };
     use assert_matches::assert_matches;
+    use async_compression::tokio::write::GzipEncoder;
     use futures_util::stream::StreamExt;
     use rand::Rng;
     use reth_consensus::{noop::NoopConsensus, test_utils::TestConsensus};
@@ -669,6 +788,10 @@ mod tests {
     };
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
+    use tokio::{
+        fs::File,
+        io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom},
+    };
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
@@ -811,6 +934,81 @@ mod tests {
             reader.next_chunk::<Block>(NoopConsensus::arc(), None).await.unwrap()
         {
             let sync_target = client.tip_header().unwrap();
+
+            let sync_target_hash = sync_target.hash();
+
+            // construct headers downloader and use first header
+            let mut header_downloader = ReverseHeadersDownloaderBuilder::default()
+                .build(Arc::clone(&Arc::new(client)), Arc::new(TestConsensus::default()));
+            header_downloader.update_local_head(local_header.clone());
+            header_downloader.update_sync_target(SyncTarget::Tip(sync_target_hash));
+
+            // get headers first
+            let mut downloaded_headers_chunk = header_downloader.next().await.unwrap().unwrap();
+
+            // export new local header to outer scope
+            local_header = sync_target;
+
+            // reverse to make sure it's in the right order before comparing
+            downloaded_headers_chunk.reverse();
+            downloaded_headers.extend_from_slice(&downloaded_headers_chunk);
+        }
+
+        // the first header is not included in the response
+        assert_eq!(headers[1..], downloaded_headers);
+    }
+
+    #[tokio::test]
+    async fn test_chunk_download_headers_from_gzip_file() {
+        reth_tracing::init_test_tracing();
+
+        // Generate some random blocks
+        let (file, headers, _) = generate_bodies_file(0..=14).await;
+
+        // Create a gzipped version of the file
+        let gzip_temp_file = tempfile::NamedTempFile::new().unwrap();
+        let gzip_path = gzip_temp_file.path().to_owned();
+        drop(gzip_temp_file); // Close the file so we can write to it
+
+        // Read original file content first
+        let mut original_file = file;
+        original_file.seek(SeekFrom::Start(0)).await.unwrap();
+        let mut original_content = Vec::new();
+        original_file.read_to_end(&mut original_content).await.unwrap();
+
+        let mut gzip_file = File::create(&gzip_path).await.unwrap();
+        let mut encoder = GzipEncoder::new(&mut gzip_file);
+
+        // Write the original content through the gzip encoder
+        encoder.write_all(&original_content).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        drop(gzip_file);
+
+        // Reopen the gzipped file for reading
+        let gzip_file = File::open(&gzip_path).await.unwrap();
+
+        // calculate min for chunk byte length range, pick a lower bound that guarantees at least
+        // one block will be read
+        let chunk_byte_len = rand::rng().random_range(2000..=10_000);
+        trace!(target: "downloaders::file::test", chunk_byte_len);
+
+        // init reader with gzip=true
+        let mut reader =
+            ChunkedFileReader::from_file(gzip_file, chunk_byte_len as u64, true).await.unwrap();
+
+        let mut downloaded_headers: Vec<SealedHeader> = vec![];
+
+        let mut local_header = headers.first().unwrap().clone();
+
+        // test
+        while let Some(client) =
+            reader.next_chunk::<Block>(NoopConsensus::arc(), None).await.unwrap()
+        {
+            if client.headers_len() == 0 {
+                continue;
+            }
+
+            let sync_target = client.tip_header().expect("tip_header should not be None");
 
             let sync_target_hash = sync_target.hash();
 
