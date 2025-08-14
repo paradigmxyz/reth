@@ -409,8 +409,8 @@ impl FileReader {
     /// Read data into the provided buffer.
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
         match self {
-            FileReader::Plain(file) => file.read_exact(buf).await?,
-            FileReader::Gzip(decoder) => decoder.read_exact(buf).await?,
+            Self::Plain(file) => file.read_exact(buf).await?,
+            Self::Gzip(decoder) => decoder.read_exact(buf).await?,
         };
         Ok(())
     }
@@ -418,8 +418,8 @@ impl FileReader {
     /// Read some data into the provided buffer, returning the number of bytes read.
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         match self {
-            FileReader::Plain(file) => file.read(buf).await,
-            FileReader::Gzip(decoder) => decoder.read(buf).await,
+            Self::Plain(file) => file.read(buf).await,
+            Self::Gzip(decoder) => decoder.read(buf).await,
         }
     }
 }
@@ -464,7 +464,7 @@ impl ChunkedFileReader {
             chunk_byte_len,
             path.extension()
                 .and_then(|ext| ext.to_str())
-                .map_or(false, |ext| ["gz", "gzip"].contains(&ext)),
+                .is_some_and(|ext| ["gz", "gzip"].contains(&ext)),
         )
         .await
     }
@@ -579,9 +579,8 @@ impl ChunkedFileReader {
                 let mut actual_read = 0;
                 while actual_read < new_read_bytes_target_len as usize {
                     match self.file.read(&mut reader[actual_read..]).await {
-                        Ok(0) => break,
+                        Ok(0) | Err(_) => break,
                         Ok(n) => actual_read += n,
-                        Err(_) => break,
                     }
                 }
                 self.chunk.truncate(prev_read_bytes_len + actual_read);
@@ -612,7 +611,7 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    /// Reads gzipped data until we accumulate at least chunk_byte_len bytes.
+    /// Reads gzipped data until we accumulate at least `chunk_byte_len` bytes.
     ///
     /// Returns `Ok(true)` if data was successfully read and we have enough bytes,
     /// or `Ok(false)` if EOF was reached with no remaining data.
