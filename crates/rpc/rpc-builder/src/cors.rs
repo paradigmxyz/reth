@@ -28,7 +28,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             .allow_headers(Any),
         _ => {
             let iter = http_cors_domains.split(',');
-            if iter.clone().any(|o| o == "*") {
+            if http_cors_domains.contains('*') {
                 return Err(CorsDomainError::WildCardNotAllowed {
                     input: http_cors_domains.to_string(),
                 })
