@@ -163,7 +163,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_state(origin, transaction, &mut None).await
+        self.validate_one_with_state(origin, transaction, None).await
     }
 
     /// Validates a single transaction with a provided state provider.
@@ -181,7 +181,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
