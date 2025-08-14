@@ -45,6 +45,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
+    /// Maximum batch size for transaction pool insertions.
+    pub max_batch_size: usize,
 }
 
 impl EthConfig {
@@ -72,6 +74,7 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            max_batch_size: 1,
         }
     }
 }
@@ -134,6 +137,12 @@ impl EthConfig {
     /// Configures the number of getproof requests
     pub const fn proof_permits(mut self, permits: usize) -> Self {
         self.proof_permits = permits;
+        self
+    }
+
+    /// Configures the maximum batch size for transaction pool insertions
+    pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
         self
     }
 }
