@@ -147,6 +147,22 @@ where
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
+        // Note: this future is quite large so we box it
+        Box::pin(self.apply_with_import_::<N>(env, rlp_path)).await
+    }
+
+    /// Apply setup using pre-imported chain data from RLP file
+    async fn apply_with_import_<N>(
+        &mut self,
+        env: &mut Environment<I>,
+        rlp_path: &Path,
+    ) -> Result<()>
+    where
+        N: NodeBuilderHelper,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+        >,
+    {
         // Create nodes with imported chain data
         let import_result = self.create_nodes_with_import::<N>(rlp_path).await?;
 
@@ -178,10 +194,21 @@ where
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
+        // Note: this future is quite large so we box it
+        Box::pin(self.apply_::<N>(env)).await
+    }
+
+    /// Apply the setup to the environment
+    async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
+    where
+        N: NodeBuilderHelper,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+        >,
+    {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
-            // Note: this future is quite large so we box it
-            return Box::pin(self.apply_with_import::<N>(env, &rlp_path)).await;
+            return self.apply_with_import::<N>(env, &rlp_path).await;
         }
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
