@@ -213,7 +213,6 @@ where
             BasicEngineApiBuilder::default(),
             BasicEngineValidatorBuilder::default(),
             Default::default(),
-            None,
         ))
     }
 }
@@ -257,7 +256,7 @@ where
     }
 
     /// Sets the tokio runtime for the RPC servers.
-    pub fn with_tokio_runtime(self, tokio_runtime: tokio::runtime::Handle) -> Self {
+    pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
         let Self { inner } = self;
         Self { inner: inner.with_tokio_runtime(tokio_runtime) }
     }

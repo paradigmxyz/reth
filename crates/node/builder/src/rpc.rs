@@ -482,7 +482,6 @@ where
         engine_api_builder: EB,
         engine_validator_builder: EVB,
         rpc_middleware: RpcMiddleware,
-        tokio_runtime: Option<tokio::runtime::Handle>,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
@@ -491,7 +490,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
-            tokio_runtime,
+            tokio_runtime: None,
         }
     }
 
@@ -633,7 +632,7 @@ where
     }
 
     /// Sets the tokio runtime for the RPC servers.
-    pub fn with_tokio_runtime(self, tokio_runtime: tokio::runtime::Handle) -> Self {
+    pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
         let Self {
             hooks,
             eth_api_builder,
@@ -650,7 +649,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            tokio_runtime: Some(tokio_runtime),
+            tokio_runtime,
         }
     }
 
@@ -726,7 +725,6 @@ where
             EB::default(),
             Engine::default(),
             Default::default(),
-            None,
         )
     }
 }
@@ -768,7 +766,11 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = Self::create_server_config(config, rpc_middleware, tokio_runtime);
+        let server_config = config
+            .rpc
+            .rpc_server_config()
+            .set_rpc_middleware(rpc_middleware)
+            .with_tokio_runtime(tokio_runtime);
         let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
 
         let handles =
@@ -835,7 +837,11 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = Self::create_server_config(config, rpc_middleware, tokio_runtime);
+        let server_config = config
+            .rpc
+            .rpc_server_config()
+            .set_rpc_middleware(rpc_middleware)
+            .with_tokio_runtime(tokio_runtime);
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
@@ -1011,26 +1017,6 @@ where
 
         on_rpc_started.on_rpc_started(ctx, handles)?;
         Ok(())
-    }
-
-    /// Helper to create RPC server config with optional tokio runtime
-    fn create_server_config<M>(
-        config: &NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
-        rpc_middleware: M,
-        tokio_runtime: Option<tokio::runtime::Handle>,
-    ) -> RpcServerConfig<M>
-    where
-        M: RethRpcMiddleware,
-    {
-        if let Some(tokio_runtime) = tokio_runtime {
-            config
-                .rpc
-                .rpc_server_config()
-                .set_rpc_middleware(rpc_middleware)
-                .with_tokio_runtime(tokio_runtime)
-        } else {
-            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
-        }
     }
 }
 

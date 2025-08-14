@@ -716,8 +716,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     }
 
     /// Configures a custom tokio runtime for the RPC server.
-    pub fn with_tokio_runtime(mut self, tokio_runtime: tokio::runtime::Handle) -> Self {
-        self.tokio_runtime = Some(tokio_runtime);
+    pub fn with_tokio_runtime(mut self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        self.tokio_runtime = tokio_runtime;
         self
     }
 
@@ -730,8 +730,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             da_config,
             enable_tx_conditional,
             min_suggested_priority_fee,
-            _nt,
             tokio_runtime,
+            _nt,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -782,8 +782,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                 EB::default(),
                 EVB::default(),
                 rpc_middleware,
-                tokio_runtime,
-            ),
+            )
+            .with_tokio_runtime(tokio_runtime),
             da_config.unwrap_or_default(),
             sequencer_url,
             sequencer_headers,

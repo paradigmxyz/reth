@@ -93,7 +93,7 @@ fn test_eth_launcher_with_tokio_runtime() {
                 >>()
                 .with_components(EthereumNode::components())
                 .with_add_ons(
-                    EthereumAddOns::default().with_tokio_runtime(custom_rt.handle().clone()),
+                    EthereumAddOns::default().with_tokio_runtime(Some(custom_rt.handle().clone())),
                 )
                 .apply(|builder| {
                     let _ = builder.db();
