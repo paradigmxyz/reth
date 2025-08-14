@@ -179,18 +179,6 @@ where
     {
         self.inner.validate_one_against_state(origin, transaction, state)
     }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch(transactions)
-    }
 }
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
