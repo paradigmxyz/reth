@@ -473,7 +473,7 @@ revm-inspectors = "0.28.0"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.3.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.18.2", default-features = false }
+alloy-evm = { version = "0.18.3", default-features = false }
 alloy-primitives = { version = "1.3.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.3.0"
