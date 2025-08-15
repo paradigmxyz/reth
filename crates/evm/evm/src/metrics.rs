@@ -6,15 +6,17 @@ use crate::{Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx, StateChangeSource},
-    Evm,
+    Evm, RecoveredTx,
 };
+use alloy_primitives::TxHash;
 use core::borrow::BorrowMut;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use revm::{
+    context::result::ResultAndState,
     database::{states::bundle_state::BundleRetention, State},
     state::EvmState,
 };
@@ -72,6 +74,11 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Counter for number of execution results cached hits when executing the latest block.
+    pub execution_results_cache_hits: Counter,
+    /// The Counter for number of execution results cached misses when executing the latest block.
+    pub execution_results_cache_misses: Counter,
 }
 
 impl ExecutorMetrics {
@@ -101,15 +108,19 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<E, DB>(
+    pub fn execute_metered<E, DB, T: SignedTransaction>(
         &self,
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
+        get_cached_tx_result: impl Fn(
+            &mut <E::Evm as Evm>::DB,
+            TxHash,
+        ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
         DB: Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction = T>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -121,7 +132,21 @@ impl ExecutorMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx?)?;
+                let tx = tx?;
+                let executable_tx = tx.as_executable();
+                if let Some(result) =
+                    get_cached_tx_result(executor.evm_mut().db_mut(), *executable_tx.tx().tx_hash())
+                {
+                    self.execution_results_cache_hits.increment(1);
+                    executor.execute_transaction_with_cached_result(
+                        executable_tx,
+                        result,
+                        |_| alloy_evm::block::CommitChanges::Yes,
+                    )?;
+                } else {
+                    self.execution_results_cache_misses.increment(1);
+                    executor.execute_transaction(executable_tx)?;
+                }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -218,6 +243,15 @@ mod tests {
             Ok(Some(0))
         }
 
+        fn execute_transaction_with_cached_result(
+            &mut self,
+            _tx: impl alloy_evm::block::ExecutableTx<Self>,
+            _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+        ) -> Result<Option<u64>, BlockExecutionError> {
+            Ok(Some(0))
+        }
+
         fn finish(
             self,
         ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
@@ -301,10 +335,11 @@ mod tests {
         };
         let executor = MockExecutor::new(state);
         let _result = metrics
-            .execute_metered::<_, EmptyDB>(
+            .execute_metered::<_, EmptyDB, _>(
                 executor,
                 input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
+                |_, _| None,
             )
             .unwrap();
 
@@ -339,10 +374,11 @@ mod tests {
 
         let executor = MockExecutor::new(state);
         let _result = metrics
-            .execute_metered::<_, EmptyDB>(
+            .execute_metered::<_, EmptyDB, _>(
                 executor,
                 input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
+                |_, _| None,
             )
             .unwrap();
 

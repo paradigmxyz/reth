@@ -15,8 +15,20 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
-use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::BundleState,
+    state::{AccountInfo, Bytecode, EvmState},
+};
 use reth_trie::MultiProofTargets;
+use revm::{
+    bytecode::opcode,
+    context::ContextTr,
+    inspector::JournalExt,
+    interpreter::{interpreter_types::Jumps, Interpreter},
+    Inspector,
+};
+use revm_primitives::{Address, U256};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,6 +38,8 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, trace};
+
+use super::TxCache;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -48,6 +62,7 @@ where
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    tx_cache: TxCache<Evm>,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -62,6 +77,7 @@ where
         execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
+        tx_cache: TxCache<Evm>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
         (
@@ -72,6 +88,7 @@ where
                 max_concurrency: 64,
                 to_multi_proof,
                 actions_rx,
+                tx_cache,
             },
             actions_tx,
         )
@@ -87,6 +104,7 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
 
+        let tx_cache = self.tx_cache.clone();
         self.executor.spawn_blocking(move || {
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
@@ -100,8 +118,9 @@ where
                     let ctx = ctx.clone();
                     let done_tx = done_tx.clone();
 
+                    let tx_cache = tx_cache.clone();
                     executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
+                        ctx.transact_batch(rx, tx_cache, sender, done_tx);
                     });
 
                     handles.push(tx);
@@ -231,7 +250,13 @@ where
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
-    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
+    fn evm_for_ctx(
+        self,
+    ) -> Option<(
+        EvmFor<Evm, EVMRecordingDatabase<impl Database>, CoinbaseBalanceEVMInspector>,
+        PrewarmMetrics,
+        Arc<AtomicBool>,
+    )> {
         let Self {
             env,
             evm_config,
@@ -261,8 +286,10 @@ where
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         let state_provider = StateProviderDatabase::new(state_provider);
+        let state_provider = EVMRecordingDatabase::new(state_provider);
 
         let mut evm_env = env.evm_env;
+        let coinbase_address = evm_env.block_env().beneficiary;
 
         // we must disable the nonce check so that we can execute the transaction even if the nonce
         // doesn't match what's on chain.
@@ -270,7 +297,11 @@ where
 
         // create a new executor and disable nonce checks in the env
         let spec_id = *evm_env.spec_id();
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+        let mut evm = evm_config.evm_with_env_and_inspector(
+            state_provider,
+            evm_env,
+            CoinbaseBalanceEVMInspector::new(coinbase_address),
+        );
 
         if !precompile_cache_disabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
@@ -301,14 +332,21 @@ where
         done_tx: Sender<()>,
     ) {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
+        let coinbase = evm.block().beneficiary;
 
         while let Ok(tx) = txs.recv() {
+            let tx_hash = *tx.as_executable().tx().tx_hash();
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
                 break
             }
+
+            let coinbase_before = revm::Database::basic(evm.db_mut(), coinbase)
+                .unwrap_or_default() // This should be erroring
+                .unwrap_or_default();
 
             // create the tx env
             let start = Instant::now();
@@ -327,11 +365,30 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+            let (targets, storage_targets) = multiproof_targets_from_state(&res.state);
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+
+            let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
+            if coinbase_balance_read {
+                debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
+                continue
+            }
+
+            let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
+
+            let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
+                let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
+                let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
+                debug!(target: "engine::tree", ?tx_hash, ?coinbase_before, ?coinbase_after, ?nonce_delta, ?balance_delta, "Calculating coinbase deltas");
+                (coinbase, nonce_delta, balance_delta)
+            });
+
+            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+
+            tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
 
         // send a message to the main task to flag that we're done
@@ -341,7 +398,7 @@ where
 
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+fn multiproof_targets_from_state(state: &EvmState) -> (MultiProofTargets, usize) {
     let mut targets = MultiProofTargets::with_capacity(state.len());
     let mut storage_targets = 0;
     for (addr, account) in state {
@@ -358,7 +415,7 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
 
         let mut storage_set =
             B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-        for (key, slot) in account.storage {
+        for (key, slot) in &account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
                 continue
@@ -394,6 +451,91 @@ pub(super) enum PrewarmTaskEvent {
         /// Number of transactions executed
         executed_transactions: usize,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AccessRecord {
+    Account { address: Address, result: Option<AccountInfo> },
+    Storage { address: Address, index: U256, result: U256 },
+}
+
+/// revm database wrapper that records state access
+#[derive(Debug)]
+struct EVMRecordingDatabase<DB> {
+    inner_db: DB,
+    recorded_traces: Vec<AccessRecord>,
+}
+
+impl<DB> EVMRecordingDatabase<DB> {
+    const fn new(inner_db: DB) -> Self {
+        Self { inner_db, recorded_traces: Vec::new() }
+    }
+}
+
+impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
+    type Error = DB::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        let result = self.inner_db.basic(address)?;
+        self.recorded_traces.push(AccessRecord::Account {
+            address,
+            result: result.as_ref().map(|r| r.copy_without_code()),
+        });
+        Ok(result)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.inner_db.code_by_hash(code_hash)
+    }
+
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        let result = self.inner_db.storage(address, index)?;
+        self.recorded_traces.push(AccessRecord::Storage { address, index, result });
+        Ok(result)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.inner_db.block_hash(number)
+    }
+}
+
+#[derive(Debug)]
+struct CoinbaseBalanceEVMInspector {
+    coinbase: Address,
+    balance_read: bool,
+}
+
+impl CoinbaseBalanceEVMInspector {
+    const fn new(coinbase: Address) -> Self {
+        Self { coinbase, balance_read: false }
+    }
+}
+
+impl<CTX> Inspector<CTX> for CoinbaseBalanceEVMInspector
+where
+    CTX: ContextTr<Journal: JournalExt>,
+{
+    fn step(&mut self, interpreter: &mut Interpreter, _context: &mut CTX) {
+        if self.balance_read {
+            return
+        }
+
+        match interpreter.bytecode.opcode() {
+            opcode::BALANCE => {
+                if let Ok(addr) = interpreter.stack.peek(0) {
+                    if Address::from_word(B256::from(addr.to_be_bytes())) == self.coinbase {
+                        self.balance_read = true;
+                    }
+                }
+            }
+            opcode::SELFBALANCE => {
+                if interpreter.input.target_address == self.coinbase {
+                    self.balance_read = true;
+                }
+            }
+            _ => (),
+        }
+    }
 }
 
 /// Metrics for transactions prewarming.

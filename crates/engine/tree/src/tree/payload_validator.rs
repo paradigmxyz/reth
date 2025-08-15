@@ -8,6 +8,7 @@ use crate::tree::{
     payload_processor::PayloadProcessor,
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    prewarm::AccessRecord,
     sparse_trie::StateRootComputeOutcome,
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
     PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
@@ -43,6 +44,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::Database;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
@@ -686,10 +688,72 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.executor.execute_metered(
+        let tx_cache = handle.tx_cache.clone();
+        let output = self.metrics.executor.execute_metered::<_, _, N::SignedTx>(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
+            |db, tx_hash| {
+                tx_cache.remove(&tx_hash).and_then(|(_, (traces, mut result, coinbase_deltas))| {
+                    for trace in traces {
+                        let matches = match &trace {
+                            AccessRecord::Account { address, result } => {
+                                match coinbase_deltas {
+                                    Some((coinbase, _, _)) if *address == coinbase => {
+                                        true
+                                    }
+                                    _ => {
+                                        let db_account = db.basic(*address);
+                                        let matches = if let Ok(account) = &db_account {
+                                            account == result
+                                        } else {
+                                            false
+                                        };
+
+                                        if !matches {
+                                            debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_account, "Can't re-use cached execution result");
+                                        }
+
+                                        matches
+                                    }
+                                }
+                            }
+                            AccessRecord::Storage { address, index, result } => {
+                                let db_storage = db.storage(*address, *index);
+                                let matches = if let Ok(storage) = &db_storage {
+                                    storage == result
+                                } else {
+                                    false
+                                };
+
+                                if !matches {
+                                    debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_storage, "Can't re-use cached execution result");
+                                }
+
+                                matches
+                            }
+                        };
+
+                        if !matches {
+                            return None;
+                        }
+                    }
+
+                    if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) = coinbase_deltas {
+                        if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
+                            if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
+                                coinbase_account.info.nonce = coinbase_db.nonce + coinbase_nonce_delta;
+                                coinbase_account.info.balance = coinbase_db.balance + coinbase_balance_delta;
+
+                                debug!(target: "engine::tree", ?tx_hash, "Re-using cached execution result");
+                                return Some(result)
+                            }
+                        }
+                    }
+
+                    None
+                })
+            },
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
