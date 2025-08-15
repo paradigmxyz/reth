@@ -206,8 +206,8 @@ where
         }
 
         // otherwise load state from DB for checks against state
-        let state: Arc<dyn AccountInfoReader> = match self.client().latest() {
-            Ok(s) => Arc::new(s),
+        let state = match self.client().latest() {
+            Ok(s) => s,
             Err(err) => {
                 return transactions
                     .into_iter()
@@ -221,10 +221,17 @@ where
             }
         };
 
-        future::join_all(transactions.into_iter().map(async |res| match res {
-            Ok((origin, tx)) => self.apply_checks_against_state(origin, tx, state.clone()).await,
-            Err(invalid_outcome) => invalid_outcome,
-        }))
+        let transactions = transactions
+            .into_iter()
+            .map(|res| match res {
+                Ok((origin, tx)) => self.inner.apply_checks_against_state(origin, tx, &state),
+                Err(invalid_outcome) => invalid_outcome,
+            })
+            .collect::<Vec<_>>();
+
+        future::join_all(
+            transactions.into_iter().map(async |res| self.apply_op_checks_against_state(res).await),
+        )
         .await
     }
 
