@@ -5,7 +5,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, Bytes, U256, Bloom};
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3,
@@ -18,7 +18,8 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
 use reth_arbitrum_primitives::ArbPrimitives;
 use alloy_eips::eip7685::Requests;
-use alloy_consensus::Block;
+use reth_primitives_traits::proofs::calculate_transaction_root;
+use alloy_consensus::{Block, EMPTY_OMMER_ROOT_HASH};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ArbPayloadV1 {
@@ -32,6 +33,9 @@ pub struct ArbPayloadV1 {
     pub gas_used: u64,
     pub transactions: Vec<Bytes>,
     pub withdrawals: Option<Vec<Withdrawal>>,
+    pub state_root: B256,
+    pub receipts_root: B256,
+    pub logs_bloom: Bloom,
 }
 
 impl ArbPayloadV1 {
@@ -100,6 +104,9 @@ impl ArbExecutionData {
             gas_used: ep.gas_used,
             transactions: ep.transactions.clone(),
             withdrawals: payload.withdrawals.clone(),
+            state_root: ep.state_root,
+            receipts_root: ep.receipts_root,
+            logs_bloom: ep.logs_bloom,
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
@@ -122,6 +129,9 @@ impl ArbExecutionData {
             gas_used: ep.gas_used,
             transactions: ep.transactions.clone(),
             withdrawals: Some(payload.withdrawals().clone()),
+            state_root: ep.state_root,
+            receipts_root: ep.receipts_root,
+            logs_bloom: ep.logs_bloom,
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
@@ -217,6 +227,60 @@ impl<N: NodePrimitives> BuiltPayload for ArbBuiltPayload<N> {
     }
 }
 
+impl ArbExecutionData {
+    pub fn try_into_block_with_sidecar(
+        &self,
+        _sidecar: &ArbSidecar,
+    ) -> Result<alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>, String> {
+        let txs: Result<Vec<reth_arbitrum_primitives::ArbTransactionSigned>, String> = self
+            .payload
+            .transactions()
+            .iter()
+            .map(|b| {
+                alloy_rlp::Decodable::decode(&mut &b[..])
+                    .map_err(|e| format!("tx decode error: {e}"))
+            })
+            .collect();
+        let transactions = txs?;
+        let tx_root = calculate_transaction_root(
+            &transactions.iter().cloned().map(|t| t.into_inner()).collect::<alloc::vec::Vec<_>>(),
+        );
+        let v1 = self.payload.as_v1();
+        let header = alloy_consensus::Header {
+            parent_hash: self.parent_hash,
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            beneficiary: v1.fee_recipient,
+            state_root: v1.state_root,
+            transactions_root: tx_root,
+            receipts_root: v1.receipts_root,
+            logs_bloom: v1.logs_bloom,
+            difficulty: U256::from(0u8),
+            number: v1.block_number,
+            gas_limit: v1.gas_limit as u128,
+            gas_used: v1.gas_used as u128,
+            timestamp: v1.timestamp,
+            extra_data: v1.extra_data.clone().into(),
+            mix_hash: v1.prev_randao,
+            nonce: 0,
+            base_fee_per_gas: Some(v1.base_fee_per_gas),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            requests_hash: None,
+            parent_beacon_block_root: self.sidecar.parent_beacon_block_root,
+        };
+        Ok(alloy_consensus::Block {
+            header,
+            body: alloy_consensus::BlockBody {
+                transactions,
+                ommers: alloc::vec::Vec::new(),
+                withdrawals: v1.withdrawals.clone(),
+                requests: None,
+            },
+        })
+    }
+}
+
 // V1 engine_getPayloadV1 response
 impl<T, N> From<ArbBuiltPayload<N>> for ExecutionPayloadV1
 where
@@ -283,6 +347,9 @@ impl reth_payload_primitives::PayloadTypes for ArbPayloadTypes {
                 })
                 .collect(),
             withdrawals: None,
+            state_root: header.state_root,
+            receipts_root: header.receipts_root,
+            logs_bloom: header.logs_bloom,
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
@@ -319,6 +386,9 @@ mod tests {
             gas_used: 0,
             transactions: txs.clone(),
             withdrawals: None,
+            state_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Bloom::default(),
         };
         assert_eq!(v1.block_number(), block_number);
         assert_eq!(v1.timestamp(), timestamp);

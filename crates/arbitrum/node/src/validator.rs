@@ -6,6 +6,7 @@ use reth_payload_primitives::{
     EngineObjectValidationError,
     NewPayloadError,
     PayloadOrAttributes,
+    ExecutionPayload,
 };
 use reth_node_api::{EngineTypes, FullNodeComponents, NodeTypes, PayloadTypes};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
@@ -35,14 +36,16 @@ where
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ArbExecutionData,
+        exec_data: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let expected_hash = payload.block_hash();
+        let expected_hash = exec_data.block_hash();
 
-        let sealed_block = payload
-            .try_into_block_with_sidecar(&payload.sidecar)
-            .map_err(|e| NewPayloadError::Other(format!("failed to decode arb payload: {e}").into()))?
-            .seal_slow();
+        let sealed_block = {
+            exec_data
+                .try_into_block_with_sidecar(&exec_data.sidecar)
+                .map_err(|e| NewPayloadError::Other(format!("failed to decode arb payload: {e}").into()))?
+                .seal_slow()
+        };
 
         if expected_hash != sealed_block.hash() {
             return Err(NewPayloadError::Other(format!(
