@@ -1,7 +1,7 @@
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
-use reth_engine_primitives::BeaconConsensusEngineHandle;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -34,7 +34,7 @@ pub const fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
+    let beacon_engine_handle = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),

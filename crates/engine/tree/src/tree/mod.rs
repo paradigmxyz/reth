@@ -19,7 +19,7 @@ use reth_chain_state::{
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
+    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
@@ -518,7 +518,7 @@ where
             .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         let num_hash = payload.num_hash();
-        let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
+        let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = num_hash.hash;
@@ -1064,7 +1064,7 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -1085,7 +1085,7 @@ where
                                         .set_latest(state, res.outcome.forkchoice_status());
 
                                     // emit an event about the handled FCU
-                                    self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                                    self.emit_event(ConsensusEngineEvent::ForkchoiceUpdated(
                                         state,
                                         res.outcome.forkchoice_status(),
                                     ));
@@ -1626,7 +1626,7 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
 
         Ok(status)
     }
@@ -1907,7 +1907,7 @@ where
         self.canonical_in_memory_state.notify_canon_state(notification);
 
         // emit event
-        self.emit_event(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+        self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(
             Box::new(tip),
             start.elapsed(),
         ));
@@ -2155,9 +2155,9 @@ where
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if is_fork {
-            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2296,7 +2296,7 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
-        self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
         Ok(PayloadStatus::new(

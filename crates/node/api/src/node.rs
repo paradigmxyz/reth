@@ -5,7 +5,7 @@ use alloy_rpc_types_engine::JwtSecret;
 use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
+use reth_engine_primitives::{ConsensusEngineEvent, ConsensusEngineHandle};
 use reth_evm::ConfigureEvm;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
@@ -113,9 +113,9 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Node configuration.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
+    pub beacon_engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     /// Notification channel for engine API events
-    pub engine_events: EventSender<BeaconConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }
