@@ -144,7 +144,7 @@ where
     ///
     /// Convenience method for applying stateless and stateful checks on transaction. Under the
     /// hood this calls same validations as [`apply_checks_no_state`](Self::apply_checks_no_state)
-    /// followed by [`validate_one_against_state`](Self::apply_checks_against_state).
+    /// followed by [`apply_checks_against_state`](Self::apply_checks_against_state).
     pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
@@ -158,7 +158,7 @@ where
     ///
     /// Returns unaltered input transaction if all checks pass, so transaction can continue
     /// through to stateful validation as argument to
-    /// [`validate_one_against_state`](Self::apply_checks_against_state).
+    /// [`apply_checks_against_state`](Self::apply_checks_against_state).
     pub fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
@@ -177,7 +177,7 @@ where
     where
         P: AccountInfoReader,
     {
-        self.inner.validate_one_against_state(origin, transaction, state)
+        self.inner.apply_checks_against_state(origin, transaction, state)
     }
 }
 
@@ -317,7 +317,7 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_against_state(origin, transaction, state)
+                self.apply_checks_against_state(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -325,7 +325,7 @@ where
 
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_against_state`](Self::validate_one_against_state).
+    /// to [`apply_checks_against_state`](Self::apply_checks_against_state).
     fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
@@ -580,7 +580,7 @@ where
     }
 
     /// Validates a single transaction using given state provider.
-    fn validate_one_against_state<P>(
+    fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
