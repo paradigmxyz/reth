@@ -1,3 +1,6 @@
+use alloy_chains::Chain;
+
+
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
@@ -28,4 +31,9 @@ impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
     fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
         SpecId::CANCUN
     }
+}
+pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
+    let mut spec = reth_chainspec::ChainSpec::default();
+    spec.chain = Chain::from(421_614u64);
+    spec
 }
