@@ -191,7 +191,8 @@ where
     ///
     /// Returns all outcomes for the given transactions in the same order.
     ///
-    /// See also [`Self::validate_one`]
+    /// Difference to [`Self::validate_one`] is that this method use one and the same state
+    /// provider to validate all given transactions, making it less costly for batch validation.
     pub async fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
