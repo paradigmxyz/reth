@@ -669,7 +669,10 @@ where
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
-            executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+            // Only cache pure precompiles (addresses 0x01-0x0a) to avoid issues with stateful
+            // precompiles that have side effects or depend on contract state.
+            // Requires: https://github.com/alloy-rs/evm/pull/153
+            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
                 let metrics = self
                     .precompile_cache_metrics
                     .entry(*address)
