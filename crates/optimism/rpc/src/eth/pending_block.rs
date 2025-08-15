@@ -17,13 +17,17 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm,
 };
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, RecoveredBlock};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Recovered, RecoveredBlock, SignedTransaction,
+};
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::{
+    utils::recover_raw_transaction, EthApiError, PendingBlock, PendingBlockEnvOrigin,
+};
 use reth_storage_api::{ProviderBlock, ProviderReceipt, ReceiptProvider, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, TransactionPool,
@@ -207,7 +211,10 @@ where
     }
 }
 
-pub(super) async fn track_flashblocks(url: Url, state: SharedFlashblockState) -> eyre::Result<()> {
+pub(super) async fn track_flashblocks<N>(url: Url, state: SharedFlashblockState) -> eyre::Result<()>
+where
+    N: RpcNodeCore,
+{
     let pubsub = WsConnect::new(url).into_service().await?;
     let params = vec![Value::String("pending".into()), Value::Bool(true)];
     let req: SerializedRequest =
@@ -234,9 +241,13 @@ pub(super) async fn track_flashblocks(url: Url, state: SharedFlashblockState) ->
                 let existing_hashes: std::collections::HashSet<_> =
                     s.diff.transactions.iter().cloned().collect();
 
-                s.diff.transactions.extend(
-                    new_fb.diff.transactions.into_iter().filter(|tx| !existing_hashes.contains(tx)),
-                );
+                s.diff.transactions.extend(new_fb.diff.transactions.into_iter().filter(|tx| {
+                    let recovered: Recovered<
+    < <N as RpcNodeCore>::Primitives as reth_primitives_traits::NodePrimitives >::SignedTx
+> = recover_raw_transaction(tx).unwrap();
+
+                    !existing_hashes.contains(recovered.tx_hash().as_slice())
+                }));
             }
         }
 
