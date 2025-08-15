@@ -196,11 +196,7 @@ where
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         let transactions = transactions
             .into_iter()
-            .map(|(origin, tx)| {
-                self.apply_op_checks_no_state(tx)
-                    .and_then(|tx| self.inner.apply_checks_no_state(origin, tx))
-                    .map(|tx| (origin, tx))
-            })
+            .map(|(origin, tx)| self.apply_checks_no_state(origin, tx).map(|tx| (origin, tx)))
             .collect::<Vec<_>>();
 
         // bail early if all transactions failed validation without state
@@ -226,10 +222,7 @@ where
         };
 
         future::join_all(transactions.into_iter().map(async |res| match res {
-            Ok((origin, tx)) => {
-                let outcome = self.inner.apply_checks_against_state(origin, tx, state.clone());
-                self.apply_op_checks_against_state(outcome).await
-            }
+            Ok((origin, tx)) => self.apply_checks_against_state(origin, tx, state.clone()).await,
             Err(invalid_outcome) => invalid_outcome,
         }))
         .await
