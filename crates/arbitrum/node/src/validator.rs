@@ -35,9 +35,26 @@ where
 
     fn ensure_well_formed_payload(
         &self,
-        _payload: ArbExecutionData,
+        payload: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        Err(NewPayloadError::Other("Arbitrum payload validation not yet implemented".into()))
+        let expected_hash = payload.block_hash();
+
+        let sealed_block = payload
+            .try_into_block_with_sidecar(&payload.sidecar)
+            .map_err(|e| NewPayloadError::Other(format!("failed to decode arb payload: {e}").into()))?
+            .seal_slow();
+
+        if expected_hash != sealed_block.hash() {
+            return Err(NewPayloadError::Other(format!(
+                "block hash mismatch: execution={} consensus={}",
+                sealed_block.hash(),
+                expected_hash
+            ).into()));
+        }
+
+        sealed_block
+            .try_recover()
+            .map_err(|e| NewPayloadError::Other(format!("failed to recover senders: {e}").into()))
     }
 }
 
