@@ -206,9 +206,12 @@ pub trait TransactionValidator: Debug + Send + Sync {
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
-        )
+        async {
+            futures_util::future::join_all(
+                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+            )
+            .await
+        }
     }
 
     /// Validates a batch of transactions with that given origin.

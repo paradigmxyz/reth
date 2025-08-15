@@ -11,8 +11,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, validate::ValidTransaction, EthPoolTransaction,
-    EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -182,7 +182,9 @@ where
             }
         };
         // checks against state
-        self.apply_checks_against_state(origin, transaction, state).await
+        let outcomes = self.apply_checks_against_state(origin, transaction, state);
+        // checks against superstate
+        self.apply_checks_against_superchain_state(outcomes).await
     }
 
     /// Validates all given transactions.
@@ -194,6 +196,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
+        // checks that don't require state
         let transactions = transactions
             .into_iter()
             .map(|(origin, tx)| self.apply_checks_no_state(origin, tx).map(|tx| (origin, tx)))
@@ -205,7 +208,7 @@ where
             return transactions.into_iter().filter_map(|res| res.err()).collect()
         }
 
-        // otherwise load state from DB for checks against state
+        // load state from DB for checks against state
         let state = match self.client().latest() {
             Ok(s) => s,
             Err(err) => {
@@ -220,17 +223,18 @@ where
                     .collect()
             }
         };
-
+        // checks against state
         let transactions = transactions
             .into_iter()
             .map(|res| match res {
-                Ok((origin, tx)) => self.inner.apply_checks_against_state(origin, tx, &state),
+                Ok((origin, tx)) => self.apply_checks_against_state(origin, tx, &state),
                 Err(invalid_outcome) => invalid_outcome,
             })
             .collect::<Vec<_>>();
 
+        // checks against superstate
         future::join_all(
-            transactions.into_iter().map(async |res| self.apply_op_checks_against_state(res).await),
+            transactions.into_iter().map(|res| self.apply_checks_against_superchain_state(res)),
         )
         .await
     }
@@ -261,7 +265,7 @@ where
     /// Under the hood calls checks inherited from L1
     /// [`apply_checks_no_state`](EthTransactionValidator::apply_checks_against_state), then
     /// [`apply_op_checks_against_state`](Self::apply_op_checks_against_state).
-    pub async fn apply_checks_against_state<P>(
+    pub fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -275,7 +279,7 @@ where
             self.inner.apply_checks_against_state(origin, transaction, state);
         // OP checks against state bundled in L1 validation outcome and then superchain state (by
         // RPC call to supervisor).
-        self.apply_op_checks_against_state(l1_validation_outcome).await
+        self.apply_op_checks_against_state(l1_validation_outcome)
     }
 
     /// Applies OP validity checks, that do _not_ require reading latest state from DB (or from
@@ -311,7 +315,7 @@ where
     /// - ensures cross chain transactions are valid w.r.t. locally configured minimum
     ///   [`SafetyLevel`](op_alloy_consensus::interop::SafetyLevel) (involves RPC call to a
     ///   superchain supervisor (cross-chain oracle)).
-    pub async fn apply_op_checks_against_state(
+    pub fn apply_op_checks_against_state(
         &self,
         outcome: TransactionValidationOutcome<Tx>,
     ) -> TransactionValidationOutcome<Tx> {
@@ -359,12 +363,6 @@ where
                 )
             }
 
-            // Interop cross tx validation
-            let valid_tx = match self.apply_checks_against_superchain_state(valid_tx).await {
-                Ok(super_valid_tx) => super_valid_tx,
-                Err(invalid_tx) => return invalid_tx,
-            };
-
             return TransactionValidationOutcome::Valid {
                 balance,
                 state_nonce,
@@ -383,32 +381,41 @@ where
     /// transaction's validity, given transaction is a cross-chain transaction.
     pub async fn apply_checks_against_superchain_state(
         &self,
-        transaction: ValidTransaction<Tx>,
-    ) -> Result<ValidTransaction<Tx>, TransactionValidationOutcome<Tx>> {
-        // Interop cross tx validation
-        if let Some(cross_chain_tx_res) = self.is_valid_cross_tx(transaction.transaction()).await {
-            match cross_chain_tx_res {
-                Ok(()) => {
-                    // valid interop tx
-                    transaction.transaction().set_interop_deadline(
-                        self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
-                    )
-                }
-                Err(err) => {
-                    return Err(TransactionValidationOutcome::Invalid(
-                        transaction.into_transaction(),
-                        match err {
+        validation_outcome: TransactionValidationOutcome<Tx>,
+    ) -> TransactionValidationOutcome<Tx> {
+        let mut err = None;
+        if let TransactionValidationOutcome::Valid { ref transaction, .. } = validation_outcome {
+            // Interop cross tx validation
+            if let Some(cross_chain_tx_res) =
+                self.is_valid_cross_tx(transaction.transaction()).await
+            {
+                match cross_chain_tx_res {
+                    Ok(()) => {
+                        // valid interop tx
+                        transaction.transaction().set_interop_deadline(
+                            self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                        )
+                    }
+                    Err(e) => {
+                        err = Some(match e {
                             InvalidCrossTx::CrossChainTxPreInterop => {
                                 InvalidTransactionError::TxTypeNotSupported.into()
                             }
-                            err => InvalidPoolTransactionError::Other(Box::new(err)),
-                        },
-                    ))
+                            e => InvalidPoolTransactionError::Other(Box::new(e)),
+                        })
+                    }
                 }
-            }
-        } // else is not cross-chain tx
+            } // else is not cross-chain tx
+        }
 
-        Ok(transaction)
+        if let Some(err) = err {
+            // consume valid transaction
+            if let TransactionValidationOutcome::Valid { transaction, .. } = validation_outcome {
+                return TransactionValidationOutcome::Invalid(transaction.into_transaction(), err)
+            }
+        }
+
+        validation_outcome
     }
 
     /// Wrapper for [`is_valid_cross_tx`](SupervisorClient::is_valid_cross_tx).
