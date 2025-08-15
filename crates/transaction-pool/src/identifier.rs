@@ -47,8 +47,8 @@ impl SenderIdentifiers {
 
     /// Returns the current identifier and increments the counter.
     fn next_id(&mut self) -> SenderId {
-        let id = self.id;
-        self.id += 1;
+        let id = self.id
+        self.id = self.id.wrapping_add(1);
         id.into()
     }
 }
