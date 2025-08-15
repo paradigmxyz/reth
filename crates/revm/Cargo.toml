@@ -56,3 +56,10 @@ serde = [
     "reth-storage-api/serde",
 ]
 portable = ["revm/portable"]
+optional-checks = [
+    "revm/optional_balance_check",
+    "revm/optional_block_gas_limit",
+    "revm/optional_eip3541",
+    "revm/optional_eip3607",
+    "revm/optional_no_base_fee",
+]
