@@ -102,14 +102,13 @@ impl TransactionId {
     /// `on_chain_nonce`
     pub fn ancestor(transaction_nonce: u64, on_chain_nonce: u64, sender: SenderId) -> Option<Self> {
         // SAFETY: transaction_nonce > on_chain_nonce ⇒ transaction_nonce >= 1
-        (transaction_nonce > on_chain_nonce)
-            .then(|| Self::new(sender, unsafe { transaction_nonce.unchecked_sub(1) }))
+        (transaction_nonce > on_chain_nonce).then(|| Self::new(sender, transaction_nonce - 1))
     }
 
     /// Returns the [`TransactionId`] that would come before this transaction.
     pub fn unchecked_ancestor(&self) -> Option<Self> {
         // SAFETY: self.nonce != 0 ⇒ self.nonce >= 1
-        (self.nonce != 0).then(|| Self::new(self.sender, unsafe {self.nonce.unchecked_sub(1)}))
+        (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
     }
 
     /// Returns the [`TransactionId`] that directly follows this transaction: `self.nonce + 1`
