@@ -273,9 +273,6 @@ where
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if !precompile_cache_disabled {
-            // Only cache pure precompiles (addresses 0x01-0x0a) to avoid issues with stateful
-            // precompiles that have side effects or depend on contract state.
-            // Requires: https://github.com/alloy-rs/evm/pull/153
             evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
