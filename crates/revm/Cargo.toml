@@ -62,9 +62,9 @@ optional-eip3541 = ["revm/optional_eip3541"]
 optional-eip3607 = ["revm/optional_eip3607"]
 optional-no-base-fee = ["revm/optional_no_base_fee"]
 optional-checks = [
-    "revm/optional_balance_check",
-    "revm/optional_block_gas_limit",
-    "revm/optional_eip3541",
-    "revm/optional_eip3607",
-    "revm/optional_no_base_fee",
+    "optional-balance-check",
+    "optional-block-gas-limit",
+    "optional-eip3541",
+    "optional-eip3607",
+    "optional-no-base-fee",
 ]
