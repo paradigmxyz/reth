@@ -20,7 +20,10 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::{
+    builder::config::PendingBlockKind, EthApiError, PendingBlock, PendingBlockEnv,
+    PendingBlockEnvOrigin,
+};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -53,6 +56,9 @@ pub trait LoadPendingBlock:
 
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
+
+    /// Returns the pending block kind
+    fn pending_block_kind(&self) -> PendingBlockKind;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -130,6 +136,9 @@ pub trait LoadPendingBlock:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
+            if self.pending_block_kind() == PendingBlockKind::None {
+                return Ok(None);
+            }
             let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
@@ -227,99 +236,103 @@ pub trait LoadPendingBlock:
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit;
 
-        let mut best_txs =
-            self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
-                block_env.basefee,
-                block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-            ));
+        // Only include transactions if not configured as Empty
+        if !self.pending_block_kind().is_empty() {
+            let mut best_txs =
+                self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
+                    block_env.basefee,
+                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                ));
 
-        while let Some(pool_tx) = best_txs.next() {
-            // ensure we still have capacity for this transaction
-            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as invalid
-                // which also removes all dependent transaction from the iterator before we can
-                // continue
-                best_txs.mark_invalid(
-                    &pool_tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        pool_tx.gas_limit(),
-                        block_gas_limit,
-                    ),
-                );
-                continue
-            }
-
-            if pool_tx.origin.is_private() {
-                // we don't want to leak any state changes made by private transactions, so we mark
-                // them as invalid here which removes all dependent transactions from the iterator
-                // before we can continue
-                best_txs.mark_invalid(
-                    &pool_tx,
-                    InvalidPoolTransactionError::Consensus(
-                        InvalidTransactionError::TxTypeNotSupported,
-                    ),
-                );
-                continue
-            }
-
-            // convert tx to a signed transaction
-            let tx = pool_tx.to_consensus();
-
-            // There's only limited amount of blob space available per block, so we need to check if
-            // the EIP-4844 can still fit in the block
-            if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
-                    // we can't fit this _blob_ transaction into the block, so we mark it as
-                    // invalid, which removes its dependent transactions from
-                    // the iterator. This is similar to the gas limit condition
-                    // for regular transactions above.
+            while let Some(pool_tx) = best_txs.next() {
+                // ensure we still have capacity for this transaction
+                if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
+                    // we can't fit this transaction into the block, so we need to mark it as
+                    // invalid which also removes all dependent transaction from
+                    // the iterator before we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
                         InvalidPoolTransactionError::ExceedsGasLimit(
-                            tx_blob_gas,
-                            blob_params.max_blob_gas_per_block(),
+                            pool_tx.gas_limit(),
+                            block_gas_limit,
                         ),
                     );
                     continue
                 }
-            }
 
-            let gas_used = match builder.execute_transaction(tx.clone()) {
-                Ok(gas_used) => gas_used,
-                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                    error,
-                    ..
-                })) => {
-                    if error.is_nonce_too_low() {
-                        // if the nonce is too low, we can skip this transaction
-                    } else {
-                        // if the transaction is invalid, we can skip it and all of its
-                        // descendants
-                        best_txs.mark_invalid(
-                            &pool_tx,
-                            InvalidPoolTransactionError::Consensus(
-                                InvalidTransactionError::TxTypeNotSupported,
-                            ),
-                        );
-                    }
+                if pool_tx.origin.is_private() {
+                    // we don't want to leak any state changes made by private transactions, so we
+                    // mark them as invalid here which removes all dependent
+                    // transactions from the iteratorbefore we can continue
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::Consensus(
+                            InvalidTransactionError::TxTypeNotSupported,
+                        ),
+                    );
                     continue
                 }
-                // this is an error that we should treat as fatal for this attempt
-                Err(err) => return Err(Self::Error::from_eth_err(err)),
-            };
 
-            // add to the total blob gas used if the transaction successfully executed
-            if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                sum_blob_gas_used += tx_blob_gas;
+                // convert tx to a signed transaction
+                let tx = pool_tx.to_consensus();
 
-                // if we've reached the max data gas per block, we can skip blob txs entirely
-                if sum_blob_gas_used == blob_params.max_blob_gas_per_block() {
-                    best_txs.skip_blobs();
+                // There's only limited amount of blob space available per block, so we need to
+                // check if the EIP-4844 can still fit in the block
+                if let Some(tx_blob_gas) = tx.blob_gas_used() {
+                    if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
+                        // we can't fit this _blob_ transaction into the block, so we mark it as
+                        // invalid, which removes its dependent transactions from
+                        // the iterator. This is similar to the gas limit condition
+                        // for regular transactions above.
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::ExceedsGasLimit(
+                                tx_blob_gas,
+                                blob_params.max_blob_gas_per_block(),
+                            ),
+                        );
+                        continue
+                    }
                 }
-            }
 
-            // add gas used by the transaction to cumulative gas used, before creating the receipt
-            cumulative_gas_used += gas_used;
+                let gas_used = match builder.execute_transaction(tx.clone()) {
+                    Ok(gas_used) => gas_used,
+                    Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                        error,
+                        ..
+                    })) => {
+                        if error.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            best_txs.mark_invalid(
+                                &pool_tx,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
+                                ),
+                            );
+                        }
+                        continue
+                    }
+                    // this is an error that we should treat as fatal for this attempt
+                    Err(err) => return Err(Self::Error::from_eth_err(err)),
+                };
+
+                // add to the total blob gas used if the transaction successfully executed
+                if let Some(tx_blob_gas) = tx.blob_gas_used() {
+                    sum_blob_gas_used += tx_blob_gas;
+
+                    // if we've reached the max data gas per block, we can skip blob txs entirely
+                    if sum_blob_gas_used == blob_params.max_blob_gas_per_block() {
+                        best_txs.skip_blobs();
+                    }
+                }
+
+                // add gas used by the transaction to cumulative gas used, before creating the
+                // receipt
+                cumulative_gas_used += gas_used;
+            }
         }
 
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =

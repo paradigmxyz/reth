@@ -10,9 +10,9 @@ use reth_rpc_eth_api::{
     helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    GasPriceOracleConfig,
+    builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
+    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
+    FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -41,6 +41,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
     max_batch_size: usize,
+    pending_block_kind: PendingBlockKind,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -80,6 +81,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -97,6 +99,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            pending_block_kind,
         }
     }
 }
@@ -125,6 +128,7 @@ where
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
             max_batch_size: 1,
+            pending_block_kind: PendingBlockKind::Full,
         }
     }
 }
@@ -160,6 +164,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -177,6 +182,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            pending_block_kind,
         }
     }
 
@@ -201,6 +207,7 @@ where
             gas_oracle_config,
             next_env: _,
             max_batch_size,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -218,6 +225,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            pending_block_kind,
         }
     }
 
@@ -295,6 +303,12 @@ where
         self
     }
 
+    /// Sets the pending block kind
+    pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -324,6 +338,7 @@ where
             task_spawner,
             next_env,
             max_batch_size,
+            pending_block_kind,
         } = self;
 
         let provider = components.provider().clone();
@@ -361,6 +376,7 @@ where
             rpc_converter,
             next_env,
             max_batch_size,
+            pending_block_kind,
         )
     }
 

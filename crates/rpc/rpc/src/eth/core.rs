@@ -20,8 +20,8 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthStateCache,
+    FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -151,6 +151,7 @@ where
         proof_permits: usize,
         rpc_converter: Rpc,
         max_batch_size: usize,
+        pending_block_kind: PendingBlockKind,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -166,6 +167,7 @@ where
             rpc_converter,
             (),
             max_batch_size,
+            pending_block_kind,
         );
 
         Self { inner: Arc::new(inner) }
@@ -299,6 +301,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Transaction batch sender for batching tx insertions
     tx_batch_sender:
         mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+
+    /// Configuration for pending block construction.
+    pending_block_kind: PendingBlockKind,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -322,6 +327,7 @@ where
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
+        pending_block_kind: PendingBlockKind,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -360,6 +366,7 @@ where
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
+            pending_block_kind,
         }
     }
 }
@@ -512,6 +519,12 @@ where
             .map_err(|_| reth_rpc_eth_types::EthApiError::BatchTxSendError)?;
 
         Ok(response_rx.await??)
+    }
+
+    /// Returns the pending block kind
+    #[inline]
+    pub const fn pending_block_kind(&self) -> PendingBlockKind {
+        self.pending_block_kind
     }
 }
 
