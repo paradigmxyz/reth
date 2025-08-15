@@ -9,7 +9,7 @@ use reth_payload_primitives::{
     ExecutionPayload,
 };
 use reth_node_api::{EngineTypes, FullNodeComponents, NodeTypes, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, Block};
 use reth_provider::StateProviderFactory;
 
 #[derive(Debug, Clone)]

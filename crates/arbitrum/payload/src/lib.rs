@@ -4,8 +4,8 @@ pub mod builder;
 extern crate alloc;
 
 use alloc::vec::Vec;
-use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{Address, B256, Bytes, U256, Bloom};
+use alloy_eips::eip4895::{Withdrawal, Withdrawals};
+use alloy_primitives::{Address, B256, B64, Bytes, U256, Bloom};
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadInputV2,
     ExecutionPayloadV1, ExecutionPayloadV3,
@@ -242,9 +242,7 @@ impl ArbExecutionData {
             })
             .collect();
         let transactions = txs?;
-        let tx_root = calculate_transaction_root(
-            &transactions.iter().cloned().map(|t| t.into_inner()).collect::<alloc::vec::Vec<_>>(),
-        );
+        let tx_root = calculate_transaction_root(&transactions);
         let v1 = self.payload.as_v1();
         let header = alloy_consensus::Header {
             parent_hash: self.parent_hash,
@@ -256,26 +254,27 @@ impl ArbExecutionData {
             logs_bloom: v1.logs_bloom,
             difficulty: U256::from(0u8),
             number: v1.block_number,
-            gas_limit: v1.gas_limit as u128,
-            gas_used: v1.gas_used as u128,
+            gas_limit: v1.gas_limit,
+            gas_used: v1.gas_used,
             timestamp: v1.timestamp,
             extra_data: v1.extra_data.clone().into(),
             mix_hash: v1.prev_randao,
-            nonce: 0,
-            base_fee_per_gas: Some(v1.base_fee_per_gas),
+            nonce: B64::ZERO,
+            base_fee_per_gas: Some(v1.base_fee_per_gas.to::<u64>()),
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
             requests_hash: None,
             parent_beacon_block_root: self.sidecar.parent_beacon_block_root,
         };
+        let withdrawals: Option<Withdrawals> =
+            v1.withdrawals.clone().map(Into::into);
         Ok(alloy_consensus::Block {
             header,
             body: alloy_consensus::BlockBody {
                 transactions,
                 ommers: alloc::vec::Vec::new(),
-                withdrawals: v1.withdrawals.clone(),
-                requests: None,
+                withdrawals,
             },
         })
     }
