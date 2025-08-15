@@ -18,7 +18,7 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
 use reth_arbitrum_primitives::ArbPrimitives;
 use alloy_eips::eip7685::Requests;
-use reth_primitives_traits::proofs::calculate_transaction_root;
+use alloy_consensus::proofs::calculate_transaction_root;
 use alloy_consensus::{Block, EMPTY_OMMER_ROOT_HASH};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -262,8 +262,8 @@ impl ArbExecutionData {
             nonce: B64::ZERO,
             base_fee_per_gas: Some(v1.base_fee_per_gas.to::<u64>()),
             withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
             requests_hash: None,
             parent_beacon_block_root: self.sidecar.parent_beacon_block_root,
         };
