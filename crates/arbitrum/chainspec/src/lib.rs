@@ -60,7 +60,7 @@ impl ChainSpecParser for ArbitrumChainSpecParser {
             "arbitrum-sepolia" | "arb-sepolia" | "arbsepolia" | "421614" => {
                 Ok(Arc::new(arbitrum_sepolia_spec()))
             }
-            _ => Ok(parse_genesis(s)?.into()),
+            _ => Ok(Arc::new(reth_chainspec::ChainSpec::from_genesis(parse_genesis(s)?))),
         }
     }
 }

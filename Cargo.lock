@@ -619,7 +619,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9b6f0482c82310366ec3dcf4e5212242f256a69fcf1a26e5017e6704091ee95"
 dependencies = [
  "alloy-primitives",
- "derive_more",
+ "derive_more 2.0.1",
  "serde",
 ]
 
@@ -7305,9 +7305,10 @@ dependencies = [
 name = "reth-arbitrum-chainspec"
 version = "0.1.0"
 dependencies = [
- "alloy-evm",
- "alloy-primitives",
+ "alloy-chains",
+ "eyre",
  "reth-chainspec",
+ "reth-cli",
  "revm",
 ]
 
@@ -7329,9 +7330,12 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-rpc-eth-api",
+ "reth-storage-api",
  "reth-storage-errors",
  "revm",
  "revm-context-interface 8.0.1",
@@ -7389,10 +7393,17 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "reth-arbitrum-primitives",
+ "reth-basic-payload-builder",
  "reth-chain-state",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-types",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
  "reth-primitives-traits",
+ "reth-revm",
+ "reth-storage-api",
  "serde",
 ]
 
@@ -7428,6 +7439,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "once_cell",
  "reth-arbitrum-evm",
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",
