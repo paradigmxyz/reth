@@ -7,15 +7,12 @@ use alloy_consensus::{
     transaction::SignerRecoverable,
     Signed, Transaction, TransactionEnvelope,
 };
-use alloy_eips::{
-    eip2718::{Eip2718Result, IsTyped2718},
-    Decodable2718, Encodable2718, Typed2718,
-};
-use alloy_primitives::{bytes::Buf, Sealed, Signature, TxHash, B256};
+use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
+use alloy_primitives::{Sealed, Signature, TxHash, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
-    alloy::transaction::{FromTxCompact, ToTxCompact},
+    alloy::transaction::{CompactEnvelope, FromTxCompact, ToTxCompact},
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
@@ -194,57 +191,63 @@ impl ToTxCompact for CustomTransactionEnvelope {
     }
 }
 
-impl RlpBincode for CustomTransactionEnvelope {}
 impl RlpBincode for CustomTransaction {}
 
-impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
+impl reth_codecs::alloy::transaction::Envelope for CustomTransaction {
     fn signature(&self) -> &Signature {
-        self.inner.signature()
+        match self {
+            CustomTransaction::Op(tx) => tx.signature(),
+            CustomTransaction::Payment(tx) => tx.inner.signature(),
+        }
     }
 
     fn tx_type(&self) -> Self::TxType {
-        TxTypeCustom::Payment
+        match self {
+            CustomTransaction::Op(tx) => TxTypeCustom::Op(tx.tx_type()),
+            CustomTransaction::Payment(_) => TxTypeCustom::Payment,
+        }
     }
 }
 
-impl Compact for CustomTransactionEnvelope {
+impl FromTxCompact for CustomTransaction {
+    type TxType = TxTypeCustom;
+
+    fn from_tx_compact(buf: &[u8], tx_type: Self::TxType, signature: Signature) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        match tx_type {
+            TxTypeCustom::Op(tx_type) => {
+                let (tx, len) = OpTxEnvelope::from_tx_compact(buf, tx_type, signature);
+                (Self::Op(tx), len)
+            }
+            TxTypeCustom::Payment => {
+                let (tx, len) = CustomTransactionEnvelope::from_tx_compact(buf, tx_type, signature);
+                (Self::Payment(tx), len)
+            }
+        }
+    }
+}
+
+impl ToTxCompact for CustomTransaction {
+    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+        match self {
+            CustomTransaction::Op(tx) => tx.to_tx_compact(buf),
+            CustomTransaction::Payment(tx) => tx.to_tx_compact(buf),
+        }
+    }
+}
+
+impl Compact for CustomTransaction {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
-        self.inner.tx().to_compact(buf)
+        <Self as CompactEnvelope>::to_compact(self, buf)
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (signature, rest) = Signature::from_compact(buf, len);
-        let (inner, buf) = <TxPayment as Compact>::from_compact(rest, len);
-        let signed = Signed::new_unhashed(inner, signature);
-        (CustomTransactionEnvelope { inner: signed }, buf)
-    }
-}
-
-impl reth_codecs::Compact for CustomTransaction {
-    fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
-    where
-        Buf: BufMut + AsMut<[u8]>,
-    {
-        buf.put_u8(self.ty());
-        match self {
-            Self::Op(tx) => tx.to_compact(buf),
-            Self::Payment(tx) => tx.to_compact(buf),
-        }
-    }
-
-    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let type_byte = buf.get_u8();
-
-        if <OpTxEnvelope as IsTyped2718>::is_type(type_byte) {
-            let (tx, remaining) = OpTxEnvelope::from_compact(buf, len);
-            return (Self::Op(tx), remaining);
-        }
-
-        let (tx, remaining) = CustomTransactionEnvelope::from_compact(buf, len);
-        (Self::Payment(tx), remaining)
+        <Self as CompactEnvelope>::from_compact(buf, len)
     }
 }
 
