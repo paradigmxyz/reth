@@ -335,13 +335,12 @@ where
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
-            let block_timestamp = self.block_timestamp();
 
             let encoded = valid_tx.transaction().encoded_2718();
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
-                block_timestamp,
+                self.block_timestamp(),
                 &encoded,
                 false,
             ) {
