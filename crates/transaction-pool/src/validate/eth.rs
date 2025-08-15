@@ -141,6 +141,10 @@ where
     /// which can improve performance when validating many transactions.
     ///
     /// If `state` is `None`, a new state provider will be created.
+    ///
+    /// Convenience method for applying stateless and stateful checks on transaction. Under the
+    /// hood this calls same validations as [`apply_checks_no_state`](Self::apply_checks_no_state)
+    /// followed by [`apply_checks_against_state`](Self::apply_checks_against_state).
     pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
@@ -148,6 +152,32 @@ where
         state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
+    }
+
+    /// Performs validation, not requiring chain state, on single transaction.
+    ///
+    /// Returns unaltered input transaction if all checks pass, so transaction can continue
+    /// through to stateful validation as argument to
+    /// [`apply_checks_against_state`](Self::apply_checks_against_state).
+    pub fn apply_checks_no_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
+        self.inner.apply_checks_no_state(origin, transaction)
+    }
+
+    /// Validates single transaction using given state.
+    pub fn apply_checks_against_state<P>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: P,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        P: AccountInfoReader,
+    {
+        self.inner.apply_checks_against_state(origin, transaction, state)
     }
 }
 
@@ -267,7 +297,7 @@ where
         transaction: Tx,
         maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
-        match self.validate_one_no_state(origin, transaction) {
+        match self.apply_checks_no_state(origin, transaction) {
             Ok(transaction) => {
                 // stateless checks passed, pass transaction down stateful validation pipeline
                 // If we don't have a state provider yet, fetch the latest state
@@ -287,7 +317,7 @@ where
 
                 let state = maybe_state.as_deref().expect("provider is set");
 
-                self.validate_one_against_state(origin, transaction, state)
+                self.apply_checks_against_state(origin, transaction, state)
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -295,8 +325,8 @@ where
 
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
-    /// to [`validate_one_against_state`](Self::validate_one_against_state).
-    fn validate_one_no_state(
+    /// to [`apply_checks_against_state`](Self::apply_checks_against_state).
+    fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -550,7 +580,7 @@ where
     }
 
     /// Validates a single transaction using given state provider.
-    fn validate_one_against_state<P>(
+    fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
