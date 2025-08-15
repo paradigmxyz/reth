@@ -6,6 +6,7 @@ use crate::tree::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
+    precompile_utils::PrecompileMapExt,
     ExecutionEnv, StateProviderBuilder,
 };
 use alloy_evm::Database;
@@ -273,7 +274,9 @@ where
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
         if !precompile_cache_disabled {
-            evm.precompiles_mut().map_precompiles(|address, precompile| {
+            // Only cache pure precompiles (addresses 0x01-0x0a) to avoid caching stateful
+            // precompiles
+            evm.precompiles_mut().map_pure_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
                     precompile_cache_map.cache_for_address(*address),

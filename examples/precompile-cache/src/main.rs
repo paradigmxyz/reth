@@ -1,4 +1,8 @@
 //! This example shows how to implement a node with a custom EVM that uses a stateful precompile
+//!
+//! Note: This example demonstrates caching ALL precompiles. For production use,
+//! consider using map_pure_precompiles to only cache pure precompiles (addresses 0x01-0x0a)
+//! to avoid issues with stateful precompiles.
 
 #![warn(unused_crate_dependencies)]
 

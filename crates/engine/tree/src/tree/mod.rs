@@ -63,6 +63,7 @@ mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
+mod precompile_utils;
 #[cfg(test)]
 mod tests;
 // TODO(alexey): compare trie updates in `insert_block_inner`
