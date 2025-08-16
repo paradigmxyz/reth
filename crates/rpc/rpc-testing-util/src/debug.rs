@@ -106,12 +106,14 @@ where
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash, false).await,
             BlockId::Number(tag) => self.block_by_number(tag, false).await,
         }?
-        .ok_or_else(|| RpcError::Custom("block not found".to_string()))?;
-        let hashes = block.transactions.hashes().map(|tx| (tx, opts.clone())).collect::<Vec<_>>();
-        let stream = futures::stream::iter(hashes.into_iter().map(move |(tx, opts)| async move {
-            match self.debug_trace_transaction_json(tx, opts).await {
-                Ok(result) => Ok((result, tx)),
-                Err(err) => Err((err, tx)),
+        .ok_or_else(|| RpcError::Custom("block not found".into()))?;
+        let stream = futures::stream::iter(block.transactions.hashes().map(move |tx| {
+            let opts = opts.clone();
+            async move {
+                match self.debug_trace_transaction_json(tx, opts).await {
+                    Ok(result) => Ok((result, tx)),
+                    Err(err) => Err((err, tx)),
+                }
             }
         }))
         .buffered(10);
