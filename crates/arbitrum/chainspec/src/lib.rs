@@ -117,6 +117,8 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
     storage.insert(map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
 
     storage
+}
+
 pub fn build_full_arbos_storage(
     chain_id: u64,
     chain_config_bytes: Option<Bytes>,
