@@ -1,5 +1,6 @@
 //! Utility functions for hashing and encoding.
 
+use crate::{ECIESError, ECIESErrorImpl};
 use alloy_primitives::B256;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -19,4 +20,25 @@ pub(crate) fn hmac_sha256(key: &[u8], input: &[&[u8]], auth_data: &[u8]) -> B256
     }
     hmac.update(auth_data);
     B256::from_slice(&hmac.finalize().into_bytes())
+}
+
+/// Verifies an HMAC-SHA256 tag using constant-time comparison.
+///
+/// This function uses HMAC's built-in `verify` method which performs constant-time
+/// comparison to prevent timing attacks.
+pub(crate) fn verify_hmac_sha256(
+    key: &[u8],
+    input: &[&[u8]],
+    auth_data: &[u8],
+    expected_tag: &[u8],
+) -> Result<(), ECIESError> {
+    let mut hmac =
+        Hmac::<Sha256>::new_from_slice(key).map_err(ECIESErrorImpl::InvalidHmacKeyLength)?;
+    for input in input {
+        hmac.update(input);
+    }
+    hmac.update(auth_data);
+    hmac.verify_slice(expected_tag)
+        .map_err(|_| ECIESError::from(ECIESErrorImpl::MacVerificationFailed))?;
+    Ok(())
 }

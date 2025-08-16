@@ -9,6 +9,7 @@
 //!
 //! For more information, refer to the [Ethereum MAC specification](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac).
 
+use crate::{ECIESError, ECIESErrorImpl};
 use aes::Aes256Enc;
 use alloy_primitives::{B128, B256};
 use block_padding::NoPadding;
@@ -16,6 +17,7 @@ use cipher::BlockEncrypt;
 use digest::KeyInit;
 use generic_array::GenericArray;
 use sha3::{Digest, Keccak256};
+use subtle;
 use typenum::U16;
 
 /// Type alias for a fixed-size array of 16 bytes used as headers.
@@ -79,5 +81,20 @@ impl MAC {
     /// bits.
     pub fn digest(&self) -> B128 {
         B128::from_slice(&self.hasher.clone().finalize()[..16])
+    }
+
+    /// Verify a MAC tag using constant-time comparison.
+    ///
+    /// This method computes the MAC digest and compares it with the provided tag
+    /// using constant-time comparison to prevent timing attacks.
+    pub fn verify(&self, expected_tag: B128) -> Result<(), ECIESError> {
+        if !bool::from(subtle::ConstantTimeEq::ct_eq(
+            self.digest().as_slice(),
+            expected_tag.as_slice(),
+        )) {
+            return Err(ECIESError::from(ECIESErrorImpl::MacVerificationFailed));
+        }
+
+        Ok(())
     }
 }

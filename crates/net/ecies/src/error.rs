@@ -97,6 +97,12 @@ pub enum ECIESErrorImpl {
     /// Error when data is not received from peer for a prolonged period.
     #[error("never received data from remote peer")]
     StreamTimeout,
+    /// Error when HMAC key length is invalid
+    #[error(transparent)]
+    InvalidHmacKeyLength(digest::InvalidLength),
+    /// Error when MAC verification fails
+    #[error("MAC tag mismatch")]
+    MacVerificationFailed,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {
@@ -126,5 +132,11 @@ impl From<alloy_rlp::Error> for ECIESError {
 impl From<std::num::TryFromIntError> for ECIESError {
     fn from(source: std::num::TryFromIntError) -> Self {
         ECIESErrorImpl::FromInt(source).into()
+    }
+}
+
+impl From<digest::InvalidLength> for ECIESError {
+    fn from(source: digest::InvalidLength) -> Self {
+        ECIESErrorImpl::InvalidHmacKeyLength(source).into()
     }
 }

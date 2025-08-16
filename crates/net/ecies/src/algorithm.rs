@@ -3,7 +3,7 @@
 use crate::{
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
-    util::{hmac_sha256, sha256},
+    util::{hmac_sha256, sha256, verify_hmac_sha256},
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
@@ -228,14 +228,12 @@ impl<'a> EncryptedMessage<'a> {
         //
         // enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
         // ```
-        let check_tag = hmac_sha256(
+        verify_hmac_sha256(
             keys.mac_key.as_ref(),
             &[self.iv.as_slice(), self.encrypted_data],
             &self.auth_data,
-        );
-        if check_tag != self.tag {
-            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into())
-        }
+            self.tag.as_slice(),
+        )?;
 
         Ok(())
     }
@@ -663,9 +661,9 @@ impl ECIES {
         let header = HeaderBytes::from_mut_slice(header_bytes);
         let mac = B128::from_slice(&mac_bytes[..16]);
 
-        self.ingress_mac.as_mut().unwrap().update_header(header);
-        let check_mac = self.ingress_mac.as_mut().unwrap().digest();
-        if check_mac != mac {
+        let ingress_mac = self.ingress_mac.as_mut().unwrap();
+        ingress_mac.update_header(header);
+        if ingress_mac.verify(mac).is_err() {
             return Err(ECIESErrorImpl::TagCheckHeaderFailed.into())
         }
 
@@ -719,9 +717,10 @@ impl ECIES {
         let mac_index = data.len().checked_sub(16).ok_or(ECIESErrorImpl::EncryptedDataTooSmall)?;
         let (body, mac_bytes) = split_at_mut(data, mac_index)?;
         let mac = B128::from_slice(mac_bytes);
-        self.ingress_mac.as_mut().unwrap().update_body(body);
-        let check_mac = self.ingress_mac.as_mut().unwrap().digest();
-        if check_mac != mac {
+
+        let ingress_mac = self.ingress_mac.as_mut().unwrap();
+        ingress_mac.update_body(body);
+        if ingress_mac.verify(mac).is_err() {
             return Err(ECIESErrorImpl::TagCheckBodyFailed.into())
         }
 
