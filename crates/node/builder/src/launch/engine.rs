@@ -256,25 +256,26 @@ where
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        let mut built_payloads = match ctx
+        // create a never-ending empty stream by keeping the sender alive.
+        let (mut built_payloads, keepalive_tx) = match ctx
             .components()
             .payload_builder_handle()
             .subscribe()
             .await
         {
-            Ok(events) => events.into_built_payload_stream().fuse(),
+            Ok(events) => (events.into_built_payload_stream().fuse(), None),
             Err(e) => {
                 reth_tracing::tracing::warn!(
                     target: "reth::cli",
-                    "Payload builder subscription unavailable ({:?}); continuing without built payloads",
+                    "Payload builder subscription unavailable ({:?}); running consensus engine without built payloads",
                     e
                 );
                 use futures::StreamExt;
                 use reth_payload_builder_primitives::{Events as PbEvents, PayloadEvents};
                 use tokio::sync::broadcast;
-                let (_tx, rx) = broadcast::channel::<PbEvents<<Types as reth_node_api::NodeTypes>::Payload>>(1);
+                let (tx, rx) = broadcast::channel::<PbEvents<<Types as reth_node_api::NodeTypes>::Payload>>(1);
                 let empty_events = PayloadEvents { receiver: rx };
-                empty_events.into_built_payload_stream().fuse()
+                (empty_events.into_built_payload_stream().fuse(), Some(tx))
             }
         };
 
@@ -285,6 +286,7 @@ where
 
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
+            let _keepalive_tx = keepalive_tx;
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);

@@ -13,6 +13,8 @@ use alloy_rpc_types_engine::{
 use reth_payload_primitives::{BuiltPayload, ExecutionPayload};
 use serde::{Deserialize, Serialize};
 use alloy_rlp::Encodable;
+use alloy_eips::Encodable2718;
+use alloy_eips::Decodable2718;
 use alloc::sync::Arc;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction};
@@ -237,7 +239,8 @@ impl ArbExecutionData {
             .transactions()
             .iter()
             .map(|b| {
-                alloy_rlp::Decodable::decode(&mut &b[..])
+                let mut s = &b[..];
+                reth_arbitrum_primitives::ArbTransactionSigned::decode_2718_exact(&mut s)
                     .map_err(|e| format!("tx decode error: {e}"))
             })
             .collect();
@@ -341,7 +344,7 @@ impl reth_payload_primitives::PayloadTypes for ArbPayloadTypes {
                 .transactions()
                 .map(|tx| {
                     let mut v = alloc::vec::Vec::new();
-                    tx.encode(&mut v);
+                    tx.encode_2718(&mut v);
                     Bytes::from(v)
                 })
                 .collect(),
