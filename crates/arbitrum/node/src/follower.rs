@@ -1,5 +1,5 @@
 use std::sync::{Arc, OnceLock};
-use alloy_primitives::B256;
+use alloy_primitives::{B256, Address, U256};
 use eyre::Result;
 use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_engine::PayloadAttributes;
@@ -14,6 +14,11 @@ pub trait FollowerExecutor: Send + Sync {
         parent_hash: B256,
         attrs: PayloadAttributes,
         l2msg_bytes: &[u8],
+        poster: Address,
+        request_id: Option<B256>,
+        kind: u8,
+        l1_base_fee: U256,
+        batch_gas_cost: Option<u64>,
     ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send>>;
 }
 
@@ -41,6 +46,11 @@ impl FollowerExecutor for FollowerExecutorHandle {
         parent_hash: B256,
         _attrs: PayloadAttributes,
         _l2msg_bytes: &[u8],
+        _poster: Address,
+        _request_id: Option<B256>,
+        _kind: u8,
+        _l1_base_fee: U256,
+        _batch_gas_cost: Option<u64>,
     ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send>> {
         let beacon = self.beacon.clone();
         Box::pin(async move {

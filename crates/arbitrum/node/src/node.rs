@@ -191,10 +191,20 @@ where
                 )
                 .await?;
 
-            let parent_header = provider
-                .header(&parent_hash)?
-                .ok_or_else(|| eyre::eyre!("missing parent header"))?;
-                reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = parent_header.gas_limit, "follower: loaded parent header");
+            let parent_header = match provider.header(&parent_hash)? {
+                Some(h) => h,
+                None => {
+                    let gen_opt = provider.header_by_number(0)?;
+                    if let Some(gen) = gen_opt {
+                        let gh = reth_primitives_traits::SealedHeader::new(gen.clone(), gen.hash_slow()).hash();
+                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, have_genesis=%gh, "missing parent header; canonical genesis differs?");
+                    } else {
+                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header; canonical genesis not found");
+                    }
+                    return Err(eyre::eyre!("missing parent header"));
+                }
+            };
+            reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = parent_header.gas_limit, "follower: loaded parent header");
 
             let sealed_parent = reth_primitives_traits::SealedHeader::new(parent_header, parent_hash);
 
