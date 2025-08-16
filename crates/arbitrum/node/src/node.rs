@@ -272,13 +272,18 @@ where
     >;
 
     fn components_builder(&self) -> <Self as Node<N>>::ComponentsBuilder {
-        ComponentsBuilder::default()
+        let mut builder = ComponentsBuilder::default()
             .node_types::<N>()
             .pool(ArbPoolBuilder::default())
             .executor(ArbExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::new(crate::payload::ArbPayloadBuilderBuilder::default()))
             .network(ArbNetworkBuilder::default())
-            .consensus(ArbConsensusBuilder::default())
+            .consensus(ArbConsensusBuilder::default());
+        if self.args.sequencer {
+            builder = builder.payload(BasicPayloadServiceBuilder::new(crate::payload::ArbPayloadBuilderBuilder::default()));
+        } else {
+            builder = builder.payload(NoopPayloadBuilder::default());
+        }
+        builder
     }
 
     fn add_ons(&self) -> <Self as Node<N>>::AddOns {
