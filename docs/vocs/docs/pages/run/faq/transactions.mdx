@@ -55,13 +55,13 @@ The actual blob fee is deducted from the sender balance before transaction execu
 
 ## EIP-7702 Transactions
 
-[EIP-7702](https://eips.ethereum.org/EIPS/eip-7702) transactions (type `0x4`) were introducedin Ethereum's Pectra fork. This provides the ability for a wallet to delegate its execution to an authorized smart contract. Alongside the fields present from previous transaction types, EIP-7702 transactions include:
+[EIP-7702](https://eips.ethereum.org/EIPS/eip-7702) transactions (type `0x4`) were introduced in Ethereum's Pectra fork. This provides the ability for a wallet to delegate its execution to an authorized smart contract. Alongside the fields present from the EIP-1559 transaction type, EIP-7702 transactions include:
 - `authorization_list`
 - `signature_y_parity`
 - `signature_r`
 - `signature_s`
 
-where `authorization_list` is a list of tuples
+where `authorization_list` is a list of authorizations, which are tuples containing the following fields:
 - `chain_id`
 - `address`
 - `nonce`
