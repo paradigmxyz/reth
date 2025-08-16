@@ -15,3 +15,6 @@ reth-chainspec = { path = "../../chainspec", default-features = false, features 
 reth-cli.workspace = true
 eyre.workspace = true
 alloy-chains.workspace = true
+alloy-primitives.workspace = true
+reth-primitives = { path = "../../primitives", default-features = false, features = ["std"] }
+anyhow.workspace = true

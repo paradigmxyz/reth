@@ -1,5 +1,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use anyhow::{anyhow, Result};
+use alloy_primitives::{hex, B256, U256};
+use reth_chainspec::ChainSpec;
+use reth_chainspec::Genesis;
+use reth_primitives::{Header, SealedHeader};
+
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use std::sync::Arc;
 
@@ -7,6 +13,60 @@ use alloy_chains::Chain;
 use revm::primitives::hardfork::SpecId;
 
 extern crate alloc;
+
+pub fn sepolia_baked_genesis_from_header(
+    chain_id: u64,
+    base_fee_hex: &str,
+    timestamp_hex: &str,
+    state_root_hex: &str,
+    gas_limit_hex: &str,
+    extra_data_hex: &str,
+) -> Result<ChainSpec> {
+    let base_fee = U256::from_be_slice(&hex::decode(base_fee_hex.trim_start_matches("0x")).unwrap_or_default());
+    let ts = U256::from_be_slice(&hex::decode(timestamp_hex.trim_start_matches("0x")).unwrap_or_default());
+    let gas_limit = U256::from_be_slice(&hex::decode(gas_limit_hex.trim_start_matches("0x")).unwrap_or_default());
+    let mut state_root = [0u8; 32];
+    let sr = hex::decode(state_root_hex.trim_start_matches("0x")).unwrap_or_default();
+    let len = sr.len().min(32);
+    state_root[32 - len..].copy_from_slice(&sr[sr.len() - len..]);
+
+    let extra = hex::decode(extra_data_hex.trim_start_matches("0x")).unwrap_or_default();
+
+    let mut header = Header::default();
+    header.parent_hash = B256::ZERO;
+    header.ommers_hash = B256::from_slice(
+        &hex::decode("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0cf4f7b9327e38a").unwrap(),
+    );
+    header.beneficiary = Default::default();
+    header.state_root = B256::from(state_root);
+    header.transactions_root = B256::from_slice(
+        &hex::decode("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap(),
+    );
+    header.receipts_root = B256::from_slice(
+        &hex::decode("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap(),
+    );
+    header.logs_bloom = Default::default();
+    header.difficulty = U256::ZERO;
+    header.number = 0;
+    header.gas_limit = gas_limit.to::<u64>();
+    header.gas_used = 0;
+    header.timestamp = ts.to::<u64>();
+    header.extra_data = extra.into();
+    header.mix_hash = B256::ZERO;
+    header.nonce = 0;
+    header.base_fee_per_gas = Some(base_fee.to::<u64>());
+    header.withdrawals_root = None;
+    header.blob_gas_used = Some(0);
+    header.excess_blob_gas = Some(0);
+
+    let genesis = Genesis::from_header(header);
+    let mut spec = ChainSpec::builder()
+        .chain(Chain::from(chain_id))
+        .genesis(genesis)
+        .build();
+    spec.set_sealed_genesis_header(SealedHeader::new(spec.genesis_header().clone(), spec.genesis_hash()));
+    Ok(spec)
+}
 
 pub trait ArbitrumChainSpec {
     fn chain_id(&self) -> u64;
