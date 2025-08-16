@@ -62,8 +62,8 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             gas_used: *gas_used,
             extra_data: alloy_primitives::Bytes(input.execution_ctx.extra_data.clone()),
             parent_beacon_block_root: input.execution_ctx.parent_beacon_block_root,
-            blob_gas_used: Some(0),
-            excess_blob_gas: Some(0),
+            blob_gas_used: None,
+            excess_blob_gas: None,
             requests_hash: None,
         };
 

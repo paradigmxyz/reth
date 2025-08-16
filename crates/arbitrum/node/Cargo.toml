@@ -37,6 +37,8 @@ reth-rpc-api.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
+reth-execution-types.workspace = true
+reth-consensus-common.workspace = true
 
 reth-revm.workspace = true
 
@@ -59,6 +61,8 @@ arb-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 alloy-consensus.workspace = true
+
+alloy-rlp.workspace = true
 
 # misc
 clap.workspace = true

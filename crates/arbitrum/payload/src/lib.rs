@@ -262,8 +262,8 @@ impl ArbExecutionData {
             nonce: B64::ZERO,
             base_fee_per_gas: Some(v1.base_fee_per_gas.to::<u64>()),
             withdrawals_root: None,
-            blob_gas_used: Some(0),
-            excess_blob_gas: Some(0),
+            blob_gas_used: None,
+            excess_blob_gas: None,
             requests_hash: None,
             parent_beacon_block_root: self.sidecar.parent_beacon_block_root,
         };
