@@ -256,14 +256,23 @@ where
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        let mut built_payloads = ctx
+        let mut built_payloads = match ctx
             .components()
             .payload_builder_handle()
             .subscribe()
             .await
-            .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
-            .into_built_payload_stream()
-            .fuse();
+        {
+            Ok(events) => events.into_built_payload_stream().fuse(),
+            Err(e) => {
+                reth_tracing::tracing::warn!(
+                    target: "reth::cli",
+                    "Payload builder subscription unavailable ({:?}); continuing without built payloads",
+                    e
+                );
+                use futures::StreamExt;
+                futures::stream::empty().fuse()
+            }
+        };
 
         let chainspec = ctx.chain_spec();
         let provider = ctx.blockchain_db().clone();
