@@ -130,6 +130,7 @@ impl Compact for AlloyHeader {
             parent_beacon_block_root: header.parent_beacon_block_root,
             requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
             extra_data: header.extra_data,
+            bal_hash:None
         };
         (alloy_header, buf)
     }

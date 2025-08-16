@@ -504,7 +504,7 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
 impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
 where
     F: ConfigureEvm,
-    DB: Database,
+    DB: Database + revm::context::JournalTr,
 {
     type Primitives = F::Primitives;
     type Error = BlockExecutionError;

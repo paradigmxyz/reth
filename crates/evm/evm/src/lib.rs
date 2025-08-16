@@ -316,14 +316,14 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>
     where
-        DB: Database,
+        DB: Database + revm::context::JournalTr,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }
 
     /// Creates a strategy for execution of a given block.
-    fn executor_for_block<'a, DB: Database>(
+    fn executor_for_block<'a, DB: Database + revm::context::JournalTr>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
@@ -358,7 +358,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>,
     >
     where
-        DB: Database,
+        DB: Database + revm::context::JournalTr,
         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         BasicBlockBuilder {
@@ -399,7 +399,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// // Complete block building
     /// let outcome = builder.finish(state_provider)?;
     /// ```
-    fn builder_for_next_block<'a, DB: Database>(
+    fn builder_for_next_block<'a, DB: Database + revm::context::JournalTr>(
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
@@ -432,7 +432,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// let batch_output = executor.execute_batch(&blocks)?;
     /// ```
     #[auto_impl(keep_default_for(&, Arc))]
-    fn executor<DB: Database>(
+    fn executor<DB: Database + revm::context::JournalTr>(
         &self,
         db: DB,
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
@@ -441,7 +441,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Returns a new [`BasicBlockExecutor`].
     #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB: Database>(
+    fn batch_executor<DB: Database + revm::context::JournalTr>(
         &self,
         db: DB,
     ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {

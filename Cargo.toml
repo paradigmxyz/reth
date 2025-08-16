@@ -456,7 +456,7 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "27.0.3", default-features = false }
+revm = { version = "28.0.1", default-features = false }
 revm-bytecode = { version = "6.0.1", default-features = false }
 revm-database = { version = "7.0.1", default-features = false }
 revm-state = { version = "7.0.1", default-features = false }
@@ -466,7 +466,7 @@ revm-inspector = { version = "8.0.2", default-features = false }
 revm-context = { version = "8.0.2", default-features = false }
 revm-context-interface = { version = "8.0.1", default-features = false }
 revm-database-interface = { version = "7.0.1", default-features = false }
-op-revm = { version = "8.0.3", default-features = false }
+op-revm = { version = "9.0.1", default-features = false }
 revm-inspectors = "0.27.1"
 
 # eth
@@ -753,8 +753,8 @@ alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "ba
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 revm = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "bal" }
-alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "bal" }
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "build-bal" }
+alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "build-bal" }
 revm-bytecode = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
 revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
 revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "bal" }
