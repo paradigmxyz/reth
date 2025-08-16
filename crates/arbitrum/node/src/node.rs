@@ -293,7 +293,7 @@ where
                                     chain_id,
                                     from: poster,
                                     nonce,
-                                    gas_fee_cap: max_fee_per_gas,
+                                    gas_fee_cap: alloy_primitives::U256::ZERO,
                                     gas: u256_to_u64_checked(&gas_limit, "unsigned/contract tx gas limit")?,
                                     to: to_opt,
                                     value,
@@ -305,7 +305,7 @@ where
                                     chain_id,
                                     request_id: req,
                                     from: poster,
-                                    gas_fee_cap: max_fee_per_gas,
+                                    gas_fee_cap: alloy_primitives::U256::ZERO,
                                     gas: u256_to_u64_checked(&gas_limit, "unsigned/contract tx gas limit")?,
                                     to: to_opt,
                                     value,
@@ -436,7 +436,7 @@ where
                             from: poster,
                             l1_base_fee,
                             deposit_value,
-                            gas_fee_cap: max_fee_per_gas,
+                            gas_fee_cap: alloy_primitives::U256::ZERO,
                             gas,
                             retry_to: retry_to_opt,
                             retry_value: callvalue,
@@ -497,16 +497,19 @@ where
                 use reth_primitives_traits::{Recovered, SignerRecoverable};
                 for tx in &txs {
                     let sender = tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
+                    let bal = state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
+                    reth_tracing::tracing::info!(
+                        target: "arb-reth::follower",
+                        tx_type = ?tx.tx_type(),
+                        sender = %sender,
+                        sender_balance = %bal,
+                        "follower: executing tx"
+                    );
                     let recovered = Recovered::new_unchecked(tx.clone(), sender);
                     builder.execute_transaction(recovered).map_err(|e| eyre::eyre!("execute_transaction error: {e}"))?;
                 }
                 let outcome = builder.finish(&state_provider).map_err(|e| eyre::eyre!("finish error: {e}"))?;
-                let mut sealed_block = outcome.block.sealed_block().clone();
-                {
-                    let mut h = sealed_block.header_mut();
-                    h.blob_gas_used = None;
-                    h.excess_blob_gas = None;
-                }
+                let sealed_block = outcome.block.sealed_block().clone();
 
                 let header = sealed_block.header();
                 reth_tracing::tracing::info!(target: "arb-reth::follower", assembled_gas_limit = header.gas_limit, "follower: assembled block gas limit before import");
@@ -533,6 +536,28 @@ where
             let fcu_res = beacon.fork_choice_updated(fcu, None, EngineApiMessageVersion::default()).await?;
             if !matches!(fcu_res.payload_status.status, PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing) {
                 return Err(eyre::eyre!("fork_choice_updated not valid/syncing: {:?}", fcu_res.payload_status));
+            }
+            match provider.header(&block_hash) {
+                Ok(Some(_)) => {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after FCU");
+                }
+                Ok(None) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after FCU");
+                }
+                Err(e) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
+                }
+            }
+            match provider.header(&parent_hash) {
+                Ok(Some(_)) => {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after FCU");
+                }
+                Ok(None) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after FCU");
+                }
+                Err(e) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
+                }
             }
             Ok((block_hash, send_root))
         })
