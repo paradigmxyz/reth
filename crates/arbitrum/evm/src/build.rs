@@ -110,7 +110,7 @@ where
         let calldata_len = calldata.len();
         let gas_limit = tx.tx().gas_limit();
 
-        let block_env = self.evm().block();
+        let block_env = alloy_evm::Evm::block(self.evm());
         let block_basefee = alloy_primitives::U256::from(block_env.basefee);
         let block_coinbase = block_env.beneficiary;
 
@@ -158,10 +158,28 @@ where
         }
 
         let res = if is_special {
+            let pre_nonce = {
+                let state = self.inner.evm_mut().db_mut();
+                match state.basic(sender) {
+                    Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
+                    Err(_) => 0,
+                }
+            };
             let mut tx_env = tx.to_tx_env();
-            TransactionEnv::set_nonce(&mut tx_env, nonce);
+            TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
             let wrapped = WithTxEnv { tx_env, tx };
-            self.inner.execute_transaction_with_commit_condition(wrapped, f)
+            let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+            if let Ok(Some(_)) = result {
+                let state = self.inner.evm_mut().db_mut();
+                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
+                    if let Some(info) = acc.info.as_mut() {
+                        if info.nonce > 0 {
+                            info.nonce -= 1;
+                        }
+                    }
+                }
+            }
+            result
         } else {
             self.inner.execute_transaction_with_commit_condition(tx, f)
         };
