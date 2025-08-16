@@ -5,7 +5,7 @@ use alloy_primitives::B64;
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
-    validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
+    validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_header_base_fee, validate_header_extra_data,
 };
@@ -112,9 +112,6 @@ where
         validate_against_parent_hash_number(h, parent)?;
         validate_against_parent_timestamp(h, parent.header())?;
         validate_against_parent_eip1559_base_fee(h, parent.header(), &self.chain_spec)?;
-        if let Some(params) = self.chain_spec.blob_params_at_timestamp(h.timestamp()) {
-            validate_against_parent_4844(h, parent.header(), params)?;
-        }
         Ok(())
     }
 }
