@@ -80,6 +80,10 @@ const INITIAL_SPEED_LIMIT_PER_SECOND_V0: u64 = 1_000_000;
 const INITIAL_PER_BLOCK_GAS_LIMIT_V0: u64 = 20 * 1_000_000;
 const INITIAL_MIN_BASE_FEE_WEI: u128 = 100_000_000; // 0.1 gwei
 const INITIAL_PRICING_INERTIA: u64 = 102;
+const INITIAL_SPEED_LIMIT_PER_SECOND_V6: u64 = 7_000_000;
+const INITIAL_PER_BLOCK_GAS_LIMIT_V6: u64 = 32_000_000;
+const INITIAL_EQUIL_UNITS_V6: u64 = 16 * 10_000_000; 
+
 const INITIAL_BACKLOG_TOLERANCE: u64 = 10;
 
 fn address_to_b256(addr: Address) -> B256 {
@@ -222,6 +226,34 @@ fn write_bytes(storage: &mut BTreeMap<B256, B256>, storage_key: &[u8], bytes: &[
         storage.insert(map_slot(storage_key, be_u64(offset)), B256::from(last));
     }
 }
+fn minify_json_preserve(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut in_str = false;
+    let mut esc = false;
+    for &b in input {
+        if in_str {
+            out.push(b);
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+        } else {
+            match b {
+                b'"' => {
+                    in_str = true;
+                    out.push(b);
+                }
+                b' ' | b'\n' | b'\r' | b'\t' => {}
+                _ => out.push(b),
+            }
+        }
+    }
+    out
+}
+
 
 
 fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTreeMap<B256, B256> {
@@ -239,17 +271,17 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
     storage.insert(map_slot(&root_key, be_u64(NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET)), be_u64(0));
 
     let l2_space = subspace(&root_key, L2_PRICING_SUBSPACE);
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)), be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V0));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)), be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V0));
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)), be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V6));
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)), be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6));
     let initial_l2_base_fee = U256::from(100_000_000u64);
     insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l2_base_fee));
     insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)), be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)));
     insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)), be_u64(INITIAL_PRICING_INERTIA));
-    storage.insert(map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
+    storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
 
     let l1_space = subspace(&root_key, L1_PRICING_SUBSPACE);
-    let price_per_unit_offset: u64 = 7;
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PRICE_PER_UNIT_OFFSET)), be_u256(initial_l1_base_fee));
 
     storage
 }
@@ -268,9 +300,10 @@ pub fn build_full_arbos_storage(
 
     if let Some(cfg) = chain_config_bytes.clone() {
         let cc_space = subspace(&root_key, CHAIN_CONFIG_SUBSPACE);
-        write_bytes(&mut storage, &cc_space, &cfg);
+        let min = minify_json_preserve(cfg.as_ref());
+        write_bytes(&mut storage, &cc_space, &min);
 
-        let buf = cfg.as_ref();
+        let buf = min.as_slice();
         if let Some(v) = find_json_number(buf, br#""InitialArbOSVersion""#) {
             desired_arbos_version = v;
         }
@@ -282,7 +315,7 @@ pub fn build_full_arbos_storage(
         }
     }
 
-    storage.insert(map_slot(&root_key, be_u64(VERSION_OFFSET)), be_u64(1));
+    storage.insert(map_slot(&root_key, be_u64(VERSION_OFFSET)), be_u64(desired_arbos_version));
     storage.insert(map_slot(&root_key, be_u64(UPGRADE_VERSION_OFFSET)), be_u64(0));
     storage.insert(map_slot(&root_key, be_u64(UPGRADE_TIMESTAMP_OFFSET)), be_u64(0));
     if desired_arbos_version >= 2 {
@@ -299,20 +332,44 @@ pub fn build_full_arbos_storage(
     let l2_space = subspace(&root_key, L2_PRICING_SUBSPACE);
     let l1_space = subspace(&root_key, L1_PRICING_SUBSPACE);
 
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)), be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V0));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)), be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V0));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)),
+        be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V6),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)),
+        be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6),
+    );
     let initial_l2_base_fee = U256::from(100_000_000u64);
     insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l2_base_fee));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)), be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)), be_u64(INITIAL_PRICING_INERTIA));
+    storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)),
+        be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)),
+        be_u64(INITIAL_PRICING_INERTIA),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)),
+        be_u64(INITIAL_BACKLOG_TOLERANCE),
+    );
 
     let initial_rewards_recipient = if desired_arbos_version >= 2 { initial_chain_owner } else { BATCH_POSTER_PAYTO };
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PAY_REWARDS_TO_OFFSET)), address_to_b256(initial_rewards_recipient));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u256(U256::from(INITIAL_EQUIL_UNITS_V0)));
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u64(INITIAL_EQUIL_UNITS_V6));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_INERTIA_OFFSET)), be_u64(INITIAL_L1_INITIAL_INERTIA));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_UNIT_REWARD_OFFSET)), be_u64(INITIAL_L1_INITIAL_PER_UNIT_REWARD));
 
     let bpt_space = subspace(&l1_space, BATCH_POSTER_TABLE_KEY);
+    insert_non_zero(&mut storage, map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
+
 
     let poster_addrs_space = subspace(&bpt_space, POSTER_ADDRS_KEY);
     insert_non_zero(&mut storage, map_slot(&poster_addrs_space, be_u64(0)), be_u64(1));
@@ -321,20 +378,28 @@ pub fn build_full_arbos_storage(
     insert_non_zero(&mut storage, map_slot(&poster_byaddr_space, address_to_b256(BATCH_POSTER)), be_u64(1));
 
     let poster_info_space = subspace(&bpt_space, POSTER_INFO_KEY);
+
+    let retryables_space = subspace(&root_key, RETRYABLES_SUBSPACE);
+    let timeout_queue_space = subspace(&retryables_space, 0);
+    storage.insert(map_slot(&timeout_queue_space, be_u64(0)), be_u64(2));
+    storage.insert(map_slot(&timeout_queue_space, be_u64(1)), be_u64(2));
+
+    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
     let per_poster_space = subspace_bytes(&poster_info_space, BATCH_POSTER.as_slice());
     insert_non_zero(&mut storage, map_slot(&per_poster_space, be_u64(1)), address_to_b256(BATCH_POSTER_PAYTO));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
+
 
     let price_per_unit_offset: u64 = 7;
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
 
     let chain_owner_space = subspace(&root_key, CHAIN_OWNER_SUBSPACE);
-    if initial_chain_owner != Address::ZERO {
-        insert_non_zero(&mut storage, map_slot(&chain_owner_space, be_u64(0)), be_u64(1));
-        insert_non_zero(&mut storage, map_slot(&chain_owner_space, be_u64(1)), address_to_b256(initial_chain_owner));
-        let byaddr = subspace(&chain_owner_space, 0);
-        insert_non_zero(&mut storage, map_slot(&byaddr, address_to_b256(initial_chain_owner)), be_u64(1));
-    }
+    storage.insert(map_slot(&chain_owner_space, be_u64(0)), be_u64(1));
+    storage.insert(map_slot(&chain_owner_space, be_u64(1)), address_to_b256(initial_chain_owner));
+    let native_token_owner_space = subspace(&root_key, 10);
+    insert_non_zero(&mut storage, map_slot(&native_token_owner_space, be_u64(0)), be_u64(0));
+
+    let byaddr = subspace(&chain_owner_space, 0);
+    storage.insert(map_slot(&byaddr, address_to_b256(initial_chain_owner)), be_u64(1));
 
     let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
@@ -352,6 +417,7 @@ pub fn sepolia_baked_genesis_from_header(
     gas_limit_hex: &str,
     extra_data_hex: &str,
     chain_config_json: Option<&str>,
+    initial_l1_base_fee_hex: Option<&str>,
 ) -> Result<ChainSpec> {
     let base_fee = parse_hex_quantity(base_fee_hex);
     let ts = parse_hex_quantity(timestamp_hex);
@@ -376,17 +442,53 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
+
     let chain_cfg_bytes = chain_config_json.map(|s| alloy_primitives::Bytes::from(s.as_bytes().to_vec()));
-    let initial_l1_price = U256::from(50_000_000_000u64);
+
+    let initial_l1_price = initial_l1_base_fee_hex
+        .map(|h| parse_hex_quantity(h))
+        .unwrap_or_else(|| U256::from(50_000_000_000u64));
+
     let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
     if !arbos_storage.is_empty() {
         let acct = GenesisAccount::default()
-            .with_nonce(Some(1))
+            .with_nonce(Some(0))
             .with_balance(U256::ZERO)
             .with_code(None)
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
+
+    let invalid_code: Vec<u8> = vec![0xfe];
+
+    let precompile_addrs_zero_version: &[Address] = &[
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000064")), // ArbSys
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000065")), // ArbInfo
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000066")), // ArbAddressTable
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000067")), // ArbBLS
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000068")), // ArbFunctionTable
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000069")), // ArbosTest
+        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006b")), // ArbOwnerPublic
+        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006c")), // ArbGasInfo
+        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006d")), // ArbAggregator
+        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006e")), // ArbRetryableTx
+        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006f")), // ArbStatistics
+        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000070")), // ArbOwner
+        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000a4b05")), // ArbosActs (0xa4b05)
+        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000c8")), // NodeInterface
+        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000c9")), // NodeInterfaceDebug
+        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000ff")), // ArbDebug
+    ];
+    for addr in precompile_addrs_zero_version {
+        alloc.entry(*addr).or_insert_with(|| {
+            GenesisAccount::default()
+                .with_nonce(Some(0))
+                .with_balance(U256::ZERO)
+                .with_code(Some(invalid_code.clone()))
+                .with_storage(None)
+        });
+    }
+
     genesis.alloc = alloc;
 
     let spec = reth_chainspec::ChainSpec::builder()
