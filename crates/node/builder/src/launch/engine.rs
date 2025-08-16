@@ -270,7 +270,11 @@ where
                     e
                 );
                 use futures::StreamExt;
-                futures::stream::empty().fuse()
+                use reth_payload_builder_primitives::events::{Events as PbEvents, PayloadEvents};
+                use tokio::sync::broadcast;
+                let (_tx, rx) = broadcast::channel::<PbEvents<<Types as reth_node_api::NodeTypes>::Payload>>(1);
+                let empty_events = PayloadEvents { receiver: rx };
+                empty_events.into_built_payload_stream().fuse()
             }
         };
 
