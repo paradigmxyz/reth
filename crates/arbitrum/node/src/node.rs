@@ -205,11 +205,22 @@ where
                     .with_bundle_update()
                     .build();
 
-                let next_env = <reth_arbitrum_evm::ArbEvmConfig<ChainSpec, reth_arbitrum_primitives::ArbPrimitives> as reth_evm::ConfigureEvm>::NextBlockEnvCtx::build_next_env(
+                let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<ChainSpec, reth_arbitrum_primitives::ArbPrimitives> as reth_evm::ConfigureEvm>::NextBlockEnvCtx::build_next_env(
                     &reth_payload_builder::EthPayloadBuilderAttributes::new(parent_hash, attrs.clone().into()),
                     &sealed_parent,
                     evm_config.chain_spec().as_ref(),
                 ).map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
+
+                if next_env.gas_limit == 0 {
+                    if let Some(gl) = reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider) {
+                        reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "overriding zero gas_limit from ArbOS state");
+                        next_env.gas_limit = gl;
+                    } else {
+                        const INITIAL_PER_BLOCK_GAS_LIMIT_V0: u64 = 20_000_000;
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using default {}", INITIAL_PER_BLOCK_GAS_LIMIT_V0);
+                        next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_V0;
+                    }
+                }
 
                 let mut builder = evm_config
                     .builder_for_next_block(&mut db, &sealed_parent, next_env)
