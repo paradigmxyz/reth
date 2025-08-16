@@ -1,3 +1,5 @@
+# Added by Devin: deps for follower execution path
+
 [package]
 name = "reth-arbitrum-node"
 version.workspace = true
@@ -36,6 +38,8 @@ reth-ethereum-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
+reth-revm.workspace = true
+
 
 
 # arbitrum-specific crates
@@ -51,6 +55,9 @@ reth-arbitrum-storage = { workspace = true }
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
+arb-alloy-consensus.workspace = true
+alloy-eips.workspace = true
+
 alloy-consensus.workspace = true
 
 # misc
