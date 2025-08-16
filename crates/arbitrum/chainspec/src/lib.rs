@@ -459,34 +459,42 @@ pub fn sepolia_baked_genesis_from_header(
         alloc.insert(ARBOS_ADDR, acct);
     }
 
-    let invalid_code: Vec<u8> = vec![0xfe];
+    let invalid_code: alloy_primitives::Bytes = vec![0xfe].into();
 
-    let precompile_addrs_zero_version: &[Address] = &[
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000064")), // ArbSys
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000065")), // ArbInfo
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000066")), // ArbAddressTable
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000067")), // ArbBLS
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000068")), // ArbFunctionTable
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000069")), // ArbosTest
-        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006b")), // ArbOwnerPublic
-        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006c")), // ArbGasInfo
-        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006d")), // ArbAggregator
-        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006e")), // ArbRetryableTx
-        Address::from_slice(&hex_literal::hex!("000000000000000000000000000000000000006f")), // ArbStatistics
-        Address::from_slice(&hex_literal::hex!("0000000000000000000000000000000000000070")), // ArbOwner
-        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000a4b05")), // ArbosActs (0xa4b05)
-        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000c8")), // NodeInterface
-        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000c9")), // NodeInterfaceDebug
-        Address::from_slice(&hex_literal::hex!("00000000000000000000000000000000000000ff")), // ArbDebug
+    let precompile_hex_addrs = [
+        "0000000000000000000000000000000000000064", // ArbSys
+        "0000000000000000000000000000000000000065", // ArbInfo
+        "0000000000000000000000000000000000000066", // ArbAddressTable
+        "0000000000000000000000000000000000000067", // ArbBLS
+        "0000000000000000000000000000000000000068", // ArbFunctionTable
+        "0000000000000000000000000000000000000069", // ArbosTest
+        "000000000000000000000000000000000000006b", // ArbOwnerPublic
+        "000000000000000000000000000000000000006c", // ArbGasInfo
+        "000000000000000000000000000000000000006d", // ArbAggregator
+        "000000000000000000000000000000000000006e", // ArbRetryableTx
+        "000000000000000000000000000000000000006f", // ArbStatistics
+        "0000000000000000000000000000000000000070", // ArbOwner
+        "0000000000000000000000000000000000000071", // ArbWasm
+        "0000000000000000000000000000000000000072", // ArbWasmCache
+        "0000000000000000000000000000000000000073", // ArbNativeTokenManager
+        "00000000000000000000000000000000000a4b05", // ArbosActs (0xa4b05)
+        "00000000000000000000000000000000000000c8", // NodeInterface
+        "00000000000000000000000000000000000000c9", // NodeInterfaceDebug
+        "00000000000000000000000000000000000000ff", // ArbDebug
     ];
-    for addr in precompile_addrs_zero_version {
-        alloc.entry(*addr).or_insert_with(|| {
-            GenesisAccount::default()
-                .with_nonce(Some(0))
-                .with_balance(U256::ZERO)
-                .with_code(Some(invalid_code.clone()))
-                .with_storage(None)
-        });
+    for h in precompile_hex_addrs {
+        if let Ok(bytes) = hex::decode(h) {
+            if bytes.len() == 20 {
+                let addr = Address::from_slice(&bytes);
+                alloc.entry(addr).or_insert_with(|| {
+                    GenesisAccount::default()
+                        .with_nonce(Some(0))
+                        .with_balance(U256::ZERO)
+                        .with_code(Some(invalid_code.clone()))
+                        .with_storage(None)
+                });
+            }
+        }
     }
 
     genesis.alloc = alloc;
