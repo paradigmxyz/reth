@@ -35,6 +35,7 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
+use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -76,7 +77,9 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+        parking_lot::Mutex<
+            Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ParallelSparseTrie>>,
+        >,
     >,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
@@ -387,7 +390,7 @@ where
         });
 
         let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
+            SparseTrieTask::<_, ConfiguredSparseTrie, ParallelSparseTrie>::new_with_cleared_trie(
                 self.executor.clone(),
                 sparse_trie_rx,
                 proof_task_handle,
