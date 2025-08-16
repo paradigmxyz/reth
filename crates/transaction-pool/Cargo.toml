@@ -34,6 +34,7 @@ alloy-consensus = { workspace = true, features = ["kzg"] }
 # async/futures
 futures-util.workspace = true
 parking_lot.workspace = true
+pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
@@ -47,7 +48,8 @@ thiserror.workspace = true
 tracing.workspace = true
 rustc-hash.workspace = true
 schnellru.workspace = true
-serde = { workspace = true, features = ["derive", "rc"], optional = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
@@ -71,10 +73,10 @@ assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+futures.workspace = true
 
 [features]
 serde = [
-    "dep:serde",
     "reth-execution-types/serde",
     "reth-eth-wire-types/serde",
     "alloy-consensus/serde",
@@ -131,4 +133,14 @@ harness = false
 [[bench]]
 name = "priority"
 required-features = ["arbitrary"]
+harness = false
+
+[[bench]]
+name = "insertion"
+required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
+name = "canonical_state_change"
+required-features = ["test-utils", "arbitrary"]
 harness = false

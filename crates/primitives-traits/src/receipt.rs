@@ -14,7 +14,6 @@ pub trait FullReceipt: Receipt + MaybeCompact {}
 impl<T> FullReceipt for T where T: Receipt + MaybeCompact {}
 
 /// Abstraction of a receipt.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait Receipt:
     Send
     + Sync
@@ -31,6 +30,26 @@ pub trait Receipt:
     + MaybeSerde
     + InMemorySize
     + MaybeSerdeBincodeCompat
+{
+}
+
+// Blanket implementation for any type that satisfies all the supertrait bounds
+impl<T> Receipt for T where
+    T: Send
+        + Sync
+        + Unpin
+        + Clone
+        + fmt::Debug
+        + TxReceipt<Log = alloy_primitives::Log>
+        + RlpEncodableReceipt
+        + RlpDecodableReceipt
+        + Encodable
+        + Decodable
+        + Eip2718EncodableReceipt
+        + Typed2718
+        + MaybeSerde
+        + InMemorySize
+        + MaybeSerdeBincodeCompat
 {
 }
 

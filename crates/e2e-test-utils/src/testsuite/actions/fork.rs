@@ -5,7 +5,7 @@ use crate::testsuite::{
     Action, BlockInfo, Environment,
 };
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -130,14 +130,19 @@ where
 
             // get the block at the fork base number to establish the fork point
             let rpc_client = &env.node_clients[0].rpc;
-            let fork_base_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
-                    false,
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
+            let fork_base_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+            >::block_by_number(
+                rpc_client,
+                alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
+                false,
+            )
+            .await?
+            .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
 
             // update active node state to point to the fork base block
             let active_node_state = env.active_node_state_mut()?;
@@ -243,7 +248,7 @@ where
 
             // walk backwards through the chain until we reach the fork base
             while current_number > self.fork_base_number {
-                let block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
+                let block = EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_hash(
                     rpc_client,
                     current_hash,
                     false,

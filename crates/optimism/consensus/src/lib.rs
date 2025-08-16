@@ -34,9 +34,7 @@ mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
 
 pub mod validation;
-pub use validation::{
-    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, validate_block_post_execution,
-};
+pub use validation::{canyon, isthmus, validate_block_post_execution};
 
 pub mod error;
 pub use error::OpConsensusError;
@@ -57,8 +55,10 @@ impl<ChainSpec> OpBeaconConsensus<ChainSpec> {
     }
 }
 
-impl<ChainSpec: EthChainSpec + OpHardforks, N: NodePrimitives<Receipt: DepositReceipt>>
-    FullConsensus<N> for OpBeaconConsensus<ChainSpec>
+impl<N, ChainSpec> FullConsensus<N> for OpBeaconConsensus<ChainSpec>
+where
+    N: NodePrimitives<Receipt: DepositReceipt>,
+    ChainSpec: EthChainSpec<Header = N::BlockHeader> + OpHardforks + Debug + Send + Sync,
 {
     fn validate_block_post_execution(
         &self,
@@ -69,8 +69,10 @@ impl<ChainSpec: EthChainSpec + OpHardforks, N: NodePrimitives<Receipt: DepositRe
     }
 }
 
-impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
-    for OpBeaconConsensus<ChainSpec>
+impl<B, ChainSpec> Consensus<B> for OpBeaconConsensus<ChainSpec>
+where
+    B: Block,
+    ChainSpec: EthChainSpec<Header = B::Header> + OpHardforks + Debug + Send + Sync,
 {
     type Error = ConsensusError;
 
@@ -128,8 +130,10 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
     }
 }
 
-impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
-    for OpBeaconConsensus<ChainSpec>
+impl<H, ChainSpec> HeaderValidator<H> for OpBeaconConsensus<ChainSpec>
+where
+    H: BlockHeader,
+    ChainSpec: EthChainSpec<Header = H> + OpHardforks + Debug + Send + Sync,
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let header = header.header();
@@ -172,29 +176,11 @@ impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
             validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        // EIP1559 base fee validation
-        // <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation>
-        // > if Holocene is active in parent_header.timestamp, then the parameters from
-        // > parent_header.extraData are used.
-        if self.chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
-            let header_base_fee =
-                header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
-            let expected_base_fee =
-                decode_holocene_base_fee(&self.chain_spec, parent.header(), header.timestamp())
-                    .map_err(|_| ConsensusError::BaseFeeMissing)?;
-            if expected_base_fee != header_base_fee {
-                return Err(ConsensusError::BaseFeeDiff(GotExpected {
-                    expected: expected_base_fee,
-                    got: header_base_fee,
-                }))
-            }
-        } else {
-            validate_against_parent_eip1559_base_fee(
-                header.header(),
-                parent.header(),
-                &self.chain_spec,
-            )?;
-        }
+        validate_against_parent_eip1559_base_fee(
+            header.header(),
+            parent.header(),
+            &self.chain_spec,
+        )?;
 
         // ensure that the blob gas fields for this block
         if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {

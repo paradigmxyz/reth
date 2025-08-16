@@ -9,9 +9,9 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie, SparseTrieState,
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
 };
 use std::{
     sync::mpsc,
@@ -19,85 +19,48 @@ use std::{
 };
 use tracing::{debug, trace, trace_span};
 
-/// The level below which the sparse trie hashes are calculated in
-/// [`update_sparse_trie`].
-const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
-
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<BPF>
+pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
     /// Executor used to spawn subtasks.
     #[expect(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
-    /// Sparse Trie initialized with the blinded provider factory.
-    ///
-    /// It's kept as a field on the struct to prevent blocking on de-allocation in [`Self::run`].
-    pub(super) trie: SparseStateTrie<BPF>,
+    /// `SparseStateTrie` used for computing the state root.
+    pub(super) trie: SparseStateTrie<A, S>,
     pub(super) metrics: MultiProofTaskMetrics,
+    /// Trie node provider factory.
+    blinded_provider_factory: BPF,
 }
 
-impl<BPF> SparseTrieTask<BPF>
+impl<BPF, A, S> SparseTrieTask<BPF, A, S>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync + Clone,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default,
 {
-    /// Creates a new sparse trie task.
-    pub(super) fn new(
+    /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
+    pub(super) fn new_with_cleared_trie(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
+        sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
         Self {
             executor,
             updates,
             metrics,
-            trie: SparseStateTrie::new(blinded_provider_factory).with_updates(true),
+            trie: sparse_state_trie.into_inner(),
+            blinded_provider_factory,
         }
-    }
-
-    /// Creates a new sparse trie, populating the accounts trie with the given cleared
-    /// `SparseTrieState` if it exists.
-    pub(super) fn new_with_stored_trie(
-        executor: WorkloadExecutor,
-        updates: mpsc::Receiver<SparseTrieUpdate>,
-        blinded_provider_factory: BPF,
-        trie_metrics: MultiProofTaskMetrics,
-        sparse_trie_state: Option<SparseTrieState>,
-    ) -> Self {
-        if let Some(sparse_trie_state) = sparse_trie_state {
-            Self::with_accounts_trie(
-                executor,
-                updates,
-                blinded_provider_factory,
-                trie_metrics,
-                sparse_trie_state,
-            )
-        } else {
-            Self::new(executor, updates, blinded_provider_factory, trie_metrics)
-        }
-    }
-
-    /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
-    /// trie.
-    pub(super) fn with_accounts_trie(
-        executor: WorkloadExecutor,
-        updates: mpsc::Receiver<SparseTrieUpdate>,
-        blinded_provider_factory: BPF,
-        metrics: MultiProofTaskMetrics,
-        sparse_trie_state: SparseTrieState,
-    ) -> Self {
-        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
-        trie.populate_from(sparse_trie_state);
-
-        Self { executor, updates, metrics, trie }
     }
 
     /// Runs the sparse trie task to completion.
@@ -106,9 +69,22 @@ where
     ///
     /// This concludes once the last trie update has been received.
     ///
-    /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
-    /// drop.
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    /// # Returns
+    ///
+    /// - State root computation outcome.
+    /// - `SparseStateTrie` that needs to be cleared and reused to avoid reallocations.
+    pub(super) fn run(
+        mut self,
+    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseStateTrie<A, S>) {
+        // run the main loop to completion
+        let result = self.run_inner();
+        (result, self.trie)
+    }
+
+    /// Inner function to run the sparse trie task to completion.
+    ///
+    /// See [`Self::run`] for more information.
+    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -129,9 +105,13 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut self.trie, update).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+            let elapsed =
+                update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
+                    .map_err(|e| {
+                        ParallelStateRootError::Other(format!(
+                            "could not calculate state root: {e:?}"
+                        ))
+                    })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -139,17 +119,15 @@ where
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = self.trie.root_with_updates().map_err(|e| {
-            ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-        })?;
+        let (state_root, trie_updates) =
+            self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
+                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+            })?;
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie
-        let trie = self.trie.take_cleared_account_trie_state();
-
-        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
+        Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 }
 
@@ -161,19 +139,20 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
-    /// The account state trie.
-    pub trie: SparseTrieState,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-pub(crate) fn update_sparse_trie<BPF>(
-    trie: &mut SparseStateTrie<BPF>,
+pub(crate) fn update_sparse_trie<BPF, A, S>(
+    trie: &mut SparseStateTrie<A, S>,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    A: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
@@ -198,6 +177,7 @@ where
             let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
+            let storage_provider = blinded_provider_factory.storage_node_provider(address);
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
@@ -208,11 +188,14 @@ where
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles)?;
+                    storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
-                    storage_trie
-                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                    storage_trie.update_leaf(
+                        slot_nibbles,
+                        alloy_rlp::encode_fixed_size(&value).to_vec(),
+                        &storage_provider,
+                    )?;
                 }
             }
 
@@ -232,33 +215,31 @@ where
             // If the account itself has an update, remove it from the state update and update in
             // one go instead of doing it down below.
             trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
-            trie.update_account(address, account.unwrap_or_default())?;
+            trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
         } else if trie.is_account_revealed(address) {
             // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
-            trie.update_account_storage_root(address)?;
+            trie.update_account_storage_root(address, blinded_provider_factory)?;
         }
     }
 
     // Update accounts
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default())?;
+        trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
     }
 
     let elapsed_before = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
-        "Calculating intermediate nodes below trie level"
+        "Calculating subtries"
     );
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.calculate_subtries();
 
     let elapsed = started_at.elapsed();
     let below_level_elapsed = elapsed - elapsed_before;
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
         ?below_level_elapsed,
         "Intermediate nodes calculated"
     );

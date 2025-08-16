@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
 };
 
+use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
 use reth_config::Config;
@@ -36,8 +37,6 @@ use reth_network::{
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use tracing::error;
-
-use crate::version::P2P_CLIENT_VERSION;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -74,7 +73,7 @@ pub struct NetworkArgs {
     pub peers_file: Option<PathBuf>,
 
     /// Custom node identity
-    #[arg(long, value_name = "IDENTITY", default_value = P2P_CLIENT_VERSION)]
+    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version.as_ref())]
     pub identity: String,
 
     /// Secret key to use for this node.
@@ -161,6 +160,13 @@ pub struct NetworkArgs {
     /// The policy determines which peers transactions are gossiped to.
     #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
     pub tx_propagation_policy: TransactionPropagationKind,
+
+    /// Disable transaction pool gossip
+    ///
+    /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
+    /// personal nodes, though providers should always opt to enable this flag.
+    #[arg(long = "disable-tx-gossip")]
+    pub disable_tx_gossip: bool,
 }
 
 impl NetworkArgs {
@@ -272,6 +278,7 @@ impl NetworkArgs {
                 // set discovery port based on instance number
                 self.discovery.port,
             ))
+            .disable_tx_gossip(self.disable_tx_gossip)
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -325,7 +332,7 @@ impl Default for NetworkArgs {
             bootnodes: None,
             dns_retries: 0,
             peers_file: None,
-            identity: P2P_CLIENT_VERSION.to_string(),
+            identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
@@ -342,7 +349,8 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
-            tx_propagation_policy: TransactionPropagationKind::default()
+            tx_propagation_policy: TransactionPropagationKind::default(),
+            disable_tx_gossip: false,
         }
     }
 }
@@ -615,6 +623,12 @@ mod tests {
 
             assert_eq!(args.dns_retries, retries);
         }
+    }
+
+    #[test]
+    fn parse_disable_tx_gossip_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
+        assert!(args.disable_tx_gossip);
     }
 
     #[test]

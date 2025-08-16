@@ -91,6 +91,10 @@ pub mod provider {
     pub use reth_db as db;
 }
 
+/// Re-exported codec crate
+#[cfg(feature = "provider")]
+pub use reth_codecs as codec;
+
 /// Re-exported reth storage api types
 #[cfg(feature = "storage-api")]
 pub mod storage {
@@ -109,6 +113,15 @@ pub mod node {
     pub use reth_node_core as core;
     #[cfg(feature = "node")]
     pub use reth_node_ethereum::*;
+}
+
+/// Re-exported ethereum engine types
+#[cfg(feature = "node")]
+pub mod engine {
+    #[doc(inline)]
+    pub use reth_engine_local as local;
+    #[doc(inline)]
+    pub use reth_node_ethereum::engine::*;
 }
 
 /// Re-exported reth trie types

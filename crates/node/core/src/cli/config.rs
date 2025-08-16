@@ -7,6 +7,9 @@ use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 
+/// 45M gas limit
+const ETHEREUM_BLOCK_GAS_LIMIT_45M: u64 = 45_000_000;
+
 /// 60M gas limit
 const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 
@@ -42,9 +45,10 @@ pub trait PayloadBuilderConfig {
         }
 
         match chain.kind() {
-            ChainKind::Named(
-                NamedChain::Mainnet | NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi,
-            ) => ETHEREUM_BLOCK_GAS_LIMIT_60M,
+            ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi) => {
+                ETHEREUM_BLOCK_GAS_LIMIT_60M
+            }
+            ChainKind::Named(NamedChain::Mainnet) => ETHEREUM_BLOCK_GAS_LIMIT_45M,
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
         }
     }
@@ -83,4 +87,7 @@ impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N>
 pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
+
+    /// Returns max batch size for transaction batch insertion.
+    fn max_batch_size(&self) -> usize;
 }

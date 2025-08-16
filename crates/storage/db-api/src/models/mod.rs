@@ -128,7 +128,7 @@ impl Encode for StoredNibbles {
     fn encode(self) -> Self::Encoded {
         // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
         // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.into()
+        self.0.to_vec()
     }
 }
 
@@ -215,7 +215,7 @@ impl_compression_for_compact!(
     Header,
     Account,
     Log,
-    Receipt,
+    Receipt<T>,
     TxType,
     StorageEntry,
     BranchNodeCompact,

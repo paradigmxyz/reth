@@ -10,7 +10,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_crate_dependencies)]
 
-/// Re-exported ethereum types
+/// Re-exported optimism types
 #[doc(inline)]
 pub use reth_optimism_primitives::*;
 
@@ -48,6 +48,7 @@ pub mod consensus {
 }
 
 /// Re-exported from `reth_chainspec`
+#[allow(ambiguous_glob_reexports)]
 pub mod chainspec {
     #[doc(inline)]
     pub use reth_chainspec::*;
@@ -99,6 +100,10 @@ pub mod provider {
     pub use reth_db as db;
 }
 
+/// Re-exported codec crate
+#[cfg(feature = "provider")]
+pub use reth_codecs as codec;
+
 /// Re-exported reth storage api types
 #[cfg(feature = "storage-api")]
 pub mod storage {
@@ -106,7 +111,7 @@ pub mod storage {
     pub use reth_storage_api::*;
 }
 
-/// Re-exported ethereum node
+/// Re-exported optimism node
 #[cfg(feature = "node-api")]
 pub mod node {
     #[doc(inline)]
@@ -117,6 +122,15 @@ pub mod node {
     pub use reth_node_core as core;
     #[cfg(feature = "node")]
     pub use reth_optimism_node::*;
+}
+
+/// Re-exported  engine types
+#[cfg(feature = "node")]
+pub mod engine {
+    #[doc(inline)]
+    pub use reth_engine_local as local;
+    #[doc(inline)]
+    pub use reth_optimism_node::engine::*;
 }
 
 /// Re-exported reth trie types

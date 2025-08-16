@@ -208,7 +208,7 @@ where
                         #[cfg(feature = "metrics")]
                         self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
-                            key.clone(),
+                            *key,
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
                         ))))
@@ -275,7 +275,7 @@ where
                     // of this, we need to check that the current walker key has a prefix of the key
                     // that we seeked to.
                     if can_skip_node &&
-                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.key().is_some_and(|key| key.starts_with(&seek_prefix)) &&
                         self.walker.children_are_in_trie()
                     {
                         trace!(
@@ -500,7 +500,7 @@ mod tests {
                     visited_key: Some(branch_node_0.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0),
                     visited_key: Some(branch_node_2.0)
                 },
                 KeyVisit {

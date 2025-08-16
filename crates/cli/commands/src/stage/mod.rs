@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_eth_wire::NetPrimitivesFor;
 
 pub mod drop;
 pub mod dump;
@@ -41,15 +40,17 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, Comp, F, P>(self, ctx: CliContext, components: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp>(
+        self,
+        ctx: CliContext,
+        components: impl FnOnce(Arc<C::ChainSpec>) -> Comp,
+    ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
-        F: FnOnce(Arc<C::ChainSpec>) -> Comp,
-        P: NetPrimitivesFor<N::Primitives>,
     {
         match self.command {
-            Subcommands::Run(command) => command.execute::<N, _, _, P>(ctx, components).await,
+            Subcommands::Run(command) => command.execute::<N, _, _>(ctx, components).await,
             Subcommands::Drop(command) => command.execute::<N>().await,
             Subcommands::Dump(command) => command.execute::<N, _, _>(components).await,
             Subcommands::Unwind(command) => command.execute::<N, _, _>(components).await,

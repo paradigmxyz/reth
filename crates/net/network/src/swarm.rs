@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
@@ -259,6 +259,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 if self.sessions.is_valid_fork_id(fork_id) {
                     self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
                 } else {
+                    debug!(target: "net", ?peer_id, remote_fork_id=?fork_id, our_fork_id=?self.sessions.fork_id(), "fork id mismatch, removing peer");
                     self.state_mut().peers_mut().remove_peer(peer_id);
                 }
             }

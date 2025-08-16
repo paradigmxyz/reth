@@ -17,8 +17,8 @@ use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
 };
 
-mod blinded;
-pub use blinded::*;
+mod trie_node;
+pub use trie_node::*;
 
 /// A struct for generating merkle proofs.
 ///
@@ -167,10 +167,7 @@ where
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             (
-                updated_branch_nodes
-                    .iter()
-                    .map(|(path, node)| (path.clone(), node.hash_mask))
-                    .collect(),
+                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
                 updated_branch_nodes
                     .into_iter()
                     .map(|(path, node)| (path, node.tree_mask))
@@ -308,10 +305,7 @@ where
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             (
-                updated_branch_nodes
-                    .iter()
-                    .map(|(path, node)| (path.clone(), node.hash_mask))
-                    .collect(),
+                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
                 updated_branch_nodes
                     .into_iter()
                     .map(|(path, node)| (path, node.tree_mask))

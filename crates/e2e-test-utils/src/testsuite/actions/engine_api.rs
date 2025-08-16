@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadStatusEnum,
 };
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
@@ -85,7 +85,7 @@ where
             const MAX_RETRIES: u32 = 5;
 
             while retries < MAX_RETRIES {
-                match EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                match EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
                     source_rpc,
                     alloy_eips::BlockNumberOrTag::Number(self.block_number),
                     true, // include transactions

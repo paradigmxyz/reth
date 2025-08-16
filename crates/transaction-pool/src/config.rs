@@ -50,6 +50,8 @@ pub struct PoolConfig {
     pub price_bumps: PriceBumpConfig,
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: u64,
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    pub minimum_priority_fee: Option<u128>,
     /// The max gas limit for transactions in the pool
     pub gas_limit: u64,
     /// How to handle locally received transactions:
@@ -87,6 +89,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            minimum_priority_fee: None,
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
@@ -110,6 +113,11 @@ impl SubPoolLimit {
     /// Creates a new instance with the given limits.
     pub const fn new(max_txs: usize, max_size: usize) -> Self {
         Self { max_txs, max_size }
+    }
+
+    /// Creates an unlimited [`SubPoolLimit`]
+    pub const fn max() -> Self {
+        Self::new(usize::MAX, usize::MAX)
     }
 
     /// Returns whether the size or amount constraint is violated.

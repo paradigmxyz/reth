@@ -1,9 +1,7 @@
 use crate::{
-    chainspec::CustomChainSpec,
-    engine::{
-        CustomBuiltPayload, CustomExecutionData, CustomPayloadAttributes, CustomPayloadTypes,
-    },
+    engine::{CustomExecutionData, CustomPayloadAttributes, CustomPayloadTypes},
     primitives::CustomNodePrimitives,
+    CustomNode,
 };
 use alloy_rpc_types_engine::{
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
@@ -12,10 +10,9 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_ethereum::node::api::{
     AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
-    NodeTypes,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
-use reth_op::node::OpStorage;
+use reth_op::node::OpBuiltPayload;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApiError;
@@ -30,9 +27,9 @@ pub struct CustomExecutionPayloadEnvelope {
     extension: u64,
 }
 
-impl From<CustomBuiltPayload> for CustomExecutionPayloadEnvelope {
-    fn from(value: CustomBuiltPayload) -> Self {
-        let sealed_block = value.0.into_sealed_block();
+impl From<OpBuiltPayload<CustomNodePrimitives>> for CustomExecutionPayloadEnvelope {
+    fn from(value: OpBuiltPayload<CustomNodePrimitives>) -> Self {
+        let sealed_block = value.into_sealed_block();
         let hash = sealed_block.hash();
         let extension = sealed_block.header().extension;
         let block = sealed_block.into_block();
@@ -127,19 +124,12 @@ where
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CustomEngineApiBuilder {}
 
 impl<N> EngineApiBuilder<N> for CustomEngineApiBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomPayloadTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    N: FullNodeComponents<Types = CustomNode>,
 {
     type EngineApi = CustomEngineApi;
 

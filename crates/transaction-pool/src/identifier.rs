@@ -1,7 +1,6 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::Address;
+use alloy_primitives::{map::HashMap, Address};
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 
 /// An internal mapping of addresses.
 ///

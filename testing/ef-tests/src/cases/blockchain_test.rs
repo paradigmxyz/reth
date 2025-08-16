@@ -323,7 +323,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in program_inputs {
         stateless_validation(
-            block.into_block(),
+            block,
             execution_witness,
             chain_spec.clone(),
             EthEvmConfig::new(chain_spec.clone()),
@@ -396,7 +396,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing
-        // exception in testsuite There are more nonce overflow tests that are in internal
+        // exception in testsuite There are more nonce overflow tests that are internal
         // call/create, and those tests are passing and are enabled.
         | "CreateTransactionHighNonce.json"
 

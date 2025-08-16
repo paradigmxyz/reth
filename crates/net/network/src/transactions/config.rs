@@ -120,7 +120,7 @@ pub trait TransactionPropagationPolicy: Send + Sync + Unpin + 'static {
 pub enum TransactionPropagationKind {
     /// Propagate transactions to all peers.
     ///
-    /// No restructions
+    /// No restrictions
     #[default]
     All,
     /// Propagate transactions to only trusted peers.

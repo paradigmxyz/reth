@@ -10,7 +10,7 @@ use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
 
-/// Satrt a discovery only bootnode.
+/// Start a discovery only bootnode.
 #[derive(Parser, Debug)]
 pub struct Command {
     /// Listen address for the bootnode (default: ":30301").

@@ -1,9 +1,5 @@
 //! Root module for test modules, so that the tests are built into a single binary.
 
-mod history;
-
-const fn main() {}
-
 use alloy_primitives::bytes::Bytes;
 use futures_util::{stream, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl};
@@ -15,6 +11,11 @@ const ITHACA_ERA_INDEX_URL: &str = "https://era.ithaca.xyz/era1/index.html";
 
 // The response containing one file that the fake client will return when the index Url is requested
 const GENESIS_ITHACA_INDEX_RESPONSE: &[u8] = b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>";
+
+mod genesis;
+mod history;
+
+const fn main() {}
 
 /// An HTTP client that fakes the file list to always show one known file
 ///

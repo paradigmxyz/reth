@@ -18,7 +18,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
 
     for i in 0..num_accounts {
         let storage =
-            EvmStorage::from_iter([(U256::from(i), EvmStorageSlot::new(U256::from(i + 1)))]);
+            EvmStorage::from_iter([(U256::from(i), EvmStorageSlot::new(U256::from(i + 1), 0))]);
 
         let account = Account {
             info: AccountInfo {
@@ -28,7 +28,8 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 code: Default::default(),
             },
             storage,
-            status: AccountStatus::Loaded,
+            status: AccountStatus::empty(),
+            transaction_id: 0,
         };
 
         let address = Address::with_last_byte(i as u8);

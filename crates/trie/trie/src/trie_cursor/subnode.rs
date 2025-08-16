@@ -74,7 +74,7 @@ impl CursorSubNode {
         node: Option<BranchNodeCompact>,
         position: SubNodePosition,
     ) -> Self {
-        let mut full_key = key.clone();
+        let mut full_key = key;
         if let Some(nibble) = position.as_child() {
             full_key.push(nibble);
         }

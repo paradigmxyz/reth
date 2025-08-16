@@ -1,4 +1,4 @@
-//! A IPC connection.
+//! An IPC connection.
 
 use crate::stream_codec::StreamCodec;
 use futures::{stream::FuturesUnordered, FutureExt, Sink, Stream};

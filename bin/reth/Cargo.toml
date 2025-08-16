@@ -27,7 +27,7 @@ reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
-reth-rpc-types-compat.workspace = true
+reth-rpc-convert.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
@@ -64,7 +64,6 @@ eyre.workspace = true
 
 [dev-dependencies]
 backon.workspace = true
-similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
@@ -76,6 +75,7 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
 ]
 
 jemalloc = [

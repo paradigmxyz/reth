@@ -1,0 +1,258 @@
+# Contributing to Reth
+
+Reth has docs specifically geared for developers and contributors, including documentation on the structure and architecture of reth, the general workflow we employ, and other useful tips.
+
+## Getting Help
+
+Need support or have questions? Open a github issue and/or join the TG chat:
+
+-   **GitHub Issues**: [Open an issue](https://github.com/paradigmxyz/reth/issues/new) for bugs or feature requests
+-   **Telegram Chat**: [Join our Telegram](https://t.me/paradigm_reth) for real-time support and discussions
+
+## Repository and Project Structure
+
+Reth is organized as a modular codebase with clear separation and a contributor friendly architecture, you can read about it in detail [here](https://github.com/paradigmxyz/reth/tree/main/docs). Here's the TL;DR:
+
+### Design
+
+Reth follows a modular architecture where each component can be used independently:
+
+-   **Consensus**: Block validation and consensus rules
+-   **Storage**: Hybrid database with MDBX + static files
+-   **Networking**: P2P networking stack
+-   **RPC**: JSON-RPC server implementation
+-   **Engine**: Consensus layer integration
+-   **EVM**: Transaction execution
+-   **Node Builder**: High-level orchestration
+
+### Crates
+
+The repository is organized into focused crates under `/crates/`:
+
+```
+crates/
+├── consensus/          # Consensus and validation logic
+├── storage/           # Database and storage implementations
+├── net/               # Networking components
+├── rpc/               # JSON-RPC server and APIs
+├── engine/            # Engine API and consensus integration
+├── evm/               # EVM execution
+├── node/              # Node building and orchestration
+├── ethereum/          # Ethereum-specific implementations
+├── optimism/          # Optimism L2 support
+└── ...
+```
+
+## Workflow: The Lifecycle of PRs
+
+### 1. Before You Start
+
+-   Check existing issues to avoid duplicate work
+-   For large features, open an issue first to discuss the approach
+-   Fork the repository and create a feature branch
+
+### 2. Development Process
+
+#### Setting Up Your Environment
+
+```bash
+# Clone your fork
+git clone https://github.com/YOUR_USERNAME/reth.git
+cd reth
+
+# Install dependencies and tools
+# Use nightly Rust for formatting
+rustup install nightly
+rustup component add rustfmt --toolchain nightly
+
+# Run the validation suite
+make pr
+```
+
+#### Code Style and Standards
+
+-   **Formatting**: Use nightly rustfmt (`cargo +nightly fmt`)
+-   **Linting**: All clippy warnings must be addressed
+-   **Documentation**: Add doc comments for public APIs
+-   **Testing**: Include appropriate tests for your changes
+
+#### Recommended VS Code Settings
+
+Install the `rust-analyzer` extension and use these settings for the best development experience:
+
+```json
+{
+    "rust-analyzer.rustfmt.overrideCommand": ["rustfmt", "+nightly"],
+    "rust-analyzer.check.overrideCommand": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--message-format=json",
+        "--all-targets",
+        "--all-features"
+    ]
+}
+```
+
+### 3. Testing Your Changes
+
+Reth uses comprehensive testing at multiple levels:
+
+#### Unit Tests
+
+Test specific functions and components:
+
+```bash
+cargo test --package reth-ethereum-consensus
+```
+
+#### Integration Tests
+
+Test component interactions:
+
+```bash
+cargo test --test integration_tests
+```
+
+#### Full Test Suite
+
+Run all tests including Ethereum Foundation tests:
+
+```bash
+make test
+```
+
+#### Validation Suite
+
+Before submitting, always run:
+
+```bash
+make pr
+```
+
+This runs:
+
+-   Code formatting checks
+-   Clippy linting
+-   Documentation generation
+-   Full test suite
+
+### 4. Submitting Your PR
+
+#### Draft PRs for Large Features
+
+For substantial changes, open a draft PR early to get feedback on the approach.
+
+#### PR Requirements
+
+-   [ ] Clear, descriptive title and description
+-   [ ] Tests for new functionality
+-   [ ] Documentation updates if needed
+-   [ ] All CI checks passing
+-   [ ] Commit messages follow conventional format
+
+#### Commit Message Format
+
+```
+type: brief description
+
+More detailed explanation if needed.
+
+- feat: new feature
+- fix: bug fix
+- docs: documentation changes
+- refactor: code refactoring
+- test: adding tests
+- chore: maintenance tasks
+```
+
+### 5. Review Process
+
+#### Who Can Review
+
+Any community member can review PRs. We encourage participation from all skill levels.
+
+#### What Reviewers Look For
+
+-   **Does the change improve Reth?**
+-   **Are there clear bugs or issues?**
+-   **Are commit messages clear and descriptive?**
+-   **Is the code well-tested?**
+-   **Is documentation updated appropriately?**
+
+#### Review Guidelines
+
+-   Be constructive and respectful
+-   Provide specific, actionable feedback
+-   Focus on significant issues first
+-   Acknowledge good work and improvements
+
+## Releases: How Reth is Released
+
+### Release Schedule
+
+-   **Regular releases**: Following semantic versioning
+-   **Security releases**: As needed for critical vulnerabilities
+-   **Pre-releases**: For testing major changes
+
+### Release Process
+
+1. **Version bump**: Update version numbers across crates
+2. **Changelog**: Update `CHANGELOG.md` with notable changes
+3. **Testing**: Final validation on testnet and mainnet
+4. **Tagging**: Create release tags and GitHub releases
+5. **Distribution**: Update package registries and Docker images
+
+### Release Criteria
+
+-   All CI checks passing
+-   No known critical bugs
+-   Documentation up to date
+-   Backwards compatibility considerations addressed
+
+## Ways to Contribute
+
+### 💡 Feature Requests
+
+For feature requests, please include:
+
+-   **Detailed explanation**: What should the feature do?
+-   **Context and motivation**: Why is this feature needed?
+-   **Examples**: How would it be used?
+-   **Similar tools**: References to similar functionality elsewhere
+
+### 📝 Documentation
+
+Documentation improvements are always welcome:
+
+-   Add missing documentation
+-   Improve code examples
+-   Create tutorials or guides
+
+### 🔧 Code Contributions
+
+Contributing code changes:
+
+-   Fix bugs identified in issues
+-   Implement requested features
+-   Improve performance
+-   Refactor for better maintainability
+
+## Code of Conduct
+
+Reth follows the [Rust Code of Conduct](https://www.rust-lang.org/conduct.html). We are committed to providing a welcoming and inclusive environment for all contributors.
+
+### Our Standards
+
+-   Be respectful and constructive
+-   Focus on what's best for the community
+-   Show empathy towards other contributors
+-   Accept constructive criticism gracefully
+
+### Reporting Issues
+
+If you experience or witness behavior that violates our code of conduct, please report it to [georgios@paradigm.xyz](mailto:georgios@paradigm.xyz).
+
+:::note
+Also read [CONTRIBUTING.md](https://github.com/paradigmxyz/reth/blob/main/CONTRIBUTING.md) for in-depth guidelines.
+:::

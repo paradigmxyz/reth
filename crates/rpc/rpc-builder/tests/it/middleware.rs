@@ -1,8 +1,8 @@
 use crate::utils::{test_address, test_rpc_builder};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use jsonrpsee::{
     core::middleware::{Batch, Notification},
-    server::middleware::rpc::{RpcServiceBuilder, RpcServiceT},
+    server::middleware::rpc::RpcServiceT,
     types::Request,
 };
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
@@ -79,13 +79,17 @@ async fn test_rpc_middleware() {
 
     let handle = RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
-        .set_rpc_middleware(RpcServiceBuilder::new().layer(mylayer.clone()))
+        .set_rpc_middleware(mylayer.clone())
         .start(&modules)
         .await
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::protocol_version(&client).await.unwrap();
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::protocol_version(
+        &client,
+    )
+    .await
+    .unwrap();
     let count = mylayer.count.load(Ordering::Relaxed);
     assert_eq!(count, 1);
 }

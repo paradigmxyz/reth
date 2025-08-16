@@ -37,6 +37,12 @@ extern crate alloc;
 
 /// Sparse trie implementation for stateless validation
 pub mod trie;
+
+#[doc(inline)]
+pub use trie::StatelessTrie;
+#[doc(inline)]
+pub use validation::stateless_validation_with_trie;
+
 /// Implementation of stateless validation
 pub mod validation;
 pub(crate) mod witness_db;

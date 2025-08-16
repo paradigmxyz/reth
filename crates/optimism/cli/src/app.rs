@@ -6,9 +6,9 @@ use reth_cli_runner::CliRunner;
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_node::{OpExecutorProvider, OpNetworkPrimitives, OpNode};
+use reth_optimism_node::{OpExecutorProvider, OpNode};
 use reth_tracing::{FileWorkerGuard, Layers};
-use std::fmt;
+use std::{fmt, sync::Arc};
 use tracing::info;
 
 /// A wrapper around a parsed CLI that handles command execution.
@@ -65,6 +65,10 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
+        let components = |spec: Arc<OpChainSpec>| {
+            (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
+        };
+
         match self.cli.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
@@ -83,14 +87,10 @@ where
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
-                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
-                })
-            }),
-            Commands::P2P(command) => {
-                runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
+            Commands::Stage(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
             }
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
@@ -98,6 +98,9 @@ where
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::ReExecute(command) => {
+                runner.run_until_ctrl_c(command.execute::<OpNode>(components))
+            }
         }
     }
 

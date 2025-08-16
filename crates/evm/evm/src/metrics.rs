@@ -5,15 +5,15 @@
 use crate::{Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::{
-    block::{BlockExecutor, StateChangeSource},
+    block::{BlockExecutor, ExecutableTx, StateChangeSource},
     Evm,
 };
 use core::borrow::BorrowMut;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Block, BlockBody, RecoveredBlock};
+use reth_primitives_traits::RecoveredBlock;
 use revm::{
     database::{states::bundle_state::BundleRetention, State},
     state::EvmState,
@@ -75,20 +75,19 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
+    fn metered<F, R>(&self, f: F) -> R
     where
-        F: FnOnce() -> R,
-        B: reth_primitives_traits::Block,
+        F: FnOnce() -> (u64, R),
     {
         // Execute the block and record the elapsed time.
         let execute_start = Instant::now();
-        let output = f();
+        let (gas_used, output) = f();
         let execution_duration = execute_start.elapsed().as_secs_f64();
 
         // Update gas metrics.
-        self.gas_processed_total.increment(block.header().gas_used());
-        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
-        self.gas_used_histogram.record(block.header().gas_used() as f64);
+        self.gas_processed_total.increment(gas_used);
+        self.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.gas_used_histogram.record(gas_used as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
@@ -105,10 +104,11 @@ impl ExecutorMetrics {
     pub fn execute_metered<'a, E, DB>(
         &self,
         executor: E,
-        input: BlockExecutionInput<
-            'a,
-            RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
-        >,
+        // input: BlockExecutionInput<
+        //     'a,
+        //     RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
+        // >,
+        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
@@ -122,13 +122,19 @@ impl ExecutorMetrics {
 
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        // Use metered to execute and track timing/gas metrics
-        let (mut db, result) = self.metered(input.block, || {
+        let f = || {
             executor.apply_pre_execution_changes()?;
-            for tx in input.block.transactions_recovered() {
-                executor.execute_transaction(tx)?;
+            for tx in transactions {
+                executor.execute_transaction(tx?)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
+        };
+
+        // Use metered to execute and track timing/gas metrics
+        let (mut db, result) = self.metered(|| {
+            let res = f();
+            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            (gas_used, res)
         })?;
 
         // merge transactions into bundle state
@@ -154,7 +160,7 @@ impl ExecutorMetrics {
         F: FnOnce(&RecoveredBlock<B>) -> R,
         B: reth_primitives_traits::Block,
     {
-        self.metered(input, || f(input))
+        self.metered(|| (input.header().gas_used(), f(input)))
     }
 }
 
@@ -280,7 +286,7 @@ mod tests {
         let state = {
             let mut state = EvmState::default();
             let storage =
-                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
+                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2), 0))]);
             state.insert(
                 Default::default(),
                 Account {
@@ -291,15 +297,23 @@ mod tests {
                         code: Default::default(),
                     },
                     storage,
-                    status: AccountStatus::Loaded,
+                    status: AccountStatus::default(),
+                    transaction_id: 0,
                 },
             );
             state
         };
         let executor = MockExecutor::new(state);
-        let input_exec: BlockExecutionInput<'_, _> = (&input).into();
-        let _result =
-            metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
+        // let input_exec: BlockExecutionInput<'_, _> = (&input).into();
+        // let _result =
+        //     metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(
+                executor,
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+                state_hook,
+            )
+            .unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -331,9 +345,16 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor::new(state);
-        let input_exec: BlockExecutionInput<'_, _> = (&input).into();
-        let _result =
-            metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
+        // let input_exec: BlockExecutionInput<'_, _> = (&input).into();
+        // let _result =
+        //     metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(
+                executor,
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+                state_hook,
+            )
+            .unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

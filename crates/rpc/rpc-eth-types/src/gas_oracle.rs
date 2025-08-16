@@ -15,7 +15,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt};
+use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -77,12 +77,12 @@ impl Default for GasPriceOracleConfig {
 #[derive(Debug)]
 pub struct GasPriceOracle<Provider>
 where
-    Provider: BlockReader,
+    Provider: NodePrimitivesProvider,
 {
     /// The type used to subscribe to block events and get block info
     provider: Provider,
     /// The cache for blocks
-    cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    cache: EthStateCache<Provider::Primitives>,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
@@ -94,13 +94,13 @@ where
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + NodePrimitivesProvider,
 {
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
-        cache: EthStateCache<Provider::Block, Provider::Receipt>,
+        cache: EthStateCache<Provider::Primitives>,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
@@ -300,25 +300,24 @@ where
         // find the maximum gas used by any of the transactions in the block to use as the
         // capacity margin for the block, if no receipts are found return the
         // suggested_min_priority_fee
-        let Some(max_tx_gas_used) = self
+        let receipts = self
             .cache
             .get_receipts(header.hash())
             .await?
-            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?
+            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?;
+
+        let mut max_tx_gas_used = 0u64;
+        let mut last_cumulative_gas = 0;
+        for receipt in receipts.as_ref() {
+            let cumulative_gas = receipt.cumulative_gas_used();
             // get the gas used by each transaction in the block, by subtracting the
-            // cumulative gas used of the previous transaction from the cumulative gas used of the
-            // current transaction. This is because there is no gas_used() method on the Receipt
-            // trait.
-            .windows(2)
-            .map(|window| {
-                let prev = window[0].cumulative_gas_used();
-                let curr = window[1].cumulative_gas_used();
-                curr - prev
-            })
-            .max()
-        else {
-            return Ok(suggestion);
-        };
+            // cumulative gas used of the previous transaction from the cumulative gas used of
+            // the current transaction. This is because there is no gas_used()
+            // method on the Receipt trait.
+            let gas_used = cumulative_gas - last_cumulative_gas;
+            max_tx_gas_used = max_tx_gas_used.max(gas_used);
+            last_cumulative_gas = cumulative_gas;
+        }
 
         // if the block is at capacity, the suggestion must be increased
         if header.gas_used() + max_tx_gas_used > header.gas_limit() {

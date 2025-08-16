@@ -139,9 +139,7 @@ impl<C> TrieWalker<C> {
     #[instrument(level = "trace", skip(self), ret)]
     pub fn next_unprocessed_key(&self) -> Option<(B256, Nibbles)> {
         self.key()
-            .and_then(
-                |key| if self.can_skip_current_node { key.increment() } else { Some(key.clone()) },
-            )
+            .and_then(|key| if self.can_skip_current_node { key.increment() } else { Some(*key) })
             .map(|key| {
                 let mut packed = key.pack();
                 packed.resize(32, 0);
@@ -249,8 +247,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let key = self.key().expect("key must exist").clone();
-        let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        let key = self.key().expect("key must exist");
+        let entry = if exact { self.cursor.seek_exact(*key)? } else { self.cursor.seek(*key)? };
         #[cfg(feature = "metrics")]
         self.metrics.inc_branch_nodes_seeked();
 
@@ -274,7 +272,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0]);
+            self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
         // The current tree mask might have been set incorrectly.

@@ -61,9 +61,9 @@ impl TrieUpdates {
     pub fn extend_ref(&mut self, other: &Self) {
         self.extend_common(other);
         self.account_nodes.extend(exclude_empty_from_pair(
-            other.account_nodes.iter().map(|(k, v)| (k.clone(), v.clone())),
+            other.account_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().cloned()));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().copied()));
         for (hashed_address, storage_trie) in &other.storage_tries {
             self.storage_tries.entry(*hashed_address).or_default().extend_ref(storage_trie);
         }
@@ -118,6 +118,30 @@ impl TrieUpdates {
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
 
+    /// Converts trie updates into [`TrieUpdatesSorted`], but keeping the maps allocated by
+    /// draining.
+    ///
+    /// This effectively clears all the fields in the [`TrieUpdatesSorted`].
+    ///
+    /// This allows us to reuse the allocated space. This allocates new space for the sorted
+    /// updates, like `into_sorted`.
+    pub fn drain_into_sorted(&mut self) -> TrieUpdatesSorted {
+        let mut account_nodes = self.account_nodes.drain().collect::<Vec<_>>();
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let storage_tries = self
+            .storage_tries
+            .drain()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect();
+
+        TrieUpdatesSorted {
+            removed_nodes: self.removed_nodes.clone(),
+            account_nodes,
+            storage_tries,
+        }
+    }
+
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
     pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
@@ -132,6 +156,13 @@ impl TrieUpdates {
                 .map(|m| (*m.0, m.1.into_sorted_ref().clone()))
                 .collect(),
         }
+    }
+
+    /// Clears the nodes and storage trie maps in this `TrieUpdates`.
+    pub fn clear(&mut self) {
+        self.account_nodes.clear();
+        self.removed_nodes.clear();
+        self.storage_tries.clear();
     }
 }
 
@@ -210,9 +241,9 @@ impl StorageTrieUpdates {
     pub fn extend_ref(&mut self, other: &Self) {
         self.extend_common(other);
         self.storage_nodes.extend(exclude_empty_from_pair(
-            other.storage_nodes.iter().map(|(k, v)| (k.clone(), v.clone())),
+            other.storage_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().cloned()));
+        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().copied()));
     }
 
     fn extend_common(&mut self, other: &Self) {
@@ -633,13 +664,15 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+            data.trie_updates
+                .removed_nodes
+                .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
             data.trie_updates.account_nodes.insert(
-                Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]),
+                Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
                 BranchNodeCompact::default(),
             );
             let encoded = bincode::serialize(&data).unwrap();
@@ -666,13 +699,15 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+            data.trie_updates
+                .removed_nodes
+                .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
             data.trie_updates.storage_nodes.insert(
-                Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]),
+                Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
                 BranchNodeCompact::default(),
             );
             let encoded = bincode::serialize(&data).unwrap();
@@ -693,14 +728,17 @@ mod tests {
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
-        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        default_updates
+            .removed_nodes
+            .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
-        default_updates
-            .account_nodes
-            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
+        default_updates.account_nodes.insert(
+            Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
+            BranchNodeCompact::default(),
+        );
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
@@ -719,15 +757,18 @@ mod tests {
             serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
-        default_updates.removed_nodes.insert(Nibbles::from_vec(vec![0x0b, 0x0e, 0x0e, 0x0f]));
+        default_updates
+            .removed_nodes
+            .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: StorageTrieUpdates =
             serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
-        default_updates
-            .storage_nodes
-            .insert(Nibbles::from_vec(vec![0x0d, 0x0e, 0x0a, 0x0d]), BranchNodeCompact::default());
+        default_updates.storage_nodes.insert(
+            Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
+            BranchNodeCompact::default(),
+        );
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: StorageTrieUpdates =
             serde_json::from_str(&updates_serialized).unwrap();

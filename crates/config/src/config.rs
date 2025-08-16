@@ -463,6 +463,7 @@ impl PruneConfig {
                     receipts,
                     account_history,
                     storage_history,
+                    bodies_history,
                     receipts_log_filter,
                 },
         } = other;
@@ -478,6 +479,7 @@ impl PruneConfig {
         self.segments.receipts = self.segments.receipts.or(receipts);
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
+        self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
             self.segments.receipts_log_filter = receipts_log_filter;
@@ -998,6 +1000,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Distance(1000)),
                 account_history: None,
                 storage_history: Some(PruneMode::Before(5000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
                     Address::random(),
                     PruneMode::Full,
@@ -1013,6 +1016,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Full),
                 account_history: Some(PruneMode::Distance(2000)),
                 storage_history: Some(PruneMode::Distance(3000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
                     (Address::random(), PruneMode::Distance(1000)),
                     (Address::random(), PruneMode::Before(2000)),

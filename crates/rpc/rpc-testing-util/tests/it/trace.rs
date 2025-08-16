@@ -1,7 +1,7 @@
 //! Integration tests for the trace API.
 
 use alloy_primitives::map::HashSet;
-use alloy_rpc_types_eth::{Block, Header, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Transaction, TransactionRequest};
 use alloy_rpc_types_trace::{
     filter::TraceFilter, parity::TraceType, tracerequest::TraceCallRequest,
 };
@@ -112,12 +112,17 @@ async fn debug_trace_block_entire_chain() {
     let url = url.unwrap();
 
     let client = HttpClientBuilder::default().build(url).unwrap();
-    let current_block: u64 =
-        <HttpClient as EthApiClient<Transaction, Block, Receipt, Header>>::block_number(&client)
-            .await
-            .unwrap()
-            .try_into()
-            .unwrap();
+    let current_block: u64 = <HttpClient as EthApiClient<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+    >>::block_number(&client)
+    .await
+    .unwrap()
+    .try_into()
+    .unwrap();
     let range = 0..=current_block;
     let mut stream = client.debug_trace_block_buffered_unordered(range, None, 20);
     let now = Instant::now();
@@ -141,12 +146,17 @@ async fn debug_trace_block_opcodes_entire_chain() {
     let url = url.unwrap();
 
     let client = HttpClientBuilder::default().build(url).unwrap();
-    let current_block: u64 =
-        <HttpClient as EthApiClient<Transaction, Block, Receipt, Header>>::block_number(&client)
-            .await
-            .unwrap()
-            .try_into()
-            .unwrap();
+    let current_block: u64 = <HttpClient as EthApiClient<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+    >>::block_number(&client)
+    .await
+    .unwrap()
+    .try_into()
+    .unwrap();
     let range = 0..=current_block;
     println!("Tracing blocks {range:?} for opcodes");
     let mut stream = client.trace_block_opcode_gas_unordered(range, 2).enumerate();

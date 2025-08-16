@@ -956,7 +956,7 @@ impl PeersManager {
 
             if peer.addr != new_addr {
                 peer.addr = new_addr;
-                trace!(target: "net::peers", ?peer_id, addre=?peer.addr, "Updated resolved trusted peer address");
+                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "Updated resolved trusted peer address");
             }
         }
     }

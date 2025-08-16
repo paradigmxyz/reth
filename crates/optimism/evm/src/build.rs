@@ -32,7 +32,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
     /// Builds a block for `input` without any bounds on header `H`.
     pub fn assemble_block<
         F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            ExecutionCtx<'a>: Into<OpBlockExecutionCtx>,
             Transaction: SignedTransaction,
             Receipt: Receipt + DepositReceipt,
         >,
@@ -51,8 +51,9 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             state_provider,
             ..
         } = input;
+        let ctx = ctx.into();
 
-        let timestamp = evm_env.block_env.timestamp;
+        let timestamp = evm_env.block_env.timestamp.saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
         let receipts_root =
@@ -97,7 +98,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             mix_hash: evm_env.block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
             base_fee_per_gas: Some(evm_env.block_env.basefee),
-            number: evm_env.block_env.number,
+            number: evm_env.block_env.number.saturating_to(),
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,
             gas_used: *gas_used,

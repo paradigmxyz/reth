@@ -60,7 +60,11 @@ alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
-secp256k1 = { workspace = true, features = ["recovery", "global-context", "rand"] }
+secp256k1 = { workspace = true, features = [
+    "recovery",
+    "global-context",
+    "rand",
+] }
 bincode.workspace = true
 byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -145,16 +149,7 @@ serde = [
     "rand_08/serde",
     "alloy-rpc-types-eth?/serde",
 ]
-reth-codec = [
-    "dep:reth-codecs",
-    "dep:modular-bitfield",
-    "dep:byteorder",
-]
-op = [
-    "dep:op-alloy-consensus",
-    "reth-codecs?/op",
-]
-rayon = [
-    "dep:rayon",
-]
+reth-codec = ["dep:reth-codecs", "dep:modular-bitfield", "dep:byteorder"]
+op = ["dep:op-alloy-consensus", "reth-codecs?/op"]
+rayon = ["dep:rayon"]
 rpc-compat = ["alloy-rpc-types-eth"]

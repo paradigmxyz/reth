@@ -82,16 +82,20 @@ pub(super) struct MultiProofConfig<Factory> {
 
 impl<Factory> MultiProofConfig<Factory> {
     /// Creates a new state root config from the consistent view and the trie input.
+    ///
+    /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
+    /// [`TrieInput`].
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
-        input: TrieInput,
-    ) -> Self {
-        Self {
+        mut input: TrieInput,
+    ) -> (TrieInput, Self) {
+        let config = Self {
             consistent_view,
-            nodes_sorted: Arc::new(input.nodes.into_sorted()),
-            state_sorted: Arc::new(input.state.into_sorted()),
-            prefix_sets: Arc::new(input.prefix_sets),
-        }
+            nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
+            state_sorted: Arc::new(input.state.drain_into_sorted()),
+            prefix_sets: Arc::new(input.prefix_sets.clone()),
+        };
+        (input.cleared(), config)
     }
 }
 

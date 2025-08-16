@@ -111,7 +111,7 @@ impl ExecInput {
             // body.
             let end_block_body = provider
                 .block_body_indices(end_block_number)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(target_block))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(end_block_number))?;
             (end_block_number, false, end_block_body.next_tx_num())
         };
 

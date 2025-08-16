@@ -9,17 +9,47 @@ use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
-    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, SparseStateTrie,
-    SparseTrie,
+    errors::SparseStateTrieResult,
+    provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
+    SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 
-/// `StatelessTrie` structure for usage during stateless validation
+/// Trait for stateless trie implementations that can be used for stateless validation.
+pub trait StatelessTrie: core::fmt::Debug {
+    /// Initialize the stateless trie using the `ExecutionWitness`
+    fn new(
+        witness: &ExecutionWitness,
+        pre_state_root: B256,
+    ) -> Result<(Self, B256Map<Bytecode>), StatelessValidationError>
+    where
+        Self: Sized;
+
+    /// Returns the `TrieAccount` that corresponds to the `Address`
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the account is missing from the Trie _and_ the witness was complete.
+    fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError>;
+
+    /// Returns the storage slot value that corresponds to the given (address, slot) tuple.
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the storage was missing from the Trie _and_ the witness was complete.
+    fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError>;
+
+    /// Computes the new state root from the `HashedPostState`.
+    fn calculate_state_root(
+        &mut self,
+        state: HashedPostState,
+    ) -> Result<B256, StatelessValidationError>;
+}
+
+/// `StatelessSparseTrie` structure for usage during stateless validation
 #[derive(Debug)]
-pub struct StatelessTrie {
+pub struct StatelessSparseTrie {
     inner: SparseStateTrie,
 }
 
-impl StatelessTrie {
+impl StatelessSparseTrie {
     /// Initialize the stateless trie using the `ExecutionWitness`
     ///
     /// Note: Currently this method does not check that the `ExecutionWitness`
@@ -99,6 +129,30 @@ impl StatelessTrie {
     }
 }
 
+impl StatelessTrie for StatelessSparseTrie {
+    fn new(
+        witness: &ExecutionWitness,
+        pre_state_root: B256,
+    ) -> Result<(Self, B256Map<Bytecode>), StatelessValidationError> {
+        Self::new(witness, pre_state_root)
+    }
+
+    fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError> {
+        self.account(address)
+    }
+
+    fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError> {
+        self.storage(address, slot)
+    }
+
+    fn calculate_state_root(
+        &mut self,
+        state: HashedPostState,
+    ) -> Result<B256, StatelessValidationError> {
+        self.calculate_state_root(state)
+    }
+}
+
 /// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
 ///
 /// This function takes the RLP-encoded values provided in [`ExecutionWitness`]
@@ -121,7 +175,8 @@ fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
 ) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
-    let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
+    let provider_factory = DefaultTrieNodeProviderFactory;
+    let mut trie = SparseStateTrie::new();
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
 
@@ -147,7 +202,7 @@ fn verify_execution_witness(
 
     // Calculate the root
     let computed_root = trie
-        .root()
+        .root(&provider_factory)
         .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
 
     if computed_root == pre_state_root {
@@ -182,6 +237,11 @@ fn calculate_state_root(
     // borrowing issues.
     let mut storage_results = Vec::with_capacity(state.storages.len());
 
+    // In `verify_execution_witness` a `DefaultTrieNodeProviderFactory` is used, so we use the same
+    // again in here.
+    let provider_factory = DefaultTrieNodeProviderFactory;
+    let storage_provider = DefaultTrieNodeProvider;
+
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
         // Take the existing storage trie (or create an empty, “revealed” one)
         let mut storage_trie =
@@ -197,9 +257,13 @@ fn calculate_state_root(
         {
             let nibbles = Nibbles::unpack(hashed_slot);
             if value.is_zero() {
-                storage_trie.remove_leaf(&nibbles)?;
+                storage_trie.remove_leaf(&nibbles, &storage_provider)?;
             } else {
-                storage_trie.update_leaf(nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                storage_trie.update_leaf(
+                    nibbles,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                    &storage_provider,
+                )?;
             }
         }
 
@@ -235,14 +299,14 @@ fn calculate_state_root(
 
         // Decide whether to remove or update the account leaf
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trie.remove_account_leaf(&nibbles)?;
+            trie.remove_account_leaf(&nibbles, &provider_factory)?;
         } else {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
-            trie.update_account_leaf(nibbles, account_rlp_buf.clone())?;
+            trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
         }
     }
 
     // Return new state root
-    trie.root()
+    trie.root(&provider_factory)
 }

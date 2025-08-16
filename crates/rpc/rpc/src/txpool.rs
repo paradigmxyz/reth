@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_convert::{RpcConvert, RpcTypes};
+use reth_rpc_eth_api::RpcTransaction;
 use reth_transaction_pool::{
     AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
 };
@@ -36,18 +37,21 @@ impl<Pool, Eth> TxPoolApi<Pool, Eth> {
 impl<Pool, Eth> TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
-    Eth: TransactionCompat<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>>,
+    Eth: RpcConvert<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>>,
 {
-    fn content(&self) -> Result<TxpoolContent<Eth::Transaction>, Eth::Error> {
+    fn content(&self) -> Result<TxpoolContent<RpcTransaction<Eth::Network>>, Eth::Error> {
         #[inline]
         fn insert<Tx, RpcTxB>(
             tx: &Tx,
-            content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
+            content: &mut BTreeMap<
+                Address,
+                BTreeMap<String, <RpcTxB::Network as RpcTypes>::TransactionResponse>,
+            >,
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
         where
             Tx: PoolTransaction,
-            RpcTxB: TransactionCompat<Primitives: NodePrimitives<SignedTx = Tx::Consensus>>,
+            RpcTxB: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx::Consensus>>,
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
@@ -72,10 +76,10 @@ where
 }
 
 #[async_trait]
-impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
+impl<Pool, Eth> TxPoolApiServer<RpcTransaction<Eth::Network>> for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
-    Eth: TransactionCompat<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>> + 'static,
+    Eth: RpcConvert<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -84,8 +88,8 @@ where
     /// Handler for `txpool_status`
     async fn txpool_status(&self) -> RpcResult<TxpoolStatus> {
         trace!(target: "rpc::eth", "Serving txpool_status");
-        let all = self.pool.all_transactions();
-        Ok(TxpoolStatus { pending: all.pending.len() as u64, queued: all.queued.len() as u64 })
+        let (pending, queued) = self.pool.pending_and_queued_txn_count();
+        Ok(TxpoolStatus { pending: pending as u64, queued: queued as u64 })
     }
 
     /// Returns a summary of all the transactions currently pending for inclusion in the next
@@ -129,7 +133,7 @@ where
     async fn txpool_content_from(
         &self,
         from: Address,
-    ) -> RpcResult<TxpoolContentFrom<Eth::Transaction>> {
+    ) -> RpcResult<TxpoolContentFrom<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().map_err(Into::into)?.remove_from(&from))
     }
@@ -139,7 +143,7 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> RpcResult<TxpoolContent<Eth::Transaction>> {
+    async fn txpool_content(&self) -> RpcResult<TxpoolContent<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content().map_err(Into::into)?)
     }
