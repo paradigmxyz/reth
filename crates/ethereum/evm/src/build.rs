@@ -47,7 +47,7 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used },
+            output: BlockExecutionResult { receipts, requests, gas_used, block_access_list },
             state_root,
             ..
         } = input;
@@ -110,6 +110,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            bal_hash: None,
         };
 
         Ok(Block {

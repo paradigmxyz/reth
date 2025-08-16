@@ -14,14 +14,11 @@ use alloy_rpc_types_eth::{
     Transaction, TransactionInfo,
 };
 use core::error;
-use reth_evm::{
-    revm::context_interface::{either::Either, Block},
-    ConfigureEvm, TxEnvFor,
-};
+use reth_evm::{revm::context_interface::either::Either, ConfigureEvm, TxEnvFor};
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
 };
-use revm_context::{BlockEnv, CfgEnv, TxEnv};
+use revm_context::{Block, BlockEnv, CfgEnv, TxEnv};
 use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 

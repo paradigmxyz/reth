@@ -10033,7 +10033,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
- "revm-context 8.0.4",
+ "revm-context 9.0.1",
  "thiserror 2.0.14",
 ]
 
@@ -10547,7 +10547,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
- "revm-interpreter 23.0.2",
+ "revm-interpreter 25.0.1",
  "revm-primitives",
  "rustc-hash 2.1.1",
  "schnellru",
@@ -10831,22 +10831,6 @@ dependencies = [
 
 [[package]]
 name = "revm-context-interface"
-version = "8.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a303a93102fceccec628265efd550ce49f2817b38ac3a492c53f7d524f18a1ca"
-dependencies = [
- "alloy-eip2930",
- "alloy-eip7702",
- "auto_impl",
- "either",
- "revm-database-interface",
- "revm-primitives",
- "revm-state",
- "serde",
-]
-
-[[package]]
-name = "revm-context-interface"
 version = "9.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc90302642d21c8f93e0876e201f3c5f7913c4fcb66fb465b0fd7b707dfe1c79"
@@ -10991,18 +10975,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.14",
-]
-
-[[package]]
-name = "revm-interpreter"
-version = "23.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d95c4a9a1662d10b689b66b536ddc2eb1e89f5debfcabc1a2d7b8417a2fa47cd"
-dependencies = [
- "revm-bytecode",
- "revm-context-interface 8.0.1",
- "revm-primitives",
- "serde",
 ]
 
 [[package]]
