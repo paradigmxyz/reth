@@ -14,13 +14,14 @@ use revm::{
     inspector::Inspector,
     interpreter::interpreter::EthInterpreter
 };
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
+use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, WithTxEnv, ExecutorTx};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult as RethBlockExecutionResult;
-use reth_evm::{OnStateHook};
+use reth_evm::{OnStateHook, TransactionEnv};
 use alloy_evm::Database;
 use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx, BlockExecutor as AlloyBlockExecutor};
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
+use alloy_evm::ToTxEnv;
 use revm::context::result::ExecutionResult;
 
 use crate::predeploys::PredeployRegistry;
@@ -86,8 +87,9 @@ impl<E, CS, RB> AlloyBlockExecutor for ArbBlockExecutor<'_, E, CS, RB>
 where
     RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
     E: reth_evm::Evm,
-    E::Tx: alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
+    E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
     for<'a> alloy_evm::eth::EthBlockExecutor<'a, E, alloy_evm::eth::spec::EthSpec, &'a RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
+    <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
 {
     type Transaction = reth_arbitrum_primitives::ArbTransactionSigned;
     type Receipt = reth_arbitrum_primitives::ArbReceipt;
@@ -111,6 +113,14 @@ where
         let block_env = self.evm().block();
         let block_basefee = alloy_primitives::U256::from(block_env.basefee);
         let block_coinbase = block_env.beneficiary;
+
+        let is_special = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                SubmitRetryable | Internal | Deposit | Contract => true,
+                _ => false,
+            }
+        };
 
         let start_ctx = ArbStartTxContext {
             sender,
@@ -147,7 +157,14 @@ where
             let _ = res;
         }
 
-        let res = self.inner.execute_transaction_with_commit_condition(tx, f);
+        let res = if is_special {
+            let mut tx_env = tx.to_tx_env();
+            TransactionEnv::set_nonce(&mut tx_env, nonce);
+            let wrapped = WithTxEnv { tx_env, tx };
+            self.inner.execute_transaction_with_commit_condition(wrapped, f)
+        } else {
+            self.inner.execute_transaction_with_commit_condition(tx, f)
+        };
 
         let end_ctx = ArbEndTxContext {
             success: res.is_ok(),
