@@ -68,3 +68,4 @@ alloy-rlp.workspace = true
 clap.workspace = true
 serde.workspace = true
 eyre.workspace = true
+tokio.workspace = true

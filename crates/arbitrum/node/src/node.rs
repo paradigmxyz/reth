@@ -191,17 +191,28 @@ where
                 )
                 .await?;
 
-            let parent_header = match provider.header(&parent_hash)? {
-                Some(h) => h,
-                None => {
-                    let gen_opt = provider.header_by_number(0)?;
-                    if let Some(gen) = gen_opt {
-                        let gh = reth_primitives_traits::SealedHeader::new(gen.clone(), gen.hash_slow()).hash();
-                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, have_genesis=%gh, "missing parent header; canonical genesis differs?");
-                    } else {
-                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header; canonical genesis not found");
+            let parent_header = {
+                let mut attempts = 0u32;
+                loop {
+                    match provider.header(&parent_hash)? {
+                        Some(h) => break h,
+                        None => {
+                            if attempts < 60 {
+                                attempts += 1;
+                                reth_tracing::tracing::debug!(target: "arb-reth::follower", want_parent=%parent_hash, attempts, "parent header not yet available; waiting");
+                                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                continue;
+                            }
+                            let gen_opt = provider.header_by_number(0)?;
+                            if let Some(gen) = gen_opt {
+                                let gh = reth_primitives_traits::SealedHeader::new(gen.clone(), gen.hash_slow()).hash();
+                                reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, have_genesis=%gh, "missing parent header; canonical genesis differs?");
+                            } else {
+                                reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header; canonical genesis not found");
+                            }
+                            return Err(eyre::eyre!("missing parent header"));
+                        }
                     }
-                    return Err(eyre::eyre!("missing parent header"));
                 }
             };
             reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = parent_header.gas_limit, "follower: loaded parent header");
