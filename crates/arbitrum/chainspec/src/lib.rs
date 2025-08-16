@@ -1,10 +1,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result};
 use alloy_primitives::{hex, B256, U256};
+use alloy_consensus::Header;
+use alloy_genesis::Genesis;
 use reth_chainspec::ChainSpec;
-use reth_chainspec::Genesis;
-use reth_primitives::{Header, SealedHeader};
 
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use std::sync::Arc;
@@ -53,18 +53,17 @@ pub fn sepolia_baked_genesis_from_header(
     header.timestamp = ts.to::<u64>();
     header.extra_data = extra.into();
     header.mix_hash = B256::ZERO;
-    header.nonce = 0;
+    header.nonce = 0u64.into();
     header.base_fee_per_gas = Some(base_fee.to::<u64>());
     header.withdrawals_root = None;
     header.blob_gas_used = Some(0);
     header.excess_blob_gas = Some(0);
 
     let genesis = Genesis::from_header(header);
-    let mut spec = ChainSpec::builder()
+    let spec = reth_chainspec::ChainSpec::builder()
         .chain(Chain::from(chain_id))
         .genesis(genesis)
         .build();
-    spec.set_sealed_genesis_header(SealedHeader::new(spec.genesis_header().clone(), spec.genesis_hash()));
     Ok(spec)
 }
 
