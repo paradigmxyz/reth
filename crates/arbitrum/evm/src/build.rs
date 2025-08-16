@@ -19,6 +19,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult as RethBlockExecutionResult;
 use reth_evm::{OnStateHook, TransactionEnv};
 use alloy_evm::Database;
+use revm::Database as RevmDatabase;
 use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx, BlockExecutor as AlloyBlockExecutor};
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
 use alloy_evm::ToTxEnv;
@@ -83,12 +84,14 @@ impl<R: Clone, CS> ArbBlockExecutorFactory<R, CS> {
     }
 }
 
-impl<E, CS, RB> AlloyBlockExecutor for ArbBlockExecutor<'_, E, CS, RB>
+impl<'a, E, CS, RB, D> AlloyBlockExecutor for ArbBlockExecutor<'a, E, CS, RB>
 where
     RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
-    E: reth_evm::Evm,
+    D: RevmDatabase + core::fmt::Debug + 'a,
+    <D as RevmDatabase>::Error: Send + Sync + 'static,
+    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>>,
     E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
-    for<'a> alloy_evm::eth::EthBlockExecutor<'a, E, alloy_evm::eth::spec::EthSpec, &'a RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
+    for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
     <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
 {
     type Transaction = reth_arbitrum_primitives::ArbTransactionSigned;
@@ -159,7 +162,8 @@ where
 
         let res = if is_special {
             let pre_nonce = {
-                let state = self.inner.evm_mut().db_mut();
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
                 match state.basic(sender) {
                     Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
                     Err(_) => 0,
@@ -170,7 +174,8 @@ where
             let wrapped = WithTxEnv { tx_env, tx };
             let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
             if let Ok(Some(_)) = result {
-                let state = self.inner.evm_mut().db_mut();
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
                 if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     if let Some(info) = acc.info.as_mut() {
                         if info.nonce > 0 {
