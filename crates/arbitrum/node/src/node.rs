@@ -210,62 +210,100 @@ where
                     .map_err(|e| eyre::eyre!("builder_for_next_block error: {e}"))?;
 
                 builder.apply_pre_execution_changes().map_err(|e| eyre::eyre!("apply_pre_execution_changes: {e}"))?;
-
-                let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = Vec::new();
-                if !l2_owned.is_empty() {
-                    let kind = l2_owned[0];
-                    let mut cur = &l2_owned[1..];
-                    if kind == 0x00 {
-                        let (env, used) = arb_alloy_consensus::tx::ArbTxEnvelope::decode_typed(cur)
-                            .map_err(|e| eyre::eyre!("decode_typed: {e}"))?;
-                        let _ = used;
-                        match env {
-                            arb_alloy_consensus::tx::ArbTxEnvelope::Legacy(bytes) => {
-                                let mut s = bytes.as_slice();
-                                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                                    .map_err(|_| eyre::eyre!("failed to decode ArbTransactionSigned"))?;
-                                txs.push(tx);
-                            }
-                            _ => {
-                                let mut buf = env.encode_typed();
-                                let mut s = buf.as_slice();
-                                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                                    .map_err(|_| eyre::eyre!("failed to decode ArbTransactionSigned from typed env"))?;
-                                txs.push(tx);
-                            }
-                        }
-                    } else {
-                        while cur.len() >= 8 {
-                            let mut len_bytes = [0u8; 8];
-                            len_bytes.copy_from_slice(&cur[..8]);
-                            cur = &cur[8..];
-                            let seg_len = u64::from_be_bytes(len_bytes) as usize;
-                            if cur.len() < seg_len { break; }
-                            let seg = &cur[..seg_len];
-                            cur = &cur[seg_len..];
-                            if seg.is_empty() { continue; }
-                            let _seg_kind = seg[0];
-                            let seg_payload = &seg[1..];
-                            match arb_alloy_consensus::tx::ArbTxEnvelope::decode_typed(seg_payload) {
-                                Ok((env, _used)) => {
-                                    let mut buf = env.encode_typed();
-                                    let mut s = buf.as_slice();
-                                    if let Ok(tx) = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s) {
-                                        txs.push(tx);
-                                    }
-                                }
-                                Err(_) => {
-                                    let mut s = seg_payload;
-                                    if let Ok(tx) = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s) {
-                                        txs.push(tx);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let outcome = builder.finish(&state_provider).map_err(|e| eyre::eyre!("finish error: {e}"))?;
+ 
+                 fn read_u256_be32(cur: &mut &[u8]) -> eyre::Result<alloy_primitives::U256> {
+                     if cur.len() < 32 { return Err(eyre::eyre!("insufficient bytes for U256")); }
+                     let mut buf = [0u8; 32];
+                     buf.copy_from_slice(&cur[..32]);
+                     *cur = &cur[32..];
+                     Ok(alloy_primitives::U256::from_be_bytes(buf))
+                 }
+                 fn read_address_from_256(cur: &mut &[u8]) -> eyre::Result<alloy_primitives::Address> {
+                     if cur.len() < 32 { return Err(eyre::eyre!("insufficient bytes for Address256")); }
+                     let mut out = [0u8; 20];
+                     out.copy_from_slice(&cur[12..32]);
+                     *cur = &cur[32..];
+                     Ok(alloy_primitives::Address::from(out))
+                 }
+ 
+                 fn parse_l2_message_to_txs(mut bytes: &[u8]) -> eyre::Result<Vec<reth_arbitrum_primitives::ArbTransactionSigned>> {
+                     use alloy_rlp::Decodable;
+                     let mut out = Vec::new();
+                     if bytes.is_empty() { return Ok(out); }
+                     let l2_kind = bytes[0];
+                     let mut cur = &bytes[1..];
+                     match l2_kind {
+                         0x00 | 0x01 => {
+                             let gas_limit = read_u256_be32(&mut cur)?;
+                             let max_fee_per_gas = read_u256_be32(&mut cur)?;
+                             let nonce = if l2_kind == 0x00 {
+                                 let n = read_u256_be32(&mut cur)?;
+                                 n.to::<u64>()
+                             } else { 0u64 };
+                             let to = read_address_from_256(&mut cur)?;
+                             let to_opt = if to == alloy_primitives::Address::ZERO { None } else { Some(to) };
+                             let value = read_u256_be32(&mut cur)?;
+                             let data = cur.to_vec();
+                             let env = if l2_kind == 0x00 {
+                                 arb_alloy_consensus::tx::ArbTxEnvelope::Unsigned(arb_alloy_consensus::tx::ArbUnsignedTx {
+                                     chain_id: alloy_primitives::U256::ZERO,
+                                     from: alloy_primitives::Address::ZERO,
+                                     nonce,
+                                     gas_fee_cap: max_fee_per_gas,
+                                     gas: gas_limit.to(),
+                                     to: to_opt,
+                                     value,
+                                     data: alloy_primitives::Bytes::from(data),
+                                 })
+                             } else {
+                                 arb_alloy_consensus::tx::ArbTxEnvelope::Contract(arb_alloy_consensus::tx::ArbContractTx {
+                                     chain_id: alloy_primitives::U256::ZERO,
+                                     request_id: alloy_primitives::B256::ZERO,
+                                     from: alloy_primitives::Address::ZERO,
+                                     gas_fee_cap: max_fee_per_gas,
+                                     gas: gas_limit.to(),
+                                     to: to_opt,
+                                     value,
+                                     data: alloy_primitives::Bytes::from(data),
+                                 })
+                             };
+                             let mut enc = env.encode_typed();
+                             let mut s = enc.as_slice();
+                             let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                                 .map_err(|_| eyre::eyre!("decode_2718 failed for unsigned/contract"))?;
+                             out.push(tx);
+                         }
+                         0x03 => {
+                             let mut inner = cur;
+                             while !inner.is_empty() {
+                                 match <Vec<u8> as Decodable>::decode(&mut inner) {
+                                     Ok(seg) => {
+                                         let mut seg_txs = parse_l2_message_to_txs(&seg)?;
+                                         out.append(&mut seg_txs);
+                                     }
+                                     Err(_) => break,
+                                 }
+                             }
+                         }
+                         0x04 => {
+                             let mut s = cur;
+                             let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                                 .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
+                             out.push(tx);
+                         }
+                         _ => {}
+                     }
+                     Ok(out)
+                 }
+ 
+                 let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = parse_l2_message_to_txs(&l2_owned)
+                     .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?;
+ 
+                 for tx in &txs {
+                     builder.execute_transaction(tx).map_err(|e| eyre::eyre!("execute_transaction error: {e}"))?;
+                 }
+ 
+                 let outcome = builder.finish(&state_provider).map_err(|e| eyre::eyre!("finish error: {e}"))?;
                 let sealed_block = outcome.block.sealed_block().clone();
 
                 let block_hash = sealed_block.hash();
