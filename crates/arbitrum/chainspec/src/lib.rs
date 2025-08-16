@@ -51,6 +51,18 @@ const INITIAL_MIN_BASE_FEE_WEI: u128 = 100_000_000; // 0.1 gwei
 const INITIAL_PRICING_INERTIA: u64 = 102;
 const INITIAL_BACKLOG_TOLERANCE: u64 = 10;
 
+fn parse_hex_quantity(s: &str) -> U256 {
+    let mut h = s.strip_prefix("0x").unwrap_or(s).to_string();
+    if h.is_empty() {
+        return U256::ZERO;
+    }
+    if h.len() % 2 == 1 {
+        h.insert(0, '0');
+    }
+    let bytes = hex::decode(&h).unwrap_or_default();
+    U256::from_be_slice(&bytes)
+}
+
 fn be_u256(val: U256) -> B256 {
     B256::from(val.to_be_bytes::<32>())
 }
@@ -163,9 +175,7 @@ pub fn build_full_arbos_storage(
 
     storage
 }
-
-}
-
+ 
 pub fn sepolia_baked_genesis_from_header(
     chain_id: u64,
     base_fee_hex: &str,
@@ -173,10 +183,11 @@ pub fn sepolia_baked_genesis_from_header(
     _state_root_hex: &str,
     gas_limit_hex: &str,
     extra_data_hex: &str,
+    chain_config_json: Option<&str>,
 ) -> Result<ChainSpec> {
-    let base_fee = U256::from_be_slice(&hex::decode(base_fee_hex.trim_start_matches("0x")).unwrap_or_default());
-    let ts = U256::from_be_slice(&hex::decode(timestamp_hex.trim_start_matches("0x")).unwrap_or_default());
-    let gas_limit = U256::from_be_slice(&hex::decode(gas_limit_hex.trim_start_matches("0x")).unwrap_or_default());
+    let base_fee = parse_hex_quantity(base_fee_hex);
+    let ts = parse_hex_quantity(timestamp_hex);
+    let gas_limit = parse_hex_quantity(gas_limit_hex);
     let extra = hex::decode(extra_data_hex.trim_start_matches("0x")).unwrap_or_default();
 
     let mut genesis = Genesis::default();
@@ -197,7 +208,8 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
-    let arbos_storage = build_full_arbos_storage(chain_id, None, base_fee);
+    let chain_cfg_bytes = chain_config_json.map(|s| alloy_primitives::Bytes::from(s.as_bytes().to_vec()));
+    let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, base_fee);
     if !arbos_storage.is_empty() {
         let acct = GenesisAccount::default()
             .with_nonce(Some(1))
