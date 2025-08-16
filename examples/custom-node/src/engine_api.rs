@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_ethereum::node::api::{
-    AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
+    AddOnsContext, ConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
 use reth_op::node::OpBuiltPayload;
@@ -63,13 +63,13 @@ pub struct CustomEngineApi {
 }
 
 struct CustomEngineApiInner {
-    beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
+    beacon_consensus: ConsensusEngineHandle<CustomPayloadTypes>,
     payload_store: PayloadStore<CustomPayloadTypes>,
 }
 
 impl CustomEngineApiInner {
     fn new(
-        beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
+        beacon_consensus: ConsensusEngineHandle<CustomPayloadTypes>,
         payload_store: PayloadStore<CustomPayloadTypes>,
     ) -> Self {
         Self { beacon_consensus, payload_store }
