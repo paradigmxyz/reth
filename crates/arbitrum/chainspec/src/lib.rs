@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use anyhow::Result;
-use alloy_primitives::{hex, Address, B256, U256, keccak256};
+use alloy_primitives::{hex, Address, B256, U256, keccak256, Bytes};
 use alloy_genesis::{Genesis, GenesisAccount};
 use reth_chainspec::ChainSpec;
 
@@ -29,6 +29,13 @@ const NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET: u64 = 8;
 
 const L1_PRICING_SUBSPACE: u8 = 0;
 const L2_PRICING_SUBSPACE: u8 = 1;
+const RETRYABLES_SUBSPACE: u8 = 2;
+const ADDRESS_TABLE_SUBSPACE: u8 = 3;
+const CHAIN_OWNER_SUBSPACE: u8 = 4;
+const SEND_MERKLE_SUBSPACE: u8 = 5;
+const BLOCKHASHES_SUBSPACE: u8 = 6;
+const CHAIN_CONFIG_SUBSPACE: u8 = 7;
+
 
 const L2_SPEED_LIMIT_PER_SECOND_OFFSET: u64 = 0;
 const L2_PER_BLOCK_GAS_LIMIT_OFFSET: u64 = 1;
@@ -63,6 +70,24 @@ fn map_slot(storage_key: &[u8], key: B256) -> B256 {
 fn subspace(storage_key: &[u8], id: u8) -> Vec<u8> {
     keccak256([storage_key, &[id]].concat()).to_vec()
 }
+fn write_bytes(storage: &mut BTreeMap<B256, B256>, storage_key: &[u8], bytes: &[u8]) {
+    storage.insert(map_slot(storage_key, be_u64(0)), be_u64(bytes.len() as u64));
+    let mut offset = 1u64;
+    let mut i = 0usize;
+    while i + 32 <= bytes.len() {
+        let word = B256::from_slice(&bytes[i..i + 32]);
+        storage.insert(map_slot(storage_key, be_u64(offset)), word);
+        offset += 1;
+        i += 32;
+    }
+    if i < bytes.len() {
+        let mut last = [0u8; 32];
+        let rem = &bytes[i..];
+        last[32 - rem.len()..].copy_from_slice(rem);
+        storage.insert(map_slot(storage_key, be_u64(offset)), B256::from(last));
+    }
+}
+
 
 fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTreeMap<B256, B256> {
     let mut storage = BTreeMap::<B256, B256>::new();
@@ -92,6 +117,51 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
     storage.insert(map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
 
     storage
+pub fn build_full_arbos_storage(
+    chain_id: u64,
+    chain_config_bytes: Option<Bytes>,
+    initial_l1_base_fee: U256,
+) -> BTreeMap<B256, B256> {
+    let mut storage = BTreeMap::<B256, B256>::new();
+    let root_key: Vec<u8> = Vec::new();
+
+    storage.insert(map_slot(&root_key, be_u64(VERSION_OFFSET)), be_u64(1));
+    storage.insert(map_slot(&root_key, be_u64(UPGRADE_VERSION_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&root_key, be_u64(UPGRADE_TIMESTAMP_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&root_key, be_u64(NETWORK_FEE_ACCOUNT_OFFSET)), B256::ZERO);
+    storage.insert(map_slot(&root_key, be_u64(CHAIN_ID_OFFSET)), be_u256(U256::from(chain_id)));
+    storage.insert(map_slot(&root_key, be_u64(GENESIS_BLOCK_NUM_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&root_key, be_u64(INFRA_FEE_ACCOUNT_OFFSET)), B256::ZERO);
+    storage.insert(map_slot(&root_key, be_u64(BROTLI_LEVEL_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&root_key, be_u64(NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET)), be_u64(0));
+
+    if let Some(cfg) = chain_config_bytes {
+        let cc_space = subspace(&root_key, CHAIN_CONFIG_SUBSPACE);
+        write_bytes(&mut storage, &cc_space, &cfg);
+    }
+
+    let l2_space = subspace(&root_key, L2_PRICING_SUBSPACE);
+    storage.insert(map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)), be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V0));
+    storage.insert(map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)), be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V0));
+    storage.insert(map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l1_base_fee));
+    storage.insert(map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)), be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)));
+    storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)), be_u64(INITIAL_PRICING_INERTIA));
+    storage.insert(map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
+
+    let l1_space = subspace(&root_key, L1_PRICING_SUBSPACE);
+    let price_per_unit_offset: u64 = 7;
+    storage.insert(map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
+
+    let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
+    let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
+    let _chain_owner = subspace(&root_key, CHAIN_OWNER_SUBSPACE);
+    let _send_merkle = subspace(&root_key, SEND_MERKLE_SUBSPACE);
+    let _blockhashes = subspace(&root_key, BLOCKHASHES_SUBSPACE);
+
+    storage
+}
+
 }
 
 pub fn sepolia_baked_genesis_from_header(
@@ -112,11 +182,11 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.config.london_block = Some(0);
     genesis.config.cancun_time = Some(0);
 
-    genesis.nonce = 0;
+    genesis.nonce = 1;
     genesis.timestamp = ts.to::<u64>();
     genesis.extra_data = extra.into();
     genesis.gas_limit = gas_limit.to::<u64>();
-    genesis.difficulty = U256::ZERO;
+    genesis.difficulty = U256::from(1u64);
     genesis.mix_hash = B256::ZERO;
     genesis.coinbase = Address::ZERO;
     genesis.base_fee_per_gas = Some(base_fee.to::<u128>());
@@ -125,7 +195,7 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
-    let arbos_storage = build_minimal_arbos_storage(chain_id, base_fee);
+    let arbos_storage = build_full_arbos_storage(chain_id, None, base_fee);
     if !arbos_storage.is_empty() {
         let acct = GenesisAccount::default()
             .with_nonce(Some(1))
