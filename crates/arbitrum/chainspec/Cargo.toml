@@ -12,5 +12,10 @@ std = []
 [dependencies]
 revm.workspace = true
 reth-chainspec = { path = "../../chainspec", default-features = false, features = ["std"] }
+reth-cli.workspace = true
+eyre.workspace = true
+anyhow.workspace = true
+alloy-chains.workspace = true
 alloy-primitives.workspace = true
-alloy-evm.workspace = true
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true

@@ -6,9 +6,10 @@ use reth_payload_primitives::{
     EngineObjectValidationError,
     NewPayloadError,
     PayloadOrAttributes,
+    ExecutionPayload,
 };
 use reth_node_api::{EngineTypes, FullNodeComponents, NodeTypes, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, Block};
 use reth_provider::StateProviderFactory;
 
 #[derive(Debug, Clone)]
@@ -35,9 +36,28 @@ where
 
     fn ensure_well_formed_payload(
         &self,
-        _payload: ArbExecutionData,
+        exec_data: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        Err(NewPayloadError::Other("Arbitrum payload validation not yet implemented".into()))
+        let expected_hash = exec_data.block_hash();
+
+        let sealed_block = {
+            exec_data
+                .try_into_block_with_sidecar(&exec_data.sidecar)
+                .map_err(|e| NewPayloadError::Other(format!("failed to decode arb payload: {e}").into()))?
+                .seal_slow()
+        };
+
+        if expected_hash != sealed_block.hash() {
+            return Err(NewPayloadError::Other(format!(
+                "block hash mismatch: execution={} consensus={}",
+                sealed_block.hash(),
+                expected_hash
+            ).into()));
+        }
+
+        sealed_block
+            .try_recover()
+            .map_err(|e| NewPayloadError::Other(format!("failed to recover senders: {e}").into()))
     }
 }
 
