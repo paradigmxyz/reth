@@ -1,6 +1,7 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use clap::Parser;
+use reth_optimism_chainspec::HardforksOverrides;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
 use tracing::info;
@@ -17,8 +18,16 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
+        Cli::<OpChainSpecParser, RollupArgs>::parse().run(async move |mut builder, rollup_args| {
             info!(target: "reth::cli", "Launching node");
+
+            // Apply OP hardfork overrides to the chainspec before launching
+            let op_hardfork_overrides = rollup_args.op_hardforks_as_vec();
+            if !op_hardfork_overrides.is_empty() {
+                builder.config_mut().chain =
+                    builder.config().chain.apply_hardforks_overrides(op_hardfork_overrides).into();
+            }
+
             let handle =
                 builder.node(OpNode::new(rollup_args)).launch_with_debug_capabilities().await?;
             handle.node_exit_future.await

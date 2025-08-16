@@ -53,6 +53,7 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 
+pub use reth_chainspec::HardforksOverrides;
 /// Re-export for convenience
 pub use reth_optimism_forks::*;
 
@@ -324,6 +325,12 @@ impl Hardforks for OpChainSpec {
 
     fn fork_filter(&self, head: Head) -> ForkFilter {
         self.inner.fork_filter(head)
+    }
+}
+
+impl HardforksOverrides for OpChainSpec {
+    fn apply_hardforks_overrides<H: Hardfork>(&self, overrides: Vec<(H, u64)>) -> Self {
+        Self { inner: self.inner.apply_hardforks_overrides(overrides) }
     }
 }
 

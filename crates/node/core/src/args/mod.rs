@@ -68,5 +68,9 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+/// Hardfork overrides
+mod hardforks_overrides;
+pub use hardforks_overrides::EthereumHardforkOverrideArgs;
+
 mod error;
 pub mod types;
