@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use alloy_primitives::{Address, U256};
 use arb_alloy_util::l1_pricing::L1PricingState;
 

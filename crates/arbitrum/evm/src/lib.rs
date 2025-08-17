@@ -1,5 +1,6 @@
 pub mod header;
 
+
 #[cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -21,6 +22,7 @@ use reth_arbitrum_payload::ArbExecutionData;
 use reth_arbitrum_chainspec::ArbitrumChainSpec;
 use revm::{
     context::{BlockEnv, CfgEnv},
+    context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
 };
 
@@ -132,7 +134,7 @@ where
             prevrandao: header.mix_hash(),
             gas_limit: header.gas_limit(),
             basefee: header.base_fee_per_gas().unwrap_or_default(),
-            blob_excess_gas_and_price: None,
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         EvmEnv { cfg_env, block_env }
     }
@@ -154,7 +156,7 @@ where
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             basefee: attributes.max_fee_per_gas.unwrap_or_default().try_into().unwrap_or_default(),
-            blob_excess_gas_and_price: None,
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
@@ -205,7 +207,7 @@ where
             prevrandao: Some(payload.payload.as_v1().prev_randao),
             gas_limit: payload.payload.as_v1().gas_limit,
             basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
-            blob_excess_gas_and_price: None,
+            blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
         EvmEnv { cfg_env, block_env }
     }

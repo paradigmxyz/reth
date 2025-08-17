@@ -7306,10 +7306,16 @@ name = "reth-arbitrum-chainspec"
 version = "0.1.0"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus",
+ "alloy-genesis",
+ "alloy-primitives",
+ "anyhow",
  "eyre",
  "reth-chainspec",
  "reth-cli",
  "revm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7346,9 +7352,12 @@ name = "reth-arbitrum-node"
 version = "1.6.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "arb-alloy-consensus",
  "clap",
  "eyre",
  "reth-arbitrum-chainspec",
@@ -7360,10 +7369,12 @@ dependencies = [
  "reth-arbitrum-txpool",
  "reth-chainspec",
  "reth-consensus",
+ "reth-consensus-common",
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-consensus",
  "reth-evm",
+ "reth-execution-types",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -7372,6 +7383,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-server-types",
@@ -7381,6 +7393,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -9165,6 +9178,7 @@ dependencies = [
  "reth-node-events",
  "reth-node-metrics",
  "reth-payload-builder",
+ "reth-payload-builder-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",

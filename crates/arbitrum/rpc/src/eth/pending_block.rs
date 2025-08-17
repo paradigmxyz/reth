@@ -6,7 +6,7 @@ use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, pending_block::LoadPendingBlock},
     FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiError, PendingBlock};
 use crate::error::ArbEthApiError;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ReceiptProvider};
 
@@ -25,6 +25,11 @@ where
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.eth_api().pending_env_builder()
     }
+    #[inline]
+    fn pending_block_kind(&self) -> PendingBlockKind {
+        self.eth_api().pending_block_kind()
+    }
+
 
     async fn local_pending_block(
         &self,

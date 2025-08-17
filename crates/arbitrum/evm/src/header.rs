@@ -1,5 +1,13 @@
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, B256, Bytes, U256};
+pub fn extract_send_root_from_header_extra(extra: &[u8]) -> B256 {
+    if extra.len() >= 32 {
+        B256::from_slice(&extra[..32])
+    } else {
+        B256::ZERO
+    }
+}
+
 use reth_storage_api::StateProvider;
 
 #[derive(Clone, Debug, Default)]
@@ -148,4 +156,11 @@ pub fn derive_arb_header_info_from_state<
         l1_block_number,
         arbos_format_version: arbos_version,
     })
+}
+pub fn read_l2_per_block_gas_limit(provider: &dyn StateProvider) -> Option<u64> {
+    let addr = arbos_state_address();
+    let root_storage_key: [u8; 32] = [0u8; 32];
+    let l2_pricing_subspace = subspace(&root_storage_key, &[1u8]);
+    let per_block_gas_limit_slot = storage_key_map(&l2_pricing_subspace, uint_to_hash_u64_be(1));
+    read_storage_u64_be(provider, addr, per_block_gas_limit_slot)
 }

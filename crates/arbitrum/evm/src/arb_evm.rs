@@ -24,10 +24,17 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         };
         tx.caller = sender;
         tx.gas_limit = signed.gas_limit();
-        tx.gas_price = signed.gas_price().unwrap_or_default();
-        tx.gas_priority_fee = Some(signed.max_priority_fee_per_gas().unwrap_or_default());
+        tx.gas_price = 0;
+        tx.gas_priority_fee = Some(0);
+        match signed.tx_type() {
+            reth_arbitrum_primitives::ArbTxType::Legacy => {
+                tx.value = signed.value();
+            }
+            _ => {
+                tx.value = alloy_primitives::U256::ZERO;
+            }
+        }
         tx.kind = kind;
-        tx.value = signed.value();
         tx.data = signed.input().clone();
         tx.chain_id = Some(signed.chain_id().unwrap_or_default());
         tx.nonce = signed.nonce();

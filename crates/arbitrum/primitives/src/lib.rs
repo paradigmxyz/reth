@@ -852,41 +852,31 @@ impl ConsensusTx for ArbTransactionSigned {
     fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
-            ArbTypedTransaction::Unsigned(tx) => tx.gas_fee_cap.to::<u128>(),
-            ArbTypedTransaction::Contract(tx) => tx.gas_fee_cap.to::<u128>(),
-            ArbTypedTransaction::Retry(tx) => tx.gas_fee_cap.to::<u128>(),
-            ArbTypedTransaction::SubmitRetryable(tx) => tx.gas_fee_cap.to::<u128>(),
             _ => 0,
         }
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        None
+        Some(0)
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        None
+        Some(0)
     }
 
     fn priority_fee_or_price(&self) -> u128 {
-        self.gas_price().unwrap_or_else(|| self.max_fee_per_gas())
+        self.gas_price().unwrap_or(0)
     }
 
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
-            _ => {
-                let cap = self.max_fee_per_gas();
-                match base_fee {
-                    Some(b) => core::cmp::min(cap, b as u128),
-                    None => cap,
-                }
-            }
+            _ => 0,
         }
     }
 
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        Some(self.effective_gas_price(Some(base_fee)) as u128)
+    fn effective_tip_per_gas(&self, _base_fee: u64) -> Option<u128> {
+        Some(0)
     }
 
     fn is_dynamic_fee(&self) -> bool {
