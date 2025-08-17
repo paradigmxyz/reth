@@ -539,6 +539,7 @@ pub fn sepolia_baked_genesis_from_header(
         let acct = GenesisAccount::default()
             .with_nonce(Some(1))
             .with_balance(U256::ZERO)
+            .with_code(Some(vec![0u8; 2].into()))
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
