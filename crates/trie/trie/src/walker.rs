@@ -11,8 +11,20 @@ use tracing::{instrument, trace};
 use crate::metrics::WalkerMetrics;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
+/// 
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
-/// if they have not changed.
+/// if they have not changed. This is primarily used in **proof fetching** and other
+/// trie operations.
+///
+/// ## Important
+/// - `TrieWalker` navigates the `Trie` table stored in **MDBX**.
+/// - The `Trie` table stores keys in **lexicographic order** of path nibbles.
+/// - This ordering allows efficient prefix iteration and skipping of subtrees.
+/// - The implementation *assumes* this ordering; if MDBX changes its ordering
+///   guarantees, traversal logic would break.
+///
+/// In short: proof correctness depends on MDBX preserving lexicographic ordering
+/// for trie table keys.
 #[derive(Debug)]
 pub struct TrieWalker<C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
