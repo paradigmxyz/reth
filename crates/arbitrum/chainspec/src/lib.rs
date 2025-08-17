@@ -542,36 +542,6 @@ pub fn sepolia_baked_genesis_from_header(
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
-        let one_byte_fe_code: alloy_primitives::Bytes = vec![0xfe].into();
-        let precompiles_with_fe_code = [
-            "0000000000000000000000000000000000000064",
-            "0000000000000000000000000000000000000065",
-            "0000000000000000000000000000000000000066",
-            "0000000000000000000000000000000000000067",
-            "0000000000000000000000000000000000000068",
-            "0000000000000000000000000000000000000069",
-            "000000000000000000000000000000000000006b",
-            "000000000000000000000000000000000000006c",
-            "000000000000000000000000000000000000006d",
-            "000000000000000000000000000000000000006e",
-            "000000000000000000000000000000000000006f",
-            "0000000000000000000000000000000000000070",
-            "00000000000000000000000000000000000000ff",
-        ];
-        for h in precompiles_with_fe_code {
-            if let Ok(bytes) = hex::decode(h) {
-                if bytes.len() == 20 {
-                    let addr = Address::from_slice(&bytes);
-                    alloc.entry(addr).or_insert_with(|| {
-                        GenesisAccount::default()
-                            .with_nonce(Some(0))
-                            .with_balance(U256::ZERO)
-                            .with_code(Some(one_byte_fe_code.clone()))
-                            .with_storage(None)
-                    });
-                }
-            }
-        }
 
 
 
