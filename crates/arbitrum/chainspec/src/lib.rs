@@ -543,6 +543,27 @@ pub fn sepolia_baked_genesis_from_header(
         alloc.insert(ARBOS_ADDR, acct);
     }
 
+    for addr in [
+        alloy_primitives::address!("0x0000000000000000000000000000000000000064"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000065"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000066"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000067"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000068"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000069"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006b"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006c"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006d"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006e"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006f"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000070"),
+        alloy_primitives::address!("0x00000000000000000000000000000000000000ff"),
+    ] {
+        let acct = GenesisAccount::default()
+            .with_balance(U256::ZERO)
+            .with_code(Some(vec![0xfeu8].into()));
+        alloc.insert(addr, acct);
+    }
+
 
 
 
