@@ -20,7 +20,11 @@ mod tests {
             Some("0xb2d05e00"),
         )
         .expect("chainspec");
-        let _hash = spec.genesis_hash();
+        let hash = spec.genesis_hash();
+        assert_eq!(
+            hash,
+            b256!("0x77194da4010e549a7028a9c3c51c3e277823be6ac7d138d0bb8a70197b5c004c")
+        );
     }
 
     #[test]
