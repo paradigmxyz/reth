@@ -7314,6 +7314,8 @@ dependencies = [
  "reth-chainspec",
  "reth-cli",
  "revm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7391,6 +7393,7 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "serde",
+ "tokio",
 ]
 
 [[package]]
