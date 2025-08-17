@@ -4,6 +4,9 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{hex, keccak256, Address, Bytes, B256, U256};
 use anyhow::Result;
 use reth_chainspec::ChainSpec;
+mod data;
+#[cfg(feature = "std")]
+mod embedded_alloc;
 
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use std::sync::Arc;
@@ -666,6 +669,14 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
+    #[cfg(feature = "std")]
+    {
+        if let Ok(embedded) = crate::embedded_alloc::load_sepolia_secure_alloc_accounts() {
+            if !embedded.is_empty() {
+                alloc = embedded;
+            }
+        }
+    }
 
     let chain_cfg_bytes = chain_config_bytes.map(|b| alloy_primitives::Bytes::from(b.to_vec()));
 
@@ -673,14 +684,37 @@ pub fn sepolia_baked_genesis_from_header(
         .map(|h| parse_hex_quantity(h))
         .unwrap_or_else(|| U256::from(50_000_000_000u64));
 
-    let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
-    if !arbos_storage.is_empty() {
-        let acct = GenesisAccount::default()
-            .with_nonce(Some(1))
-            .with_balance(U256::ZERO)
-            .with_code(Some(Bytes::from_static(&[0x00, 0x00])))
-            .with_storage(Some(arbos_storage));
-        alloc.insert(ARBOS_ADDR, acct);
+    if alloc.is_empty() {
+        let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
+        if !arbos_storage.is_empty() {
+            let acct = GenesisAccount::default()
+                .with_nonce(Some(1))
+                .with_balance(U256::ZERO)
+                .with_code(Some(Bytes::default()))
+                .with_storage(Some(arbos_storage));
+            alloc.insert(ARBOS_ADDR, acct);
+        }
+
+        for &b in &[0x64u8, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0xff] {
+            let mut a = [0u8; 20];
+            a[19] = b;
+            let addr = Address::from_slice(&a);
+            let acct = GenesisAccount::default()
+                .with_nonce(Some(0))
+                .with_balance(U256::ZERO)
+                .with_code(Some(Bytes::from_static(&[0xfe])));
+            alloc.insert(addr, acct);
+        }
+        for &b in &[0x71u8, 0x72, 0x73, 0xc8, 0xc9] {
+            let mut a = [0u8; 20];
+            a[19] = b;
+            let addr = Address::from_slice(&a);
+            let acct = GenesisAccount::default()
+                .with_nonce(Some(0))
+                .with_balance(U256::ZERO)
+                .with_code(Some(Bytes::default()));
+            alloc.insert(addr, acct);
+        }
     }
 
 
