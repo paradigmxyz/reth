@@ -393,7 +393,9 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
-    let hash = provider_rw.block_hash(block)?.unwrap();
+    let hash = provider_rw
+        .block_hash(block)?
+        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
@@ -484,7 +486,8 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if !collector.is_empty() && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0
+        if !collector.is_empty() &&
+            collector.len().is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)
         {
             info!(target: "reth::cli",
                 parsed_new_accounts=collector.len(),
@@ -523,7 +526,7 @@ where
 
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
+        if (index > 0 && index.is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)) ||
             index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
@@ -588,7 +591,7 @@ where
 
                 intermediate_state = Some(*state);
 
-                if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
                     info!(target: "reth::cli",
                         total_flushed_updates,
                         "Flushing trie updates"

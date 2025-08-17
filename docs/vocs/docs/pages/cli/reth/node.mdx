@@ -400,6 +400,13 @@ RPC:
 
           [default: 25]
 
+      --rpc.pending-block <KIND>
+          Configures the pending block behavior for RPC responses.
+
+          Options: full (include all transactions), empty (header only), none (disable pending blocks).
+
+          [default: full]
+
       --builder.disallow <PATH>
           Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
 
@@ -569,6 +576,11 @@ TxPool:
 
       --txpool.disable-transactions-backup
           Disables transaction backup to disk on node shutdown
+
+      --txpool.max-batch-size <MAX_BATCH_SIZE>
+          Max batch size for transaction pool insertions
+
+          [default: 1]
 
 Builder:
       --builder.extradata <EXTRA_DATA>
