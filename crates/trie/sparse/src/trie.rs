@@ -1260,28 +1260,29 @@ impl SerialSparseTrie {
     ///
     /// This function identifies all nodes that have changed (based on the prefix set) at the given
     /// depth and recalculates their RLP representation.
-    pub fn update_rlp_node_level(&mut self, depth: usize) {
-        // Take the current prefix set
-        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let mut buffers = RlpNodeBuffers::default();
+    pub fn update_rlp_node_level(&mut self, _depth: usize) {
+        let _ = self.root();
+        // // Take the current prefix set
+        // let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        // let mut buffers = RlpNodeBuffers::default();
 
-        // Get the nodes that have changed at the given depth.
-        let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        // Update the prefix set to the prefix set of the nodes that still need to be updated.
-        self.prefix_set = new_prefix_set;
+        // // Get the nodes that have changed at the given depth.
+        // let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        // // Update the prefix set to the prefix set of the nodes that still need to be updated.
+        // self.prefix_set = new_prefix_set;
 
-        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
+        // trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
 
-        let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
-        for (level, path) in targets {
-            buffers.path_stack.push(RlpNodePathStackItem {
-                level,
-                path,
-                is_in_prefix_set: Some(true),
-            });
-            self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
-        }
-        self.rlp_buf = temp_rlp_buf;
+        // let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
+        // for (level, path) in targets {
+        //     buffers.path_stack.push(RlpNodePathStackItem {
+        //         level,
+        //         path,
+        //         is_in_prefix_set: Some(true),
+        //     });
+        //     self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
+        // }
+        // self.rlp_buf = temp_rlp_buf;
     }
 
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
@@ -1305,63 +1306,63 @@ impl SerialSparseTrie {
     ///   specified depth.
     /// - A `PrefixSetMut` containing paths shallower than the specified depth that still need to be
     ///   tracked for future updates.
-    fn get_changed_nodes_at_depth(
-        &self,
-        prefix_set: &mut PrefixSet,
-        depth: usize,
-    ) -> (Vec<(usize, Nibbles)>, PrefixSetMut) {
-        let mut unchanged_prefix_set = PrefixSetMut::default();
-        let mut paths = Vec::from([(Nibbles::default(), 0)]);
-        let mut targets = Vec::new();
+    // fn get_changed_nodes_at_depth(
+    //     &self,
+    //     prefix_set: &mut PrefixSet,
+    //     depth: usize,
+    // ) -> (Vec<(usize, Nibbles)>, PrefixSetMut) {
+    //     let mut unchanged_prefix_set = PrefixSetMut::default();
+    //     let mut paths = Vec::from([(Nibbles::default(), 0)]);
+    //     let mut targets = Vec::new();
 
-        while let Some((mut path, level)) = paths.pop() {
-            match self.nodes.get(&path).unwrap() {
-                SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { key: _, hash } => {
-                    if hash.is_some() && !prefix_set.contains(&path) {
-                        continue
-                    }
+    //     while let Some((mut path, level)) = paths.pop() {
+    //         match self.nodes.get(&path).unwrap() {
+    //             SparseNode::Empty | SparseNode::Hash(_) => {}
+    //             SparseNode::Leaf { key: _, hash } => {
+    //                 if hash.is_some() && !prefix_set.contains(&path) {
+    //                     continue
+    //                 }
 
-                    targets.push((level, path));
-                }
-                SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
-                    if hash.is_some() && !prefix_set.contains(&path) {
-                        continue
-                    }
+    //                 targets.push((level, path));
+    //             }
+    //             SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
+    //                 if hash.is_some() && !prefix_set.contains(&path) {
+    //                     continue
+    //                 }
 
-                    if level >= depth {
-                        targets.push((level, path));
-                    } else {
-                        unchanged_prefix_set.insert(path);
+    //                 if level >= depth {
+    //                     targets.push((level, path));
+    //                 } else {
+    //                     unchanged_prefix_set.insert(path);
 
-                        path.extend(key);
-                        paths.push((path, level + 1));
-                    }
-                }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
-                    if hash.is_some() && !prefix_set.contains(&path) {
-                        continue
-                    }
+    //                     path.extend(key);
+    //                     paths.push((path, level + 1));
+    //                 }
+    //             }
+    //             SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
+    //                 if hash.is_some() && !prefix_set.contains(&path) {
+    //                     continue
+    //                 }
 
-                    if level >= depth {
-                        targets.push((level, path));
-                    } else {
-                        unchanged_prefix_set.insert(path);
+    //                 if level >= depth {
+    //                     targets.push((level, path));
+    //                 } else {
+    //                     unchanged_prefix_set.insert(path);
 
-                        for bit in CHILD_INDEX_RANGE.rev() {
-                            if state_mask.is_bit_set(bit) {
-                                let mut child_path = path;
-                                child_path.push_unchecked(bit);
-                                paths.push((child_path, level + 1));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    //                     for bit in CHILD_INDEX_RANGE.rev() {
+    //                         if state_mask.is_bit_set(bit) {
+    //                             let mut child_path = path;
+    //                             child_path.push_unchecked(bit);
+    //                             paths.push((child_path, level + 1));
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        (targets, unchanged_prefix_set)
-    }
+    //     (targets, unchanged_prefix_set)
+    // }
 
     /// Look up or calculate the RLP of the node at the root path.
     ///
