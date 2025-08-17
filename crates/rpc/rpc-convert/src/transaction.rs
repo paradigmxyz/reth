@@ -413,8 +413,6 @@ where
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.
-/// Uses unsafe transmute to cast `&CfgEnv<Spec>` to `&CfgEnv<()>`, allowing closures
-/// to access all `CfgEnv` fields.
 impl<F, RpcReq, T, E> TxEnvConverter<RpcReq, T> for F
 where
     F: Fn(RpcReq, &CfgEnv<()>, &BlockEnv) -> Result<T, E>
@@ -435,10 +433,8 @@ where
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<T, Self::Error> {
-        //TODO: check if we should use only the chain id - and some other specific fields
-        // or the whole `CfgEnv`
-        let cfg_env_base = unsafe { std::mem::transmute::<&CfgEnv<Spec>, &CfgEnv<()>>(cfg_env) };
-        self(request, cfg_env_base, block_env)
+        let cfg_env_with_chain_id = CfgEnv::<()>::new_with_spec(()).with_chain_id(cfg_env.chain_id);
+        self(request, &cfg_env_with_chain_id, block_env)
     }
 }
 
