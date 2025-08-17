@@ -594,10 +594,7 @@ pub fn sepolia_baked_genesis_from_header(
 
     genesis.alloc = alloc;
 
-    let spec = reth_chainspec::ChainSpec::builder()
-        .chain(Chain::from(chain_id))
-        .genesis(genesis)
-        .build();
+    let spec = reth_chainspec::ChainSpec::from_genesis(genesis);
     Ok(spec)
 }
 
