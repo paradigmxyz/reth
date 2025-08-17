@@ -43,18 +43,13 @@ struct SeekedHashedEntry<V> {
     result: Option<(B256, V)>,
 }
 
-/// `TrieNodeIter` iterates over existing intermediate branch nodes (via `TrieWalker`)
-/// and updated leaf nodes (via the `Hashed` table).
-///
-/// ## Important
-/// - The `Hashed` table in MDBX stores keys by their **Keccak256 hash**, not
-///   lexicographically.
-/// - Iteration depends on being able to seek entries in this hashed order.
-/// - Proof fetching relies on lexicographic traversal (`TrieWalker`), while
-///   hash building requires combining this with hashed table lookups.
-///
-/// These assumptions about MDBX key ordering must hold for proofs and
-/// hashing to be correct.
+/// TrieNodeIter assumes that MDBX allows seeking into the hashed trie table
+/// and iterating from that point in lexicographic order of the hashed keys.
+/// Hash building requires combining sequential trie traversal with lookups
+/// into this hashed table. The correctness of this process depends on the
+/// cursor guaranteeing stable lexicographic ordering, so that iteration
+/// over hashed entries matches the trie’s traversal order. If ordering
+/// diverged, node hashes would be computed incorrectly.
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The walker over intermediate nodes.
