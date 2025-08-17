@@ -223,7 +223,18 @@ fn write_bytes(storage: &mut BTreeMap<B256, B256>, storage_key: &[u8], bytes: &[
         let mut last = [0u8; 32];
         let rem = &bytes[i..];
         last[32 - rem.len()..].copy_from_slice(rem);
-        storage.insert(map_slot(storage_key, be_u64(offset)), B256::from(last));
+        let slot = map_slot(storage_key, be_u64(offset));
+        let val = B256::from(last);
+        #[cfg(feature = "std")]
+        {
+            eprintln!("DBG write_bytes: len={} last_idx={} slot=0x{} val=0x{}",
+                bytes.len(),
+                offset,
+                hex::encode(slot.as_slice()),
+                hex::encode(val.as_slice())
+            );
+        }
+        storage.insert(slot, val);
     }
 }
 fn minify_json_preserve(input: &[u8]) -> Vec<u8> {
@@ -300,18 +311,41 @@ pub fn build_full_arbos_storage(
 
     if let Some(cfg) = chain_config_bytes.clone() {
         let cc_space = subspace(&root_key, CHAIN_CONFIG_SUBSPACE);
-        let min = minify_json_preserve(cfg.as_ref());
-        write_bytes(&mut storage, &cc_space, &min);
+        let raw = cfg.as_ref();
+        write_bytes(&mut storage, &cc_space, raw);
 
-        let buf = min.as_slice();
-        if let Some(v) = find_json_number(buf, br#""InitialArbOSVersion""#) {
-            desired_arbos_version = v;
-        }
-        if let Some(owner) = find_json_address(buf, br#""InitialChainOwner""#) {
-            initial_chain_owner = owner;
-        }
-        if let Some(n) = find_json_number(buf, br#""GenesisBlockNum""#) {
-            genesis_block_num = n;
+
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(raw) {
+            let mut obj = &v;
+            if let Some(arb) = v.get("arbitrum") {
+                obj = arb;
+            }
+            if let Some(n) = obj.get("InitialArbOSVersion").and_then(|x| x.as_u64()) {
+                desired_arbos_version = n;
+            } else if let Some(n) = v.get("InitialArbOSVersion").and_then(|x| x.as_u64()) {
+                desired_arbos_version = n;
+            }
+            if let Some(owner_str) = obj.get("InitialChainOwner").and_then(|x| x.as_str()).or_else(|| v.get("InitialChainOwner").and_then(|x| x.as_str())) {
+                if let Ok(bytes) = hex::decode(owner_str.trim_start_matches("0x")) {
+                    if bytes.len() == 20 {
+                        initial_chain_owner = Address::from_slice(&bytes);
+                    }
+                }
+            }
+            if let Some(n) = obj.get("GenesisBlockNum").and_then(|x| x.as_u64()).or_else(|| v.get("GenesisBlockNum").and_then(|x| x.as_u64())) {
+                genesis_block_num = n;
+            }
+        } else {
+            let buf = raw;
+            if let Some(v) = find_json_number(buf, br#""InitialArbOSVersion""#) {
+                desired_arbos_version = v;
+            }
+            if let Some(owner) = find_json_address(buf, br#""InitialChainOwner""#) {
+                initial_chain_owner = owner;
+            }
+            if let Some(n) = find_json_number(buf, br#""GenesisBlockNum""#) {
+                genesis_block_num = n;
+            }
         }
     }
 
@@ -332,15 +366,20 @@ pub fn build_full_arbos_storage(
     let l2_space = subspace(&root_key, L2_PRICING_SUBSPACE);
     let l1_space = subspace(&root_key, L1_PRICING_SUBSPACE);
 
+    let (l2_speed_limit, l2_per_block_limit) = if desired_arbos_version >= 6 {
+        (INITIAL_SPEED_LIMIT_PER_SECOND_V6, INITIAL_PER_BLOCK_GAS_LIMIT_V6)
+    } else {
+        (INITIAL_SPEED_LIMIT_PER_SECOND_V0, INITIAL_PER_BLOCK_GAS_LIMIT_V0)
+    };
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)),
-        be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V6),
+        be_u64(l2_speed_limit),
     );
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)),
-        be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6),
+        be_u64(l2_per_block_limit),
     );
     let initial_l2_base_fee = U256::from(100_000_000u64);
     insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l2_base_fee));
@@ -363,9 +402,12 @@ pub fn build_full_arbos_storage(
 
     let initial_rewards_recipient = if desired_arbos_version >= 2 { initial_chain_owner } else { BATCH_POSTER_PAYTO };
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PAY_REWARDS_TO_OFFSET)), address_to_b256(initial_rewards_recipient));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u64(INITIAL_EQUIL_UNITS_V6));
+    let l1_equil_units = if desired_arbos_version >= 6 { INITIAL_EQUIL_UNITS_V6 } else { INITIAL_EQUIL_UNITS_V0 };
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u64(l1_equil_units));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_INERTIA_OFFSET)), be_u64(INITIAL_L1_INITIAL_INERTIA));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_UNIT_REWARD_OFFSET)), be_u64(INITIAL_L1_INITIAL_PER_UNIT_REWARD));
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
+    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_AMORTIZED_COST_CAP_BIPS_OFFSET)), be_u64(u64::MAX));
 
     let bpt_space = subspace(&l1_space, BATCH_POSTER_TABLE_KEY);
     insert_non_zero(&mut storage, map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
@@ -401,10 +443,53 @@ pub fn build_full_arbos_storage(
     let byaddr = subspace(&chain_owner_space, 0);
     storage.insert(map_slot(&byaddr, address_to_b256(initial_chain_owner)), be_u64(1));
 
+    if desired_arbos_version >= 30 {
+        let programs_space = subspace(&root_key, 8);
+        let params_space = subspace(&programs_space, 0);
+        let mut stylus_bytes: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        let mut push_be_n = |val: u64, n: usize| {
+            let be = val.to_be_bytes();
+            stylus_bytes.extend_from_slice(&be[8 - n..]);
+        };
+        push_be_n(1, 2);
+        push_be_n(10_000, 3);
+        push_be_n(262_144, 4);
+        push_be_n(2, 2);
+        push_be_n(1000, 2);
+        push_be_n(128, 2);
+        push_be_n(72, 1);
+        push_be_n(11, 1);
+        push_be_n(50, 1);
+        push_be_n(50, 1);
+        push_be_n(365, 2);
+        push_be_n(31, 2);
+        push_be_n(32, 2);
+        let mut slot_idx: u64 = 0;
+        let mut i = 0usize;
+        while i < stylus_bytes.len() {
+            let end = core::cmp::min(i + 32, stylus_bytes.len());
+            let mut buf = [0u8; 32];
+            let chunk = &stylus_bytes[i..end];
+            buf[0..chunk.len()].copy_from_slice(chunk);
+            storage.insert(map_slot(&params_space, be_u64(slot_idx)), B256::from(buf));
+            slot_idx += 1;
+            i = end;
+        }
+
+        let data_pricer_space = subspace(&programs_space, 3);
+        let initial_bytes_per_second: u64 = (((1u128 << 40) / (365u128 * 24u128)) / (60u128 * 60u128)) as u64;
+        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(1)), be_u64(initial_bytes_per_second));
+        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(2)), be_u64(1_421_388_000));
+        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(3)), be_u64(82_928_201));
+        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(4)), be_u64(21_360_419));
+    }
+
+
     let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
     let _send_merkle = subspace(&root_key, SEND_MERKLE_SUBSPACE);
     let _blockhashes = subspace(&root_key, BLOCKHASHES_SUBSPACE);
+
 
     storage
 }
@@ -416,7 +501,7 @@ pub fn sepolia_baked_genesis_from_header(
     _state_root_hex: &str,
     gas_limit_hex: &str,
     extra_data_hex: &str,
-    chain_config_json: Option<&str>,
+    chain_config_bytes: Option<&[u8]>,
     initial_l1_base_fee_hex: Option<&str>,
 ) -> Result<ChainSpec> {
     let base_fee = parse_hex_quantity(base_fee_hex);
@@ -443,7 +528,7 @@ pub fn sepolia_baked_genesis_from_header(
 
     let mut alloc = BTreeMap::new();
 
-    let chain_cfg_bytes = chain_config_json.map(|s| alloy_primitives::Bytes::from(s.as_bytes().to_vec()));
+    let chain_cfg_bytes = chain_config_bytes.map(|b| alloy_primitives::Bytes::from(b.to_vec()));
 
     let initial_l1_price = initial_l1_base_fee_hex
         .map(|h| parse_hex_quantity(h))
@@ -452,50 +537,44 @@ pub fn sepolia_baked_genesis_from_header(
     let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
     if !arbos_storage.is_empty() {
         let acct = GenesisAccount::default()
-            .with_nonce(Some(0))
+            .with_nonce(Some(1))
             .with_balance(U256::ZERO)
-            .with_code(None)
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
-
-    let invalid_code: alloy_primitives::Bytes = vec![0xfe].into();
-
-    let precompile_hex_addrs = [
-        "0000000000000000000000000000000000000064", // ArbSys
-        "0000000000000000000000000000000000000065", // ArbInfo
-        "0000000000000000000000000000000000000066", // ArbAddressTable
-        "0000000000000000000000000000000000000067", // ArbBLS
-        "0000000000000000000000000000000000000068", // ArbFunctionTable
-        "0000000000000000000000000000000000000069", // ArbosTest
-        "000000000000000000000000000000000000006b", // ArbOwnerPublic
-        "000000000000000000000000000000000000006c", // ArbGasInfo
-        "000000000000000000000000000000000000006d", // ArbAggregator
-        "000000000000000000000000000000000000006e", // ArbRetryableTx
-        "000000000000000000000000000000000000006f", // ArbStatistics
-        "0000000000000000000000000000000000000070", // ArbOwner
-        "0000000000000000000000000000000000000071", // ArbWasm
-        "0000000000000000000000000000000000000072", // ArbWasmCache
-        "0000000000000000000000000000000000000073", // ArbNativeTokenManager
-        "00000000000000000000000000000000000a4b05", // ArbosActs (0xa4b05)
-        "00000000000000000000000000000000000000c8", // NodeInterface
-        "00000000000000000000000000000000000000c9", // NodeInterfaceDebug
-        "00000000000000000000000000000000000000ff", // ArbDebug
-    ];
-    for h in precompile_hex_addrs {
-        if let Ok(bytes) = hex::decode(h) {
-            if bytes.len() == 20 {
-                let addr = Address::from_slice(&bytes);
-                alloc.entry(addr).or_insert_with(|| {
-                    GenesisAccount::default()
-                        .with_nonce(Some(0))
-                        .with_balance(U256::ZERO)
-                        .with_code(Some(invalid_code.clone()))
-                        .with_storage(None)
-                });
+        let one_byte_fe_code: alloy_primitives::Bytes = vec![0xfe].into();
+        let precompiles_with_fe_code = [
+            "0000000000000000000000000000000000000064",
+            "0000000000000000000000000000000000000065",
+            "0000000000000000000000000000000000000066",
+            "0000000000000000000000000000000000000067",
+            "0000000000000000000000000000000000000068",
+            "0000000000000000000000000000000000000069",
+            "000000000000000000000000000000000000006b",
+            "000000000000000000000000000000000000006c",
+            "000000000000000000000000000000000000006d",
+            "000000000000000000000000000000000000006e",
+            "000000000000000000000000000000000000006f",
+            "0000000000000000000000000000000000000070",
+            "00000000000000000000000000000000000000ff",
+        ];
+        for h in precompiles_with_fe_code {
+            if let Ok(bytes) = hex::decode(h) {
+                if bytes.len() == 20 {
+                    let addr = Address::from_slice(&bytes);
+                    alloc.entry(addr).or_insert_with(|| {
+                        GenesisAccount::default()
+                            .with_nonce(Some(0))
+                            .with_balance(U256::ZERO)
+                            .with_code(Some(one_byte_fe_code.clone()))
+                            .with_storage(None)
+                    });
+                }
             }
         }
-    }
+
+
+
 
     genesis.alloc = alloc;
 
