@@ -1,8 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use anyhow::Result;
-use alloy_primitives::{hex, Address, B256, U256, keccak256, Bytes};
 use alloy_genesis::{Genesis, GenesisAccount};
+use alloy_primitives::{hex, keccak256, Address, Bytes, B256, U256};
+use anyhow::Result;
 use reth_chainspec::ChainSpec;
 
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
@@ -15,7 +15,8 @@ extern crate alloc;
 
 use alloc::collections::BTreeMap;
 
-const ARBOS_ADDR: Address = alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+const ARBOS_ADDR: Address =
+    alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
 
 fn insert_non_zero(storage: &mut BTreeMap<B256, B256>, key: B256, val: B256) {
     if val != B256::ZERO {
@@ -63,10 +64,10 @@ const INITIAL_L1_INITIAL_INERTIA: u64 = 10;
 const INITIAL_L1_INITIAL_PER_UNIT_REWARD: u64 = 10;
 const INITIAL_EQUIL_UNITS_V0: u64 = 60 * 16 * 100_000;
 
-const BATCH_POSTER: Address = alloy_primitives::address!("0xA4B000000000000000000073657175656e636572");
+const BATCH_POSTER: Address =
+    alloy_primitives::address!("0xA4B000000000000000000073657175656e636572");
 const BATCH_POSTER_PAYTO: Address = BATCH_POSTER;
 const CHAIN_CONFIG_SUBSPACE: u8 = 7;
-
 
 const L2_SPEED_LIMIT_PER_SECOND_OFFSET: u64 = 0;
 const L2_PER_BLOCK_GAS_LIMIT_OFFSET: u64 = 1;
@@ -82,7 +83,7 @@ const INITIAL_MIN_BASE_FEE_WEI: u128 = 100_000_000; // 0.1 gwei
 const INITIAL_PRICING_INERTIA: u64 = 102;
 const INITIAL_SPEED_LIMIT_PER_SECOND_V6: u64 = 7_000_000;
 const INITIAL_PER_BLOCK_GAS_LIMIT_V6: u64 = 32_000_000;
-const INITIAL_EQUIL_UNITS_V6: u64 = 16 * 10_000_000; 
+const INITIAL_EQUIL_UNITS_V6: u64 = 16 * 10_000_000;
 
 const INITIAL_BACKLOG_TOLERANCE: u64 = 10;
 
@@ -98,7 +99,15 @@ fn find_json_number(buf: &[u8], key: &[u8]) -> Option<u64> {
     while i + key.len() < buf.len() {
         if &buf[i..i + key.len()] == key {
             let mut j = i + key.len();
-            while j < buf.len() && (buf[j] == b' ' || buf[j] == b'\t' || buf[j] == b'\r' || buf[j] == b'\n' || buf[j] == b':' ) { j += 1; }
+            while j < buf.len()
+                && (buf[j] == b' '
+                    || buf[j] == b'\t'
+                    || buf[j] == b'\r'
+                    || buf[j] == b'\n'
+                    || buf[j] == b':')
+            {
+                j += 1;
+            }
             let mut val: u64 = 0;
             let mut any = false;
             while j < buf.len() {
@@ -111,7 +120,9 @@ fn find_json_number(buf: &[u8], key: &[u8]) -> Option<u64> {
                     break;
                 }
             }
-            if any { return Some(val); }
+            if any {
+                return Some(val);
+            }
             return None;
         }
         i += 1;
@@ -133,23 +144,45 @@ fn find_json_address(buf: &[u8], key: &[u8]) -> Option<Address> {
     while i + key.len() < buf.len() {
         if &buf[i..i + key.len()] == key {
             let mut j = i + key.len();
-            while j < buf.len() && (buf[j] == b' ' || buf[j] == b'\t' || buf[j] == b'\r' || buf[j] == b'\n' || buf[j] == b':' ) { j += 1; }
-            if j + 2 >= buf.len() || buf[j] != b'"' { return None; }
+            while j < buf.len()
+                && (buf[j] == b' '
+                    || buf[j] == b'\t'
+                    || buf[j] == b'\r'
+                    || buf[j] == b'\n'
+                    || buf[j] == b':')
+            {
+                j += 1;
+            }
+            if j + 2 >= buf.len() || buf[j] != b'"' {
+                return None;
+            }
             j += 1;
-            if j + 2 >= buf.len() || buf[j] != b'0' || buf[j+1] != b'x' { return None; }
+            if j + 2 >= buf.len() || buf[j] != b'0' || buf[j + 1] != b'x' {
+                return None;
+            }
             j += 2;
             let start = j;
             let mut bytes = [0u8; 20];
             let mut k = 0usize;
             while j < buf.len() && k < 20 {
-                if j + 1 >= buf.len() { break; }
-                let hi = match hex_char_val(buf[j]) { Some(v) => v, None => break };
-                let lo = match hex_char_val(buf[j+1]) { Some(v) => v, None => break };
+                if j + 1 >= buf.len() {
+                    break;
+                }
+                let hi = match hex_char_val(buf[j]) {
+                    Some(v) => v,
+                    None => break,
+                };
+                let lo = match hex_char_val(buf[j + 1]) {
+                    Some(v) => v,
+                    None => break,
+                };
                 bytes[k] = (hi << 4) | lo;
                 k += 1;
                 j += 2;
             }
-            while j < buf.len() && buf[j] != b'"' { j += 1; }
+            while j < buf.len() && buf[j] != b'"' {
+                j += 1;
+            }
             if k == 20 {
                 return Some(Address::from_slice(&bytes));
             } else {
@@ -159,8 +192,18 @@ fn find_json_address(buf: &[u8], key: &[u8]) -> Option<Address> {
                     let mut bi = 20usize;
                     let mut p = start + hex_len;
                     while p > start && bi > 0 {
-                        let lo = if p > start { p -= 1; hex_char_val(buf[p]).unwrap_or(0) } else { 0 };
-                        let hi = if p > start { p -= 1; hex_char_val(buf[p]).unwrap_or(0) } else { 0 };
+                        let lo = if p > start {
+                            p -= 1;
+                            hex_char_val(buf[p]).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        let hi = if p > start {
+                            p -= 1;
+                            hex_char_val(buf[p]).unwrap_or(0)
+                        } else {
+                            0
+                        };
                         bi -= 1;
                         tmp[bi] = (hi << 4) | lo;
                     }
@@ -227,7 +270,8 @@ fn write_bytes(storage: &mut BTreeMap<B256, B256>, storage_key: &[u8], bytes: &[
         let val = B256::from(last);
         #[cfg(feature = "std")]
         {
-            eprintln!("DBG write_bytes: len={} last_idx={} slot=0x{} val=0x{}",
+            eprintln!(
+                "DBG write_bytes: len={} last_idx={} slot=0x{} val=0x{}",
                 bytes.len(),
                 offset,
                 hex::encode(slot.as_slice()),
@@ -265,8 +309,6 @@ fn minify_json_preserve(input: &[u8]) -> Vec<u8> {
     out
 }
 
-
-
 fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTreeMap<B256, B256> {
     let mut storage = BTreeMap::<B256, B256>::new();
     let root_key: Vec<u8> = Vec::new();
@@ -282,17 +324,45 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
     storage.insert(map_slot(&root_key, be_u64(NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET)), be_u64(0));
 
     let l2_space = subspace(&root_key, L2_PRICING_SUBSPACE);
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)), be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V6));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)), be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_SPEED_LIMIT_PER_SECOND_OFFSET)),
+        be_u64(INITIAL_SPEED_LIMIT_PER_SECOND_V6),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)),
+        be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6),
+    );
     let initial_l2_base_fee = U256::from(100_000_000u64);
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l2_base_fee));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)), be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)), be_u64(INITIAL_PRICING_INERTIA));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
+        be_u256(initial_l2_base_fee),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)),
+        be_u256(U256::from(INITIAL_MIN_BASE_FEE_WEI)),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)),
+        be_u64(INITIAL_PRICING_INERTIA),
+    );
     storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)),
+        be_u64(INITIAL_BACKLOG_TOLERANCE),
+    );
 
     let l1_space = subspace(&root_key, L1_PRICING_SUBSPACE);
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PRICE_PER_UNIT_OFFSET)), be_u256(initial_l1_base_fee));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_PRICE_PER_UNIT_OFFSET)),
+        be_u256(initial_l1_base_fee),
+    );
 
     storage
 }
@@ -314,7 +384,6 @@ pub fn build_full_arbos_storage(
         let raw = cfg.as_ref();
         write_bytes(&mut storage, &cc_space, raw);
 
-
         if let Ok(v) = serde_json::from_slice::<serde_json::Value>(raw) {
             let mut obj = &v;
             if let Some(arb) = v.get("arbitrum") {
@@ -325,14 +394,22 @@ pub fn build_full_arbos_storage(
             } else if let Some(n) = v.get("InitialArbOSVersion").and_then(|x| x.as_u64()) {
                 desired_arbos_version = n;
             }
-            if let Some(owner_str) = obj.get("InitialChainOwner").and_then(|x| x.as_str()).or_else(|| v.get("InitialChainOwner").and_then(|x| x.as_str())) {
+            if let Some(owner_str) = obj
+                .get("InitialChainOwner")
+                .and_then(|x| x.as_str())
+                .or_else(|| v.get("InitialChainOwner").and_then(|x| x.as_str()))
+            {
                 if let Ok(bytes) = hex::decode(owner_str.trim_start_matches("0x")) {
                     if bytes.len() == 20 {
                         initial_chain_owner = Address::from_slice(&bytes);
                     }
                 }
             }
-            if let Some(n) = obj.get("GenesisBlockNum").and_then(|x| x.as_u64()).or_else(|| v.get("GenesisBlockNum").and_then(|x| x.as_u64())) {
+            if let Some(n) = obj
+                .get("GenesisBlockNum")
+                .and_then(|x| x.as_u64())
+                .or_else(|| v.get("GenesisBlockNum").and_then(|x| x.as_u64()))
+            {
                 genesis_block_num = n;
             }
         } else {
@@ -353,12 +430,16 @@ pub fn build_full_arbos_storage(
     storage.insert(map_slot(&root_key, be_u64(UPGRADE_VERSION_OFFSET)), be_u64(0));
     storage.insert(map_slot(&root_key, be_u64(UPGRADE_TIMESTAMP_OFFSET)), be_u64(0));
     if desired_arbos_version >= 2 {
-        storage.insert(map_slot(&root_key, be_u64(NETWORK_FEE_ACCOUNT_OFFSET)), address_to_b256(initial_chain_owner));
+        storage.insert(
+            map_slot(&root_key, be_u64(NETWORK_FEE_ACCOUNT_OFFSET)),
+            address_to_b256(initial_chain_owner),
+        );
     } else {
         storage.insert(map_slot(&root_key, be_u64(NETWORK_FEE_ACCOUNT_OFFSET)), B256::ZERO);
     }
     storage.insert(map_slot(&root_key, be_u64(CHAIN_ID_OFFSET)), be_u256(U256::from(chain_id)));
-    storage.insert(map_slot(&root_key, be_u64(GENESIS_BLOCK_NUM_OFFSET)), be_u64(genesis_block_num));
+    storage
+        .insert(map_slot(&root_key, be_u64(GENESIS_BLOCK_NUM_OFFSET)), be_u64(genesis_block_num));
     storage.insert(map_slot(&root_key, be_u64(INFRA_FEE_ACCOUNT_OFFSET)), B256::ZERO);
     storage.insert(map_slot(&root_key, be_u64(BROTLI_LEVEL_OFFSET)), be_u64(0));
     storage.insert(map_slot(&root_key, be_u64(NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET)), be_u64(0));
@@ -382,7 +463,11 @@ pub fn build_full_arbos_storage(
         be_u64(l2_per_block_limit),
     );
     let initial_l2_base_fee = U256::from(100_000_000u64);
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)), be_u256(initial_l2_base_fee));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
+        be_u256(initial_l2_base_fee),
+    );
     storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
     insert_non_zero(
         &mut storage,
@@ -400,30 +485,58 @@ pub fn build_full_arbos_storage(
         be_u64(INITIAL_BACKLOG_TOLERANCE),
     );
 
-    let initial_rewards_recipient = if desired_arbos_version >= 2 { initial_chain_owner } else { BATCH_POSTER_PAYTO };
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PAY_REWARDS_TO_OFFSET)), address_to_b256(initial_rewards_recipient));
-    let l1_equil_units = if desired_arbos_version >= 6 { INITIAL_EQUIL_UNITS_V6 } else { INITIAL_EQUIL_UNITS_V0 };
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u64(l1_equil_units));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_INERTIA_OFFSET)), be_u64(INITIAL_L1_INITIAL_INERTIA));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_UNIT_REWARD_OFFSET)), be_u64(INITIAL_L1_INITIAL_PER_UNIT_REWARD));
+    let initial_rewards_recipient =
+        if desired_arbos_version >= 2 { initial_chain_owner } else { BATCH_POSTER_PAYTO };
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_PAY_REWARDS_TO_OFFSET)),
+        address_to_b256(initial_rewards_recipient),
+    );
+    let l1_equil_units =
+        if desired_arbos_version >= 6 { INITIAL_EQUIL_UNITS_V6 } else { INITIAL_EQUIL_UNITS_V0 };
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)),
+        be_u64(l1_equil_units),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_INERTIA_OFFSET)),
+        be_u64(INITIAL_L1_INITIAL_INERTIA),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_PER_UNIT_REWARD_OFFSET)),
+        be_u64(INITIAL_L1_INITIAL_PER_UNIT_REWARD),
+    );
     storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_AMORTIZED_COST_CAP_BIPS_OFFSET)), be_u64(u64::MAX));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_AMORTIZED_COST_CAP_BIPS_OFFSET)),
+        be_u64(u64::MAX),
+    );
     storage.insert(map_slot(&l1_space, be_u64(L1_LAST_UPDATE_TIME_OFFSET)), be_u64(0));
     storage.insert(map_slot(&l1_space, be_u64(L1_FUNDS_DUE_FOR_REWARDS_OFFSET)), B256::ZERO);
     storage.insert(map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)), be_u64(0));
     storage.insert(map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)), B256::ZERO);
     storage.insert(map_slot(&l1_space, be_u64(L1_FEES_AVAILABLE_OFFSET)), B256::ZERO);
 
-
     let bpt_space = subspace(&l1_space, BATCH_POSTER_TABLE_KEY);
     storage.insert(map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
 
-
     let poster_addrs_space = subspace(&bpt_space, POSTER_ADDRS_KEY);
     insert_non_zero(&mut storage, map_slot(&poster_addrs_space, be_u64(0)), be_u64(1));
-    insert_non_zero(&mut storage, map_slot(&poster_addrs_space, be_u64(1)), address_to_b256(BATCH_POSTER));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&poster_addrs_space, be_u64(1)),
+        address_to_b256(BATCH_POSTER),
+    );
     let poster_byaddr_space = subspace(&poster_addrs_space, 0);
-    insert_non_zero(&mut storage, map_slot(&poster_byaddr_space, address_to_b256(BATCH_POSTER)), be_u64(1));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&poster_byaddr_space, address_to_b256(BATCH_POSTER)),
+        be_u64(1),
+    );
 
     let poster_info_space = subspace(&bpt_space, POSTER_INFO_KEY);
 
@@ -432,13 +545,24 @@ pub fn build_full_arbos_storage(
     storage.insert(map_slot(&timeout_queue_space, be_u64(0)), be_u64(2));
     storage.insert(map_slot(&timeout_queue_space, be_u64(1)), be_u64(2));
 
-    insert_non_zero(&mut storage, map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)), be_u64(INITIAL_BACKLOG_TOLERANCE));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)),
+        be_u64(INITIAL_BACKLOG_TOLERANCE),
+    );
     let per_poster_space = subspace_bytes(&poster_info_space, BATCH_POSTER.as_slice());
-    insert_non_zero(&mut storage, map_slot(&per_poster_space, be_u64(1)), address_to_b256(BATCH_POSTER_PAYTO));
-
+    insert_non_zero(
+        &mut storage,
+        map_slot(&per_poster_space, be_u64(1)),
+        address_to_b256(BATCH_POSTER_PAYTO),
+    );
 
     let price_per_unit_offset: u64 = 7;
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(price_per_unit_offset)), be_u256(initial_l1_base_fee));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(price_per_unit_offset)),
+        be_u256(initial_l1_base_fee),
+    );
 
     let chain_owner_space = subspace(&root_key, CHAIN_OWNER_SUBSPACE);
     storage.insert(map_slot(&chain_owner_space, be_u64(0)), be_u64(1));
@@ -483,25 +607,32 @@ pub fn build_full_arbos_storage(
         }
 
         let data_pricer_space = subspace(&programs_space, 3);
-        let initial_bytes_per_second: u64 = (((1u128 << 40) / (365u128 * 24u128)) / (60u128 * 60u128)) as u64;
-        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(1)), be_u64(initial_bytes_per_second));
-        insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(2)), be_u64(1_421_388_000));
+        let initial_bytes_per_second: u64 =
+            (((1u128 << 40) / (365u128 * 24u128)) / (60u128 * 60u128)) as u64;
+        insert_non_zero(
+            &mut storage,
+            map_slot(&data_pricer_space, be_u64(1)),
+            be_u64(initial_bytes_per_second),
+        );
+        insert_non_zero(
+            &mut storage,
+            map_slot(&data_pricer_space, be_u64(2)),
+            be_u64(1_421_388_000),
+        );
         insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(3)), be_u64(82_928_201));
         insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(4)), be_u64(21_360_419));
     }
 
     storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
 
-
     let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
     let _send_merkle = subspace(&root_key, SEND_MERKLE_SUBSPACE);
     let _blockhashes = subspace(&root_key, BLOCKHASHES_SUBSPACE);
 
-
     storage
 }
- 
+
 pub fn sepolia_baked_genesis_from_header(
     chain_id: u64,
     base_fee_hex: &str,
@@ -547,49 +678,10 @@ pub fn sepolia_baked_genesis_from_header(
         let acct = GenesisAccount::default()
             .with_nonce(Some(1))
             .with_balance(U256::ZERO)
-            .with_code(Some(vec![0u8; 2].into()))
+            .with_code(Some(Bytes::from_static(&[0x00, 0x00])))
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
-    for addr in [
-        alloy_primitives::address!("0x0000000000000000000000000000000000000064"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000065"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000066"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000067"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000068"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000069"),
-        alloy_primitives::address!("0x000000000000000000000000000000000000006b"),
-        alloy_primitives::address!("0x000000000000000000000000000000000000006c"),
-        alloy_primitives::address!("0x000000000000000000000000000000000000006d"),
-        alloy_primitives::address!("0x000000000000000000000000000000000000006e"),
-        alloy_primitives::address!("0x000000000000000000000000000000000000006f"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000070"),
-        alloy_primitives::address!("0x00000000000000000000000000000000000000ff"),
-    ] {
-        let acct = GenesisAccount::default()
-            .with_balance(U256::ZERO)
-            .with_code(Some(vec![0xfeu8; 1].into()));
-        alloc.insert(addr, acct);
-    }
-    for addr in [
-        alloy_primitives::address!("0x0000000000000000000000000000000000000071"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000072"),
-        alloy_primitives::address!("0x0000000000000000000000000000000000000073"),
-        alloy_primitives::address!("0x00000000000000000000000000000000000000c8"),
-        alloy_primitives::address!("0x00000000000000000000000000000000000000c9"),
-    ] {
-        let acct = GenesisAccount::default()
-            .with_balance(U256::ZERO)
-            .with_code(Some(vec![0u8; 2].into()));
-        alloc.insert(addr, acct);
-    }
-
-
-
-
-
-
-
 
 
     genesis.alloc = alloc;
@@ -638,12 +730,8 @@ pub struct ArbitrumChainSpecParser;
 impl ChainSpecParser for ArbitrumChainSpecParser {
     type ChainSpec = reth_chainspec::ChainSpec;
 
-    const SUPPORTED_CHAINS: &'static [&'static str] = &[
-        "arbitrum-sepolia",
-        "arb-sepolia",
-        "arbsepolia",
-        "421614",
-    ];
+    const SUPPORTED_CHAINS: &'static [&'static str] =
+        &["arbitrum-sepolia", "arb-sepolia", "arbsepolia", "421614"];
 
     fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
         match s {
