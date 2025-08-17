@@ -5,8 +5,8 @@ pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, BeaconConsensusEngineEvent,
-    BeaconConsensusEngineHandle, ConfigureEngineEvm,
+    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
+    ConsensusEngineHandle,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -326,10 +326,9 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     ///
     /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
     /// dispatch events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub beacon_engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -375,10 +374,9 @@ pub struct RpcServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
     /// Notification channel for engine API events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the consensus engine.
-    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Handle returned when only the authenticated Engine API server is launched.
@@ -393,10 +391,9 @@ pub struct AuthServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
     /// Notification channel for engine API events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the consensus engine.
-    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Internal context struct for RPC setup shared between different launch methods
@@ -408,8 +405,8 @@ struct RpcSetupContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     auth_config: reth_rpc_builder::auth::AuthServerConfig,
     registry: RpcRegistry<Node, EthApi>,
     on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
-    engine_events: EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
@@ -1090,6 +1087,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
             .max_batch_size(self.config.max_batch_size)
+            .pending_block_kind(self.config.pending_block_kind)
     }
 }
 
