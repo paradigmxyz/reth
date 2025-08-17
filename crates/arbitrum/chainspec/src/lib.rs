@@ -406,11 +406,17 @@ pub fn build_full_arbos_storage(
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_EQUIL_UNITS_OFFSET)), be_u64(l1_equil_units));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_INERTIA_OFFSET)), be_u64(INITIAL_L1_INITIAL_INERTIA));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_UNIT_REWARD_OFFSET)), be_u64(INITIAL_L1_INITIAL_PER_UNIT_REWARD));
-    insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
+    storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
     insert_non_zero(&mut storage, map_slot(&l1_space, be_u64(L1_AMORTIZED_COST_CAP_BIPS_OFFSET)), be_u64(u64::MAX));
+    storage.insert(map_slot(&l1_space, be_u64(L1_LAST_UPDATE_TIME_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&l1_space, be_u64(L1_FUNDS_DUE_FOR_REWARDS_OFFSET)), B256::ZERO);
+    storage.insert(map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)), B256::ZERO);
+    storage.insert(map_slot(&l1_space, be_u64(L1_FEES_AVAILABLE_OFFSET)), B256::ZERO);
+
 
     let bpt_space = subspace(&l1_space, BATCH_POSTER_TABLE_KEY);
-    insert_non_zero(&mut storage, map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
+    storage.insert(map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
 
 
     let poster_addrs_space = subspace(&bpt_space, POSTER_ADDRS_KEY);
@@ -484,6 +490,8 @@ pub fn build_full_arbos_storage(
         insert_non_zero(&mut storage, map_slot(&data_pricer_space, be_u64(4)), be_u64(21_360_419));
     }
 
+    storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
+
 
     let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
@@ -539,9 +547,45 @@ pub fn sepolia_baked_genesis_from_header(
         let acct = GenesisAccount::default()
             .with_nonce(Some(1))
             .with_balance(U256::ZERO)
+            .with_code(Some(vec![0u8; 2].into()))
             .with_storage(Some(arbos_storage));
         alloc.insert(ARBOS_ADDR, acct);
     }
+    for addr in [
+        alloy_primitives::address!("0x0000000000000000000000000000000000000064"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000065"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000066"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000067"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000068"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000069"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006b"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006c"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006d"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006e"),
+        alloy_primitives::address!("0x000000000000000000000000000000000000006f"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000070"),
+        alloy_primitives::address!("0x00000000000000000000000000000000000000ff"),
+    ] {
+        let acct = GenesisAccount::default()
+            .with_balance(U256::ZERO)
+            .with_code(Some(vec![0xfeu8; 1].into()));
+        alloc.insert(addr, acct);
+    }
+    for addr in [
+        alloy_primitives::address!("0x0000000000000000000000000000000000000071"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000072"),
+        alloy_primitives::address!("0x0000000000000000000000000000000000000073"),
+        alloy_primitives::address!("0x00000000000000000000000000000000000000c8"),
+        alloy_primitives::address!("0x00000000000000000000000000000000000000c9"),
+    ] {
+        let acct = GenesisAccount::default()
+            .with_balance(U256::ZERO)
+            .with_code(Some(vec![0u8; 2].into()));
+        alloc.insert(addr, acct);
+    }
+
+
+
 
 
 
