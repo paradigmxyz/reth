@@ -7,7 +7,6 @@ mod tests {
 
     use crate::embedded_alloc::load_sepolia_secure_alloc_hashed;
 
-    #[ignore]
     #[test]
     fn baked_genesis_builds_with_embedded_alloc_or_fallback() {
         let spec = sepolia_baked_genesis_from_header(
@@ -24,7 +23,6 @@ mod tests {
         let _hash = spec.genesis_hash();
     }
 
-    #[ignore]
     #[test]
     fn sepolia_securealloc_trie_root_matches() {
         let (accounts_h, storages_h) = load_sepolia_secure_alloc_hashed().expect("load");
