@@ -132,7 +132,7 @@ pub fn load_sepolia_secure_alloc_hashed(
         };
 
         let acct = Account { nonce, balance, bytecode_hash: code_hash };
-        accounts_h.insert(hashed_addr, Some(acct));
+        accounts_h.insert(hashed_addr, acct);
 
         let mut storage_entries: BTreeMap<B256, B256> = BTreeMap::new();
         if let Some(stor) = v.get("storage").and_then(|x| x.as_object()) {
