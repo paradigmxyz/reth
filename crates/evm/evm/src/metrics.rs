@@ -104,10 +104,6 @@ impl ExecutorMetrics {
     pub fn execute_metered<'a, E, DB>(
         &self,
         executor: E,
-        // input: BlockExecutionInput<
-        //     'a,
-        //     RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
-        // >,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
@@ -304,9 +300,6 @@ mod tests {
             state
         };
         let executor = MockExecutor::new(state);
-        // let input_exec: BlockExecutionInput<'_, _> = (&input).into();
-        // let _result =
-        //     metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
         let _result = metrics
             .execute_metered::<_, EmptyDB>(
                 executor,
@@ -345,9 +338,7 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor::new(state);
-        // let input_exec: BlockExecutionInput<'_, _> = (&input).into();
-        // let _result =
-        //     metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
+
         let _result = metrics
             .execute_metered::<_, EmptyDB>(
                 executor,

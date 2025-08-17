@@ -491,7 +491,7 @@ fn test_disconnected_block() {
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
     // TODO Pelle:
-    let outcome = test_harness.tree.insert_block(sealed.clone(), None).unwrap();
+    let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
     assert_eq!(
         outcome,
         InsertPayloadOk::Inserted(BlockStatus::Disconnected {

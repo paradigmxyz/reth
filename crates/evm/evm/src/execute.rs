@@ -2,24 +2,23 @@
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::{BlockHeader, Header, Transaction};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
-use reth_ethereum_primitives::TransactionSigned;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_execution_types::BlockExecutionResult;
-pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
     Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader,
-    SignedTransaction, TxTy,
+    TxTy,
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
@@ -27,7 +26,7 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     context::result::ExecutionResult,
     database::{
-        states::bundle_state::BundleRetention, BundleState, Database as RevmDatabase, State,
+        states::bundle_state::BundleRetention, BundleState, State,
     },
 };
 
@@ -40,16 +39,16 @@ pub trait Executor<DB: Database>: Sized {
     type Error;
 
     /// Executes a single block and returns [`BlockExecutionResult`], without the state changes.
-    fn execute_one<'a>(
+    fn execute_one(
         &mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
-    fn execute_one_with_state_hook<'a, F>(
+    fn execute_one_with_state_hook<F>(
         &mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -62,9 +61,9 @@ pub trait Executor<DB: Database>: Sized {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute<'a>(
+    fn execute(
         mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         let result = self.execute_one(block)?;
@@ -78,18 +77,13 @@ pub trait Executor<DB: Database>: Sized {
         blocks: I,
     ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        I: IntoIterator<
-            Item = BlockExecutionInput<
-                'a,
-                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            >,
-        >,
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     {
         let mut results = Vec::new();
         let mut first_block = None;
         for block in blocks {
             if first_block.is_none() {
-                first_block = Some(block.block.header().number());
+                first_block = Some(block.header().number());
             }
             results.push(self.execute_one(block)?);
         }
@@ -103,9 +97,9 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
-    fn execute_with_state_closure<'a, F>(
+    fn execute_with_state_closure<F>(
         mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         mut f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -119,9 +113,9 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
-    fn execute_with_state_hook<'a, F>(
+    fn execute_with_state_hook<F>(
         mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -131,18 +125,6 @@ pub trait Executor<DB: Database>: Sized {
         let mut state = self.into_state();
         Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
-
-    /// After running the block's own transactions, check each inclusion-list transaction
-    /// against the post-execution in-memory state. If any IL tx would still be valid
-    /// (nonce, balance, gas checks), this returns a validation error.
-    ///
-    /// This check is only performed for blocks after the inclusion list fork activation.
-    fn validate_block_inclusion_list(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
-        il: impl AsRef<[Recovered<TransactionSigned>]>,
-    ) -> Result<(), Self::Error>;
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
@@ -530,28 +512,25 @@ where
     type Primitives = F::Primitives;
     type Error = BlockExecutionError;
 
-    fn execute_one<'a>(
+    fn execute_one(
         &mut self,
-        input: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         // Execute the block
         let result = self
             .strategy_factory
-            .executor_for_block(&mut self.db, input.block)
-            .execute_block(input.block.transactions_recovered())?;
-
-        // Enforce inclusion-list rule against the in-memory post-execution state
-        self.validate_block_inclusion_list(input.block, &result, &input.il)?;
+            .executor_for_block(&mut self.db, block)
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
         Ok(result)
     }
 
-    fn execute_one_with_state_hook<'a, H>(
+    fn execute_one_with_state_hook<H>(
         &mut self,
-        input: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: H,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -560,12 +539,9 @@ where
         // 1) Execute the block’s native transactions with state hook
         let result = self
             .strategy_factory
-            .executor_for_block(&mut self.db, input.block)
+            .executor_for_block(&mut self.db, block)
             .with_state_hook(Some(Box::new(state_hook)))
-            .execute_block(input.block.transactions_recovered())?;
-
-        // 2) Enforce inclusion-list rule against the post-exec state
-        self.validate_block_inclusion_list(input.block, &result, &input.il)?;
+            .execute_block(block.transactions_recovered())?;
 
         // 3) Revert dry-run transitions so only real block transitions remain
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -579,80 +555,6 @@ where
 
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
-    }
-
-    fn validate_block_inclusion_list(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
-        il: impl AsRef<[Recovered<TransactionSigned>]>,
-    ) -> Result<(), Self::Error> {
-        use alloc::collections::BTreeSet;
-
-        // Early return if inclusion list is empty - nothing to validate
-        if il.as_ref().is_empty() {
-            return Ok(());
-        }
-
-        // TODO: Replace with actual inclusion list fork when available
-        // For now, only check for blocks with timestamp >= some future timestamp
-        // This prevents inclusion list validation during historical sync
-        // const INCLUSION_LIST_FORK_TIMESTAMP: u64 = u64::MAX; // Effectively disabled for now
-
-        // if block.timestamp() < INCLUSION_LIST_FORK_TIMESTAMP {
-        //     return Ok(());
-        // }
-
-        const INCLUSION_LIST_FORK_BLOCK_NUMBER: u64 = 32; // first epoch
-
-        if block.number() < INCLUSION_LIST_FORK_BLOCK_NUMBER {
-            return Ok(());
-        }
-        
-        // 1) Gather all tx hashes already in the block
-        let included: BTreeSet<_> =
-            block.transactions_recovered().map(|tx| tx.inner().tx_hash()).collect();
-
-        // 2) Compute remaining gas after block execution
-        let remaining = block.header().gas_limit().saturating_sub(exec_output.gas_used);
-
-        // 3) Check each inclusion-list transaction
-        for recovered in il.as_ref() {
-            let tx = recovered.inner();
-            let h = tx.tx_hash();
-
-            // Skip if already included or if not enough gas
-            if included.contains(&h) || tx.gas_limit() > remaining {
-                continue;
-            }
-
-            // Get sender address
-            let sender = recovered.signer();
-
-            // Check if transaction would still be valid based on:
-            // - Account nonce matches transaction nonce
-            // - Account has sufficient balance for value + max gas cost
-            if let Ok(account) = RevmDatabase::basic(&mut self.db, sender) {
-                let account = account.unwrap_or_default();
-
-                // Check nonce
-                if account.nonce == tx.nonce() {
-                    // Check balance (value + gas_limit * gas_price)
-                    let max_cost = tx.value().saturating_add(
-                        U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
-                    );
-
-                    if account.balance >= max_cost {
-                        // Transaction would still be valid - inclusion list violation
-                        return Err(BlockExecutionError::Validation(
-                            BlockValidationError::InvalidInclusionList,
-                        ));
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -725,32 +627,17 @@ mod tests {
         type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
-        fn execute_one<'a>(
+        fn execute_one(
             &mut self,
-            _block: BlockExecutionInput<
-                'a,
-                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            >,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn validate_block_inclusion_list(
+        fn execute_one_with_state_hook<F>(
             &mut self,
             _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            _exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
-            _il: impl AsRef<[Recovered<TransactionSigned>]>,
-        ) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn execute_one_with_state_hook<'a, F>(
-            &mut self,
-            _block: BlockExecutionInput<
-                'a,
-                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-            >,
             _state_hook: F,
         ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
@@ -773,8 +660,7 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
-        let input = BlockExecutionInput { block: &Default::default(), il: vec![] };
-        let _ = executor.execute(input);
+        let _ = executor.execute(&Default::default());
     }
 
     fn setup_state_with_account(

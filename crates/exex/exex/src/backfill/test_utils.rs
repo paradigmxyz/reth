@@ -13,7 +13,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionInput, BlockWriter as _, ExecutionOutcome,
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome,
     LatestStateProviderRef, ProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -208,8 +208,8 @@ where
         .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
 
     let inputs = vec![
-        BlockExecutionInput::new(&block1, Vec::new()),
-        BlockExecutionInput::new(&block2, Vec::new()),
+        &block1,
+        &block2,
     ];
     let mut execution_outcome = executor.execute_batch(inputs)?;
     execution_outcome.state_mut().reverts.sort();

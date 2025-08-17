@@ -161,6 +161,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     fn withdrawals(&self) -> &alloy_eips::eip4895::Withdrawals {
         self.inner.withdrawals()
     }
+
+    fn clone_with_il(&self, _il: Vec<Bytes>) -> Self {
+        todo!()
+    }
 }
 
 impl OpAttributes for CustomPayloadBuilderAttributes {

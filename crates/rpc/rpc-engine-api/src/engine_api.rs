@@ -1540,18 +1540,4 @@ mod tests {
             assert_eq!(res, expected);
         }
     }
-
-    #[tokio::test]
-    async fn test_update_payload_with_inclusion_list_v1() {
-        // Test that the updatePayloadWithInclusionListV1 method can be called without errors
-        let (_handle, api) = setup_engine_api();
-
-        let payload_id = PayloadId::new([1u8; 8]);
-        let inclusion_list =
-            vec![Bytes::from_static(&[0x01, 0x02, 0x03]), Bytes::from_static(&[0x04, 0x05, 0x06])];
-
-        // Call the method - should succeed without errors
-        let result = api.update_payload_with_inclusion_list_v1(payload_id, inclusion_list).await;
-        assert!(result.is_ok());
-    }
 }

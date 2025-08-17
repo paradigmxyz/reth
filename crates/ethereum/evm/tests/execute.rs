@@ -1,7 +1,5 @@
 //! Execution tests.
 
-use reth_execution_types::BlockExecutionInput;
-
 use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
 use alloy_eips::{
     eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
@@ -91,9 +89,8 @@ fn eip_4788_non_genesis_call() {
         },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     let err = executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect_err("Executing cancun block without parent beacon block root field should fail");
 
     assert!(matches!(
@@ -112,8 +109,7 @@ fn eip_4788_non_genesis_call() {
         },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    executor.execute_one(exec_input).unwrap();
+    executor.execute_one(&block).unwrap();
 
     // check the actual storage of the contract - it should be:
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
@@ -171,10 +167,9 @@ fn eip_4788_no_code_cancun() {
         },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     provider
         .batch_executor(db)
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while cancun is active should not fail");
 }
 
@@ -216,9 +211,8 @@ fn eip_4788_empty_account_call() {
         },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while cancun is active should not fail");
 
     // ensure that the nonce of the system address account has not changed
@@ -249,8 +243,7 @@ fn eip_4788_genesis_call() {
         Block { header: header.clone(), body: Default::default() },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    let _err = executor.execute_one(exec_input).expect_err(
+    let _err = executor.execute_one(&block).expect_err(
         "Executing genesis cancun block with non-zero parent beacon block root field\
     should fail",
     );
@@ -261,8 +254,7 @@ fn eip_4788_genesis_call() {
     // now try to process the genesis block again, this time ensuring that a system contract
     // call does not occur
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    executor.execute_one(exec_input).unwrap();
+    executor.execute_one(&block).unwrap();
 
     // there is no system contract call so there should be NO STORAGE CHANGES
     // this means we'll check the transition state
@@ -306,8 +298,7 @@ fn eip_4788_high_base_fee() {
         Block { header: header.clone(), body: Default::default() },
         vec![],
     );
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    executor.execute_one(exec_input).unwrap();
+    executor.execute_one(&block).unwrap();
 
     // check the actual storage of the contract - it should be:
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
@@ -369,9 +360,8 @@ fn eip_2935_pre_fork() {
 
     // attempt to execute an empty block, this should not fail
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // ensure that the block hash was *not* written to storage, since this is before the fork
@@ -403,9 +393,8 @@ fn eip_2935_fork_activation_genesis() {
 
     // attempt to execute genesis block, this should not fail
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // ensure that the block hash was *not* written to storage, since there are no blocks
@@ -446,9 +435,8 @@ fn eip_2935_fork_activation_within_window_bounds() {
 
     // attempt to execute the fork activation block, this should not fail
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
@@ -497,9 +485,8 @@ fn eip_2935_fork_activation_outside_window_bounds() {
 
     // attempt to execute the fork activation block, this should not fail
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
@@ -528,9 +515,8 @@ fn eip_2935_state_transition_inside_fork() {
 
     // attempt to execute the genesis block, this should not fail
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // nothing should be written as the genesis has no ancestors
@@ -555,9 +541,8 @@ fn eip_2935_state_transition_inside_fork() {
     let header_hash = header.hash_slow();
 
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the block hash of genesis should now be in storage, but not block 1
@@ -585,9 +570,8 @@ fn eip_2935_state_transition_inside_fork() {
     };
 
     let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     executor
-        .execute_one(exec_input)
+        .execute_one(&block)
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the block hash of genesis and block 1 should now be in storage, but not block 2
@@ -665,8 +649,7 @@ fn eip_7002() {
     let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
         .try_into_recovered()
         .unwrap();
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    let BlockExecutionResult { receipts, requests, .. } = executor.execute_one(exec_input).unwrap();
+    let BlockExecutionResult { receipts, requests, .. } = executor.execute_one(&block).unwrap();
 
     let receipt = receipts.first().unwrap();
     assert!(receipt.success);
@@ -739,8 +722,7 @@ fn block_gas_limit_error() {
     let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
         .try_into_recovered()
         .unwrap();
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
-    let exec_result = executor.execute_one(exec_input);
+    let exec_result = executor.execute_one(&block);
 
     // Check if the execution result is an error and assert the specific error type
     match exec_result {
@@ -803,9 +785,8 @@ fn test_balance_increment_not_duplicated() {
     let (tx, rx) = mpsc::channel();
     let tx_clone = tx.clone();
 
-    let exec_input = BlockExecutionInput::new(&block, vec![]);
     let _output = executor
-        .execute_with_state_hook(exec_input, move |_, state: &EvmState| {
+        .execute_with_state_hook(&block, move |_, state: &EvmState| {
             if let Some(account) = state.get(&withdrawal_recipient) {
                 let _ = tx_clone.send(account.info.balance);
             }

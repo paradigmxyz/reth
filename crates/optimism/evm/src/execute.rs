@@ -13,7 +13,6 @@ mod tests {
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutor, Executor};
-    use reth_execution_types::BlockExecutionInput;
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
@@ -106,8 +105,7 @@ mod tests {
             },
             vec![addr, addr],
         );
-        let input = BlockExecutionInput::new(&block, Vec::new());
-        let output = executor.execute(input).unwrap();
+        let output = executor.execute(&block).unwrap();
 
         let receipts = &output.receipts;
         let tx_receipt = &receipts[0];
@@ -179,9 +177,8 @@ mod tests {
             },
             vec![addr, addr],
         );
-        let input = BlockExecutionInput::new(&block, Vec::new());
         let output = executor
-            .execute(input)
+            .execute(&block)
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = &output.receipts;

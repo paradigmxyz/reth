@@ -4,9 +4,8 @@ use crate::{execute::Executor, Database, OnStateHook};
 
 // re-export Either
 pub use futures_util::future::Either;
-use reth_ethereum_primitives::TransactionSigned;
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, BlockExecutionResult};
-use reth_primitives_traits::{NodePrimitives, Recovered, RecoveredBlock};
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
 where
@@ -17,9 +16,9 @@ where
     type Primitives = A::Primitives;
     type Error = A::Error;
 
-    fn execute_one<'a>(
+    fn execute_one(
         &mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         match self {
@@ -28,9 +27,9 @@ where
         }
     }
 
-    fn execute_one_with_state_hook<'a, F>(
+    fn execute_one_with_state_hook<F>(
         &mut self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -42,9 +41,9 @@ where
         }
     }
 
-    fn execute<'a>(
+    fn execute(
         self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         match self {
@@ -53,9 +52,9 @@ where
         }
     }
 
-    fn execute_with_state_closure<'a, F>(
+    fn execute_with_state_closure<F>(
         self,
-        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -78,18 +77,6 @@ where
         match self {
             Self::Left(a) => a.size_hint(),
             Self::Right(b) => b.size_hint(),
-        }
-    }
-
-    fn validate_block_inclusion_list(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
-        il: impl AsRef<[Recovered<TransactionSigned>]>,
-    ) -> Result<(), Self::Error> {
-        match self {
-            Self::Left(a) => a.validate_block_inclusion_list(block, exec_output, il),
-            Self::Right(b) => b.validate_block_inclusion_list(block, exec_output, il),
         }
     }
 }

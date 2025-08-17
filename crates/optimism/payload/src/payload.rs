@@ -73,7 +73,7 @@ impl<T> OpPayloadBuilderAttributes<T> {
     }
 }
 
-impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
+impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAttributes
     for OpPayloadBuilderAttributes<T>
 {
     type RpcPayloadAttributes = OpPayloadAttributes;
@@ -113,7 +113,7 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
             prev_randao: attributes.payload_attributes.prev_randao,
             withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-            // TODO: impl IL into OP - Pelle
+            // TODO: impl IL into OP 
             il: None,
         };
 
@@ -156,6 +156,10 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+    
+    fn clone_with_il(&self, _il: Vec<Bytes>) -> Self {
+        todo!()
     }
 }
 
