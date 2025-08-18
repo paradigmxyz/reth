@@ -14,6 +14,7 @@ exclude_crates=(
   reth-cli
   reth-cli-commands
   reth-cli-runner
+  reth-cli-util
   reth-consensus-debug-client
   reth-db-common
   reth-discv4
