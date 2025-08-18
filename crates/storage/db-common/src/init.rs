@@ -393,7 +393,9 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
-    let hash = provider_rw.block_hash(block)?.unwrap();
+    let hash = provider_rw
+        .block_hash(block)?
+        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?

@@ -18,7 +18,6 @@ mod admin;
 mod anvil;
 mod debug;
 mod engine;
-mod ganache;
 mod hardhat;
 mod mev;
 mod miner;
@@ -69,7 +68,6 @@ pub mod clients {
         anvil::AnvilApiClient,
         debug::{DebugApiClient, DebugExecutionWitnessApiClient},
         engine::{EngineApiClient, EngineEthApiClient},
-        ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
         miner::MinerApiClient,
