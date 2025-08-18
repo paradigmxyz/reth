@@ -267,7 +267,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.17.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=build-bal#707d14286dcdb7f5ee26547719abde3e0091cfe9"
+source = "git+https://github.com/Rimeeeeee/evm?branch=build-bal#e93505175282a90e13e337bd87ac8cb6d97e16f8"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -377,7 +377,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.17.0"
-source = "git+https://github.com/Rimeeeeee/evm?branch=build-bal#707d14286dcdb7f5ee26547719abde3e0091cfe9"
+source = "git+https://github.com/Rimeeeeee/evm?branch=build-bal#e93505175282a90e13e337bd87ac8cb6d97e16f8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -2350,9 +2350,9 @@ dependencies = [
 
 [[package]]
 name = "const-hex"
-version = "1.14.1"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83e22e0ed40b96a48d3db274f72fd365bd78f67af39b6bbd47e8a15e1c6207ff"
+checksum = "dccd746bf9b1038c0507b7cec21eb2b11222db96a2902c96e8c185d6d20fb9c4"
 dependencies = [
  "cfg-if",
  "cpufeatures",
