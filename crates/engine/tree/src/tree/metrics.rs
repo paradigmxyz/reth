@@ -111,6 +111,7 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::{Receipt, TransactionSigned};
+    use reth_evm_ethereum::EthEvm;
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
@@ -119,7 +120,6 @@ mod tests {
         inspector::NoOpInspector,
         state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot},
     };
-    use reth_evm_ethereum::EthEvm;
     use std::sync::mpsc;
 
     /// A simple mock executor for testing that doesn't require complex EVM setup
@@ -216,12 +216,11 @@ mod tests {
         let executor = MockExecutor::new(state);
 
         // This will fail to create the EVM but should still call the hook
-        let _result = metrics
-            .execute_metered::<_, EmptyDB>(
-                executor,
-                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
-                state_hook,
-            );
+        let _result = metrics.execute_metered::<_, EmptyDB>(
+            executor,
+            input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            state_hook,
+        );
 
         // Check if hook was called (it might not be if finish() fails early)
         match rx.try_recv() {
@@ -237,12 +236,12 @@ mod tests {
     fn test_executor_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = EngineApiMetrics::default();
-        
+
         // Pre-populate some metrics to ensure they exist
         metrics.executor.gas_processed_total.increment(0);
         metrics.executor.gas_per_second.set(0.0);
         metrics.executor.gas_used_histogram.record(0.0);
-        
+
         let input = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
 
         let (tx, _rx) = mpsc::channel();
@@ -271,14 +270,13 @@ mod tests {
         };
 
         let executor = MockExecutor::new(state);
-        
+
         // Execute (will fail but should still update some metrics)
-        let _result = metrics
-            .execute_metered::<_, EmptyDB>(
-                executor,
-                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
-                state_hook,
-            );
+        let _result = metrics.execute_metered::<_, EmptyDB>(
+            executor,
+            input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            state_hook,
+        );
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -291,7 +289,7 @@ mod tests {
                 break;
             }
         }
-        
+
         assert!(found_metrics, "Expected to find sync.execution metrics");
     }
 }
@@ -383,3 +381,4 @@ pub(crate) struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
 }
+
