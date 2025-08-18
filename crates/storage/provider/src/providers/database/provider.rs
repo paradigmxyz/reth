@@ -3055,11 +3055,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             return Ok(())
         }
 
-        //Blocks are not empty, so no need to handle the case of `blocks.first()` being
+        // Blocks are not empty, so no need to handle the case of `blocks.first()` being
         // `None`.
         let first_number = blocks[0].number();
 
-        //Blocks are not empty, so no need to handle the case of `blocks.first()` being
+        // Blocks are not empty, so no need to handle the case of `blocks.last()` being
         // `None`.
         let last_block_number = blocks[blocks.len() - 1].number();
 
