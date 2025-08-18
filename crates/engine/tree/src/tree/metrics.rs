@@ -1,9 +1,21 @@
-use reth_evm::metrics::ExecutorMetrics;
+use crate::tree::MeteredStateHook;
+use alloy_consensus::BlockHeader;
+use alloy_evm::{
+    block::{BlockExecutor, ExecutableTx},
+    Evm,
+};
+use core::borrow::BorrowMut;
+use reth_errors::BlockExecutionError;
+use reth_evm::{metrics::ExecutorMetrics, Database, OnStateHook};
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::RecoveredBlock;
 use reth_trie::updates::TrieUpdates;
+use revm::database::{states::bundle_state::BundleRetention, State};
+use std::time::Instant;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -16,6 +28,92 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub tree: TreeMetrics,
+}
+
+impl EngineApiMetrics {
+    /// Helper function for metered execution
+    fn metered<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> (u64, R),
+    {
+        // Execute the block and record the elapsed time.
+        let execute_start = Instant::now();
+        let (gas_used, output) = f();
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+
+        // Update gas metrics.
+        self.executor.gas_processed_total.increment(gas_used);
+        self.executor.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.executor.gas_used_histogram.record(gas_used as f64);
+        self.executor.execution_histogram.record(execution_duration);
+        self.executor.execution_duration.set(execution_duration);
+
+        output
+    }
+
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
+    /// execution.
+    ///
+    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
+    /// of accounts, storage slots and bytecodes loaded and updated.
+    pub(crate) fn execute_metered<E, DB>(
+        &self,
+        executor: E,
+        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        state_hook: Box<dyn OnStateHook>,
+    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    where
+        DB: Database,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
+    {
+        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
+        // they are globally registered so that the data recorded in the hook will
+        // be accessible.
+        let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
+
+        let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
+
+        let f = || {
+            executor.apply_pre_execution_changes()?;
+            for tx in transactions {
+                executor.execute_transaction(tx?)?;
+            }
+            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+        };
+
+        // Use metered to execute and track timing/gas metrics
+        let (mut db, result) = self.metered(|| {
+            let res = f();
+            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            (gas_used, res)
+        })?;
+
+        // merge transactions into bundle state
+        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
+
+        // Update the metrics for the number of accounts, storage slots and bytecodes updated
+        let accounts = output.state.state.len();
+        let storage_slots =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = output.state.contracts.len();
+
+        self.executor.accounts_updated_histogram.record(accounts as f64);
+        self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+
+        Ok(output)
+    }
+
+    /// Execute the given block and update metrics for the execution.
+    #[allow(dead_code)]
+    pub(crate) fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
+    where
+        F: FnOnce(&RecoveredBlock<B>) -> R,
+        B: reth_primitives_traits::Block,
+    {
+        self.metered(|| (input.header().gas_used(), f(input)))
+    }
 }
 
 /// Metrics for the entire blockchain tree
