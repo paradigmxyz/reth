@@ -46,6 +46,7 @@ asm-keccak = [
 ]
 
 jemalloc = [
+    "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
 ]
