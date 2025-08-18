@@ -8,9 +8,7 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{
-    format_gas_throughput, Block, BlockBody, NodePrimitives, RecoveredBlock,
-};
+use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
