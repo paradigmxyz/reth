@@ -7,7 +7,7 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_node_api::{BeaconConsensusEngineEvent, NodePrimitives};
+use reth_node_api::{ConsensusEngineEvent, NodePrimitives};
 use reth_primitives_traits::{Bytecode, RecoveredBlock};
 use reth_storage_api::BlockNumReader;
 use reth_tokio_util::EventStream;
@@ -93,7 +93,7 @@ impl<N: NodePrimitives> PendingState<N> {
 
 /// A task to maintain pending state based on consensus engine events.
 pub async fn maintain_pending_state<P>(
-    mut events: EventStream<BeaconConsensusEngineEvent<EthPrimitives>>,
+    mut events: EventStream<ConsensusEngineEvent<EthPrimitives>>,
     provider: P,
     pending_state: PendingState<EthPrimitives>,
 ) where
@@ -101,18 +101,18 @@ pub async fn maintain_pending_state<P>(
 {
     while let Some(event) = events.next().await {
         match event {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _) |
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, _) => {
+            ConsensusEngineEvent::CanonicalBlockAdded(block, _) |
+            ConsensusEngineEvent::ForkBlockAdded(block, _) => {
                 trace!(target: "reth::ress_provider", block = ? block.recovered_block().num_hash(), "Insert block into pending state");
                 pending_state.insert_block(block);
             }
-            BeaconConsensusEngineEvent::InvalidBlock(block) => {
+            ConsensusEngineEvent::InvalidBlock(block) => {
                 if let Ok(block) = block.try_recover() {
                     trace!(target: "reth::ress_provider", block = ?block.num_hash(), "Insert invalid block into pending state");
                     pending_state.insert_invalid_block(Arc::new(block));
                 }
             }
-            BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+            ConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 if status.is_valid() {
                     let target = state.finalized_block_hash;
                     if let Ok(Some(block_number)) = provider.block_number(target) {
@@ -122,9 +122,9 @@ pub async fn maintain_pending_state<P>(
                 }
             }
             // ignore
-            BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            BeaconConsensusEngineEvent::BlockReceived(_) |
-            BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
+            ConsensusEngineEvent::CanonicalChainCommitted(_, _) |
+            ConsensusEngineEvent::BlockReceived(_) |
+            ConsensusEngineEvent::LiveSyncProgress(_) => (),
         }
     }
 }

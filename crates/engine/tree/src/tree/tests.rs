@@ -301,7 +301,7 @@ impl TestHarness {
         // check for ForkchoiceUpdated event
         let event = self.from_tree_rx.recv().await.unwrap();
         match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+            EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::ForkchoiceUpdated(
                 state,
                 status,
             )) => {

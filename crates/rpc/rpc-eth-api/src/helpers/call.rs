@@ -37,7 +37,7 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
+    EthApiError, RevertError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
@@ -48,7 +48,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -412,8 +412,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
         let mut inspector = AccessListInspector::new(initial);
 
-        let (result, (evm_env, mut tx_env)) =
-            self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+        let result = self.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
         let access_list = inspector.into_access_list();
         tx_env.set_access_list(access_list.clone());
         match result.result {
@@ -729,11 +728,12 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
-        if request.as_ref().gas_limit() > Some(self.call_gas_limit()) {
-            // configured gas exceeds limit
-            return Err(
-                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+        if let Some(requested_gas) = request.as_ref().gas_limit() {
+            let global_gas_cap = self.call_gas_limit();
+            if global_gas_cap != 0 && global_gas_cap < requested_gas {
+                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                request.as_mut().set_gas_limit(global_gas_cap);
+            }
         }
 
         // apply configured gas cap

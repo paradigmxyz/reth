@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use parking_lot::Mutex;
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineApiValidator, EngineTypes};
+use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
@@ -84,7 +84,7 @@ where
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
+        beacon_consensus: ConsensusEngineHandle<PayloadT>,
         payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
         task_spawner: Box<dyn TaskSpawner>,
@@ -1150,7 +1150,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
+    beacon_consensus: ConsensusEngineHandle<PayloadT>,
     /// The type that can communicate with the payload service to retrieve payloads.
     payload_store: PayloadStore<PayloadT>,
     /// For spawning and executing async tasks
@@ -1231,7 +1231,7 @@ mod tests {
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
-            BeaconConsensusEngineHandle::new(to_engine),
+            ConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             NoopTransactionPool::default(),
             task_executor,
