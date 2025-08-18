@@ -5,7 +5,7 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
@@ -88,8 +88,6 @@ where
     post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
-    /// Executor metrics.
-    metrics: ExecutorMetrics,
 }
 
 impl<E> ExecutionStage<E>
@@ -112,7 +110,6 @@ where
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
             exex_manager_handle,
-            metrics: ExecutorMetrics::default(),
         }
     }
 
