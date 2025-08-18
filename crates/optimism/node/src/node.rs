@@ -29,7 +29,7 @@ use reth_node_builder::{
     rpc::{
         BasicEngineValidatorBuilder, EngineApiBuilder, EngineValidatorAddOn,
         EngineValidatorBuilder, EthApiBuilder, Identity, PayloadValidatorBuilder, RethRpcAddOns,
-        RethRpcMiddleware, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
+        RethRpcMiddleware, RpcAddOns, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -332,25 +332,15 @@ where
     OpEthApiBuilder: EthApiBuilder<N>,
 {
     fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
-impl<N, NetworkT, RpcMiddleware>
-    OpAddOns<
-        N,
-        OpEthApiBuilder<NetworkT>,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-        RpcMiddleware,
-    >
-where
-    N: FullNodeComponents<Types: OpNodeTypes>,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-{
-    /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
-    pub fn builder() -> OpAddOnsBuilder<NetworkT> {
-        OpAddOnsBuilder::default()
+        Self::new(
+            RpcAddOns::default(),
+            OpDAConfig::default(),
+            None,
+            Vec::new(),
+            None,
+            false,
+            1_000_000,
+        )
     }
 }
 
@@ -438,26 +428,6 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
         )
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, N, EthB::EthApi>, RethRpcServerHandles) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        self.rpc_add_ons = self.rpc_add_ons.on_rpc_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, N, EthB::EthApi>) -> eyre::Result<()> + Send + 'static,
-    {
-        self.rpc_add_ons = self.rpc_add_ons.extend_rpc_modules(hook);
-        self
     }
 }
 
@@ -605,41 +575,37 @@ where
                 <N::Types as NodeTypes>::ChainSpec,
             >,
         >,
+        Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
-    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N> + Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
     Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
 {
     type EthApi = EthB::EthApi;
-
-    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
-        self.rpc_add_ons.hooks_mut()
-    }
 }
 
-impl<N, NetworkT, PVB, EB, EVB> EngineValidatorAddOn<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
+    for OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
+    RpcMiddleware: RethRpcMiddleware,
 {
     type ValidatorBuilder = EVB;
 
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
-        EngineValidatorAddOn::engine_validator_builder(&self.rpc_add_ons)
+        self.rpc_add_ons.engine_validator_builder()
     }
 }
 
-/// A regular optimism evm and executor builder.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
+/// Optimism add-ons builder variant.
+#[derive(Debug)]
 pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.

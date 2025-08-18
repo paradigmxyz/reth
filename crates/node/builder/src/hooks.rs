@@ -1,8 +1,35 @@
 use std::fmt;
 
 use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_rpc::eth::EthApiTypes;
 
-use crate::node::FullNode;
+use crate::{
+    node::FullNode,
+    rpc::{ExtendRpcModules, OnRpcStarted},
+};
+
+/// Container for RPC-specific hooks.
+pub struct RpcHooks<Node: FullNodeComponents, EthApi: EthApiTypes> {
+    /// Hook to run once the RPC server is started.
+    pub on_rpc_started: Option<Box<dyn OnRpcStarted<Node, EthApi>>>,
+    /// Hook to run to configure the RPC modules.
+    pub extend_rpc_modules: Option<Box<dyn ExtendRpcModules<Node, EthApi>>>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> fmt::Debug for RpcHooks<Node, EthApi> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RpcHooks")
+            .field("on_rpc_started", &self.on_rpc_started.is_some())
+            .field("extend_rpc_modules", &self.extend_rpc_modules.is_some())
+            .finish()
+    }
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Default for RpcHooks<Node, EthApi> {
+    fn default() -> Self {
+        Self { on_rpc_started: None, extend_rpc_modules: None }
+    }
+}
 
 /// Container for all the configurable hook functions.
 pub struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {

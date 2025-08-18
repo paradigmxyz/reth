@@ -447,11 +447,43 @@ impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>> + 'static,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
+    }
+
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(self, hook: F) -> WithLaunchContext<NodeBuilderWithRpcHooks<T, CB, AO>>
+    where
+        F: FnOnce(
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        WithLaunchContext {
+            builder: self.builder.on_rpc_started(hook),
+            task_executor: self.task_executor,
+        }
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(
+        self,
+        hook: F,
+    ) -> WithLaunchContext<NodeBuilderWithRpcHooks<T, CB, AO>>
+    where
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        WithLaunchContext {
+            builder: self.builder.extend_rpc_modules(hook),
+            task_executor: self.task_executor,
+        }
     }
 
     /// Returns a reference to node's database.
@@ -531,62 +563,6 @@ where
         F: FnOnce(AO) -> AO,
     {
         Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
-                RethRpcServerHandles,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    ///
-    /// This hook can obtain the node's components (txpool, provider, etc.) and can modify the
-    /// modules that the RPC server installs.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-    ///
-    /// #[derive(Clone)]
-    /// struct CustomApi<Pool> { pool: Pool }
-    ///
-    /// #[rpc(server, namespace = "custom")]
-    /// impl CustomApi {
-    ///     #[method(name = "hello")]
-    ///     async fn hello(&self) -> RpcResult<String> {
-    ///         Ok("World".to_string())
-    ///     }
-    /// }
-    ///
-    /// let node = NodeBuilder::new(config)
-    ///     .node(EthereumNode::default())
-    ///     .extend_rpc_modules(|ctx| {
-    ///         // Access node components, so they can used by the CustomApi
-    ///         let pool = ctx.pool().clone();
-    ///         
-    ///         // Add custom RPC namespace
-    ///         ctx.modules.merge_configured(CustomApi { pool }.into_rpc())?;
-    ///         
-    ///         Ok(())
-    ///     })
-    ///     .build()?;
-    /// ```
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -688,6 +664,89 @@ where
         EngineNodeLauncher::new(
             self.task_executor.clone(),
             self.builder.config.datadir(),
+            engine_tree_config,
+        )
+    }
+}
+
+impl<T, CB, AO> WithLaunchContext<NodeBuilderWithRpcHooks<T, CB, AO>>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>> + 'static,
+{
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
+    }
+
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
+    }
+
+    /// Installs an `ExEx` (Execution Extension) in the node.
+    ///
+    /// # Note
+    ///
+    /// The `ExEx` ID must be unique.
+    pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        Self {
+            builder: self.builder.install_exex(exex_id, exex),
+            task_executor: self.task_executor,
+        }
+    }
+
+    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<
+                T,
+                CB,
+                AddOnsWithRpcHooks<NodeAdapter<T, CB::Components>, AO>,
+            >,
+        >>::Node,
+    >
+    where
+        EngineNodeLauncher: LaunchNode<
+            NodeBuilderWithComponents<
+                T,
+                CB,
+                AddOnsWithRpcHooks<NodeAdapter<T, CB::Components>, AO>,
+            >,
+        >,
+    {
+        let launcher = self.engine_api_launcher();
+        self.builder.launch_with(launcher).await
+    }
+
+    /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
+    /// support.
+    pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
+        let engine_tree_config = self.builder.inner.config.engine.tree_config();
+        EngineNodeLauncher::new(
+            self.task_executor.clone(),
+            self.builder.inner.config.datadir(),
             engine_tree_config,
         )
     }
