@@ -915,82 +915,95 @@ where
         let namespaces: Vec<_> = namespaces.collect();
         namespaces
             .iter()
-            .map(|namespace| {
-                self.modules
-                    .entry(namespace.clone())
-                    .or_insert_with(|| match namespace.clone() {
-                        RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
-                                .into_rpc()
-                                .into()
-                        }
-                        RethRpcModule::Debug => {
-                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
-                        RethRpcModule::Eth => {
-                            // merge all eth handlers
-                            let mut module = eth_api.clone().into_rpc();
-                            module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
-                            module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
-                            module
-                                .merge(
-                                    EthBundle::new(
-                                        eth_api.clone(),
-                                        self.blocking_pool_guard.clone(),
-                                    )
-                                    .into_rpc(),
-                                )
-                                .expect("No conflicts");
+            .filter_map(|namespace| {
+                // Skip Other variants - they should be registered via extend_rpc_modules
+                if matches!(namespace, RethRpcModule::Other(_)) {
+                    return None;
+                }
 
-                            module.into()
-                        }
-                        RethRpcModule::Net => {
-                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
-                        }
-                        RethRpcModule::Trace => TraceApi::new(
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                            self.eth_config,
-                        )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
-                        RethRpcModule::Txpool => TxPoolApi::new(
-                            self.eth.api.pool().clone(),
-                            self.eth.api.tx_resp_builder().clone(),
-                        )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Rpc => RPCApi::new(
-                            namespaces
-                                .iter()
-                                .map(|module| (module.to_string(), "1.0".to_string()))
-                                .collect(),
-                        )
-                        .into_rpc()
-                        .into(),
-                        RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
-                        // only relevant for Ethereum and configured in `EthereumAddOns`
-                        // implementation
-                        // TODO: can we get rid of this here?
-                        // Custom modules are not handled here - they should be registered via
-                        // extend_rpc_modules
-                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
-                        RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
-                        RethRpcModule::Mev => {
-                            EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
-                    })
-                    .clone()
+                Some(
+                    self.modules
+                        .entry(namespace.clone())
+                        .or_insert_with(|| match namespace.clone() {
+                            RethRpcModule::Admin => {
+                                AdminApi::new(self.network.clone(), self.provider.chain_spec())
+                                    .into_rpc()
+                                    .into()
+                            }
+                            RethRpcModule::Debug => {
+                                DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                    .into_rpc()
+                                    .into()
+                            }
+                            RethRpcModule::Eth => {
+                                // merge all eth handlers
+                                let mut module = eth_api.clone().into_rpc();
+                                module.merge(eth_filter.clone().into_rpc()).expect("No conflicts");
+                                module.merge(eth_pubsub.clone().into_rpc()).expect("No conflicts");
+                                module
+                                    .merge(
+                                        EthBundle::new(
+                                            eth_api.clone(),
+                                            self.blocking_pool_guard.clone(),
+                                        )
+                                        .into_rpc(),
+                                    )
+                                    .expect("No conflicts");
+
+                                module.into()
+                            }
+                            RethRpcModule::Net => {
+                                NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
+                            }
+                            RethRpcModule::Trace => TraceApi::new(
+                                eth_api.clone(),
+                                self.blocking_pool_guard.clone(),
+                                self.eth_config,
+                            )
+                            .into_rpc()
+                            .into(),
+                            RethRpcModule::Web3 => {
+                                Web3Api::new(self.network.clone()).into_rpc().into()
+                            }
+                            RethRpcModule::Txpool => TxPoolApi::new(
+                                self.eth.api.pool().clone(),
+                                self.eth.api.tx_resp_builder().clone(),
+                            )
+                            .into_rpc()
+                            .into(),
+                            RethRpcModule::Rpc => RPCApi::new(
+                                namespaces
+                                    .iter()
+                                    .map(|module| (module.to_string(), "1.0".to_string()))
+                                    .collect(),
+                            )
+                            .into_rpc()
+                            .into(),
+                            RethRpcModule::Ots => {
+                                OtterscanApi::new(eth_api.clone()).into_rpc().into()
+                            }
+                            RethRpcModule::Reth => {
+                                RethApi::new(self.provider.clone(), self.executor.clone())
+                                    .into_rpc()
+                                    .into()
+                            }
+                            // only relevant for Ethereum and configured in `EthereumAddOns`
+                            // implementation
+                            // TODO: can we get rid of this here?
+                            RethRpcModule::Flashbots => Default::default(),
+                            // Other variants are filtered out above
+                            RethRpcModule::Other(_) => {
+                                unreachable!("Other variants are filtered out")
+                            }
+                            RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
+                            RethRpcModule::Mev => {
+                                EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                    .into_rpc()
+                                    .into()
+                            }
+                        })
+                        .clone(),
+                )
             })
             .collect::<Vec<_>>()
     }
