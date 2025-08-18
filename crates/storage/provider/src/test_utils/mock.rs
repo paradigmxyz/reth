@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EthStorage, HeaderProvider, ReceiptProviderIdExt,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant, TransactionsProvider,
+    ChainSpecProvider, ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, StateProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    TransactionsProvider,
 };
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -18,10 +18,8 @@ use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
-use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
-use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
     SignedTransaction, SignerRecoverable,
@@ -30,15 +28,14 @@ use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader,
-    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use reth_trie_db::MerklePatriciaTrie;
 use std::{
     collections::BTreeMap,
     fmt::Debug,
@@ -230,26 +227,6 @@ impl ExtendedAccount {
         self.storage.extend(storage);
         self
     }
-}
-
-/// Mock node.
-#[derive(Clone, Debug)]
-pub struct MockNode;
-
-impl NodeTypes for MockNode {
-    type Primitives = EthPrimitives;
-    type ChainSpec = reth_chainspec::ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
-    type Storage = EthStorage;
-    type Payload = EthEngineTypes;
-}
-
-impl<T, ChainSpec> StateCommitmentProvider for MockEthProvider<T, ChainSpec>
-where
-    T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
-{
-    type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
 impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory

@@ -10339,6 +10339,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
+          "description": "Archive and full nodes prune headers, transactions and receipts in MDBX (hot db) after they have been written to static files (cold db). Full nodes additionally prune history indices.",
           "editorMode": "code",
           "expr": "reth_pruner_segments_highest_pruned_block{$instance_label=\"$instance\"}",
           "instant": false,
