@@ -39,6 +39,7 @@ pub(crate) struct Header {
     blob_gas_used: Option<u64>,
     excess_blob_gas: Option<u64>,
     parent_beacon_block_root: Option<B256>,
+    block_access_list_hash: Option<B256>,
     extra_fields: Option<HeaderExt>,
     extra_data: Bytes,
 }
@@ -100,6 +101,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
             parent_beacon_block_root: self.parent_beacon_block_root,
+            block_access_list_hash: self.block_access_list_hash,
             extra_fields: extra_fields.into_option(),
             extra_data: self.extra_data.clone(),
         };
@@ -130,7 +132,7 @@ impl Compact for AlloyHeader {
             parent_beacon_block_root: header.parent_beacon_block_root,
             requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
             extra_data: header.extra_data,
-            bal_hash:None
+            block_access_list_hash: header.block_access_list_hash,
         };
         (alloy_header, buf)
     }
@@ -163,6 +165,7 @@ mod tests {
         blob_gas_used: Some(0x60000),
         excess_blob_gas: Some(0x0),
         parent_beacon_block_root: Some(b256!("0xaa1d9606b7932f2280a19b3498b9ae9eebc6a83f1afde8e45944f79d353db4c1")),
+        block_access_list_hash:None,
         extra_data: bytes!("726574682f76312e302e302f6c696e7578"),
         extra_fields: None,
     };
