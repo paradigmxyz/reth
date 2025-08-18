@@ -291,9 +291,14 @@ impl RethRpcModule {
         Self::STANDARD_VARIANTS.len()
     }
 
-    /// Returns all variant names of standard modules
+    /// Returns all variant names including Other (for parsing)
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
+    }
+
+    /// Returns standard variant names (excludes "other") for CLI display
+    pub fn standard_variant_names() -> impl Iterator<Item = &'static str> {
+        <Self as VariantNames>::VARIANTS.iter().copied().filter(|&name| name != "other")
     }
 
     /// Returns all standard variants (excludes Other)
@@ -775,6 +780,22 @@ mod test {
         assert_eq!(other1, other2);
         assert_ne!(other1, other3);
         assert_ne!(other1, RethRpcModule::Eth);
+    }
+
+    #[test]
+    fn test_standard_variant_names_excludes_other() {
+        let standard_names: Vec<_> = RethRpcModule::standard_variant_names().collect();
+
+        // Verify "other" is not in the list
+        assert!(!standard_names.contains(&"other"));
+
+        // Should have exactly as many names as STANDARD_VARIANTS
+        assert_eq!(standard_names.len(), RethRpcModule::STANDARD_VARIANTS.len());
+
+        // Verify all standard variants have their names in the list
+        for variant in RethRpcModule::STANDARD_VARIANTS {
+            assert!(standard_names.contains(&variant.as_ref()));
+        }
     }
 
     #[test]
