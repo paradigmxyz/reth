@@ -1,7 +1,9 @@
 //! Base fee related utilities for Optimism chains.
 
 use alloy_consensus::BlockHeader;
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{
+    decode_holocene_extra_data, decode_min_base_fee_extra_data, EIP1559ParamError,
+};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_optimism_forks::OpHardforks;
 
@@ -36,8 +38,8 @@ pub fn decode_min_base_fee<H>(
 where
     H: BlockHeader,
 {
-    // TODO: function is in op-alloy 
-    let (elasticity, denominator, min_base_fee_log2) =
+    // TODO: function is in op-alloy
+    let (elasticity, denominator, significand, exponent) =
         decode_min_base_fee_extra_data(parent.extra_data())?;
     let base_fee_params = if elasticity == 0 && denominator == 0 {
         chain_spec.base_fee_params_at_timestamp(timestamp)
@@ -46,8 +48,8 @@ where
     };
 
     let base_fee = parent.next_block_base_fee(base_fee_params).unwrap_or_default();
-    if min_base_fee_log2 > 0 {
-        let min_base_fee = 1 << min_base_fee_log2;
+    if chain_spec.is_jovian_active_at_block(timestamp) {
+        let min_base_fee = significand.checked_mul(10_u128.pow(exponent)).unwrap_or(0);
         if base_fee < min_base_fee {
             return Ok(min_base_fee);
         }
