@@ -72,3 +72,58 @@ impl ExecutorMetrics {
         self.metered(|| (block.header().gas_used(), f(block)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::SealedHeader;
+
+    fn create_test_block_with_gas(gas_used: u64) -> RecoveredBlock<Block> {
+        let header = Header { gas_used, ..Default::default() };
+        RecoveredBlock::new_sealed(
+            Block { header: header.clone(), body: Default::default() }.seal_slow(),
+            Default::default(),
+        )
+    }
+
+    #[test]
+    fn test_metered_one_updates_metrics() {
+        let metrics = ExecutorMetrics::default();
+        let block = create_test_block_with_gas(1000);
+
+        // Check initial state
+        assert_eq!(metrics.gas_processed_total.get(), 0);
+
+        // Execute with metered_one
+        let result = metrics.metered_one(&block, |b| {
+            // Simulate some work
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            b.header().gas_used()
+        });
+
+        // Verify result
+        assert_eq!(result, 1000);
+
+        // Verify metrics were updated
+        assert_eq!(metrics.gas_processed_total.get(), 1000);
+        assert!(metrics.gas_per_second.get() > 0.0);
+        assert!(metrics.execution_duration.get() > 0.0);
+    }
+
+    #[test]
+    fn test_metered_helper_tracks_timing() {
+        let metrics = ExecutorMetrics::default();
+
+        let result = metrics.metered(|| {
+            // Simulate some work
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            (500, "test_result")
+        });
+
+        assert_eq!(result, "test_result");
+        assert_eq!(metrics.gas_processed_total.get(), 500);
+        assert!(metrics.execution_duration.get() >= 0.01); // At least 10ms
+    }
+}
