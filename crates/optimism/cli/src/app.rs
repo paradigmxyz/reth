@@ -3,6 +3,7 @@ use eyre::{eyre, Result};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;
+use reth_cli_util::RethCliParsers;
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -13,19 +14,20 @@ use tracing::info;
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
-pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
-    cli: Cli<Spec, Ext>,
+pub struct CliApp<P: RethCliParsers, Ext: clap::Args + fmt::Debug> {
+    cli: Cli<P, Ext>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
 }
 
-impl<C, Ext> CliApp<C, Ext>
+impl<P, Ext> CliApp<P, Ext>
 where
-    C: ChainSpecParser<ChainSpec = OpChainSpec>,
+    P: RethCliParsers,
+    P::ChainSpecParser: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
-    pub(crate) fn new(cli: Cli<C, Ext>) -> Self {
+    pub(crate) fn new(cli: Cli<P, Ext>) -> Self {
         Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
     }
 
@@ -48,7 +50,7 @@ where
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()> {
+    pub fn run(mut self, launcher: impl Launcher<P::ChainSpecParser, Ext>) -> Result<()> {
         let runner = match self.runner.take() {
             Some(runner) => runner,
             None => CliRunner::try_default_runtime()?,

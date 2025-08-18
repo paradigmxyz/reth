@@ -15,7 +15,7 @@ use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
-    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    cli::{Cli, EthereumCliParsers},
     node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::eth::primitives::TransactionRequest,
@@ -24,7 +24,7 @@ use reth_ethereum::{
 mod submit;
 
 fn main() {
-    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
+    Cli::<EthereumCliParsers, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { node, node_exit_future } =

@@ -1,7 +1,7 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use clap::Parser;
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+use reth_optimism_cli::{parsers::OpCliParsers, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
 use tracing::info;
 
@@ -17,7 +17,7 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
+        Cli::<OpCliParsers, RollupArgs>::parse().run(async move |builder, rollup_args| {
             info!(target: "reth::cli", "Launching node");
             let handle =
                 builder.node(OpNode::new(rollup_args)).launch_with_debug_capabilities().await?;

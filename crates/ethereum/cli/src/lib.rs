@@ -11,7 +11,9 @@
 /// Chain specification parser.
 pub mod chainspec;
 pub mod interface;
+pub mod parsers;
 pub use interface::Cli;
+pub use parsers::EthereumCliParsers;
 
 #[cfg(test)]
 mod test {

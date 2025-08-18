@@ -1,9 +1,8 @@
 //! CLI definition and entrypoint to executable
 
-use crate::chainspec::EthereumChainSpecParser;
+use crate::parsers::EthereumCliParsers;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
-use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
@@ -12,6 +11,7 @@ use reth_cli_commands::{
     p2p, prune, re_execute, recover, stage,
 };
 use reth_cli_runner::CliRunner;
+use reth_cli_util::RethCliParsers;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -27,11 +27,10 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<P: RethCliParsers = EthereumCliParsers, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    pub command: Commands<C, Ext>,
+    pub command: Commands<P, Ext>,
 
     /// The logging configuration for the CLI.
     #[command(flatten)]
@@ -54,7 +53,7 @@ impl Cli {
     }
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
+impl<P: RethCliParsers, Ext: clap::Args + fmt::Debug> Cli<P, Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -84,14 +83,14 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     ///
     /// ```no_run
     /// use clap::Parser;
-    /// use reth_ethereum_cli::{chainspec::EthereumChainSpecParser, interface::Cli};
+    /// use reth_ethereum_cli::{interface::Cli, parsers::EthereumCliParsers};
     ///
     /// #[derive(Debug, Parser)]
     /// pub struct MyArgs {
     ///     pub enable: bool,
     /// }
     ///
-    /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
+    /// Cli::<EthereumCliParsers, MyArgs>::parse()
     ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
     ///         Ok(()))
@@ -99,9 +98,17 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// ````
     pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
+            Ext,
+        ) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
-        C: ChainSpecParser<ChainSpec = ChainSpec>,
+        P::ChainSpecParser: reth_cli::chainspec::ChainSpecParser<ChainSpec = ChainSpec>,
     {
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
     }
@@ -116,13 +123,18 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         self,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
-        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+        P::ChainSpecParser: reth_cli::chainspec::ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
     }
@@ -148,13 +160,22 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// ```
     pub fn with_runner<L, Fut>(self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
+            Ext,
+        ) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
-        C: ChainSpecParser<ChainSpec = ChainSpec>,
+        P::ChainSpecParser: reth_cli::chainspec::ChainSpecParser<ChainSpec = ChainSpec>,
     {
-        let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
-        };
+        let components =
+            |spec: Arc<<P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec>| {
+                (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+            };
 
         self.with_runner_and_components::<EthereumNode>(
             runner,
@@ -170,13 +191,18 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         runner: CliRunner,
         components: impl CliComponentsBuilder<N>,
         launcher: impl AsyncFnOnce(
-            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
             Ext,
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
-        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+        P::ChainSpecParser: reth_cli::chainspec::ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
@@ -191,7 +217,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
 
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+                command.execute(ctx, FnLauncher::new::<P::ChainSpecParser, Ext>(launcher))
             }),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
             Commands::InitState(command) => {
@@ -238,39 +264,39 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
+pub enum Commands<P: RethCliParsers, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
-    Node(Box<node::NodeCommand<C, Ext>>),
+    Node(Box<node::NodeCommand<P::ChainSpecParser, Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
-    Init(init_cmd::InitCommand<C>),
+    Init(init_cmd::InitCommand<P::ChainSpecParser>),
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
-    InitState(init_state::InitStateCommand<C>),
+    InitState(init_state::InitStateCommand<P::ChainSpecParser>),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
-    Import(import::ImportCommand<C>),
+    Import(import::ImportCommand<P::ChainSpecParser>),
     /// This syncs ERA encoded blocks from a directory.
     #[command(name = "import-era")]
-    ImportEra(import_era::ImportEraCommand<C>),
+    ImportEra(import_era::ImportEraCommand<P::ChainSpecParser>),
     /// Exports block to era1 files in a specified directory.
     #[command(name = "export-era")]
-    ExportEra(export_era::ExportEraCommand<C>),
+    ExportEra(export_era::ExportEraCommand<P::ChainSpecParser>),
     /// Dumps genesis block JSON configuration to stdout.
-    DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
+    DumpGenesis(dump_genesis::DumpGenesisCommand<P::ChainSpecParser>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command<C>),
+    Db(db::Command<P::ChainSpecParser>),
     /// Download public node snapshots
     #[command(name = "download")]
-    Download(download::DownloadCommand<C>),
+    Download(download::DownloadCommand<P::ChainSpecParser>),
     /// Manipulate individual stages.
     #[command(name = "stage")]
-    Stage(stage::Command<C>),
+    Stage(stage::Command<P::ChainSpecParser>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<C>),
+    P2P(p2p::Command<P::ChainSpecParser>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
@@ -280,18 +306,20 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Config(config_cmd::Command),
     /// Scripts for node recovery
     #[command(name = "recover")]
-    Recover(recover::Command<C>),
+    Recover(recover::Command<P::ChainSpecParser>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
-    Prune(prune::PruneCommand<C>),
+    Prune(prune::PruneCommand<P::ChainSpecParser>),
     /// Re-execute blocks in parallel to verify historical sync correctness.
     #[command(name = "re-execute")]
-    ReExecute(re_execute::Command<C>),
+    ReExecute(re_execute::Command<P::ChainSpecParser>),
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+impl<P: RethCliParsers, Ext: clap::Args + fmt::Debug> Commands<P, Ext> {
     /// Returns the underlying chain being used for commands
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub fn chain_spec(
+        &self,
+    ) -> Option<&Arc<<P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec>> {
         match self {
             Self::Node(cmd) => cmd.chain_spec(),
             Self::Init(cmd) => cmd.chain_spec(),
@@ -317,8 +345,9 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chainspec::SUPPORTED_CHAINS;
+    use crate::{chainspec::SUPPORTED_CHAINS, parsers::EthereumCliParsers};
     use clap::CommandFactory;
+    use reth_cli_commands::node::NoArgs;
     use reth_node_core::args::ColorMode;
 
     #[test]
@@ -332,7 +361,7 @@ mod tests {
     /// runtime
     #[test]
     fn test_parse_help_all_subcommands() {
-        let reth = Cli::<EthereumChainSpecParser, NoArgs>::command();
+        let reth = Cli::<EthereumCliParsers, NoArgs>::command();
         for sub_command in reth.get_subcommands() {
             let err = Cli::try_parse_args_from(["reth", sub_command.get_name(), "--help"])
                 .err()

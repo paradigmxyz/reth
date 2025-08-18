@@ -313,6 +313,18 @@ impl RethRpcModule {
             _ => self.as_ref(), // Uses AsRefStr trait
         }
     }
+
+    /// Check if a string might be a typo of a standard module name.
+    /// Returns Some(suggestion) if likely a typo, None otherwise.
+    pub fn detect_typo(input: &str) -> Option<&'static str> {
+        for module in Self::STANDARD_VARIANTS {
+            let standard_name = module.as_ref();
+            if is_likely_typo(input, standard_name) {
+                return Some(standard_name);
+            }
+        }
+        None
+    }
 }
 
 impl AsRef<str> for RethRpcModule {
@@ -381,6 +393,105 @@ impl Serialize for RethRpcModule {
     {
         s.serialize_str(self.as_str())
     }
+}
+
+/// Trait for validating RPC module selections.
+///
+/// This allows customizing how RPC module names are validated when parsing
+/// CLI arguments or configuration.
+pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
+    /// Parse and validate an RPC module selection string.
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String>;
+}
+
+/// Default validator with typo detection.
+///
+/// This validator checks for likely typos in module names and suggests corrections.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultRpcModuleValidator;
+
+impl RpcModuleValidator for DefaultRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // First try standard parsing
+        let selection = RpcModuleSelection::from_str(s)
+            .map_err(|e| format!("Failed to parse RPC modules: {}", e))?;
+
+        // Validate each module in the selection
+        if let RpcModuleSelection::Selection(modules) = &selection {
+            for module in modules {
+                if let RethRpcModule::Other(name) = module {
+                    // Use the RethRpcModule's built-in typo detection
+                    if let Some(suggestion) = RethRpcModule::detect_typo(name) {
+                        return Err(format!(
+                            "'{}' appears to be a typo. Did you mean '{}'?",
+                            name, suggestion
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(selection)
+    }
+}
+
+/// Lenient validator that accepts any module name without validation.
+///
+/// This validator performs no typo checking and accepts any module name.
+#[derive(Debug, Clone, Copy)]
+pub struct LenientRpcModuleValidator;
+
+impl RpcModuleValidator for LenientRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        RpcModuleSelection::from_str(s).map_err(|e| format!("Failed to parse RPC modules: {}", e))
+    }
+}
+
+/// Check if two strings are likely typos using edit distance.
+fn is_likely_typo(input: &str, target: &str) -> bool {
+    // Quick check: if lengths differ by more than 2, unlikely to be a typo
+    if input.len().abs_diff(target.len()) > 2 {
+        return false;
+    }
+
+    let distance = edit_distance(input, target);
+
+    // Consider it a typo if:
+    // - Distance is 1 (single char difference)
+    // - Distance is 2 and strings are at least 3 chars (for transpositions like "eth" -> "eht")
+    match distance {
+        1 => true,
+        2 => input.len() >= 3 && target.len() >= 3,
+        _ => false,
+    }
+}
+
+/// Calculate edit distance between two strings.
+fn edit_distance(s1: &str, s2: &str) -> usize {
+    let len1 = s1.len();
+    let len2 = s2.len();
+
+    if len1 == 0 {
+        return len2;
+    }
+    if len2 == 0 {
+        return len1;
+    }
+
+    let mut prev: Vec<usize> = (0..=len2).collect();
+    let mut curr = vec![0; len2 + 1];
+
+    for (i, c1) in s1.chars().enumerate() {
+        curr[0] = i + 1;
+        for (j, c2) in s2.chars().enumerate() {
+            let cost = if c1 == c2 { 0 } else { 1 };
+            curr[j + 1] =
+                std::cmp::min(std::cmp::min(prev[j + 1] + 1, curr[j] + 1), prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[len2]
 }
 
 #[cfg(test)]
@@ -664,5 +775,126 @@ mod test {
         assert_eq!(other1, other2);
         assert_ne!(other1, other3);
         assert_ne!(other1, RethRpcModule::Eth);
+    }
+
+    #[test]
+    fn test_typo_detection() {
+        // Should detect single character typos
+        assert_eq!(RethRpcModule::detect_typo("eht"), Some("eth"));
+        assert_eq!(RethRpcModule::detect_typo("adimn"), Some("admin"));
+        assert_eq!(RethRpcModule::detect_typo("debgu"), Some("debug"));
+
+        // Should detect transpositions in longer strings
+        assert_eq!(RethRpcModule::detect_typo("admni"), Some("admin"));
+        assert_eq!(RethRpcModule::detect_typo("txpol"), Some("txpool"));
+
+        // Should not detect non-typos
+        assert_eq!(RethRpcModule::detect_typo("custom"), None);
+        assert_eq!(RethRpcModule::detect_typo("mymodule"), None);
+        assert_eq!(RethRpcModule::detect_typo("xyz"), None);
+    }
+
+    #[test]
+    fn test_edit_distance() {
+        assert_eq!(edit_distance("", ""), 0);
+        assert_eq!(edit_distance("abc", "abc"), 0);
+        assert_eq!(edit_distance("abc", "ab"), 1);
+        assert_eq!(edit_distance("abc", "adc"), 1);
+        assert_eq!(edit_distance("kitten", "sitting"), 3);
+        assert_eq!(edit_distance("eth", "eht"), 2); // transposition
+        assert_eq!(edit_distance("eth", "et"), 1); // deletion
+        assert_eq!(edit_distance("eth", "eath"), 1); // insertion
+    }
+
+    #[test]
+    fn test_default_validator_accepts_standard_modules() {
+        // Should accept standard modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,debug");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        assert!(matches!(selection, RpcModuleSelection::Selection(_)));
+    }
+
+    #[test]
+    fn test_default_validator_accepts_custom_modules() {
+        // Should accept custom modules that don't look like typos
+        let result = DefaultRpcModuleValidator::parse_selection("eth,mycustom,special123");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        if let RpcModuleSelection::Selection(modules) = selection {
+            assert!(modules.contains(&RethRpcModule::Eth));
+            assert!(modules.contains(&RethRpcModule::Other("mycustom".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("special123".to_string())));
+        } else {
+            panic!("Expected Selection variant");
+        }
+    }
+
+    #[test]
+    fn test_default_validator_catches_typos() {
+        // Should catch obvious typos
+        let result = DefaultRpcModuleValidator::parse_selection("eht");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Did you mean 'eth'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("eth,adimn");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Did you mean 'admin'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("debgu,net");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Did you mean 'debug'"));
+    }
+
+    #[test]
+    fn test_default_validator_all_selection() {
+        // Should accept "all" selection
+        let result = DefaultRpcModuleValidator::parse_selection("all");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn test_default_validator_none_selection() {
+        // Should accept "none" selection
+        let result = DefaultRpcModuleValidator::parse_selection("none");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+    }
+
+    #[test]
+    fn test_lenient_validator_accepts_typos() {
+        // Lenient validator should accept anything without validation
+        let result = LenientRpcModuleValidator::parse_selection("eht,adimn,xyz123");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        if let RpcModuleSelection::Selection(modules) = selection {
+            assert!(modules.contains(&RethRpcModule::Other("eht".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("adimn".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("xyz123".to_string())));
+        } else {
+            panic!("Expected Selection variant");
+        }
+    }
+
+    #[test]
+    fn test_default_validator_mixed_standard_and_custom() {
+        // Should handle mix of standard and custom modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,mycustom,debug");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        if let RpcModuleSelection::Selection(modules) = selection {
+            assert_eq!(modules.len(), 4);
+            assert!(modules.contains(&RethRpcModule::Eth));
+            assert!(modules.contains(&RethRpcModule::Admin));
+            assert!(modules.contains(&RethRpcModule::Debug));
+            assert!(modules.contains(&RethRpcModule::Other("mycustom".to_string())));
+        } else {
+            panic!("Expected Selection variant");
+        }
     }
 }

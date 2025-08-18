@@ -1,12 +1,30 @@
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use reth_fs_util::FsPathError;
+use reth_rpc_server_types::RpcModuleValidator;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::Path,
     str::FromStr,
     time::Duration,
 };
+
+/// Trait for configuring CLI parsers across reth.
+///
+/// This trait provides configurable parsers for various CLI components,
+/// allowing customization of validation behavior.
+pub trait RethCliParsers: Clone + Send + Sync + 'static {
+    /// The chain specification parser type.
+    type ChainSpecParser: reth_cli::chainspec::ChainSpecParser + std::fmt::Debug;
+
+    /// The RPC module validator type.
+    type RpcModuleValidator: reth_rpc_server_types::RpcModuleValidator;
+
+    /// Parse and validate an RPC module selection string.
+    fn parse_rpc_modules(s: &str) -> Result<reth_rpc_server_types::RpcModuleSelection, String> {
+        Self::RpcModuleValidator::parse_selection(s)
+    }
+}
 
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
