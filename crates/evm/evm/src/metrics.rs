@@ -83,7 +83,7 @@ mod tests {
 
     fn create_test_block_with_gas(gas_used: u64) -> RecoveredBlock<Block> {
         let header = Header { gas_used, ..Default::default() };
-        let block = Block { header: header.clone(), body: Default::default() };
+        let block = Block { header, body: Default::default() };
         // Use a dummy hash for testing
         let hash = B256::default();
         let sealed = block.seal_unchecked(hash);
