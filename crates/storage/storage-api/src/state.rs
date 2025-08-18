@@ -96,15 +96,6 @@ pub trait StateProvider:
 pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
-/// Trait implemented for database providers that can provide the [`reth_trie_db::StateCommitment`]
-/// type.
-#[cfg(feature = "db-api")]
-pub trait StateCommitmentProvider: Send + Sync {
-    /// The [`reth_trie_db::StateCommitment`] type that can be used to perform state commitment
-    /// operations.
-    type StateCommitment: reth_trie_db::StateCommitment;
-}
-
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider: Send + Sync {
