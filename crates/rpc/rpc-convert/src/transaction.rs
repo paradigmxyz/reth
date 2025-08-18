@@ -486,58 +486,58 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 }
 
 /// Converts rpc transaction requests into transaction environment.
-pub trait TxEnvConverter<RpcReq, T>: Debug + Send + Sync + Unpin + Clone + 'static {
+pub trait TxEnvConverter<TxReq, T>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// An associated error that can occur during conversion.
     type Error;
 
     /// Converts a rpc transaction request into a transaction environment.
     fn convert_tx_env<Spec>(
         &self,
-        request: RpcReq,
+        tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<T, Self::Error>;
 }
 
-impl<RpcReq, T> TxEnvConverter<RpcReq, T> for ()
+impl<TxReq, T> TxEnvConverter<TxReq, T> for ()
 where
-    RpcReq: TryIntoTxEnv<T>,
+    TxReq: TryIntoTxEnv<T>,
 {
-    type Error = RpcReq::Err;
+    type Error = TxReq::Err;
 
     fn convert_tx_env<Spec>(
         &self,
-        request: RpcReq,
+        tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<T, Self::Error> {
-        request.try_into_tx_env(cfg_env, block_env)
+        tx_req.try_into_tx_env(cfg_env, block_env)
     }
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.
-impl<F, RpcReq, T, E> TxEnvConverter<RpcReq, T> for F
+impl<F, TxReq, T, E> TxEnvConverter<TxReq, T> for F
 where
-    F: Fn(RpcReq, &CfgEnv<()>, &BlockEnv) -> Result<T, E>
+    F: Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<T, E>
         + Debug
         + Send
         + Sync
         + Unpin
         + Clone
         + 'static,
-    RpcReq: Clone,
+    TxReq: Clone,
     E: std::error::Error + Send + Sync + 'static,
 {
     type Error = E;
 
     fn convert_tx_env<Spec>(
         &self,
-        request: RpcReq,
+        tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<T, Self::Error> {
         let cfg_env_with_chain_id = CfgEnv::<()>::new_with_spec(()).with_chain_id(cfg_env.chain_id);
-        self(request, &cfg_env_with_chain_id, block_env)
+        self(tx_req, &cfg_env_with_chain_id, block_env)
     }
 }
 
@@ -555,7 +555,7 @@ pub struct TransactionConversionError(String);
 /// network and EVM associated primitives:
 /// * [`FromConsensusTx`]: from signed transaction into RPC response object.
 /// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
-/// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: Converts RPC transaction request into an executable
+/// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: from RPC transaction request into an executable
 ///   transaction.
 ///   - Use `()` for `TxEnv` generic when [`TryIntoTxEnv`] is implemented on the request type
 ///   - Use a closure or custom type implementing [`TxEnvConverter`] for custom conversion logic
