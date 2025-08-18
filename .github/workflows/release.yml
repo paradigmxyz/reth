@@ -223,7 +223,7 @@ jobs:
           | Payload Builders     | <TODO> |
           | Non-Payload Builders | <TODO>    |
 
-          *See [Update Priorities](https://github.com/paradigmxyz/reth/blob/main/docs/vocs/docs/pages/installation/priorities.mdx) for more information about this table.*
+          *See [Update Priorities](https://reth.rs/installation/priorities) for more information about this table.*
 
           ## All Changes
 
