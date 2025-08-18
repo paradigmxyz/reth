@@ -1,5 +1,4 @@
 use crate::tree::MeteredStateHook;
-use alloy_consensus::BlockHeader;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
