@@ -485,8 +485,22 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
     }
 }
 
-/// Converts rpc transaction requests into transaction environment.
-pub trait TxEnvConverter<TxReq, T>: Debug + Send + Sync + Unpin + Clone + 'static {
+/// Converts `TxReq` into `TxEnv`.
+///
+/// Where:
+/// * `TxReq` is a transaction request received from an RPC API
+/// * `TxEnv` is the corresponding transaction environment for execution
+///
+/// The `TxEnvConverter` has two blanket implementations:
+/// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
+/// * `Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
+///   [`RpcConverter::with_tx_env_converter`].
+///
+/// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
+/// implementation for free, thanks to the blanket implementation, unless the conversion requires
+/// more context. For example, some configuration parameters or access handles to database, network,
+/// etc.
+pub trait TxEnvConverter<TxReq, TxEnv>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// An associated error that can occur during conversion.
     type Error;
 
@@ -496,12 +510,12 @@ pub trait TxEnvConverter<TxReq, T>: Debug + Send + Sync + Unpin + Clone + 'stati
         tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
-    ) -> Result<T, Self::Error>;
+    ) -> Result<TxEnv, Self::Error>;
 }
 
-impl<TxReq, T> TxEnvConverter<TxReq, T> for ()
+impl<TxReq, TxEnv> TxEnvConverter<TxReq, TxEnv> for ()
 where
-    TxReq: TryIntoTxEnv<T>,
+    TxReq: TryIntoTxEnv<TxEnv>,
 {
     type Error = TxReq::Err;
 
@@ -510,15 +524,15 @@ where
         tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
-    ) -> Result<T, Self::Error> {
+    ) -> Result<TxEnv, Self::Error> {
         tx_req.try_into_tx_env(cfg_env, block_env)
     }
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.
-impl<F, TxReq, T, E> TxEnvConverter<TxReq, T> for F
+impl<F, TxReq, TxEnv, E> TxEnvConverter<TxReq, TxEnv> for F
 where
-    F: Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<T, E>
+    F: Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<TxEnv, E>
         + Debug
         + Send
         + Sync
@@ -535,7 +549,7 @@ where
         tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
-    ) -> Result<T, Self::Error> {
+    ) -> Result<TxEnv, Self::Error> {
         let cfg_env_with_chain_id = CfgEnv::<()>::new_with_spec(()).with_chain_id(cfg_env.chain_id);
         self(tx_req, &cfg_env_with_chain_id, block_env)
     }
@@ -557,8 +571,6 @@ pub struct TransactionConversionError(String);
 /// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
 /// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: from RPC transaction request into an executable
 ///   transaction.
-///   - Use `()` for `TxEnv` generic when [`TryIntoTxEnv`] is implemented on the request type
-///   - Use a closure or custom type implementing [`TxEnvConverter`] for custom conversion logic
 /// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
