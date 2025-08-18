@@ -9,7 +9,7 @@ use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
-    era_file_ops::{EraFile, EraFileReader, EraFileWrite, EraReader, EraWriter},
+    era_file_ops::{EraFile, FileReader, FileWriter, StreamReader, StreamWriter},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,
@@ -172,7 +172,7 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
     }
 }
 
-impl<R: Read + Seek> EraReader<R> for Era1Reader<R> {
+impl<R: Read + Seek> StreamReader<R> for Era1Reader<R> {
     type File = Era1File;
     type Iterator = BlockTupleIterator<R>;
 
@@ -250,7 +250,7 @@ impl<R: Read + Seek> Era1Reader<R> {
     }
 }
 
-impl EraFileReader for Era1Reader<File> {}
+impl FileReader for Era1Reader<File> {}
 
 /// Writer for Era1 files that builds on top of [`E2StoreWriter`]
 #[derive(Debug)]
@@ -262,7 +262,7 @@ pub struct Era1Writer<W: Write> {
     has_written_block_index: bool,
 }
 
-impl<W: Write> EraWriter<W> for Era1Writer<W> {
+impl<W: Write> StreamWriter<W> for Era1Writer<W> {
     type File = Era1File;
 
     /// Create a new [`Era1Writer`]
@@ -400,7 +400,7 @@ impl<W: Write> Era1Writer<W> {
     }
 }
 
-impl EraFileWrite for Era1Writer<File> {}
+impl FileWriter for Era1Writer<File> {}
 
 #[cfg(test)]
 mod tests {

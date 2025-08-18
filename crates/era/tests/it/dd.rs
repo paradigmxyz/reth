@@ -6,7 +6,7 @@ use alloy_primitives::U256;
 use reth_era::{
     e2s_types::IndexEntry,
     era1_file::{Era1Reader, Era1Writer},
-    era_file_ops::{EraReader, EraWriter},
+    era_file_ops::{StreamReader, StreamWriter},
     execution_types::CompressedBody,
 };
 use reth_ethereum_primitives::TransactionSigned;

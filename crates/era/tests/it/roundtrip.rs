@@ -13,7 +13,7 @@ use reth_era::{
     e2s_types::IndexEntry,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
-    era_file_ops::{EraFile, EraReader, EraWriter},
+    era_file_ops::{EraFile, StreamReader, StreamWriter},
     execution_types::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },
