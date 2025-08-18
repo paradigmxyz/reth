@@ -37,7 +37,7 @@ impl std::str::FromStr for PendingBlockKind {
             "none" => Ok(Self::None),
             "full" => Ok(Self::Full),
             _ => Err(format!(
-                "Invalid pending block kind: {s}. Valid options are: empty, non-empty, latest"
+                 "Invalid pending block kind: {s}. Valid options are: empty, none, full"
             )),
         }
     }
