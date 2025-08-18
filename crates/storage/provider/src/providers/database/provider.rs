@@ -3056,7 +3056,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         }
 
         //Blocks are not empty, so no need to handle the case of `blocks.first()` being
-        // `None`. blocks[0] get's the first element of the `blocks` vector.
+        // `None`.
         let first_number = blocks[0].number();
 
         //Blocks are not empty, so no need to handle the case of `blocks.first()` being
