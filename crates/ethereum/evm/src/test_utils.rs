@@ -17,10 +17,7 @@ use reth_evm::{
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::{
-        result::{ExecutionResult, HaltReason},
-        JournalTr,
-    },
+    context::result::{ExecutionResult, HaltReason},
     database::State,
     Inspector,
 };
@@ -64,7 +61,7 @@ impl BlockExecutorFactory for MockEvmConfig {
         _ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database + JournalTr + 'a,
+        DB: Database + 'a,
         I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
         MockExecutor { result: self.exec_results.lock().pop().unwrap(), evm, hook: None }
