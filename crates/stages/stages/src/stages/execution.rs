@@ -5,10 +5,12 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
+use reth_primitives_traits::{
+    format_gas_throughput, Block, BlockBody, NodePrimitives, RecoveredBlock,
+};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
@@ -88,6 +90,8 @@ where
     post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
+    /// Executor metrics.
+    metrics: ExecutorMetrics,
 }
 
 impl<E> ExecutionStage<E>
@@ -110,6 +114,7 @@ where
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
             exex_manager_handle,
+            metrics: ExecutorMetrics::default(),
         }
     }
 
@@ -335,9 +340,11 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            let result = executor.execute_one(&block).map_err(|error| StageError::Block {
-                block: Box::new(block.block_with_parent()),
-                error: BlockErrorKind::Execution(error),
+            let result = self.metrics.metered_one(&block, |input| {
+                executor.execute_one(input).map_err(|error| StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Execution(error),
+                })
             })?;
 
             if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
