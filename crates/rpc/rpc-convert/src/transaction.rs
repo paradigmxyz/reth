@@ -796,10 +796,10 @@ where
             evm: Default::default(),
             receipt_converter: Default::default(),
             header_converter: Default::default(),
-            tx_env_converter: Default::default(),
             mapper: Default::default(),
             sim_tx_converter: Default::default(),
             rpc_tx_converter: Default::default(),
+            tx_env_converter: Default::default(),
         }
     }
 }
