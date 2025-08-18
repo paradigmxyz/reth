@@ -835,7 +835,6 @@ where
     N: NodePrimitives,
     Network: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    TxTy<N>: Clone + Debug,
     Receipt: ReceiptConverter<
             N,
             RpcReceipt = RpcReceipt<Network>,
@@ -854,17 +853,11 @@ where
         + Clone
         + Debug,
     Header: HeaderConverter<HeaderTy<N>, RpcHeader<Network>>,
-    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>>
-        + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Debug
-        + 'static,
     Map: TxInfoMapper<TxTy<N>> + Clone + Debug + Unpin + Send + Sync + 'static,
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
     RpcTx:
         RpcTxConverter<TxTy<N>, Network::TransactionResponse, <Map as TxInfoMapper<TxTy<N>>>::Out>,
+    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>>,
 {
     type Primitives = N;
     type Network = Network;
