@@ -136,7 +136,7 @@ where
             let provider_ro = self.view.provider_ro()?;
             let tx = provider_ro.into_tx();
             self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone())));
+            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
         }
 
         Ok(None)
@@ -222,12 +222,17 @@ pub struct ProofTaskTx<Tx> {
 
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
+
+    /// Identifier for the tx within the context of a single [`ProofTaskManager`], used only for
+    /// tracing.
+    id: usize,
 }
 
 impl<Tx> ProofTaskTx<Tx> {
-    /// Initializes a [`ProofTaskTx`] using the given transaction anda[`ProofTaskCtx`].
-    const fn new(tx: Tx, task_ctx: ProofTaskCtx) -> Self {
-        Self { tx, task_ctx }
+    /// Initializes a [`ProofTaskTx`] using the given transaction and a [`ProofTaskCtx`]. The id is
+    /// used only for tracing.
+    const fn new(tx: Tx, task_ctx: ProofTaskCtx, id: usize) -> Self {
+        Self { tx, task_ctx, id }
     }
 }
 
@@ -277,9 +282,9 @@ where
             target: "trie::proof_task",
             "Storage proof calculation",
             hashed_address=?input.hashed_address,
-            // Add a random id because we often have parallel storage proof calculations for the
+            // Add a unique id because we often have parallel storage proof calculations for the
             // same hashed address, and we want to differentiate them during trace analysis.
-            span_id=rand::random::<u64>(),
+            span_id=self.id,
         );
         let span_guard = span.enter();
 

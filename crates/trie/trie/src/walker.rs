@@ -181,11 +181,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                     node.full_key_is_only_nonremoved_child(added_removed_keys.as_ref())
                 });
 
-            let _full_key = node.full_key();
             trace!(
                 target: "trie::walker",
                 ?key_is_only_nonremoved_child,
-                ?_full_key,
+                full_key=?node.full_key(),
                 "Checked for only nonremoved child",
             );
 
