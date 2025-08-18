@@ -35,7 +35,6 @@ pub trait TrieCursorFactory {
     ) -> Result<Self::StorageTrieCursor, DatabaseError>;
 }
 
-
 /// A cursor for navigating a trie that works with both Tables and `DupSort` tables.
 ///
 /// # Ordering assumptions
@@ -54,9 +53,6 @@ pub trait TrieCursorFactory {
 ///
 /// Consumers of this trait (e.g. [`TrieWalker`], [`TrieNodeIter`]) can rely on this
 /// documented behavior instead of duplicating assumptions.
-
-
-
 
 #[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursor: Send + Sync {
