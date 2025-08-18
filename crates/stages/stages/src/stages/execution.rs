@@ -343,16 +343,6 @@ where
                 error: BlockErrorKind::Execution(error),
             })?;
 
-            // Record execution metrics
-            let block_execution_duration = execute_start.elapsed();
-            let execution_duration_secs = block_execution_duration.as_secs_f64();
-            let gas_used = block.header().gas_used();
-            self.metrics.gas_processed_total.increment(gas_used);
-            self.metrics.gas_per_second.set(gas_used as f64 / execution_duration_secs);
-            self.metrics.gas_used_histogram.record(gas_used as f64);
-            self.metrics.execution_histogram.record(execution_duration_secs);
-            self.metrics.execution_duration.set(execution_duration_secs);
-
             if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
