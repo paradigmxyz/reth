@@ -7979,6 +7979,7 @@ dependencies = [
  "eyre",
  "futures",
  "metrics",
+ "metrics-util",
  "mini-moka",
  "parking_lot",
  "proptest",
