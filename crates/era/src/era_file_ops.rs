@@ -1,6 +1,6 @@
 //! Represents reading and writing operations' era file
 
-use crate::{e2s_types::Version, execution_types::Accumulator, E2sError};
+use crate::{e2s_types::Version, E2sError};
 use std::{
     fs::File,
     io::{Read, Seek, Write},
@@ -87,9 +87,6 @@ pub trait EraWriter<W: Write>: Sized {
 
     /// Write a complete era file
     fn write_file(&mut self, file: &Self::File) -> Result<(), E2sError>;
-
-    /// Writer accumulator
-    fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError>;
 
     /// Flush any buffered data
     fn flush(&mut self) -> Result<(), E2sError>;
