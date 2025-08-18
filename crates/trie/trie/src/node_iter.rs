@@ -43,13 +43,12 @@ struct SeekedHashedEntry<V> {
     result: Option<(B256, V)>,
 }
 
-/// TrieNodeIter assumes that MDBX allows seeking into the hashed trie table
-/// and iterating from that point in lexicographic order of the hashed keys.
-/// Hash building requires combining sequential trie traversal with lookups
-/// into this hashed table. The correctness of this process depends on the
-/// cursor guaranteeing stable lexicographic ordering, so that iteration
-/// over hashed entries matches the trie’s traversal order. If ordering
-/// diverged, node hashes would be computed incorrectly.
+/// Iterates over trie nodes for hash building.
+///
+/// This iterator depends on the ordering guarantees of [`TrieCursor`],
+/// and additionally uses hashed cursor lookups when operating on storage tries.
+
+
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The walker over intermediate nodes.

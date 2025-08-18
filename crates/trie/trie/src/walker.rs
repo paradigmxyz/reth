@@ -10,12 +10,11 @@ use tracing::{instrument, trace};
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
-/// TrieWalker depends on the MDBX cursor iterating the trie table in strict
-/// lexicographic key order. This is critical because the physical ordering of
-/// keys in the DB must mirror the logical path order of the trie: walking the
-/// cursor yields the same sequence of nodes as walking the trie structure.
-/// Proof fetching assumes this alignment; without lexicographic ordering,
-/// traversed proofs would not correspond to actual trie paths.   
+/// Traverses the trie in lexicographic order.
+///
+/// This iterator depends on the ordering guarantees of [`TrieCursor`].
+
+  
 #[derive(Debug)]
 pub struct TrieWalker<C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
