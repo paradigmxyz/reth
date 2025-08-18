@@ -38,6 +38,26 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
+    /// Helper function for metered execution
+    fn metered<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> (u64, R),
+    {
+        // Execute the block and record the elapsed time.
+        let execute_start = Instant::now();
+        let (gas_used, output) = f();
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+
+        // Update gas metrics.
+        self.gas_processed_total.increment(gas_used);
+        self.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.gas_used_histogram.record(gas_used as f64);
+        self.execution_histogram.record(execution_duration);
+        self.execution_duration.set(execution_duration);
+
+        output
+    }
+
     /// Execute a block and update basic gas/timing metrics.
     ///
     /// This is a simple helper that tracks execution time and gas usage.
@@ -49,19 +69,6 @@ impl ExecutorMetrics {
         B: Block,
         B::Header: BlockHeader,
     {
-        // Execute the block and record the elapsed time.
-        let execute_start = Instant::now();
-        let gas_used = block.header().gas_used();
-        let output = f(block);
-        let execution_duration = execute_start.elapsed().as_secs_f64();
-
-        // Update gas metrics.
-        self.gas_processed_total.increment(gas_used);
-        self.gas_per_second.set(gas_used as f64 / execution_duration);
-        self.gas_used_histogram.record(gas_used as f64);
-        self.execution_histogram.record(execution_duration);
-        self.execution_duration.set(execution_duration);
-
-        output
+        self.metered(|| (block.header().gas_used(), f(block)))
     }
 }
