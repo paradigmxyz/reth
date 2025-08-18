@@ -110,7 +110,9 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash,
-            block_access_list_hash: None,
+            block_access_list_hash: block_access_list
+                .as_ref()
+                .map(|bal| alloy_primitives::keccak256(&alloy_rlp::encode(bal))),
         };
 
         Ok(Block {
@@ -119,7 +121,7 @@ where
                 transactions,
                 ommers: Default::default(),
                 withdrawals,
-                block_access_list: None,
+                block_access_list: block_access_list.clone(),
             },
         })
     }
