@@ -38,7 +38,7 @@ impl MultiAddedRemovedKeys {
             if storage.wiped {
                 self.storages.remove(hashed_address);
                 if account.is_empty() {
-                    self.account.insert_removed(*hashed_address);
+                    //self.account.insert_removed(*hashed_address);
                 }
                 continue
             }
@@ -55,7 +55,7 @@ impl MultiAddedRemovedKeys {
             }
 
             if !account.is_empty() {
-                self.account.remove_removed(hashed_address);
+                //self.account.remove_removed(hashed_address);
             }
         }
     }
