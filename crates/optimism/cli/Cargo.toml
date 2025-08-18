@@ -83,6 +83,7 @@ asm-keccak = [
 
 # Jemalloc feature for vergen to generate correct env vars
 jemalloc = [
+    "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
 ]

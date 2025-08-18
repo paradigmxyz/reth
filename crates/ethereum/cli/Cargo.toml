@@ -51,9 +51,12 @@ jemalloc = [
     "reth-node-metrics/jemalloc",
 ]
 jemalloc-prof = [
+    "reth-cli-util/jemalloc-prof",
     "reth-node-core/jemalloc",
 ]
-tracy-allocator = []
+tracy-allocator = [
+    "reth-cli-util/tracy-allocator",
+]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
