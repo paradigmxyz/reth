@@ -571,7 +571,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
-                removed_txs_count += 1; 
+                removed_txs_count += 1;
             }
         }
 
@@ -1467,7 +1467,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // Update ancestor condition.
                 if has_parked_ancestor {
-                    tx.state.remove(TxState::NO_PARKED_ANCESTORS); //08148899655
+                    tx.state.remove(TxState::NO_PARKED_ANCESTORS);
                 } else {
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }

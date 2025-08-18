@@ -3054,12 +3054,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             debug!(target: "providers::db", "Attempted to append empty block range");
             return Ok(())
         }
- 
-        //SAFETY: Blocks are not empty, so no need to handle the case of `blocks.first()` being `None`.
-        //blocks[0] get's the first elment of the `blocks` vector.
+
+        //SAFETY: Blocks are not empty, so no need to handle the case of `blocks.first()` being
+        // `None`. blocks[0] get's the first element of the `blocks` vector.
         let first_number = blocks[0].number();
 
-        //SAFETY: Blocks are not empty, so no need to handle the case of `blocks.first()` being `None`.
+        //SAFETY: Blocks are not empty, so no need to handle the case of `blocks.first()` being
+        // `None`.
         let last_block_number = blocks[blocks.len() - 1].number();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
