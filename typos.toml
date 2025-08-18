@@ -22,6 +22,8 @@ extend-ignore-re = [
     "[0-9]+th",
     "[0-9]+st",
     "[0-9]+rd",
+    # Line ignore with trailing comment
+    "(?Rm)^.*//\\s*typos:disable-line$",
 ]
 
 [default.extend-words]

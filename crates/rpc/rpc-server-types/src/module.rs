@@ -803,7 +803,7 @@ mod test {
         // Should detect single character typos
         assert_eq!(RethRpcModule::detect_typo("eht"), Some("eth"));
         assert_eq!(RethRpcModule::detect_typo("adimn"), Some("admin"));
-        assert_eq!(RethRpcModule::detect_typo("debgu"), Some("debug"));
+        assert_eq!(RethRpcModule::detect_typo("debgu"), Some("debug")); // typos:disable-line
 
         // Should detect transpositions in longer strings
         assert_eq!(RethRpcModule::detect_typo("admni"), Some("admin"));
@@ -864,7 +864,7 @@ mod test {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Did you mean 'admin'"));
 
-        let result = DefaultRpcModuleValidator::parse_selection("debgu,net");
+        let result = DefaultRpcModuleValidator::parse_selection("debgu,net"); // typos:disable-line
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Did you mean 'debug'"));
     }
