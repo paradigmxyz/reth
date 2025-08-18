@@ -77,13 +77,16 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_primitives::B256;
     use reth_ethereum_primitives::Block;
-    use reth_primitives_traits::{BlockExt, SealedBlock};
+    use reth_primitives_traits::Block as BlockTrait;
 
     fn create_test_block_with_gas(gas_used: u64) -> RecoveredBlock<Block> {
         let header = Header { gas_used, ..Default::default() };
         let block = Block { header: header.clone(), body: Default::default() };
-        let sealed = SealedBlock::new(block.seal_unchecked(), Default::default());
+        // Use a dummy hash for testing
+        let hash = B256::default();
+        let sealed = block.seal_unchecked(hash);
         RecoveredBlock::new_sealed(sealed, Default::default())
     }
 

@@ -381,4 +381,3 @@ pub(crate) struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
 }
-
