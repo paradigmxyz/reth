@@ -12,7 +12,10 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
     ExecutionPayloadV3, PayloadId,
 };
-use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{
+    decode_min_base_fee_factors, encode_holocene_extra_data, encode_min_base_fee_extra_data,
+    EIP1559ParamError,
+};
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
@@ -44,8 +47,8 @@ pub struct OpPayloadBuilderAttributes<T> {
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
     pub eip_1559_params: Option<B64>,
-    /// minBaseFeeLog2 parameter for the generated payload
-    pub min_base_fee_log2_param: Option<B64>,
+    /// The minBaseFeeFactors (significand and exponent) for the generated payload
+    pub min_base_fee_factors: Option<u8>,
 }
 
 impl<T> Default for OpPayloadBuilderAttributes<T> {
@@ -56,7 +59,7 @@ impl<T> Default for OpPayloadBuilderAttributes<T> {
             gas_limit: Default::default(),
             eip_1559_params: Default::default(),
             transactions: Default::default(),
-            min_base_fee_log2_param: Default::default(),
+            min_base_fee_factors: Default::default(),
         }
     }
 }
@@ -72,16 +75,24 @@ impl<T> OpPayloadBuilderAttributes<T> {
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 
+    /// Extracts the `eip1559` parameters for the payload along with the min_base_fee
+    /// factors.
+    ///
+    /// Returns encoded extra data containing both EIP-1559 parameters and minimum base fee
+    /// configuration (significand and exponent) if min_base_fee_factors is present.
     pub fn get_min_base_fee_extra_data(
         &self,
         default_base_fee_params: BaseFeeParams,
     ) -> Result<Bytes, EIP1559ParamError> {
+        let (significand, exponent) =
+            self.min_base_fee_factors.map(decode_min_base_fee_factors).unwrap_or_default();
         self.eip_1559_params
             .map(|params| {
                 encode_min_base_fee_extra_data(
                     params,
                     default_base_fee_params,
-                    self.min_base_fee_log2_param.unwrap_or(0),
+                    significand,
+                    exponent,
                 )
             })
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
@@ -129,7 +140,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             transactions,
             gas_limit: attributes.gas_limit,
             eip_1559_params: attributes.eip_1559_params,
-            min_base_fee_log2_param: attributes.min_base_fee_log2_param,
+            min_base_fee_factors: attributes.min_base_fee_factors,
         })
     }
 
