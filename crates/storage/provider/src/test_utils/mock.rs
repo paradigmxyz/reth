@@ -66,6 +66,8 @@ pub struct MockEthProvider<
     pub state_roots: Arc<Mutex<Vec<B256>>>,
     /// Local block body indices store
     pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
+    /// Whether to return errors for database provider methods (for backwards compatibility)
+    pub error_on_database_provider: bool,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -83,6 +85,7 @@ where
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
             block_body_indices: self.block_body_indices.clone(),
+            error_on_database_provider: self.error_on_database_provider,
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -100,6 +103,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
             block_body_indices: Default::default(),
+            error_on_database_provider: true, // Keep default behavior for backwards compatibility
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -187,9 +191,16 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
             block_body_indices: self.block_body_indices,
+            error_on_database_provider: self.error_on_database_provider,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
+    }
+    
+    /// Configure whether database provider methods should return errors
+    pub fn with_database_provider_error(mut self, error: bool) -> Self {
+        self.error_on_database_provider = error;
+        self
     }
 }
 
@@ -264,17 +275,21 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        // TODO: return Ok(self.clone()) when engine tests stops relying on an
-        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
-        //Ok(self.clone())
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.error_on_database_provider {
+            // Return error for backwards compatibility with engine tests
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        } else {
+            Ok(self.clone())
+        }
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        // TODO: return Ok(self.clone()) when engine tests stops relying on an
-        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
-        //Ok(self.clone())
-        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        if self.error_on_database_provider {
+            // Return error for backwards compatibility with engine tests
+            Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+        } else {
+            Ok(self.clone())
+        }
     }
 }
 
