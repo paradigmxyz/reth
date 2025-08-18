@@ -12,7 +12,6 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
-use reth_primitives_traits::RecoveredBlock;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
@@ -54,7 +53,7 @@ impl EngineApiMetrics {
     /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
     ///
-    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
+    /// This method updates metrics for execution time, gas usage, and the number
     /// of accounts, storage slots and bytecodes loaded and updated.
     pub(crate) fn execute_metered<E, DB>(
         &self,
@@ -103,16 +102,6 @@ impl EngineApiMetrics {
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
 
         Ok(output)
-    }
-
-    /// Execute the given block and update metrics for the execution.
-    #[allow(dead_code)]
-    pub(crate) fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
-    where
-        F: FnOnce(&RecoveredBlock<B>) -> R,
-        B: reth_primitives_traits::Block,
-    {
-        self.metered(|| (input.header().gas_used(), f(input)))
     }
 }
 
