@@ -5,7 +5,7 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
@@ -88,8 +88,6 @@ where
     post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
-    /// Executor metrics.
-    metrics: ExecutorMetrics,
 }
 
 impl<E> ExecutionStage<E>
@@ -112,7 +110,6 @@ where
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
             exex_manager_handle,
-            metrics: ExecutorMetrics::default(),
         }
     }
 
@@ -191,7 +188,7 @@ where
         // If there's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
         if provider.prune_modes_ref().has_receipts_pruning() {
-            return Ok(())
+            return Ok(());
         }
 
         // Get next expected receipt number
@@ -232,7 +229,7 @@ where
                     if next_receipt_num_after_unwind > next_static_file_receipt_num {
                         // This means we need a deeper unwind.
                     } else {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
 
@@ -241,7 +238,7 @@ where
                     &static_file_provider,
                     provider,
                     StaticFileSegment::Receipts,
-                )?)
+                )?);
             }
         }
 
@@ -281,7 +278,7 @@ where
     /// Execute the stage
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let start_block = input.next_block();
@@ -338,18 +335,16 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            let result = self.metrics.metered_one(&block, |input| {
-                executor.execute_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(block.block_with_parent()),
-                    error: BlockErrorKind::Execution(error),
-                })
+            let result = executor.execute_one(&block).map_err(|error| StageError::Block {
+                block: Box::new(block.block_with_parent()),
+                error: BlockErrorKind::Execution(error),
             })?;
 
             if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
-                })
+                });
             }
             results.push(result);
 
@@ -386,7 +381,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break
+                break;
             }
         }
 
@@ -421,7 +416,7 @@ where
                 // means that we didn't send the notification to ExExes
                 return Err(StageError::PostExecuteCommit(
                     "Previous post execute commit input wasn't processed",
-                ))
+                ));
             }
         }
 
@@ -435,7 +430,7 @@ where
                 let Some(reverts) =
                     state.bundle.reverts.get_mut((block_number - start_block) as usize)
                 else {
-                    break
+                    break;
                 };
 
                 // If both account history and storage history pruning is configured, clear reverts
@@ -497,7 +492,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            })
+            });
         }
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
