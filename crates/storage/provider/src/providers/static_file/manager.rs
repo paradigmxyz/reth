@@ -54,6 +54,12 @@ use std::{
 };
 use tracing::{debug, info, trace, warn};
 
+/// Maximum number of cached static file jar providers before eviction
+const MAX_CACHE_SIZE: usize = 100;
+
+/// Number of oldest entries to evict when cache size exceeds maximum
+const EVICT_COUNT: usize = 20;
+
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
 /// range.
@@ -515,14 +521,30 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Given a segment and block range it returns a cached
-    /// [`StaticFileJarProvider`]. TODO(joshie): we should check the size and pop N if there's too
-    /// many.
+    /// [`StaticFileJarProvider`]. Implements cache size management to prevent unlimited growth.
     fn get_or_create_jar_provider(
         &self,
         segment: StaticFileSegment,
         fixed_block_range: &SegmentRangeInclusive,
     ) -> ProviderResult<StaticFileJarProvider<'_, N>> {
         let key = (fixed_block_range.end(), segment);
+
+        // Check cache size and evict old entries if necessary
+        if self.map.len() > MAX_CACHE_SIZE {
+            // Collect keys sorted by block number (oldest first) for eviction
+            let mut keys_to_evict: Vec<_> = self.map.iter().map(|entry| *entry.key()).collect();
+            keys_to_evict.sort_by_key(|(block_num, _)| *block_num);
+
+            // Remove the oldest entries
+            for &key_to_remove in keys_to_evict.iter().take(EVICT_COUNT) {
+                self.map.remove(&key_to_remove);
+            }
+
+            trace!(target: "provider::static_file",
+                   cache_size = self.map.len(),
+                   evicted = EVICT_COUNT.min(keys_to_evict.len()),
+                   "Evicted old entries from static file cache");
+        }
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
         trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
