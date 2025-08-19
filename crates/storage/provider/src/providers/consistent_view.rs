@@ -109,7 +109,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(genesis_block, StorageLocation::StaticFiles).unwrap();
+        provider_rw.insert_block(&genesis_block, StorageLocation::StaticFiles).unwrap();
         provider_rw.commit().unwrap();
 
         // create a consistent view provider and check that a ro provider can be made
@@ -127,7 +127,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block, StorageLocation::StaticFiles).unwrap();
+        provider_rw.insert_block(&recovered_block, StorageLocation::StaticFiles).unwrap();
         provider_rw.commit().unwrap();
 
         // ensure successful creation of a read-only provider, based on this new db state.
@@ -142,7 +142,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block, StorageLocation::StaticFiles).unwrap();
+        provider_rw.insert_block(&recovered_block, StorageLocation::StaticFiles).unwrap();
         provider_rw.commit().unwrap();
 
         // check that creation of a read-only provider still works
@@ -161,7 +161,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(genesis_block, StorageLocation::Both).unwrap();
+        provider_rw.insert_block(&genesis_block, StorageLocation::Both).unwrap();
         provider_rw.0.static_file_provider().commit().unwrap();
         provider_rw.commit().unwrap();
 
@@ -180,7 +180,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block, StorageLocation::Both).unwrap();
+        provider_rw.insert_block(&recovered_block, StorageLocation::Both).unwrap();
         provider_rw.0.static_file_provider().commit().unwrap();
         provider_rw.commit().unwrap();
 
@@ -218,7 +218,7 @@ mod tests {
 
         // reinsert the block at the same height, but with a different hash
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block, StorageLocation::Both).unwrap();
+        provider_rw.insert_block(&recovered_block, StorageLocation::Both).unwrap();
         provider_rw.0.static_file_provider().commit().unwrap();
         provider_rw.commit().unwrap();
 

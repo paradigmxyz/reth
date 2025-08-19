@@ -167,7 +167,7 @@ where
         {
             let block_hash = recovered_block.hash();
             self.database()
-                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
+                .insert_block(&recovered_block, StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.

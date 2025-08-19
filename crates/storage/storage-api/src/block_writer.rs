@@ -72,7 +72,7 @@ pub trait BlockWriter: Send + Sync {
     /// written.
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
         write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
@@ -119,7 +119,7 @@ pub trait BlockWriter: Send + Sync {
     /// Returns `Ok(())` on success, or an error if any operation fails.
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<RecoveredBlock<Self::Block>>,
+        blocks: &[RecoveredBlock<Self::Block>],
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,

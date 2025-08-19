@@ -642,13 +642,13 @@ mod tests {
                     vec![],
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         // append the blocks
         let provider = runner.db().factory.provider_rw().unwrap();
         provider
             .append_blocks_with_state(
-                sealed_blocks,
+                &sealed_blocks,
                 &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
                 TrieUpdates::default(),

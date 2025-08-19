@@ -1746,10 +1746,10 @@ mod tests {
 
         let provider_rw = factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
-            database_blocks
+            &database_blocks
                 .into_iter()
                 .map(|b| b.try_recover().expect("failed to seal block with senders"))
-                .collect(),
+                .collect::<Vec<_>>(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {

@@ -79,7 +79,7 @@ where
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(
-        vec![block.clone()],
+         &[block.clone()],
         &execution_outcome,
         Default::default(),
         Default::default(),
@@ -213,7 +213,7 @@ where
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(
-        vec![block1.clone(), block2.clone()],
+        &[block1.clone(), block2.clone()],
         &execution_outcome,
         Default::default(),
         Default::default(),

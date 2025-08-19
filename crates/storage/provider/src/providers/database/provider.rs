@@ -424,7 +424,7 @@ impl<
     /// Inserts an historical block. **Used for setting up test environments**
     pub fn insert_historical_block(
         &self,
-        block: RecoveredBlock<<Self as BlockWriter>::Block>,
+        block: &RecoveredBlock<<Self as BlockWriter>::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let ttd = if block.number() == 0 {
             block.header().difficulty()
@@ -2816,7 +2816,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
         write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
@@ -2879,7 +2879,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             next_tx_num += 1;
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.into_body()))], write_to)?;
+        self.append_block_bodies(vec![(block_number, Some(block.body().clone()))], write_to)?;
 
         debug!(
             target: "providers::db",
@@ -3045,7 +3045,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// TODO(joshie): this fn should be moved to `UnifiedStorageWriter` eventually
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<RecoveredBlock<Self::Block>>,
+        blocks: &[RecoveredBlock<Self::Block>],
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
@@ -3231,12 +3231,12 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
+                &data.genesis.clone().try_recover().unwrap(),
                 crate::StorageLocation::Database,
             )
             .unwrap();
         provider_rw
-            .insert_block(data.blocks[0].0.clone(), crate::StorageLocation::Database)
+            .insert_block(&data.blocks[0].0.clone(), crate::StorageLocation::Database)
             .unwrap();
         provider_rw
             .write_state(
@@ -3264,13 +3264,13 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
+                &data.genesis.clone().try_recover().unwrap(),
                 crate::StorageLocation::Database,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .insert_block(&data.blocks[i].0.clone(), crate::StorageLocation::Database)
                 .unwrap();
             provider_rw
                 .write_state(
@@ -3301,7 +3301,7 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
+                &data.genesis.clone().try_recover().unwrap(),
                 crate::StorageLocation::Database,
             )
             .unwrap();
@@ -3309,7 +3309,7 @@ mod tests {
         // insert blocks 1-3 with receipts
         for i in 0..3 {
             provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .insert_block(&data.blocks[i].0.clone(), crate::StorageLocation::Database)
                 .unwrap();
             provider_rw
                 .write_state(
@@ -3339,13 +3339,13 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
+                &data.genesis.clone().try_recover().unwrap(),
                 crate::StorageLocation::Database,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .insert_block(&data.blocks[i].0.clone(), crate::StorageLocation::Database)
                 .unwrap();
             provider_rw
                 .write_state(
@@ -3389,7 +3389,7 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         for block in blocks {
             provider_rw
-                .insert_block(block.try_recover().unwrap(), crate::StorageLocation::Database)
+                .insert_block(&block.try_recover().unwrap(), crate::StorageLocation::Database)
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3411,13 +3411,13 @@ mod tests {
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw
             .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
+                &data.genesis.clone().try_recover().unwrap(),
                 crate::StorageLocation::Database,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .insert_block(&data.blocks[i].0.clone(), crate::StorageLocation::Database)
                 .unwrap();
             provider_rw
                 .write_state(
