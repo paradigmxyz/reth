@@ -82,7 +82,7 @@ where
     }
 
     /// Computes the state root by calculating storage roots in parallel for modified accounts,
-    /// then walking the state trie to build the final root hash.
+    /// then walking the state trie to build the final state root hash.
     fn calculate(
         self,
         retain_updates: bool,
