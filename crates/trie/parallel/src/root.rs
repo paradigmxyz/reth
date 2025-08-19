@@ -33,6 +33,10 @@ use tracing::*;
 /// it needs to rely on database state saying the same until
 /// the last transaction is open.
 /// See docs of using [`ConsistentDbView`] for caveats.
+///
+/// Note: This implementation only serves as a fallback for the sparse trie-based
+/// state root calculation. The sparse trie approach is more efficient as it avoids traversing
+/// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
 pub struct ParallelStateRoot<Factory> {
     /// Consistent view of the database.
