@@ -43,8 +43,8 @@ pub trait EraFileId: Clone {
     fn count(&self) -> u32;
 }
 
-/// [`EraReader`] for reading era-format files
-pub trait EraReader<R: Read + Seek>: Sized {
+/// [`StreamReader`] for reading era-format files
+pub trait StreamReader<R: Read + Seek>: Sized {
     /// The file type this reader produces
     type File: EraFile;
 
@@ -61,8 +61,8 @@ pub trait EraReader<R: Read + Seek>: Sized {
     fn iter(self) -> Self::Iterator;
 }
 
-/// [`EraReader`] provides reading file operations for era files
-pub trait EraFileReader: EraReader<File> {
+/// [`FileReader`] provides reading era file operations for era files
+pub trait FileReader: StreamReader<File> {
     /// Opens and reads an era file from the given path
     fn open<P: AsRef<Path>>(
         path: P,
@@ -74,8 +74,8 @@ pub trait EraFileReader: EraReader<File> {
     }
 }
 
-/// [`EraWriter`] for writing era-format files
-pub trait EraWriter<W: Write>: Sized {
+/// [`StreamWriter`] for writing era-format files
+pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
     type File: EraFile;
 
@@ -92,8 +92,8 @@ pub trait EraWriter<W: Write>: Sized {
     fn flush(&mut self) -> Result<(), E2sError>;
 }
 
-/// [`EraReader`] provides writing file operations for era files
-pub trait EraFileWrite: EraWriter<File> {
+/// [`StreamWriter`] provides writing file operations for era files
+pub trait FileWriter: StreamWriter<File> {
     /// Creates a new file at the specified path and writes the era file to it
     fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError> {
         let file_handle = File::create(path).map_err(E2sError::Io)?;
