@@ -65,6 +65,8 @@ pub struct PoolConfig {
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
     pub max_queued_lifetime: Duration,
+    /// Whether balance checking is disabled on transaction ingress
+    pub disable_balance_check: bool,
 }
 
 impl PoolConfig {
@@ -96,6 +98,7 @@ impl Default for PoolConfig {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            disable_balance_check: false,
         }
     }
 }

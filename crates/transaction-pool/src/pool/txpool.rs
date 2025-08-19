@@ -1243,6 +1243,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     auths: FxHashMap<SenderId, HashSet<TxHash>>,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
+    /// Disable balance checking for transactions entering the transaction pool
+    disable_balance_check: bool,
 }
 
 impl<T: PoolTransaction> AllTransactions<T> {
@@ -1457,7 +1459,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // If the account changed in the block, check the balance.
                 if let Some(changed_balance) = changed_balance {
-                    if &cumulative_cost > changed_balance {
+                    if &cumulative_cost > changed_balance && !self.disable_balance_check {
                         // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
@@ -1929,6 +1931,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // pending, so we can set this to `false`
             let mut has_parked_ancestor = false;
 
+            let disable_balance_check = self.disable_balance_check;
+
             // Traverse all future transactions of the sender starting with the on chain nonce, and
             // update existing transactions: `[on_chain_nonce,..]`
             for (id, tx) in self.descendant_txs_mut(&on_chain_id) {
@@ -1948,7 +1952,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 // Update for next transaction
                 cumulative_cost = tx.next_cumulative_cost();
 
-                if cumulative_cost > on_chain_balance {
+                if cumulative_cost > on_chain_balance && disable_balance_check {
                     // sender lacks sufficient funds to pay for this transaction
                     tx.state.remove(TxState::ENOUGH_BALANCE);
                 } else {
@@ -2039,6 +2043,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             local_transactions_config: Default::default(),
             auths: Default::default(),
             metrics: Default::default(),
+            disable_balance_check: false,
         }
     }
 }
