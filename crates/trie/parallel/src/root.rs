@@ -111,7 +111,8 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Use tokio blocking pool for database operations
+            // Spawn a blocking task to calculate this account's storage root from database I/O
+            // while the main thread continues processing other accounts in parallel
             let handle = get_runtime_handle();
             drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
