@@ -45,7 +45,7 @@ pub trait EraFileId: Clone {
 
 /// [`StreamReader`] for reading era-format files
 pub trait StreamReader<R: Read + Seek>: Sized {
-    /// The file type this reader produces
+    /// The file type the reader produces
     type File: EraFileFormat;
 
     /// The iterator type for streaming data
