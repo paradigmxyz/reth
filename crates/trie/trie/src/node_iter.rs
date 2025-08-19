@@ -47,7 +47,6 @@ struct SeekedHashedEntry<V> {
 ///
 /// This iterator depends on the ordering guarantees of [`TrieCursor`],
 /// and additionally uses hashed cursor lookups when operating on storage tries.
-
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The walker over intermediate nodes.
@@ -278,9 +277,9 @@ where
                     // the database, so the walker will advance to the branch node after it. Because
                     // of this, we need to check that the current walker key has a prefix of the key
                     // that we seeked to.
-                    if can_skip_node
-                        && self.walker.key().is_some_and(|key| key.starts_with(&seek_prefix))
-                        && self.walker.children_are_in_trie()
+                    if can_skip_node &&
+                        self.walker.key().is_some_and(|key| key.starts_with(&seek_prefix)) &&
+                        self.walker.children_are_in_trie()
                     {
                         trace!(
                             target: "trie::node_iter",

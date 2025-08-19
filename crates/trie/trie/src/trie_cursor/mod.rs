@@ -35,25 +35,8 @@ pub trait TrieCursorFactory {
     ) -> Result<Self::StorageTrieCursor, DatabaseError>;
 }
 
-/// A cursor for navigating a trie that works with both Tables and `DupSort` tables.
-///
-/// # Ordering assumptions
-///
-/// MDBX stores keys in **lexicographic byte order**. The trie uses this property for
-/// traversal and proof construction:
-///
-/// - [`TrieWalker`] depends on lexicographic ordering to walk the trie in key order,
-///   which is required for proof fetching.
-/// - [`TrieNodeIter`] also relies on lexicographic ordering when iterating over nodes,
-///   but may additionally use hashed lookups for storage tries (see its own docs).
-///
-/// These behaviors are surfaced through the [`TrieCursor`] API. Implementations must
-/// preserve the underlying MDBX ordering guarantees when seeking, advancing, or reading
-/// entries.
-///
-/// Consumers of this trait (e.g. [`TrieWalker`], [`TrieNodeIter`]) can rely on this
-/// documented behavior instead of duplicating assumptions.
-
+/// A cursor for traversing stored trie nodes. The cursor must iterate over keys in
+/// lexicographical order.
 #[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursor: Send + Sync {
     /// Move the cursor to the key and return if it is an exact match.

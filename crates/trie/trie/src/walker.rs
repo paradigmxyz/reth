@@ -13,7 +13,6 @@ use crate::metrics::WalkerMetrics;
 /// Traverses the trie in lexicographic order.
 ///
 /// This iterator depends on the ordering guarantees of [`TrieCursor`].
-
 #[derive(Debug)]
 pub struct TrieWalker<C> {
     /// A mutable reference to a trie cursor instance used for navigating the trie.
@@ -316,8 +315,8 @@ impl<C: TrieCursor> TrieWalker<C> {
 
         // Check if the walker needs to backtrack to the previous level in the trie during its
         // traversal.
-        if subnode.position().is_last_child()
-            || (subnode.position().is_parent() && !allow_root_to_child_nibble)
+        if subnode.position().is_last_child() ||
+            (subnode.position().is_parent() && !allow_root_to_child_nibble)
         {
             self.stack.pop();
             self.move_to_next_sibling(false)?;
