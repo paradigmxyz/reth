@@ -79,7 +79,7 @@ where
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(
-         &[block.clone()],
+        std::slice::from_ref(block),
         &execution_outcome,
         Default::default(),
         Default::default(),

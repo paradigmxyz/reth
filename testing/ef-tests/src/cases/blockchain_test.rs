@@ -198,7 +198,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .unwrap();
 
     provider
-        .insert_block(&genesis_block.clone(), StorageLocation::Database)
+        .insert_block(&genesis_block, StorageLocation::Database)
         .map_err(|err| Error::block_failed(0, err))?;
 
     let genesis_state = case.pre.clone().into_genesis_state();

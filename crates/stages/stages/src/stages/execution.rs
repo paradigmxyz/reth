@@ -768,7 +768,7 @@ mod tests {
                 total
             }
         }) if processed == previous_stage_checkpoint.progress.processed &&
-            total == previous_stage_checkpoint.progress.total + &block.gas_used);
+            total == previous_stage_checkpoint.progress.total + block.gas_used);
     }
 
     #[test]

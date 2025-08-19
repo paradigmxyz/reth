@@ -166,8 +166,7 @@ where
         } in blocks
         {
             let block_hash = recovered_block.hash();
-            self.database()
-                .insert_block(&recovered_block, StorageLocation::Both)?;
+            self.database().insert_block(&recovered_block, StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
