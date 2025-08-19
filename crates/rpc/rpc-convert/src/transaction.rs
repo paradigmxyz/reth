@@ -375,15 +375,8 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 /// * `TxReq` is a transaction request received from an RPC API
 /// * `TxEnv` is the corresponding transaction environment for execution
 ///
-/// The `TxEnvConverter` has two blanket implementations:
+/// The `TxEnvConverter` has a blanket implementation:
 /// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
-/// * `Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
-///   [`RpcConverter::with_tx_env_converter`].
-///
-/// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
-/// implementation for free, thanks to the blanket implementation, unless the conversion requires
-/// more context. For example, some configuration parameters or access handles to database, network,
-/// etc.
 pub trait TxEnvConverter<TxReq, TxEnv>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// An associated error that can occur during conversion.
     type Error;
@@ -412,32 +405,6 @@ where
         block_env: &BlockEnv,
     ) -> Result<TxEnv, Self::Error> {
         tx_req.try_into_tx_env(cfg_env, block_env)
-    }
-}
-
-/// Converts rpc transaction requests into transaction environment using a closure.
-impl<F, TxReq, TxEnv, E> TxEnvConverter<TxReq, TxEnv> for F
-where
-    F: Fn(TxReq, &CfgEnv<()>, &BlockEnv) -> Result<TxEnv, E>
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + Clone
-        + 'static,
-    TxReq: Clone,
-    E: std::error::Error + Send + Sync + 'static,
-{
-    type Error = E;
-
-    fn convert_tx_env<Spec>(
-        &self,
-        tx_req: TxReq,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<TxEnv, Self::Error> {
-        let cfg_env_with_chain_id = CfgEnv::<()>::new_with_spec(()).with_chain_id(cfg_env.chain_id);
-        self(tx_req, &cfg_env_with_chain_id, block_env)
     }
 }
 
