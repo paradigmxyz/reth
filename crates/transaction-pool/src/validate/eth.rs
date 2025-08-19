@@ -571,18 +571,17 @@ where
 
         // check for bytecode
         if let Err(err) = self.validate_account_bytecode(&transaction, &account, &state) {
-            return err;
+            return err
         }
 
         // Checks for nonce
-
         if let Err(err) = self.validate_nonce(&transaction, &account) {
-            return err;
+            return err
         }
 
         // checks for max cost not exceedng account_balance
         if let Err(err) = self.validate_account_balance(&transaction, &account) {
-            return err;
+            return err
         }
 
         // heavy blob tx validation
@@ -635,12 +634,12 @@ where
             };
 
             if is_eip7702 {
-                return Ok(());
+                return Ok(())
             }
             return Err(TransactionValidationOutcome::Invalid(
                 transaction.clone(),
                 InvalidTransactionError::SignerAccountHasBytecode.into(),
-            ));
+            ))
         }
         Ok(())
     }
@@ -659,7 +658,7 @@ where
                 transaction.clone(),
                 InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
                     .into(),
-            ));
+            ))
         }
         Ok(())
     }
@@ -681,7 +680,7 @@ where
                     GotExpected { got: account.balance, expected }.into(),
                 )
                 .into(),
-            ));
+            ))
         }
         Ok(())
     }
@@ -703,7 +702,7 @@ where
                     return Err(TransactionValidationOutcome::Invalid(
                         transaction.clone(),
                         InvalidTransactionError::TxTypeNotSupported.into(),
-                    ));
+                    ))
                 }
                 EthBlobTransactionSidecar::Missing => {
                     // This can happen for re-injected blob transactions (on re-org), since the blob
@@ -718,7 +717,7 @@ where
                             InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
                             ),
-                        ));
+                        ))
                     }
                 }
                 EthBlobTransactionSidecar::Present(sidecar) => {
@@ -731,7 +730,7 @@ where
                                 InvalidPoolTransactionError::Eip4844(
                                     Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
                                 ),
-                            ));
+                            ))
                         }
                     } else if sidecar.is_eip7594() {
                         return Err(TransactionValidationOutcome::Invalid(
@@ -739,7 +738,7 @@ where
                             InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
                             ),
-                        ));
+                        ))
                     }
 
                     // validate the blob
@@ -749,7 +748,7 @@ where
                             InvalidPoolTransactionError::Eip4844(
                                 Eip4844PoolTransactionError::InvalidEip4844Blob(err),
                             ),
-                        ));
+                        ))
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
