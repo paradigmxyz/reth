@@ -237,6 +237,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
     validation_metrics: TxPoolValidationMetrics,
+    /// Whether balance checking is disabled on transaction ingress
+    disable_balance_check: bool,
 }
 
 // === impl EthTransactionValidatorInner ===
@@ -609,8 +611,8 @@ where
 
         let cost = transaction.cost();
 
-        // Checks for max cost
-        if cost > &account.balance {
+        // Checks for max cost unless balance checking is disabled
+        if cost > &account.balance && !self.disable_balance_check {
             let expected = *cost;
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -809,6 +811,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     max_tx_input_bytes: usize,
     /// Maximum gas limit for individual transactions
     max_tx_gas_limit: Option<u64>,
+    /// Whether balance checking is disabled on transaction ingress
+    disable_balance_check: bool,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
@@ -852,6 +856,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
+
+            // balance check should always be enabled, unless in dev mode
+            disable_balance_check: false,
         }
     }
 
@@ -1007,6 +1014,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Sets the disable balance check flag
+    pub const fn with_disable_balance_check(mut self, disable_balance_check: bool) -> Self {
+        self.disable_balance_check = disable_balance_check;
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -1029,6 +1042,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config,
             max_tx_input_bytes,
             max_tx_gas_limit,
+            disable_balance_check,
             ..
         } = self;
 
@@ -1063,6 +1077,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_tx_gas_limit,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
+            disable_balance_check,
         };
 
         EthTransactionValidator { inner: Arc::new(inner) }

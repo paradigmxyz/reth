@@ -472,6 +472,7 @@ where
             .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
             .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
+            .with_disable_balance_check(ctx.config().txpool.disable_balance_check)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         if validator.validator().eip4844() {

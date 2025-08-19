@@ -79,6 +79,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.max-tx-gas")]
     pub max_tx_gas_limit: Option<u64>,
 
+    /// Disable balance checking for transactions entering the transaction pool
+    #[arg(long = "txpool.disable-balance-check")]
+    pub disable_balance_check: bool,
+
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
@@ -156,6 +160,7 @@ impl Default for TxPoolArgs {
             minimum_priority_fee: None,
             enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             max_tx_gas_limit: None,
+            disable_balance_check: false,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
