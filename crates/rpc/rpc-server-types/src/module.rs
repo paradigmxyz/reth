@@ -407,6 +407,34 @@ impl Serialize for RethRpcModule {
 pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
     /// Parse and validate an RPC module selection string.
     fn parse_selection(s: &str) -> Result<RpcModuleSelection, String>;
+
+    /// Validates RPC module selection that was already parsed.
+    ///
+    /// This is used to validate modules that were parsed as `Other` variants
+    /// to ensure they meet the validation rules of the specific implementation.
+    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
+        // Re-validate the modules using the parser's validator
+        // This is necessary because the clap value parser accepts any input
+        // and we need to validate according to the specific parser's rules
+        let RpcModuleSelection::Selection(module_set) = modules else {
+            // All or Standard variants are always valid
+            return Ok(());
+        };
+
+        for module in module_set {
+            let RethRpcModule::Other(name) = module else {
+                // Standard modules are always valid
+                continue;
+            };
+
+            // Try to parse and validate using the configured validator
+            // This will check for typos and other validation rules
+            Self::parse_selection(name)
+                .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Default validator with typo detection.

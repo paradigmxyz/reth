@@ -75,10 +75,12 @@ where
             Commands::Node(command) => {
                 // Validate RPC modules using the configured validator
                 if let Some(http_api) = &command.rpc.http_api {
-                    P::validate_rpc_modules(http_api, "http.api").map_err(|e| eyre!(e))?;
+                    <P::RpcModuleValidator as reth_rpc_server_types::RpcModuleValidator>::validate_selection(http_api, "http.api")
+                        .map_err(|e| eyre!("{e}"))?;
                 }
                 if let Some(ws_api) = &command.rpc.ws_api {
-                    P::validate_rpc_modules(ws_api, "ws.api").map_err(|e| eyre!(e))?;
+                    <P::RpcModuleValidator as reth_rpc_server_types::RpcModuleValidator>::validate_selection(ws_api, "ws.api")
+                        .map_err(|e| eyre!("{e}"))?;
                 }
 
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
