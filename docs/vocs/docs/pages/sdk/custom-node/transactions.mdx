@@ -21,7 +21,7 @@ but still produces a new state, performing a computation at no gas cost.
 # Type definition using declarative macro
 
 We'll showcase the macro on the `custom-node` example in the `reth` repository.
-Please refer to it to see the complete implementation.
+Please refer to it to see the complete implementation: https://github.com/paradigmxyz/reth/tree/main/examples/custom-node
 
 ## Introduction
 
@@ -34,9 +34,17 @@ ones.
 The transaction envelope macro resides in the `alloy_consensus` crate since version `1.0.10`. It's being consistently improved upon so it's recommended to use the latest version.
 Since we're building on top of Optimism we will also need `op-alloy` that contains Optimism specific extensions.
 
+Our goal is Reth compatibility, hence we need to import relevant Reth crates. Sometimes items from REVM are referenced
+by Reth as its transaction execution environment, so we also need to import it.
+
 ```toml
 # reth
 reth-codecs = "1.6.0"
+reth-ethereum = { version = "1.6.0", features = ["node-api", "network", "evm", "pool", "trie", "storage-api", "provider"] }
+reth-op = { version = "1.6.0", features = ["node", "pool", "rpc"] }
+
+# revm
+revm-primitives = "20.2.1"
 
 # alloy
 alloy-consensus = "1.0.24"
@@ -55,7 +63,7 @@ op-alloy-rpc-types-engine = "0.18.14"
 op-alloy-rpc-types = "0.18.14"
 ```
 
-There may be occasionally additional dependencies needed. Refer to the custom node example for a complete list: https://github.com/paradigmxyz/reth/blob/7d660b57b0f219899387a352de5ba517b6b08901/examples/custom-node/Cargo.toml
+There may be occasionally additional dependencies needed. Refer to the custom node example for a complete list: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml
 
 ## Declaration
 
@@ -65,7 +73,7 @@ When one thinks of a transaction, usually they mean as it is defined in the cons
 interpretations depending on context. We'll start with the consensus definition.
 
 This definition is how the blockchain stores it, hence why a lot of the declarative properties relate to RLP encoding.
-In the context of reth, the consensus definition is also adapted into the RPC API representation. Therefore it is also
+In the context of reth, the consensus definition is also adapted into the RPC API representation. Therefore, it is also
 being JSON encoded. And lastly, it is being stored in database, it uses `Compact` encoding, which is a custom reth
 database encoding. This one needs to be implemented manually, but can reuse a lot of existing functionality. More on
 that later on in this chapter.
@@ -211,9 +219,9 @@ it cannot provide these implementations automatically.
 
 We'll dissect the several kinds of trait implementations you may encounter. To see the complete list refer to these
 source code sections:
-* Consensus envelope: https://github.com/paradigmxyz/reth/blob/c63459884e5988067b0b7a67362dd036f2085326/examples/custom-node/src/primitives/tx.rs#L43-L309
-* Pooled envelope: https://github.com/paradigmxyz/reth/blob/cb42ac94b552fc798563ea9c383870dc3db99f4c/examples/custom-node/src/pool.rs#L21-L94
-* Transaction: https://github.com/paradigmxyz/reth/blob/7349abd12639cebc7a5377a841376b0fd4781bcb/examples/custom-node/src/primitives/tx_custom.rs#L70-L288
+* Consensus envelope: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/primitives/tx.rs#L29-L140
+* Pooled envelope: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/pool.rs#L23-L89
+* Transaction: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/primitives/tx_custom.rs#L71-L288
 
 Most of these implementations simply match the envelope enum variant and then delegate the responsibility to each variant, for example:
 
