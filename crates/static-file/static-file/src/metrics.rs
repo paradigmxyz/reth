@@ -1,4 +1,3 @@
-use metrics;
 use reth_metrics::{metrics::Histogram, Metrics};
 
 /// Metrics for the static file producer.
