@@ -72,6 +72,8 @@ where
         self.calculate(true)
     }
 
+    /// Computes the state root by calculating storage roots in parallel for modified accounts,
+    /// then walking the state trie to build the final root hash.
     fn calculate(
         self,
         retain_updates: bool,
@@ -100,7 +102,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            tokio::task::spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -270,8 +272,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
-    #[test]
-    fn random_parallel_root() {
+    #[tokio::test]
+    async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
