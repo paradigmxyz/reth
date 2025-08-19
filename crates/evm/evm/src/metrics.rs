@@ -95,9 +95,6 @@ mod tests {
         let metrics = ExecutorMetrics::default();
         let block = create_test_block_with_gas(1000);
 
-        // Check initial state
-        // Metrics don't have direct get() method, just verify execution completes
-
         // Execute with metered_one
         let result = metrics.metered_one(&block, |b| {
             // Simulate some work
@@ -107,8 +104,6 @@ mod tests {
 
         // Verify result
         assert_eq!(result, 1000);
-
-        // Metrics were updated (can't directly read values without metrics-util)
     }
 
     #[test]
@@ -122,6 +117,5 @@ mod tests {
         });
 
         assert_eq!(result, "test_result");
-        // Metrics were updated (execution_duration should be >= 0.01)
     }
 }

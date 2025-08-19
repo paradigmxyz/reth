@@ -107,6 +107,7 @@ impl EngineApiMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7685::Requests;
     use alloy_evm::block::{CommitChanges, StateChangeSource};
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
@@ -116,9 +117,11 @@ mod tests {
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
         context::result::ExecutionResult,
+        database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
         state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot},
+        Context, MainBuilder, MainContext,
     };
     use std::sync::mpsc;
 
@@ -161,15 +164,33 @@ mod tests {
         fn finish(
             self,
         ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
-            // Create a mock db with our state for returning
-            let _db = State::builder()
+            let Self { hook, state, .. } = self;
+            
+            // Call hook with our mock state
+            if let Some(mut hook) = hook {
+                hook.on_state(StateChangeSource::Transaction(0), &state);
+            }
+
+            // Create a mock EVM
+            let db = State::builder()
                 .with_database(EmptyDB::default())
                 .with_bundle_update()
                 .without_state_clear()
                 .build();
+            let evm = EthEvm::new(
+                Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
+                false,
+            );
 
-            // Return mock EVM and result - this won't actually work but tests the metrics path
-            Err(BlockExecutionError::msg("Mock executor cannot create real EVM"))
+            // Return successful result like the original tests
+            Ok((
+                evm,
+                BlockExecutionResult {
+                    receipts: vec![],
+                    requests: Requests::default(),
+                    gas_used: 1000,
+                },
+            ))
         }
 
         fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
@@ -233,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_executor_metrics_recorded() {
+    fn test_executor_metrics_hook_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = EngineApiMetrics::default();
 
