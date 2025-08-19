@@ -18,9 +18,34 @@ use reth_trie::{
     HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{mpsc, Arc, OnceLock},
+    time::Duration,
+};
 use thiserror::Error;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
+
+/// Gets or creates a tokio runtime handle for spawning blocking tasks.
+/// This ensures we always have a runtime available for I/O operations.
+fn get_runtime_handle() -> Handle {
+    Handle::try_current().unwrap_or_else(|_| {
+        // Create a new runtime if no runtime is available
+        static RT: OnceLock<Runtime> = OnceLock::new();
+        
+        let rt = RT.get_or_init(|| {
+            Builder::new_multi_thread()
+                .enable_all()
+                // Keep threads alive for efficient reuse
+                .thread_keep_alive(Duration::from_secs(15))
+                .build()
+                .expect("Failed to create tokio runtime")
+        });
+        
+        rt.handle().clone()
+    })
+}
 
 /// Parallel incremental state root calculator.
 ///
@@ -104,58 +129,33 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let (tx, rx) = mpsc::sync_channel(1);
 
-            // Use tokio blocking pool if available, otherwise fall back to std::thread
-            if tokio::runtime::Handle::try_current().is_ok() {
-                let _ = tokio::task::spawn_blocking(move || {
-                    let result = (|| -> Result<_, ParallelStateRootError> {
-                        let provider_ro = view.provider_ro()?;
-                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                            &trie_nodes_sorted,
-                        );
-                        let hashed_state = HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                            &hashed_state_sorted,
-                        );
-                        Ok(StorageRoot::new_hashed(
-                            trie_cursor_factory,
-                            hashed_state,
-                            hashed_address,
-                            prefix_set,
-                            #[cfg(feature = "metrics")]
-                            metrics,
-                        )
-                        .calculate(retain_updates)?)
-                    })();
-                    let _ = tx.send(result);
-                });
-            } else {
-                std::thread::spawn(move || {
-                    let result = (|| -> Result<_, ParallelStateRootError> {
-                        let provider_ro = view.provider_ro()?;
-                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                            &trie_nodes_sorted,
-                        );
-                        let hashed_state = HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                            &hashed_state_sorted,
-                        );
-                        Ok(StorageRoot::new_hashed(
-                            trie_cursor_factory,
-                            hashed_state,
-                            hashed_address,
-                            prefix_set,
-                            #[cfg(feature = "metrics")]
-                            metrics,
-                        )
-                        .calculate(retain_updates)?)
-                    })();
-                    let _ = tx.send(result);
-                });
-            }
+            // Use tokio blocking pool for I/O operations
+            let handle = get_runtime_handle();
+            let _ = handle.spawn_blocking(move || {
+                let result = (|| -> Result<_, ParallelStateRootError> {
+                    let provider_ro = view.provider_ro()?;
+                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                        &trie_nodes_sorted,
+                    );
+                    let hashed_state = HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                        &hashed_state_sorted,
+                    );
+                    Ok(StorageRoot::new_hashed(
+                        trie_cursor_factory,
+                        hashed_state,
+                        hashed_address,
+                        prefix_set,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                    )
+                    .calculate(retain_updates)?)
+                })();
+                let _ = tx.send(result);
+            });
             storage_roots.insert(hashed_address, rx);
         }
 

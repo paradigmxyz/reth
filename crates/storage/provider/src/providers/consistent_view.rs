@@ -41,7 +41,7 @@ where
         Ok(Self::new(provider, tip))
     }
 
-    /// Creates new read-only provider and performs consistency checks on the current tip.
+    /// Creates new read-only handle to the database and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<Factory::Provider> {
         // Create a new provider.
         let provider_ro = self.factory.database_provider_ro()?;
