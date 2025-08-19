@@ -55,7 +55,7 @@ where
                     tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
             });
 
-            return Ok(hash)
+            return Ok(hash);
         }
 
         // submit the transaction to the pool with a `Local` origin
@@ -135,7 +135,7 @@ where
     ) -> Result<TxTy<Self::Primitives>, Self::Error> {
         let request: OpTransactionRequest = request.into();
         let Ok(tx) = request.build_typed_tx() else {
-            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
+            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError));
         };
 
         // Create an empty signature for the transaction.

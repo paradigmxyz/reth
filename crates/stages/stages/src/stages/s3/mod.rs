@@ -71,7 +71,7 @@ where
                     self.fetch_rx = None;
                 }
 
-                return Poll::Ready(response)
+                return Poll::Ready(response);
             }
 
             // Spawns the downloader task if there are any missing files
@@ -79,11 +79,11 @@ where
                 self.fetch_rx = Some(fetch_rx);
 
                 // Polls fetch_rx & registers waker
-                continue
+                continue;
             }
 
             // No files to be downloaded
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
     }
 
@@ -147,7 +147,7 @@ impl S3Stage {
                 StaticFileSegment::parse_filename(block_range_files[0].0).expect("qed");
 
             if block_range.end() <= checkpoint.block_number {
-                continue
+                continue;
             }
 
             let mut block_range_requests = vec![];
@@ -156,7 +156,7 @@ impl S3Stage {
                 // run.
                 if self.static_file_directory.join(filename).exists() {
                     // TODO: check hash if the file already exists
-                    continue
+                    continue;
                 }
 
                 block_range_requests.push((filename, file_hash));
@@ -167,7 +167,7 @@ impl S3Stage {
 
         // Return None, if we have downloaded all the files that are required.
         if requests.is_empty() {
-            return None
+            return None;
         }
 
         let static_file_directory = self.static_file_directory.clone();
@@ -190,7 +190,7 @@ impl S3Stage {
                     .await
                     {
                         let _ = fetch_tx.send(Err(err));
-                        return
+                        return;
                     }
                 }
 
@@ -254,7 +254,7 @@ mod tests {
             let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default())
+                return Ok(Vec::default());
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

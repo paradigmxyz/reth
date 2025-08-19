@@ -211,7 +211,7 @@ where
                             key.clone(),
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
-                        ))))
+                        ))));
                     }
                 }
             }
@@ -221,7 +221,7 @@ where
                 // Check if the walker's key is less than the key of the current hashed entry
                 if self.walker.key().is_some_and(|key| key < &Nibbles::unpack(hashed_key)) {
                     self.should_check_walker_key = false;
-                    continue
+                    continue;
                 }
 
                 // Set the next hashed entry as a leaf node and return
@@ -230,7 +230,7 @@ where
 
                 #[cfg(feature = "metrics")]
                 self.metrics.inc_leaf_nodes_returned();
-                return Ok(Some(TrieElement::Leaf(hashed_key, value)))
+                return Ok(Some(TrieElement::Leaf(hashed_key, value)));
             }
 
             // Handle seeking and advancing based on the previous hashed key
@@ -274,9 +274,9 @@ where
                     // the database, so the walker will advance to the branch node after it. Because
                     // of this, we need to check that the current walker key has a prefix of the key
                     // that we seeked to.
-                    if can_skip_node &&
-                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
-                        self.walker.children_are_in_trie()
+                    if can_skip_node
+                        && self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix))
+                        && self.walker.children_are_in_trie()
                     {
                         trace!(
                             target: "trie::node_iter",
@@ -286,7 +286,7 @@ where
                         );
 
                         self.should_check_walker_key = false;
-                        continue
+                        continue;
                     }
 
                     self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;

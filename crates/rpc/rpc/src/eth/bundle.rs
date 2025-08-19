@@ -67,13 +67,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         let transactions = txs
@@ -112,14 +112,14 @@ where
                 .chain_spec()
                 .blob_params_at_timestamp(evm_env.block_env.timestamp)
                 .unwrap_or_else(BlobParams::cancun);
-            if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
-                blob_params.max_blob_gas_per_block()
+            if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>()
+                > blob_params.max_blob_gas_per_block()
             {
                 return Err(EthApiError::InvalidParams(
                     EthBundleError::Eip4844BlobGasExceeded(blob_params.max_blob_gas_per_block())
                         .to_string(),
                 )
-                .into())
+                .into());
             }
         }
 
@@ -129,7 +129,7 @@ where
             if gas_limit > evm_env.block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                )
+                );
             }
             evm_env.block_env.gas_limit = gas_limit;
         }

@@ -101,8 +101,8 @@ pub async fn maintain_pending_state<P>(
 {
     while let Some(event) = events.next().await {
         match event {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _) |
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, _) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _)
+            | BeaconConsensusEngineEvent::ForkBlockAdded(block, _) => {
                 trace!(target: "reth::ress_provider", block = ? block.recovered_block().num_hash(), "Insert block into pending state");
                 pending_state.insert_block(block);
             }
@@ -122,8 +122,8 @@ pub async fn maintain_pending_state<P>(
                 }
             }
             // ignore
-            BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
+            BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _)
+            | BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
         }
     }
 }

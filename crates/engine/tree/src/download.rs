@@ -144,7 +144,7 @@ where
     /// given hash.
     fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
-            return false
+            return false;
         }
         self.push_pending_event(DownloadOutcome::NewDownloadStarted {
             remaining_blocks: 1,
@@ -172,8 +172,8 @@ where
 
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
-        let blocks = self.inflight_full_block_requests.len() +
-            self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
+        let blocks = self.inflight_full_block_requests.len()
+            + self.inflight_block_range_requests.iter().map(|r| r.count() as usize).sum::<usize>();
         self.metrics.active_block_downloads.set(blocks as f64);
     }
 
@@ -256,7 +256,7 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break
+                    break;
                 }
             }
             downloaded_blocks.push(block.0.into());

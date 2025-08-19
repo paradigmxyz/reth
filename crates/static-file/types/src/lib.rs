@@ -94,10 +94,10 @@ pub struct StaticFileTargets {
 impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
     pub const fn any(&self) -> bool {
-        self.headers.is_some() ||
-            self.receipts.is_some() ||
-            self.transactions.is_some() ||
-            self.block_meta.is_some()
+        self.headers.is_some()
+            || self.receipts.is_some()
+            || self.transactions.is_some()
+            || self.block_meta.is_some()
     }
 
     /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
@@ -112,10 +112,9 @@ impl StaticFileTargets {
         .iter()
         .all(|(target_block_range, highest_static_fileted_block)| {
             target_block_range.is_none_or(|target_block_range| {
-                *target_block_range.start() ==
-                    highest_static_fileted_block.map_or(0, |highest_static_fileted_block| {
-                        highest_static_fileted_block + 1
-                    })
+                *target_block_range.start()
+                    == highest_static_fileted_block
+                        .map_or(0, |highest_static_fileted_block| highest_static_fileted_block + 1)
             })
         })
     }

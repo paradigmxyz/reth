@@ -117,7 +117,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(res) = self.caches.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.account_cache_misses.increment(1);
@@ -166,7 +166,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(res) = self.caches.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.code_cache_misses.increment(1);
@@ -350,7 +350,7 @@ impl ProviderCaches {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
             if account.status.is_not_modified() {
-                continue
+                continue;
             }
 
             // If the account was destroyed, invalidate from the account / storage caches
@@ -359,7 +359,7 @@ impl ProviderCaches {
                 self.account_cache.invalidate(addr);
 
                 self.invalidate_account_storage(addr);
-                continue
+                continue;
             }
 
             // If we have an account that was modified, but it has a `None` account info, some wild
@@ -367,7 +367,7 @@ impl ProviderCaches {
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
                 trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
+                return Err(());
             };
 
             // Now we iterate over all storage and make updates to the cached storage values

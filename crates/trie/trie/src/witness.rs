@@ -106,7 +106,7 @@ where
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let is_state_empty = state.is_empty();
         if is_state_empty && !self.always_include_root_node {
-            return Ok(Default::default())
+            return Ok(Default::default());
         }
 
         let proof_targets = if is_state_empty {
@@ -129,7 +129,7 @@ where
             } else {
                 (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
             };
-            return Ok(B256Map::from_iter([(root_hash, root_node)]))
+            return Ok(B256Map::from_iter([(root_hash, root_node)]));
         }
 
         // Record all nodes from multiproof in the witness

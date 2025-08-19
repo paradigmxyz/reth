@@ -75,8 +75,8 @@ impl CustomRlpxProtoMessage {
         buf.put_u8(self.message_type as u8);
         match &self.message {
             CustomRlpxProtoMessageKind::Ping | CustomRlpxProtoMessageKind::Pong => {}
-            CustomRlpxProtoMessageKind::PingMessage(msg) |
-            CustomRlpxProtoMessageKind::PongMessage(msg) => {
+            CustomRlpxProtoMessageKind::PingMessage(msg)
+            | CustomRlpxProtoMessageKind::PongMessage(msg) => {
                 buf.put(msg.as_bytes());
             }
         }
@@ -86,7 +86,7 @@ impl CustomRlpxProtoMessage {
     /// Decodes a `CustomRlpxProtoMessage` from the given message buffer.
     pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
         if buf.is_empty() {
-            return None
+            return None;
         }
         let id = buf[0];
         buf.advance(1);

@@ -179,10 +179,10 @@ pub struct MultiProof {
 impl MultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
-        self.account_subtree.is_empty() &&
-            self.branch_node_hash_masks.is_empty() &&
-            self.branch_node_tree_masks.is_empty() &&
-            self.storages.is_empty()
+        self.account_subtree.is_empty()
+            && self.branch_node_hash_masks.is_empty()
+            && self.branch_node_tree_masks.is_empty()
+            && self.storages.is_empty()
     }
 
     /// Return the account proof nodes for the given account path.
@@ -238,7 +238,7 @@ impl MultiProof {
                             nonce: account.nonce,
                             bytecode_hash: (account.code_hash != KECCAK_EMPTY)
                                 .then_some(account.code_hash),
-                        })
+                        });
                     }
                 }
             }
@@ -310,10 +310,10 @@ pub struct DecodedMultiProof {
 impl DecodedMultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
-        self.account_subtree.is_empty() &&
-            self.branch_node_hash_masks.is_empty() &&
-            self.branch_node_tree_masks.is_empty() &&
-            self.storages.is_empty()
+        self.account_subtree.is_empty()
+            && self.branch_node_hash_masks.is_empty()
+            && self.branch_node_tree_masks.is_empty()
+            && self.storages.is_empty()
     }
 
     /// Return the account proof nodes for the given account path.
@@ -368,7 +368,7 @@ impl DecodedMultiProof {
                         nonce: account.nonce,
                         bytecode_hash: (account.code_hash != KECCAK_EMPTY)
                             .then_some(account.code_hash),
-                    })
+                    });
                 }
             }
             None
@@ -489,7 +489,7 @@ impl StorageMultiProof {
             if let Some(last) = proof.last() {
                 if let TrieNode::Leaf(leaf) = TrieNode::decode(&mut &last[..])? {
                     if nibbles.ends_with(&leaf.key) {
-                        break 'value U256::decode(&mut &leaf.value[..])?
+                        break 'value U256::decode(&mut &leaf.value[..])?;
                     }
                 }
             }
@@ -541,7 +541,7 @@ impl DecodedStorageMultiProof {
         let value = 'value: {
             if let Some(TrieNode::Leaf(leaf)) = proof.last() {
                 if nibbles.ends_with(&leaf.key) {
-                    break 'value U256::decode(&mut &leaf.value[..])?
+                    break 'value U256::decode(&mut &leaf.value[..])?;
                 }
             }
             U256::ZERO
@@ -627,10 +627,10 @@ impl AccountProof {
         } = proof;
         let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
-        let (storage_root, info) = if nonce == 0 &&
-            balance.is_zero() &&
-            storage_hash.is_zero() &&
-            code_hash == KECCAK_EMPTY
+        let (storage_root, info) = if nonce == 0
+            && balance.is_zero()
+            && storage_hash.is_zero()
+            && code_hash == KECCAK_EMPTY
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.
