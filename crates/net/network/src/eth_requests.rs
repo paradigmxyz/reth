@@ -231,7 +231,8 @@ where
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
                 let transformed_receipts = transform_fn(receipts_by_block);
-                total_bytes += transformed_receipts.length();
+
+                total_bytes += transformed_receipts.iter().map(|r| r.length()).sum::<usize>();
                 receipts.push(transformed_receipts);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
