@@ -111,8 +111,7 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Spawn a blocking task to calculate this account's storage root from database I/O
-            // while the main thread continues processing other accounts in parallel
+            // Spawn a blocking task to calculate account's storage root from database I/O
             let handle = get_runtime_handle();
             drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
