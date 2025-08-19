@@ -106,29 +106,56 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            tokio::task::spawn_blocking(move || {
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider_ro = view.provider_ro()?;
-                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
-                    );
-                    let hashed_state = HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
-                    );
-                    Ok(StorageRoot::new_hashed(
-                        trie_cursor_factory,
-                        hashed_state,
-                        hashed_address,
-                        prefix_set,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                    )
-                    .calculate(retain_updates)?)
-                })();
-                let _ = tx.send(result);
-            });
+            // Use tokio blocking pool if available, otherwise fall back to std::thread
+            if tokio::runtime::Handle::try_current().is_ok() {
+                let _ = tokio::task::spawn_blocking(move || {
+                    let result = (|| -> Result<_, ParallelStateRootError> {
+                        let provider_ro = view.provider_ro()?;
+                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &trie_nodes_sorted,
+                        );
+                        let hashed_state = HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                            &hashed_state_sorted,
+                        );
+                        Ok(StorageRoot::new_hashed(
+                            trie_cursor_factory,
+                            hashed_state,
+                            hashed_address,
+                            prefix_set,
+                            #[cfg(feature = "metrics")]
+                            metrics,
+                        )
+                        .calculate(retain_updates)?)
+                    })();
+                    let _ = tx.send(result);
+                });
+            } else {
+                std::thread::spawn(move || {
+                    let result = (|| -> Result<_, ParallelStateRootError> {
+                        let provider_ro = view.provider_ro()?;
+                        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &trie_nodes_sorted,
+                        );
+                        let hashed_state = HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                            &hashed_state_sorted,
+                        );
+                        Ok(StorageRoot::new_hashed(
+                            trie_cursor_factory,
+                            hashed_state,
+                            hashed_address,
+                            prefix_set,
+                            #[cfg(feature = "metrics")]
+                            metrics,
+                        )
+                        .calculate(retain_updates)?)
+                    })();
+                    let _ = tx.send(result);
+                });
+            }
             storage_roots.insert(hashed_address, rx);
         }
 
