@@ -18,8 +18,13 @@ use reth_trie::{
     HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{mpsc, Arc, OnceLock},
+    time::Duration,
+};
 use thiserror::Error;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
 
 /// Parallel incremental state root calculator.
@@ -33,6 +38,10 @@ use tracing::*;
 /// it needs to rely on database state saying the same until
 /// the last transaction is open.
 /// See docs of using [`ConsistentDbView`] for caveats.
+///
+/// Note: This implementation only serves as a fallback for the sparse trie-based
+/// state root calculation. The sparse trie approach is more efficient as it avoids traversing
+/// the entire trie, only operating on the modified parts.
 #[derive(Debug)]
 pub struct ParallelStateRoot<Factory> {
     /// Consistent view of the database.
@@ -72,6 +81,8 @@ where
         self.calculate(true)
     }
 
+    /// Computes the state root by calculating storage roots in parallel for modified accounts,
+    /// then walking the state trie to build the final state root hash.
     fn calculate(
         self,
         retain_updates: bool,
@@ -89,6 +100,10 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+
+        // Get runtime handle once outside the loop
+        let handle = get_runtime_handle();
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -98,9 +113,10 @@ where
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let (tx, rx) = mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            // Spawn a blocking task to calculate account's storage root from database I/O
+            drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -122,7 +138,7 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            });
+            }));
             storage_roots.insert(hashed_address, rx);
         }
 
@@ -261,6 +277,27 @@ impl From<alloy_rlp::Error> for ParallelStateRootError {
     }
 }
 
+/// Gets or creates a tokio runtime handle for spawning blocking tasks.
+/// This ensures we always have a runtime available for I/O operations.
+fn get_runtime_handle() -> Handle {
+    Handle::try_current().unwrap_or_else(|_| {
+        // Create a new runtime if no runtime is available
+        static RT: OnceLock<Runtime> = OnceLock::new();
+
+        let rt = RT.get_or_init(|| {
+            Builder::new_multi_thread()
+                // Keep the threads alive for at least the block time (12 seconds) plus buffer.
+                // This prevents the costly process of spawning new threads on every
+                // new block, and instead reuses the existing threads.
+                .thread_keep_alive(Duration::from_secs(15))
+                .build()
+                .expect("Failed to create tokio runtime")
+        });
+
+        rt.handle().clone()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,8 +307,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
-    #[test]
-    fn random_parallel_root() {
+    #[tokio::test]
+    async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
