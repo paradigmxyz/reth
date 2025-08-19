@@ -47,6 +47,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
+rand.workspace = true
 criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true

@@ -17,6 +17,12 @@ fn default_added_removed_keys() -> AddedRemovedKeys {
     AddedRemovedKeys::default().with_assume_added(true)
 }
 
+impl Default for MultiAddedRemovedKeys {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MultiAddedRemovedKeys {
     /// Returns a new instance.
     pub fn new() -> Self {
