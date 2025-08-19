@@ -111,7 +111,7 @@ where
 
             let (tx, rx) = mpsc::sync_channel(1);
 
-            // Use tokio blocking pool for I/O operations
+            // Use tokio blocking pool for database operations
             let handle = get_runtime_handle();
             drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
