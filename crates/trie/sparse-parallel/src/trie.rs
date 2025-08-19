@@ -344,7 +344,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                     ?decoded,
                                     ?tree_mask,
                                     ?hash_mask,
-                                    "Revealing child",
+                                    "Revealing child (from upper)",
                                 );
                                 subtrie.reveal_node(
                                     reveal_path,
@@ -379,12 +379,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
             // If it's a leaf node, extract its value before getting mutable reference to subtrie.
-            // We also add the leaf the prefix set, so that whichever lower subtrie it belongs to
-            // will have its hash recalculated as part of `update_subtrie_hashes`.
             let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
                 let mut leaf_full_path = *node_path;
                 leaf_full_path.extend(key);
-                self.prefix_set.insert(leaf_full_path);
                 Some((
                     leaf_full_path,
                     self.upper_subtrie
@@ -810,6 +807,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self.upper_subtrie.wipe();
         self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
         self.prefix_set = PrefixSetMut::all();
+        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     fn clear(&mut self) {
@@ -820,6 +818,8 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
         self.prefix_set.clear();
         self.updates = None;
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
         // `update_actions_buffers` doesn't need to be cleared; we want to reuse the Vecs it has
         // buffered, and all of those are already inherently cleared when they get used.
     }
@@ -1288,7 +1288,10 @@ impl ParallelSparseTrie {
 
     /// Returns:
     /// 1. List of lower [subtries](SparseSubtrie) that have changed according to the provided
-    ///    [prefix set](PrefixSet). See documentation of [`ChangedSubtrie`] for more details.
+    ///    [prefix set](PrefixSet). See documentation of [`ChangedSubtrie`] for more details. Lower
+    ///    subtries whose root node is missing a hash will also be returned; this is required to
+    ///    handle cases where extensions/leafs get shortened and therefore moved from the upper to a
+    ///    lower subtrie.
     /// 2. Prefix set of keys that do not belong to any lower subtrie.
     ///
     /// This method helps optimize hash recalculations by identifying which specific
@@ -1308,9 +1311,10 @@ impl ParallelSparseTrie {
         let updates_enabled = self.updates_enabled();
 
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-            if let Some(subtrie) =
-                subtrie.take_revealed_if(|subtrie| prefix_set.contains(&subtrie.path))
-            {
+            if let Some(subtrie) = subtrie.take_revealed_if(|subtrie| {
+                prefix_set.contains(&subtrie.path) ||
+                    subtrie.nodes.get(&subtrie.path).is_some_and(|n| n.hash().is_none())
+            }) {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
                     PrefixSetMut::all()
@@ -1541,7 +1545,7 @@ impl SparseSubtrie {
                                     ?decoded,
                                     ?tree_mask,
                                     ?hash_mask,
-                                    "Revealing child",
+                                    "Revealing child (from lower)",
                                 );
                                 self.reveal_node(
                                     reveal_path,
