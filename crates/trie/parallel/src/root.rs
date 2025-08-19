@@ -27,26 +27,6 @@ use thiserror::Error;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::*;
 
-/// Gets or creates a tokio runtime handle for spawning blocking tasks.
-/// This ensures we always have a runtime available for I/O operations.
-fn get_runtime_handle() -> Handle {
-    Handle::try_current().unwrap_or_else(|_| {
-        // Create a new runtime if no runtime is available
-        static RT: OnceLock<Runtime> = OnceLock::new();
-
-        let rt = RT.get_or_init(|| {
-            Builder::new_multi_thread()
-                .enable_all()
-                // Keep threads alive for efficient reuse
-                .thread_keep_alive(Duration::from_secs(15))
-                .build()
-                .expect("Failed to create tokio runtime")
-        });
-
-        rt.handle().clone()
-    })
-}
-
 /// Parallel incremental state root calculator.
 ///
 /// The calculator starts off by launching tasks to compute storage roots.
@@ -292,6 +272,26 @@ impl From<alloy_rlp::Error> for ParallelStateRootError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Provider(ProviderError::Rlp(error))
     }
+}
+
+/// Gets or creates a tokio runtime handle for spawning blocking tasks.
+/// This ensures we always have a runtime available for I/O operations.
+fn get_runtime_handle() -> Handle {
+    Handle::try_current().unwrap_or_else(|_| {
+        // Create a new runtime if no runtime is available
+        static RT: OnceLock<Runtime> = OnceLock::new();
+
+        let rt = RT.get_or_init(|| {
+            Builder::new_multi_thread()
+                .enable_all()
+                // Keep threads alive for efficient reuse
+                .thread_keep_alive(Duration::from_secs(15))
+                .build()
+                .expect("Failed to create tokio runtime")
+        });
+
+        rt.handle().clone()
+    })
 }
 
 #[cfg(test)]
