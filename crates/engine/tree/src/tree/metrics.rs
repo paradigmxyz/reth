@@ -165,7 +165,7 @@ mod tests {
             self,
         ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
             let Self { hook, state, .. } = self;
-            
+
             // Call hook with our mock state
             if let Some(mut hook) = hook {
                 hook.on_state(StateChangeSource::Transaction(0), &state);
