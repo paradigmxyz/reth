@@ -917,7 +917,7 @@ where
             .iter()
             .filter_map(|namespace| {
                 // Skip Other variants - they should be registered via extend_rpc_modules
-                if matches!(namespace, RethRpcModule::Other(_)) {
+                if namespace.is_other() {
                     return None;
                 }
 

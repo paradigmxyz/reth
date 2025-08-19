@@ -318,6 +318,11 @@ impl RethRpcModule {
             _ => self.as_ref(), // Uses AsRefStr trait
         }
     }
+
+    /// Returns true if this is an `Other` variant.
+    pub const fn is_other(&self) -> bool {
+        matches!(self, Self::Other(_))
+    }
 }
 
 impl AsRef<str> for RethRpcModule {
@@ -743,6 +748,18 @@ mod test {
         assert_eq!(other1, other2);
         assert_ne!(other1, other3);
         assert_ne!(other1, RethRpcModule::Eth);
+    }
+
+    #[test]
+    fn test_rpc_module_is_other() {
+        // Standard modules should return false
+        assert!(!RethRpcModule::Eth.is_other());
+        assert!(!RethRpcModule::Admin.is_other());
+        assert!(!RethRpcModule::Debug.is_other());
+
+        // Other variants should return true
+        assert!(RethRpcModule::Other("custom".to_string()).is_other());
+        assert!(RethRpcModule::Other("mycustomrpc".to_string()).is_other());
     }
 
     #[test]
