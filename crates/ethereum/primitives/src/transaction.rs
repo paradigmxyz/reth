@@ -611,13 +611,11 @@ impl reth_codecs::Compact for TransactionSigned {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
+            let transaction_type = (bitflags & 0b110) >> 1;
             if cfg!(feature = "std") {
                 reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                     let mut decompressor = decompressor.borrow_mut();
 
-                    // TODO: enforce that zstd is only present at a "top" level type
-
-                    let transaction_type = (bitflags & 0b110) >> 1;
                     let (transaction, _) =
                         Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
@@ -625,7 +623,6 @@ impl reth_codecs::Compact for TransactionSigned {
                 })
             } else {
                 let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
-                let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
 
