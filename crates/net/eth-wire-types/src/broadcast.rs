@@ -228,7 +228,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns true if the message is empty
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match self {
             Self::Eth66(msg) => msg.0.is_empty(),
             Self::Eth68(msg) => msg.hashes.is_empty(),
@@ -236,7 +236,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns the number of hashes in the message
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Self::Eth66(msg) => msg.0.len(),
             Self::Eth68(msg) => msg.hashes.len(),

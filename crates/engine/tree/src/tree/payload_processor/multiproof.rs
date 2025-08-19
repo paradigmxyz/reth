@@ -11,10 +11,7 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
-    StateCommitmentProvider,
-};
+use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx};
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
@@ -362,8 +359,7 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
 
 impl<Factory> MultiproofManager<Factory>
 where
-    Factory:
-        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
     fn new(
@@ -653,8 +649,7 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
 
 impl<Factory> MultiProofTask<Factory>
 where
-    Factory:
-        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
@@ -1166,10 +1161,7 @@ mod tests {
 
     fn create_state_root_config<F>(factory: F, input: TrieInput) -> MultiProofConfig<F>
     where
-        F: DatabaseProviderFactory<Provider: BlockReader>
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         let consistent_view = ConsistentDbView::new(factory, None);
         let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
@@ -1181,10 +1173,7 @@ mod tests {
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
     where
-        F: DatabaseProviderFactory<Provider: BlockReader>
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        F: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         let executor = WorkloadExecutor::default();
         let config = create_state_root_config(factory, TrieInput::default());

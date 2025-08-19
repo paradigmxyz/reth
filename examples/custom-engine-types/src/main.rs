@@ -60,7 +60,6 @@ use reth_ethereum::{
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
-use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
@@ -252,13 +251,7 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-        >,
-    >,
+    N: FullNodeComponents<Types = MyCustomNode, Evm = EthEvmConfig>,
 {
     type Validator = CustomEngineValidator;
 
@@ -275,7 +268,6 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = CustomEngineTypes;
 }

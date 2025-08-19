@@ -55,9 +55,6 @@ pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcR
 // Re-exports
 pub use reth_ethereum_forks::*;
 
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;
-
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
 

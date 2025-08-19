@@ -2,7 +2,7 @@
 
 use crate::{node::NodeTestContext, NodeHelperType, Wallet};
 use reth_chainspec::ChainSpec;
-use reth_cli_commands::import_op::{import_blocks_from_file, ImportConfig};
+use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig};
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};

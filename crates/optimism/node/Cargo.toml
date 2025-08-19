@@ -24,7 +24,6 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
-reth-trie-db.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, optional = true }
 reth-trie-common.workspace = true
@@ -57,6 +56,9 @@ alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
+# async
+tokio.workspace = true
+
 # misc
 clap.workspace = true
 serde.workspace = true
@@ -65,7 +67,6 @@ eyre.workspace = true
 # test-utils dependencies
 reth-e2e-test-utils = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -83,7 +84,6 @@ reth-network-api.workspace = true
 
 alloy-network.workspace = true
 futures.workspace = true
-alloy-eips.workspace = true
 op-alloy-network.workspace = true
 tempfile.workspace = true
 
@@ -100,7 +100,6 @@ test-utils = [
     "reth-tasks",
     "reth-e2e-test-utils",
     "alloy-genesis",
-    "tokio",
     "serde_json",
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",
@@ -112,7 +111,6 @@ test-utils = [
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
-    "reth-trie-db/test-utils",
     "reth-optimism-node/test-utils",
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/test-utils",
