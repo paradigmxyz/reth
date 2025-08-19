@@ -100,6 +100,10 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
+
+        // Get runtime handle once outside the loop
+        let handle = get_runtime_handle();
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -112,7 +116,6 @@ where
             let (tx, rx) = mpsc::sync_channel(1);
 
             // Spawn a blocking task to calculate account's storage root from database I/O
-            let handle = get_runtime_handle();
             drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
@@ -283,8 +286,9 @@ fn get_runtime_handle() -> Handle {
 
         let rt = RT.get_or_init(|| {
             Builder::new_multi_thread()
-                .enable_all()
-                // Keep threads alive for efficient reuse
+                // Keep the threads alive for at least the block time (12 seconds) plus buffer.
+                // This prevents the costly process of spawning new threads on every
+                // new block, and instead reuses the existing threads.
                 .thread_keep_alive(Duration::from_secs(15))
                 .build()
                 .expect("Failed to create tokio runtime")
