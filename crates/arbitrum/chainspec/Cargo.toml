@@ -21,3 +21,9 @@ alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+base64 = "0.22"
+libflate = "2.0"
+reth-primitives-traits = { path = "../../primitives-traits" }
+
+[dependencies]
+reth-trie-common = { path = "../../trie/common" }
