@@ -24,6 +24,39 @@ pub trait RethCliParsers: Clone + Send + Sync + 'static {
     fn parse_rpc_modules(s: &str) -> Result<reth_rpc_server_types::RpcModuleSelection, String> {
         Self::RpcModuleValidator::parse_selection(s)
     }
+
+    /// Validates RPC module selection using the configured validator.
+    ///
+    /// This is used to validate modules that were parsed as `Other` variants
+    /// to ensure they meet the validation rules of the specific implementation.
+    fn validate_rpc_modules(
+        modules: &reth_rpc_server_types::RpcModuleSelection,
+        arg_name: &str,
+    ) -> Result<(), String> {
+        use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
+
+        // Re-validate the modules using the parser's validator
+        // This is necessary because the clap value parser accepts any input
+        // and we need to validate according to the specific parser's rules
+        let RpcModuleSelection::Selection(module_set) = modules else {
+            // All or Standard variants are always valid
+            return Ok(());
+        };
+
+        for module in module_set {
+            let RethRpcModule::Other(name) = module else {
+                // Standard modules are always valid
+                continue;
+            };
+
+            // Try to parse and validate using the configured validator
+            // This will check for typos and other validation rules
+            Self::parse_rpc_modules(name)
+                .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Helper to parse a [Duration] from seconds

@@ -216,9 +216,19 @@ impl<P: RethCliParsers, Ext: clap::Args + fmt::Debug> Cli<P, Ext> {
         let _ = install_prometheus_recorder();
 
         match self.command {
-            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<P::ChainSpecParser, Ext>(launcher))
-            }),
+            Commands::Node(command) => {
+                // Validate RPC modules using the configured validator
+                if let Some(http_api) = &command.rpc.http_api {
+                    P::validate_rpc_modules(http_api, "http.api").map_err(|e| eyre::eyre!(e))?;
+                }
+                if let Some(ws_api) = &command.rpc.ws_api {
+                    P::validate_rpc_modules(ws_api, "ws.api").map_err(|e| eyre::eyre!(e))?;
+                }
+
+                runner.run_command_until_exit(|ctx| {
+                    command.execute(ctx, FnLauncher::new::<P::ChainSpecParser, Ext>(launcher))
+                })
+            }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<N>())
@@ -445,5 +455,81 @@ mod tests {
         ])
         .unwrap();
         assert!(reth.run(async move |_, _| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn test_rpc_module_validation() {
+        use reth_rpc_server_types::RethRpcModule;
+
+        // Test that standard modules are accepted
+        let cli = Cli::<EthereumCliParsers>::try_parse_args_from([
+            "reth",
+            "node",
+            "--http.api",
+            "eth,admin,debug",
+        ])
+        .unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                // Should contain the expected modules
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Admin));
+                assert!(modules.contains(&RethRpcModule::Debug));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+
+        // Test that unknown modules are parsed as Other variant
+        let cli = Cli::<EthereumCliParsers>::try_parse_args_from([
+            "reth",
+            "node",
+            "--http.api",
+            "eth,customrpc",
+        ])
+        .unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Other("customrpc".to_string())));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+    }
+
+    #[test]
+    fn test_rpc_module_typo_detection() {
+        use reth_cli_runner::CliRunner;
+
+        // Test that a typo in module name is detected during validation
+        let cli = Cli::<EthereumCliParsers>::try_parse_args_from([
+            "reth",
+            "node",
+            "--http.api",
+            "eht", // typo: should be "eth"
+        ])
+        .unwrap();
+
+        // When we try to run the CLI with validation, it should fail
+        let runner = CliRunner::try_default_runtime().unwrap();
+        let result = cli.with_runner(runner, |_, _| async { Ok(()) });
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+
+        // The error should mention it's a typo and suggest the correct module
+        assert!(err_msg.contains("'eht'"), "Error should mention the typo: {}", err_msg);
+        assert!(err_msg.contains("'eth'"), "Error should suggest the correct module: {}", err_msg);
+        assert!(err_msg.contains("typo"), "Error should indicate it's a typo: {}", err_msg);
     }
 }
