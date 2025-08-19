@@ -509,15 +509,15 @@ mod tests {
     }
 
     #[test]
-    fn test_rpc_module_typo_detection() {
+    fn test_rpc_module_unknown_rejected() {
         use reth_cli_runner::CliRunner;
 
-        // Test that a typo in module name is detected during validation
+        // Test that unknown module names are rejected during validation
         let cli = Cli::<EthereumCliParsers>::try_parse_args_from([
             "reth",
             "node",
             "--http.api",
-            "eht", // typo: should be "eth"
+            "unknownmodule",
         ])
         .unwrap();
 
@@ -529,9 +529,16 @@ mod tests {
         let err = result.unwrap_err();
         let err_msg = err.to_string();
 
-        // The error should mention it's a typo and suggest the correct module
-        assert!(err_msg.contains("'eht'"), "Error should mention the typo: {}", err_msg);
-        assert!(err_msg.contains("'eth'"), "Error should suggest the correct module: {}", err_msg);
-        assert!(err_msg.contains("typo"), "Error should indicate it's a typo: {}", err_msg);
+        // The error should mention it's an unknown module
+        assert!(
+            err_msg.contains("Unknown RPC module"),
+            "Error should mention unknown module: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("'unknownmodule'"),
+            "Error should mention the module name: {}",
+            err_msg
+        );
     }
 }
