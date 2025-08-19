@@ -248,7 +248,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Initialize the database from a state dump file.
     #[command(name = "init-state")]
     InitState(init_state::InitStateCommand<C>),
-    /// This syncs RLP encoded blocks from a file.
+    /// This syncs RLP encoded blocks from a file or files.
     #[command(name = "import")]
     Import(import::ImportCommand<C>),
     /// This syncs ERA encoded blocks from a directory.
