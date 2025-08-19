@@ -33,7 +33,7 @@ fn get_runtime_handle() -> Handle {
     Handle::try_current().unwrap_or_else(|_| {
         // Create a new runtime if no runtime is available
         static RT: OnceLock<Runtime> = OnceLock::new();
-        
+
         let rt = RT.get_or_init(|| {
             Builder::new_multi_thread()
                 .enable_all()
@@ -42,7 +42,7 @@ fn get_runtime_handle() -> Handle {
                 .build()
                 .expect("Failed to create tokio runtime")
         });
-        
+
         rt.handle().clone()
     })
 }
@@ -133,7 +133,7 @@ where
 
             // Use tokio blocking pool for I/O operations
             let handle = get_runtime_handle();
-            let _ = handle.spawn_blocking(move || {
+            drop(handle.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -155,7 +155,7 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            });
+            }));
             storage_roots.insert(hashed_address, rx);
         }
 
