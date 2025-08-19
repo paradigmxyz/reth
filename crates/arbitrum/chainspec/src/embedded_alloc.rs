@@ -91,16 +91,11 @@ pub fn load_sepolia_secure_alloc_accounts() -> Result<BTreeMap<Address, GenesisA
     bail!("unexpected embedded alloc format")
 }
 
-#[cfg(test)]
 use alloy_consensus::constants::KECCAK_EMPTY;
-#[cfg(test)]
 use alloy_primitives::keccak256;
-#[cfg(test)]
 use reth_primitives_traits::Account;
-#[cfg(test)]
-use reth_trie_common::hashed_state::HashedStorage;
+use reth_trie_common::HashedStorage;
 
-#[cfg(test)]
 pub fn load_sepolia_secure_alloc_hashed(
 ) -> Result<(BTreeMap<B256, Account>, BTreeMap<B256, HashedStorage>)> {
     let parsed = decode_embedded_alloc_json()?;
@@ -131,19 +126,19 @@ pub fn load_sepolia_secure_alloc_hashed(
             KECCAK_EMPTY
         };
 
-        let acct = Account { nonce, balance, bytecode_hash: code_hash };
+        let acct = Account { nonce, balance, bytecode_hash: Some(code_hash) };
         accounts_h.insert(hashed_addr, acct);
 
-        let mut storage_entries: BTreeMap<B256, B256> = BTreeMap::new();
+        let mut storage_entries: BTreeMap<B256, U256> = BTreeMap::new();
         if let Some(stor) = v.get("storage").and_then(|x| x.as_object()) {
             for (k, val) in stor {
                 let sk = parse_b256_hex(k);
-                let sv = parse_b256_hex(val.as_str().unwrap_or("0x0"));
+                let sv = parse_u256_hex(val.as_str().unwrap_or("0x0"));
                 storage_entries.insert(sk, sv);
             }
         }
         if !storage_entries.is_empty() {
-            let storage = HashedStorage::from_iter(storage_entries.into_iter());
+            let storage = HashedStorage::from_iter(false, storage_entries.into_iter());
             storages_h.insert(hashed_addr, storage);
         }
     }

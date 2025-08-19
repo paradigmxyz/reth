@@ -6,7 +6,7 @@ use anyhow::Result;
 use reth_chainspec::ChainSpec;
 mod data;
 #[cfg(feature = "std")]
-mod embedded_alloc;
+pub mod embedded_alloc;
 
 use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use std::sync::Arc;
@@ -353,7 +353,11 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
         map_slot(&l2_space, be_u64(L2_PRICING_INERTIA_OFFSET)),
         be_u64(INITIAL_PRICING_INERTIA),
     );
-    storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)),
+        be_u64(0),
+    );
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_BACKLOG_TOLERANCE_OFFSET)),
@@ -471,7 +475,11 @@ pub fn build_full_arbos_storage(
         map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
         be_u256(initial_l2_base_fee),
     );
-    storage.insert(map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)), be_u64(0));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l2_space, be_u64(L2_GAS_BACKLOG_OFFSET)),
+        be_u64(0),
+    );
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_MIN_BASE_FEE_WEI_OFFSET)),
@@ -518,14 +526,38 @@ pub fn build_full_arbos_storage(
         map_slot(&l1_space, be_u64(L1_AMORTIZED_COST_CAP_BIPS_OFFSET)),
         be_u64(u64::MAX),
     );
-    storage.insert(map_slot(&l1_space, be_u64(L1_LAST_UPDATE_TIME_OFFSET)), be_u64(0));
-    storage.insert(map_slot(&l1_space, be_u64(L1_FUNDS_DUE_FOR_REWARDS_OFFSET)), B256::ZERO);
-    storage.insert(map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)), be_u64(0));
-    storage.insert(map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)), B256::ZERO);
-    storage.insert(map_slot(&l1_space, be_u64(L1_FEES_AVAILABLE_OFFSET)), B256::ZERO);
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_LAST_UPDATE_TIME_OFFSET)),
+        be_u64(0),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_FUNDS_DUE_FOR_REWARDS_OFFSET)),
+        B256::ZERO,
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_UNITS_SINCE_OFFSET)),
+        be_u64(0),
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_LAST_SURPLUS_OFFSET)),
+        B256::ZERO,
+    );
+    insert_non_zero(
+        &mut storage,
+        map_slot(&l1_space, be_u64(L1_FEES_AVAILABLE_OFFSET)),
+        B256::ZERO,
+    );
 
     let bpt_space = subspace(&l1_space, BATCH_POSTER_TABLE_KEY);
-    storage.insert(map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)), be_u64(0));
+    insert_non_zero(
+        &mut storage,
+        map_slot(&bpt_space, be_u64(BPT_TOTAL_FUNDS_DUE_OFFSET)),
+        be_u64(0),
+    );
 
     let poster_addrs_space = subspace(&bpt_space, POSTER_ADDRS_KEY);
     insert_non_zero(&mut storage, map_slot(&poster_addrs_space, be_u64(0)), be_u64(1));
@@ -543,10 +575,6 @@ pub fn build_full_arbos_storage(
 
     let poster_info_space = subspace(&bpt_space, POSTER_INFO_KEY);
 
-    let retryables_space = subspace(&root_key, RETRYABLES_SUBSPACE);
-    let timeout_queue_space = subspace(&retryables_space, 0);
-    storage.insert(map_slot(&timeout_queue_space, be_u64(0)), be_u64(2));
-    storage.insert(map_slot(&timeout_queue_space, be_u64(1)), be_u64(2));
 
     insert_non_zero(
         &mut storage,
@@ -640,9 +668,11 @@ pub fn sepolia_baked_genesis_from_header(
     chain_id: u64,
     base_fee_hex: &str,
     timestamp_hex: &str,
-    _state_root_hex: &str,
+    state_root_hex: &str,
     gas_limit_hex: &str,
     extra_data_hex: &str,
+    mix_hash_hex: &str,
+    nonce_hex: &str,
     chain_config_bytes: Option<&[u8]>,
     initial_l1_base_fee_hex: Option<&str>,
 ) -> Result<ChainSpec> {
@@ -650,18 +680,37 @@ pub fn sepolia_baked_genesis_from_header(
     let ts = parse_hex_quantity(timestamp_hex);
     let gas_limit = parse_hex_quantity(gas_limit_hex);
     let extra = hex::decode(extra_data_hex.trim_start_matches("0x")).unwrap_or_default();
+    let mix_hash = {
+        let bytes = hex::decode(mix_hash_hex.trim_start_matches("0x")).unwrap_or_default();
+        let mut arr = [0u8; 32];
+        let copy = bytes.len().min(32);
+        if copy > 0 {
+            arr[32 - copy..].copy_from_slice(&bytes[bytes.len() - copy..]);
+        }
+        B256::from(arr)
+    };
+    let nonce = parse_hex_quantity(nonce_hex).to::<u64>();
+    let state_root = {
+        let bytes = hex::decode(state_root_hex.trim_start_matches("0x")).unwrap_or_default();
+        let mut arr = [0u8; 32];
+        let copy = bytes.len().min(32);
+        if copy > 0 {
+            arr[32 - copy..].copy_from_slice(&bytes[bytes.len() - copy..]);
+        }
+        B256::from(arr)
+    };
 
     let mut genesis = Genesis::default();
     genesis.config.chain_id = chain_id;
     genesis.config.london_block = Some(0);
     genesis.config.cancun_time = Some(0);
 
-    genesis.nonce = 1;
+    genesis.nonce = nonce;
     genesis.timestamp = ts.to::<u64>();
-    genesis.extra_data = extra.into();
+    genesis.extra_data = extra.clone().into();
     genesis.gas_limit = gas_limit.to::<u64>();
     genesis.difficulty = U256::from(1u64);
-    genesis.mix_hash = B256::ZERO;
+    genesis.mix_hash = mix_hash;
     genesis.coinbase = Address::ZERO;
     genesis.base_fee_per_gas = Some(base_fee.to::<u128>());
     genesis.excess_blob_gas = None;
@@ -717,10 +766,26 @@ pub fn sepolia_baked_genesis_from_header(
         }
     }
 
-
     genesis.alloc = alloc;
 
-    let spec = reth_chainspec::ChainSpec::from_genesis(genesis);
+    let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
+
+    let mut header = alloy_consensus::Header::default();
+    header.gas_limit = gas_limit.to::<u64>();
+    header.difficulty = U256::from(1u64);
+    header.nonce = nonce.into();
+    header.extra_data = extra.into();
+    header.state_root = state_root;
+    header.timestamp = ts.to::<u64>();
+    header.mix_hash = mix_hash;
+    header.beneficiary = Address::ZERO;
+    header.base_fee_per_gas = Some(base_fee.to::<u64>());
+
+    use reth_primitives_traits::SealedHeader;
+    let sealed = SealedHeader::new_unhashed(header);
+    spec.genesis_header = sealed;
+    spec.genesis = genesis;
+
     Ok(spec)
 }
 
