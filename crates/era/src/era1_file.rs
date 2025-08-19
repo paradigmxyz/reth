@@ -9,7 +9,7 @@ use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
-    era_file_ops::{EraFile, FileReader, FileWriter, StreamReader, StreamWriter},
+    era_file_ops::{EraFileFormat, FileReader, FileWriter, StreamReader, StreamWriter},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,
@@ -35,7 +35,7 @@ pub struct Era1File {
     pub id: Era1Id,
 }
 
-impl EraFile for Era1File {
+impl EraFileFormat for Era1File {
     type EraGroup = Era1Group;
     type Id = Era1Id;
 

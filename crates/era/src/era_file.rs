@@ -12,7 +12,7 @@ use crate::{
     },
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version, SLOT_INDEX},
-    era_file_ops::{EraFile, EraFileReader, EraFileWrite, EraReader, EraWriter},
+    era_file_ops::{EraFileFormat, FileReader, FileWriter, StreamReader, StreamWriter},
     era_types::{EraGroup, EraId, SlotIndex},
 };
 
@@ -24,7 +24,7 @@ use std::{
 
 /// Era file interface
 #[derive(Debug)]
-pub struct BeaconEraFile {
+pub struct EraFile {
     /// Version record, must be the first record in the file
     pub version: Version,
 
@@ -35,7 +35,7 @@ pub struct BeaconEraFile {
     pub id: EraId,
 }
 
-impl EraFile for BeaconEraFile {
+impl EraFileFormat for EraFile {
     type EraGroup = EraGroup;
     type Id = EraId;
 
@@ -57,14 +57,15 @@ impl EraFile for BeaconEraFile {
     }
 }
 
-/// Reader for Era files that builds on top of [`E2StoreReader`]
+/// Reader for era files that builds on top of [`E2StoreReader`]
 #[derive(Debug)]
-pub struct BeaconEraReader<R: Read> {
+pub struct EraReader<R: Read> {
     reader: E2StoreReader<R>,
 }
 
 /// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct BeaconBlockIterator<R: Read> {
     reader: E2StoreReader<R>,
     blocks: VecDeque<CompressedSignedBeaconBlock>,
@@ -130,8 +131,8 @@ impl<R: Read + Seek> BeaconBlockIterator<R> {
     }
 }
 
-impl<R: Read + Seek> EraReader<R> for BeaconEraReader<R> {
-    type File = BeaconEraFile;
+impl<R: Read + Seek> StreamReader<R> for EraReader<R> {
+    type File = EraFile;
     type Iterator = BeaconBlockIterator<R>;
 
     /// Create a new [`Era1Reader`]
@@ -149,10 +150,10 @@ impl<R: Read + Seek> EraReader<R> for BeaconEraReader<R> {
     }
 }
 
-impl<R: Read + Seek> BeaconEraReader<R> {
+impl<R: Read + Seek> EraReader<R> {
     /// Reads and parses an Era1 file from the underlying reader, assembling all components
     /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
-    pub fn read_and_assemble(mut self, network_name: String) -> Result<BeaconEraFile, E2sError> {
+    pub fn read_and_assemble(mut self, network_name: String) -> Result<EraFile, E2sError> {
         // Validate version entry
         let _version_entry = match self.reader.read_version()? {
             Some(entry) if entry.is_version() => entry,
@@ -194,7 +195,7 @@ impl<R: Read + Seek> BeaconEraReader<R> {
     }
 }
 
-impl EraFileReader for BeaconEraReader<File> {}
+impl FileReader for EraReader<File> {}
 
 /// Writer for Era1 files that builds on top of [`E2StoreWriter`]
 #[derive(Debug)]
@@ -206,8 +207,8 @@ pub struct BeaconEraWriter<W: Write> {
     has_written_slot_indices: bool,
 }
 
-impl<W: Write> EraWriter<W> for BeaconEraWriter<W> {
-    type File = BeaconEraFile;
+impl<W: Write> StreamWriter<W> for BeaconEraWriter<W> {
+    type File = EraFile;
 
     /// Create a new [`Era1Writer`]
     fn new(writer: W) -> Self {
@@ -339,4 +340,4 @@ impl<W: Write> BeaconEraWriter<W> {
     }
 }
 
-impl EraFileWrite for BeaconEraWriter<File> {}
+impl FileWriter for BeaconEraWriter<File> {}

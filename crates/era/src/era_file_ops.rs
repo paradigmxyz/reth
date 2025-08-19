@@ -8,7 +8,7 @@ use std::{
 };
 
 /// Represents era file with generic content and identifier types
-pub trait EraFile: Sized {
+pub trait EraFileFormat: Sized {
     /// Content group type
     type EraGroup;
 
@@ -46,7 +46,7 @@ pub trait EraFileId: Clone {
 /// [`StreamReader`] for reading era-format files
 pub trait StreamReader<R: Read + Seek>: Sized {
     /// The file type this reader produces
-    type File: EraFile;
+    type File: EraFileFormat;
 
     /// The iterator type for streaming data
     type Iterator;
@@ -77,7 +77,7 @@ pub trait FileReader: StreamReader<File> {
 /// [`StreamWriter`] for writing era-format files
 pub trait StreamWriter<W: Write>: Sized {
     /// The file type this writer handles
-    type File: EraFile;
+    type File: EraFileFormat;
 
     /// Create a new writer
     fn new(writer: W) -> Self;
@@ -106,7 +106,7 @@ pub trait FileWriter: StreamWriter<File> {
     /// file's ID using the standardized era file naming convention
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>
     where
-        <Self::File as EraFile>::Id: EraFileId,
+        <Self::File as EraFileFormat>::Id: EraFileId,
     {
         let filename = file.id().to_file_name();
         let path = directory.as_ref().join(filename);
