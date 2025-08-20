@@ -170,12 +170,11 @@ where
                 }
             };
             {
-                let block_bf_u64 = self.inner.evm().block().basefee;
                 let is_legacy = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy);
                 let chosen_gas_price = if is_legacy {
                     alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
                 } else {
-                    alloy_primitives::U256::from(block_bf_u64)
+                    alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
                 };
                 let needed_fee = alloy_primitives::U256::from(gas_limit) * chosen_gas_price;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
