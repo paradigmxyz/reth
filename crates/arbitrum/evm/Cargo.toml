@@ -54,3 +54,4 @@ alloy-primitives.workspace = true
 alloy-evm.workspace = true
 alloy-eips.workspace = true
 revm-context-interface.workspace = true
+tracing.workspace = true
