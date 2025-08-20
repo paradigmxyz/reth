@@ -232,13 +232,6 @@ where
         }
 
         let mut tx_env = tx.to_tx_env();
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
-        }
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) && tx.tx().gas_limit() == 0 {
-            let block_env = alloy_evm::Evm::block(self.evm());
-            reth_evm::TransactionEnv::set_gas_limit(&mut tx_env, block_env.gas_limit);
-        }
 
 
 
