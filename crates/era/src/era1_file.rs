@@ -9,7 +9,7 @@ use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
-    era_file_ops::{EraFileFormat, FileReader, FileWriter, StreamReader, StreamWriter},
+    era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,
@@ -400,14 +400,15 @@ impl<W: Write> Era1Writer<W> {
     }
 }
 
-impl FileWriter for Era1Writer<File> {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_types::{
-        Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty,
+    use crate::{
+        era_file_ops::FileWriter,
+        execution_types::{
+            Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+            TotalDifficulty,
+        },
     };
     use alloy_primitives::{B256, U256};
     use std::io::Cursor;

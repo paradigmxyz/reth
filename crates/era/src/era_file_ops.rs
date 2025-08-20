@@ -93,8 +93,8 @@ pub trait StreamWriter<W: Write>: Sized {
 }
 
 /// [`StreamWriter`] provides writing file operations for era files
-/// [`StreamWriter`] provides writing file operations for era files
 pub trait FileWriter {
+    /// Era file type the writer handles
     type File: EraFileFormat<Id: EraFileId>;
 
     /// Creates a new file at the specified path and writes the era file to it
