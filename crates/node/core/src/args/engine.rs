@@ -40,7 +40,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
     pub parallel_sparse_trie_enabled: bool,
 
-    /// Enable the parallel sparse trie in the engine.
+    /// Disable the parallel sparse trie in the engine.
     #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false")]
     pub parallel_sparse_trie_disabled: bool,
 
