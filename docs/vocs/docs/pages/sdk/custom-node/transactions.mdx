@@ -31,39 +31,15 @@ ones.
 
 ## Dependencies
 
+We recommend copying out the dependencies list from the [manifest of the custom node example](https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml).
+
 The transaction envelope macro resides in the `alloy_consensus` crate since version `1.0.10`. It's being consistently improved upon so it's recommended to use the latest version.
 Since we're building on top of Optimism we will also need `op-alloy` that contains Optimism specific extensions.
 
 Our goal is Reth compatibility, hence we need to import relevant Reth crates. Sometimes items from REVM are referenced
 by Reth as its transaction execution environment, so we also need to import it.
 
-```toml
-# reth
-reth-codecs = "1.6.0"
-reth-ethereum = { version = "1.6.0", features = ["node-api", "network", "evm", "pool", "trie", "storage-api", "provider"] }
-reth-op = { version = "1.6.0", features = ["node", "pool", "rpc"] }
-
-# revm
-revm-primitives = "20.2.1"
-
-# alloy
-alloy-consensus = "1.0.24"
-alloy-eips = "1.0.24"
-alloy-evm = "1.0.24"
-alloy-genesis = "1.0.24"
-alloy-op-evm = "1.0.24"
-alloy-primitives = "1.0.24"
-alloy-rlp = "1.0.24"
-alloy-serde = "1.0.24"
-alloy-network = "1.0.24"
-alloy-rpc-types-engine = "1.0.24"
-alloy-rpc-types-eth = "1.0.24"
-op-alloy-consensus = "0.18.14"
-op-alloy-rpc-types-engine = "0.18.14"
-op-alloy-rpc-types = "0.18.14"
-```
-
-There may be occasionally additional dependencies needed. Refer to the custom node example for a complete list: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml
+There may be occasionally additional dependencies needed. Refer to the [custom node example](https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml) for a complete list.
 
 ## Declaration
 
