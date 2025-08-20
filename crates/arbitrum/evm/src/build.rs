@@ -223,6 +223,10 @@ where
         }
 
         let mut tx_env = tx.to_tx_env();
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) {
+            tx_env.gas_price = block_basefee.to::<u128>();
+        }
+
 
 
 
