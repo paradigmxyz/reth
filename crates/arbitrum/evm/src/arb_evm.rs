@@ -75,6 +75,10 @@ impl reth_evm::TransactionEnv for ArbTransaction<TxEnv> {
     fn set_access_list(&mut self, access_list: alloy_eips::eip2930::AccessList) {
         self.0.set_access_list(access_list);
     }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        self.0.gas_price = gas_price;
+    }
 }
 
 impl IntoTxEnv<ArbTransaction<TxEnv>> for ArbTransaction<TxEnv> {
