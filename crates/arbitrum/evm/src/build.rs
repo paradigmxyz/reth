@@ -204,8 +204,15 @@ where
                 used_pre_nonce = Some(current_nonce);
             }
 
-            let effective_gas_limit = tx_env.gas_limit;
-            let effective_gas_price = alloy_primitives::U256::from(tx_env.gas_price);
+            let mut effective_gas_limit = gas_limit;
+            if (is_internal || is_deposit) && gas_limit == 0 {
+                effective_gas_limit = 1_000_000;
+            }
+            let effective_gas_price = if is_internal || is_deposit {
+                block_basefee
+            } else {
+                upfront_gas_price
+            };
             let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
