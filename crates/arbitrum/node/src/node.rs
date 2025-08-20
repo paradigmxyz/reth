@@ -265,8 +265,10 @@ where
                 .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
 
                 if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
                     next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
                 } else {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
                     next_env.max_fee_per_gas = Some(l1_base_fee);
                 }
 
