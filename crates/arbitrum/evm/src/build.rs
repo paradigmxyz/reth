@@ -133,11 +133,13 @@ where
             }
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+        let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
                 Legacy => block_basefee,
+                Deposit | Internal => block_basefee,
                 _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
@@ -235,8 +237,10 @@ where
         }
 
         let mut tx_env = tx.to_tx_env();
-        if is_internal {
+        if is_internal || is_deposit {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+        }
+        if is_internal {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
