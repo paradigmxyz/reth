@@ -190,7 +190,7 @@ where
         > + Send
         + Sync
         + 'static,
-    N::Provider: reth_provider::DatabaseProviderFactory + reth_provider::StaticFileProviderFactory,
+    reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>: reth_provider::providers::ProviderNodeTypes,
 {
     fn execute_message_to_block(
         &self,
@@ -816,7 +816,7 @@ where
             ChainSpec = ChainSpec,
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
-    >,
+    > + reth_node_api::ProviderFactoryExt,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -860,7 +860,7 @@ where
             ChainSpec = ChainSpec,
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
-    >,
+    > + reth_node_api::ProviderFactoryExt,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
