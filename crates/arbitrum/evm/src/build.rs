@@ -191,17 +191,27 @@ where
             }
         };
 
+        let mut tx_env = tx.to_tx_env();
+        if is_internal || is_deposit {
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+        }
+        if is_internal {
+            reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
+        }
+
         if needs_precredit {
             if is_sequenced {
                 used_pre_nonce = Some(current_nonce);
             }
 
-            let needed_fee = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
+            let effective_gas_limit = tx_env.gas_limit;
+            let effective_gas_price = alloy_primitives::U256::from(tx_env.gas_price);
+            let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
                 is_sequenced = is_sequenced,
-                gas_limit = gas_limit,
+                gas_limit = effective_gas_limit,
                 paid_gas_price = %paid_gas_price,
                 upfront_gas_price = %upfront_gas_price,
                 needed_fee = %needed_fee,
@@ -234,14 +244,6 @@ where
                 .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
                 .unwrap_or_default();
             tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
-        }
-
-        let mut tx_env = tx.to_tx_env();
-        if is_internal || is_deposit {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
-        }
-        if is_internal {
-            reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
 
