@@ -809,8 +809,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///    delegation will only be allowed a single transaction slot instead of the standard limit.
     ///    This is due to the possibility of the account being sweeped by an unrelated account.
     /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
-    ///    most one in-flight transaction is allowed; any additional delegated tranasctions
-    ///    from that account will be rejected.
+    ///    most one in-flight transaction is allowed; any additional delegated tranasctions from
+    ///    that account will be rejected.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -823,7 +823,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
-                if self.all_transactions.txs_iter(*sender_id).skip(1).next().is_some() {
+                if self.all_transactions.txs_iter(*sender_id).nth(1).is_some() {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
