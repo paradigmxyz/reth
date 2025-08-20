@@ -389,7 +389,10 @@ where
             evm_config,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
+        std::thread::Builder::new()
+            .name("Engine block validation task".to_string())
+            .spawn(|| task.run())
+            .unwrap();
         (incoming, outgoing)
     }
 
