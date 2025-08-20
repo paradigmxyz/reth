@@ -810,7 +810,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///    This is due to the possibility of the account being sweeped by an unrelated account.
     /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
     ///    most one in-flight transaction is allowed; any additional delegated tranasctions
-    ///    (`.skip(1)`) will be rejected.
+    ///    from that account will be rejected.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
