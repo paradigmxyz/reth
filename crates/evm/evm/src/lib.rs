@@ -530,6 +530,13 @@ pub trait TransactionEnv:
         self.set_access_list(access_list);
         self
     }
+
+    fn set_gas_price(&mut self, gas_price: u128);
+
+    fn with_gas_price(mut self, gas_price: u128) -> Self {
+        self.set_gas_price(gas_price);
+        self
+    }
 }
 
 impl TransactionEnv for TxEnv {
@@ -554,6 +561,10 @@ impl TransactionEnv for TxEnv {
             self.tx_type = EIP2930_TX_TYPE_ID;
         }
     }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        self.gas_price = gas_price;
+    }
 }
 
 #[cfg(feature = "op")]
@@ -572,5 +583,9 @@ impl<T: TransactionEnv> TransactionEnv for op_revm::OpTransaction<T> {
 
     fn set_access_list(&mut self, access_list: AccessList) {
         self.base.set_access_list(access_list);
+    }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        self.base.set_gas_price(gas_price);
     }
 }
