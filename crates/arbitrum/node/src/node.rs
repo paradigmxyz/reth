@@ -622,9 +622,7 @@ where
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
-            11 => {
-                return Err(eyre::eyre!("ParseL2Transactions encountered initialize message (should've been handled explicitly at genesis)"));
-            }
+            11 => Vec::new(),
             12 => {
                 let mut cur = &l2_owned[..];
                 let to = read_address20(&mut cur)?;
