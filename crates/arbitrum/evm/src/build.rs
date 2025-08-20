@@ -169,6 +169,17 @@ where
                     Err(_) => 0,
                 }
             };
+            {
+                let gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
+                let needed_fee = alloy_primitives::U256::from(gas_limit) * gas_price;
+                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
+                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
+                    if let Some(info) = acc.info.as_mut() {
+                        info.balance = info.balance.saturating_add(needed_fee);
+                    }
+                }
+            }
             let mut tx_env = tx.to_tx_env();
             TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
             let wrapped = WithTxEnv { tx_env, tx };
