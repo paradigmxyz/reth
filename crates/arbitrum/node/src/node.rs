@@ -623,41 +623,46 @@ where
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => {
+                return Err(eyre::eyre!("ParseL2Transactions encountered initialize message (should've been handled explicitly at genesis)"));
+            }
+            12 => {
                 let mut cur = &l2_owned[..];
-                let mut data = Vec::new();
+                let to = read_address20(&mut cur)?;
+                let balance = read_u256_be32(&mut cur)?;
+                let req = request_id.ok_or_else(|| {
+                    eyre::eyre!("cannot issue deposit tx without L1 request id")
+                })?;
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Deposit(
+                    arb_alloy_consensus::tx::ArbDepositTx {
+                        chain_id: chain_id_u256,
+                        l1_request_id: req,
+                        from: poster,
+                        to,
+                        value: balance,
+                    },
+                );
+                let mut enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode deposit failed"))?]
+            }
+            13 => {
+                let mut cur = &l2_owned[..];
                 let batch_timestamp = read_u256_be32(&mut cur)?;
                 let batch_poster = read_address20(&mut cur)?;
-                let batch_seq_num = read_u64_be(&mut cur)?;
-                let prev_msg_count = read_u64_be(&mut cur)?;
-                let new_msg_count = read_u64_be(&mut cur)?;
-                let data_gas = read_u64_be(&mut cur)?;
-                if new_msg_count < prev_msg_count {
-                    return Err(eyre::eyre!("endMsgCount < prevMsgCount in BatchPostingReport"));
-                }
-                let num_in_batch = new_msg_count - prev_msg_count;
-                for _ in 0..num_in_batch {
-                    match read_u64_be(&mut cur) {
-                        Ok(len) => {
-                            if len > (1 << 24) {
-                                return Err(eyre::eyre!("message len too large in BatchPostingReport"));
-                            }
-                            data.extend_from_slice(&abi_encode_u64(len));
-                        }
-                        Err(_) => {
-                            return Err(eyre::eyre!("unable to read byteLen in BatchPostingReport"));
-                        }
-                    }
-                }
-                if cur.len() > 32 {
-                    return Err(eyre::eyre!("BatchPostingReport: trailing data"));
-                }
-                let l1bf = if cur.is_empty() {
-                    alloy_primitives::U256::ZERO
-                } else {
-                    read_u256_be32(&mut cur)?
-                };
+                let _data_hash = read_u256_be32(&mut cur)?;
+                let batch_num_u256 = read_u256_be32(&mut cur)?;
+                let l1bf = read_u256_be32(&mut cur)?;
+                let extra_gas = if cur.is_empty() { 0u64 } else { read_u64_be(&mut cur)? };
+                let batch_num = u256_to_u64_checked(&batch_num_u256, "batch number")?;
+                let base_gas = batch_gas_cost.ok_or_else(|| eyre::eyre!("cannot compute batch gas cost"))?;
+                let batch_data_gas = base_gas.saturating_add(extra_gas);
                 let report = encode_batch_posting_report_data(
-                    batch_timestamp, batch_poster, batch_seq_num, data_gas, l1bf,
+                    batch_timestamp,
+                    batch_poster,
+                    batch_num,
+                    batch_data_gas,
+                    l1bf,
                 );
                 let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
                     arb_alloy_consensus::tx::ArbInternalTx {
@@ -669,12 +674,6 @@ where
                 let mut s = enc.as_slice();
                 vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode Internal failed"))?]
-            }
-            12 => {
-                if l2_owned != batch_gas_cost.unwrap_or_default().to_be_bytes() {
-                    return Err(eyre::eyre!("BatchGasCost mismatch"));
-                }
-                Vec::new()
             }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
