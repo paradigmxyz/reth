@@ -35,7 +35,8 @@ pub trait TrieCursorFactory {
     ) -> Result<Self::StorageTrieCursor, DatabaseError>;
 }
 
-/// A cursor for navigating a trie that works with both Tables and `DupSort` tables.
+/// A cursor for traversing stored trie nodes. The cursor must iterate over keys in
+/// lexicographical order.
 #[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursor: Send + Sync {
     /// Move the cursor to the key and return if it is an exact match.
