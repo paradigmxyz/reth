@@ -100,8 +100,7 @@ pub trait FileWriter {
     /// Creates a new file at the specified path and writes the era file to it
     fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError>;
 
-    /// Creates a new file in the specified directory with a filename derived from the
-    /// file's ID using the standardized era file naming convention
+    /// Creates a file in the directory using standardized era naming
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>;
 }
 
@@ -116,8 +115,7 @@ impl<T: StreamWriter<File>> FileWriter for T {
         Ok(())
     }
 
-    /// Creates a new file in the specified directory with a filename derived from the
-    /// file's ID using the standardized era file naming convention
+    /// Creates a file in the directory using standardized era naming
     fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError> {
         let filename = file.id().to_file_name();
         let path = directory.as_ref().join(filename);
