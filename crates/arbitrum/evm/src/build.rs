@@ -197,9 +197,6 @@ where
                 }
             }
             let mut tx_env = tx.to_tx_env();
-            if !matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
-                reth_evm::TransactionEnv::set_gas_price(&mut tx_env, self.inner.evm().block().basefee as u128);
-            }
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
             let wrapped = WithTxEnv { tx_env, tx };
             let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
