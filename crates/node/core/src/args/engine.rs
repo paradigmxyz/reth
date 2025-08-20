@@ -35,7 +35,7 @@ pub struct EngineArgs {
     pub caching_and_prewarming_disabled: bool,
 
     /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-parallel-sparse-trie
-    /// if you want to disable usage of the ParallelSparseTrie.
+    /// if you want to disable usage of the `ParallelSparseTrie`.
     #[deprecated]
     #[arg(long = "engine.parallel-sparse-trie", default_value = "true", hide = true)]
     pub parallel_sparse_trie_enabled: bool,

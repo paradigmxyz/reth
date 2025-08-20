@@ -363,10 +363,10 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let accounts_trie = if !self.disable_parallel_sparse_trie {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            } else {
+            let accounts_trie = if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
+            } else {
+                ConfiguredSparseTrie::Parallel(Default::default())
             };
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
