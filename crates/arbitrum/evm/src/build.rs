@@ -170,8 +170,14 @@ where
                 }
             };
             {
-                let gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
-                let needed_fee = alloy_primitives::U256::from(gas_limit) * gas_price;
+                let block_bf_u64 = self.inner.evm().block().basefee;
+                let is_legacy = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy);
+                let chosen_gas_price = if is_legacy {
+                    alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
+                } else {
+                    alloy_primitives::U256::from(block_bf_u64)
+                };
+                let needed_fee = alloy_primitives::U256::from(gas_limit) * chosen_gas_price;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
                 let _ = state.load_cache_account(sender);
@@ -191,7 +197,10 @@ where
                 }
             }
             let mut tx_env = tx.to_tx_env();
-            TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
+            if !matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
+                reth_evm::TransactionEnv::set_gas_price(&mut tx_env, self.inner.evm().block().basefee as u128);
+            }
+            reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
             let wrapped = WithTxEnv { tx_env, tx };
             let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
             if let Ok(Some(_)) = result {
