@@ -45,7 +45,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm::Database;
-use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -648,7 +648,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<Evm, impl OwnedExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<Evm, impl ExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
     where
         S: StateProvider,

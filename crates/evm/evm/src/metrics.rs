@@ -6,7 +6,7 @@ use crate::{Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx, StateChangeSource},
-    Evm, RecoveredTx,
+    Evm,
 };
 use alloy_primitives::TxHash;
 use core::borrow::BorrowMut;
@@ -113,7 +113,7 @@ impl ExecutorMetrics {
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
-        get_cached_tx_result: impl Fn(
+        _get_cached_tx_result: impl Fn(
             &mut <E::Evm as Evm>::DB,
             TxHash,
         ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
@@ -133,20 +133,20 @@ impl ExecutorMetrics {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
-                let executable_tx = tx.as_executable();
-                if let Some(result) =
-                    get_cached_tx_result(executor.evm_mut().db_mut(), *executable_tx.tx().tx_hash())
-                {
-                    self.execution_results_cache_hits.increment(1);
-                    executor.execute_transaction_with_cached_result(
-                        executable_tx,
-                        result,
-                        |_| alloy_evm::block::CommitChanges::Yes,
-                    )?;
-                } else {
+                // TODO: Re-enable cached execution when the method is available
+                // if let Some(result) =
+                //     get_cached_tx_result(executor.evm_mut().db_mut(), *tx.tx().tx_hash())
+                // {
+                //     self.execution_results_cache_hits.increment(1);
+                //     executor.execute_transaction_with_cached_result(
+                //         tx,
+                //         result,
+                //         |_| alloy_evm::block::CommitChanges::Yes,
+                //     )?;
+                // } else {
                     self.execution_results_cache_misses.increment(1);
-                    executor.execute_transaction(executable_tx)?;
-                }
+                    executor.execute_transaction(tx)?;
+                // }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -243,14 +243,6 @@ mod tests {
             Ok(Some(0))
         }
 
-        fn execute_transaction_with_cached_result(
-            &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-        ) -> Result<Option<u64>, BlockExecutionError> {
-            Ok(Some(0))
-        }
 
         fn finish(
             self,
