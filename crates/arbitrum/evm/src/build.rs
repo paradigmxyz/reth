@@ -188,16 +188,31 @@ where
                 );
                 use alloy_primitives::map::HashMap;
                 use alloy_evm::block::state_changes::balance_increment_state;
+                use revm::state::AccountInfo;
+                use alloy_consensus::constants::KECCAK_EMPTY;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
+
                 let mut increments = HashMap::default();
                 increments.insert(sender, needed_fee.to::<u128>());
                 let _ = balance_increment_state(&increments, state);
-                let bal_after = match state.basic(sender) {
-                    Ok(Some(info)) => info.balance,
-                    _ => alloy_primitives::U256::ZERO,
+
+                let inc_u256 = alloy_primitives::U256::from(needed_fee);
+                let existing = match state.basic(sender) {
+                    Ok(Some(info)) => info,
+                    _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: pre_nonce, code_hash: KECCAK_EMPTY, code: None },
                 };
-                tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit = %bal_after, "state.basic(sender) after pre-credit");
+                let mut updated = existing;
+                updated.balance = updated.balance.saturating_add(inc_u256);
+                state.insert_account(sender, updated);
+
+                let overlay_bal = state
+                    .bundle_state
+                    .state
+                    .get(&sender)
+                    .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
+                    .unwrap_or_default();
+                tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
             }
             let mut tx_env = tx.to_tx_env();
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
