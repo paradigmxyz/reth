@@ -755,25 +755,24 @@ where
                         }
                     }
                 }
-
+ 
+                {
+                    let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
+                        head_block_hash: block_hash,
+                        safe_block_hash: parent_hash,
+                        finalized_block_hash: parent_hash,
+                    };
+                    let fcu_resp = beacon
+                        .fork_choice_updated(
+                            fcu_state,
+                            None,
+                            reth_payload_primitives::EngineApiMessageVersion::default(),
+                        )
+                        .await?;
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?fcu_resp.payload_status.status, %block_hash, "follower: updated forkchoice to new head");
+                }
+ 
                 Ok((block_hash, send_root))
-            {
-                let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
-                    head_block_hash: block_hash,
-                    safe_block_hash: parent_hash,
-                    finalized_block_hash: parent_hash,
-                };
-                let fcu_resp = beacon
-                    .fork_choice_updated(
-                        fcu_state,
-                        None,
-                        reth_payload_primitives::EngineApiMessageVersion::default(),
-                    )
-                    .await?;
-                reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?fcu_resp.payload_status.status, %block_hash, "follower: updated forkchoice to new head");
-            }
-
-            }
         })
     }
 }
