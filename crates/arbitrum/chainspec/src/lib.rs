@@ -337,7 +337,7 @@ fn build_minimal_arbos_storage(chain_id: u64, initial_l1_base_fee: U256) -> BTre
         map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)),
         be_u64(INITIAL_PER_BLOCK_GAS_LIMIT_V6),
     );
-    let initial_l2_base_fee = U256::from(100_000_000u64);
+    let initial_l2_base_fee = U256::from(87_500_000u64);
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
@@ -469,7 +469,7 @@ pub fn build_full_arbos_storage(
         map_slot(&l2_space, be_u64(L2_PER_BLOCK_GAS_LIMIT_OFFSET)),
         be_u64(l2_per_block_limit),
     );
-    let initial_l2_base_fee = U256::from(100_000_000u64);
+    let initial_l2_base_fee = U256::from(87_500_000u64);
     insert_non_zero(
         &mut storage,
         map_slot(&l2_space, be_u64(L2_BASE_FEE_WEI_OFFSET)),
