@@ -191,7 +191,7 @@ where
                 used_pre_nonce = Some(pre_nonce);
             }
 
-            let needed_fee = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
+            let needed_fee = alloy_primitives::U256::from(gas_limit) * paid_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
