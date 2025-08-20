@@ -193,6 +193,11 @@ where
                 let mut increments = HashMap::default();
                 increments.insert(sender, needed_fee.to::<u128>());
                 let _ = balance_increment_state(&increments, state);
+                let bal_after = match state.basic(sender) {
+                    Ok(Some(info)) => info.balance,
+                    _ => alloy_primitives::U256::ZERO,
+                };
+                tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit = %bal_after, "state.basic(sender) after pre-credit");
             }
             let mut tx_env = tx.to_tx_env();
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
