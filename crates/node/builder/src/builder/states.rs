@@ -81,6 +81,10 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T> = ComponentsFor<T>
     pub task_executor: TaskExecutor,
     /// The provider of the node.
     pub provider: T::Provider,
+    /// The provider factory for DB/static file access.
+    pub provider_factory: reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<T::Types, T::DB>,
+    >,
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
@@ -117,6 +121,13 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         <Self::Types as reth_node_api::NodeTypes>::Payload,
     > {
         self.components.payload_builder_handle()
+    fn provider_factory(
+        &self,
+    ) -> &reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
+    > {
+        &self.provider_factory
+    }
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -125,6 +136,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
+impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {}
     }
 }
 
@@ -134,6 +146,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
             components: self.components.clone(),
             task_executor: self.task_executor.clone(),
             provider: self.provider.clone(),
+            provider_factory: self.provider_factory.clone(),
         }
     }
 }

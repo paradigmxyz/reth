@@ -7,6 +7,7 @@ use reth_storage_api::{
     StorageLocation,
 };
 use reth_provider::OriginalValuesKnown;
+use reth_provider::providers::ProviderFactory;
 use reth_provider::StaticFileProviderFactory;
 use reth_provider::StaticFileWriter;
 
@@ -171,7 +172,9 @@ pub type ArbNodeComponents<N> = ComponentsBuilder<
 #[derive(Clone)]
 pub struct ArbFollowerExec<N: FullNodeComponents> {
     pub provider: N::Provider,
-    pub db_factory: reth_provider::providers::ProviderFactory<N>,
+    pub db_factory: reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>,
+    >,
     pub beacon: reth_node_api::ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     pub evm_config:
         reth_arbitrum_evm::ArbEvmConfig<ChainSpec, reth_arbitrum_primitives::ArbPrimitives>,
@@ -187,6 +190,7 @@ where
         > + Send
         + Sync
         + 'static,
+    N::Provider: reth_provider::DatabaseProviderFactory + reth_provider::StaticFileProviderFactory,
 {
     fn execute_message_to_block(
         &self,
@@ -211,7 +215,6 @@ where
         let provider = self.provider.clone();
         let evm_config = self.evm_config.clone();
         let beacon = self.beacon.clone();
-        let db_factory = self.db_factory.clone();
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         Box::pin(async move {
@@ -706,8 +709,8 @@ where
                 );
 
                 {
-                    let provider_rw = db_factory.database_provider_rw()?;
-                    let static_file_provider = db_factory.static_file_provider();
+                    let provider_rw = self.db_factory.database_provider_rw()?;
+                    let static_file_provider = self.db_factory.static_file_provider();
 
                     let exec_outcome = reth_execution_types::ExecutionOutcome::new(
                         db.take_bundle(),
@@ -716,7 +719,7 @@ where
                         Vec::new(),
                     );
 
-                    let executed = ExecutedBlockWithTrieUpdates {
+                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
                         block: ExecutedBlock {
                             recovered_block: std::sync::Arc::new(outcome.block),
                             execution_output: std::sync::Arc::new(exec_outcome),
@@ -725,8 +728,7 @@ where
                         trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
                     };
 
-                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
-                        .save_blocks(vec![executed])?;
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
                     UnifiedStorageWriter::commit(provider_rw)?;
 
                     match provider.header(&block_hash) {
@@ -839,7 +841,7 @@ where
 
         let follower: ArbFollowerExec<N> = ArbFollowerExec {
             provider: ctx.node.provider().clone(),
-            db_factory: ctx.node.provider_factory().clone(),
+            db_factory: reth_node_api::ProviderFactoryExt::provider_factory(&ctx.node).clone(),
             beacon: rpc_handle.beacon_engine_handle.clone(),
             evm_config: reth_arbitrum_evm::ArbEvmConfig::new(
                 ctx.config.chain.clone(),
