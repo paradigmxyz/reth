@@ -12,7 +12,7 @@ use crate::{
     },
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version, SLOT_INDEX},
-    era_file_ops::{EraFileFormat, FileReader, FileWriter, StreamReader, StreamWriter},
+    era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
     era_types::{EraGroup, EraId, SlotIndex},
 };
 
@@ -339,5 +339,3 @@ impl<W: Write> BeaconEraWriter<W> {
         Ok(())
     }
 }
-
-impl FileWriter for BeaconEraWriter<File> {}
