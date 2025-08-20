@@ -4,7 +4,7 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::era1_file::Era1Reader;
+use reth_era::{era1_file::Era1Reader, era_file_ops::StreamReader};
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
