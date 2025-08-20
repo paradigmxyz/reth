@@ -93,7 +93,21 @@ pub trait StreamWriter<W: Write>: Sized {
 }
 
 /// [`StreamWriter`] provides writing file operations for era files
-pub trait FileWriter: StreamWriter<File> {
+/// [`StreamWriter`] provides writing file operations for era files
+pub trait FileWriter {
+    type File: EraFileFormat<Id: EraFileId>;
+
+    /// Creates a new file at the specified path and writes the era file to it
+    fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError>;
+
+    /// Creates a new file in the specified directory with a filename derived from the
+    /// file's ID using the standardized era file naming convention
+    fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>;
+}
+
+impl<T: StreamWriter<File>> FileWriter for T {
+    type File = T::File;
+
     /// Creates a new file at the specified path and writes the era file to it
     fn create<P: AsRef<Path>>(path: P, file: &Self::File) -> Result<(), E2sError> {
         let file_handle = File::create(path).map_err(E2sError::Io)?;
@@ -104,10 +118,7 @@ pub trait FileWriter: StreamWriter<File> {
 
     /// Creates a new file in the specified directory with a filename derived from the
     /// file's ID using the standardized era file naming convention
-    fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError>
-    where
-        <Self::File as EraFileFormat>::Id: EraFileId,
-    {
+    fn create_with_id<P: AsRef<Path>>(directory: P, file: &Self::File) -> Result<(), E2sError> {
         let filename = file.id().to_file_name();
         let path = directory.as_ref().join(filename);
         Self::create(path, file)
