@@ -125,15 +125,15 @@ where
             }
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+        let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let needs_precredit = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                Deposit | Internal => false,
+                Internal => false,
+                Deposit => true,
                 _ => true,
             }
         };
-        let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
-        let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
