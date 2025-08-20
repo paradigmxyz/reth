@@ -20,6 +20,7 @@ use reth_arbitrum_rpc::ArbNitroApiServer;
 use reth_arbitrum_rpc::ArbNitroRpc;
 
 use reth_primitives_traits::Block as _;
+use reth_storage_api::BlockReader;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
 
@@ -828,7 +829,7 @@ where
             if let Ok(maybe_block) = provider.block_by_hash(new_block_hash) {
                 if let Some(block) = maybe_block {
                     let sealed = block.seal_unchecked(new_block_hash);
-                    let payload = <crate::engine::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes> as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
+                    let payload = <<N::Types as reth_node_api::node::NodeTypes>::Payload as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
                     match beacon.new_payload(payload).await {
                         Ok(status) => {
                             reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?status.status, %new_block_hash, "follower: submitted new_payload");
