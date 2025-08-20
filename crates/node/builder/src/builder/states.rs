@@ -144,6 +144,16 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
         }
     }
 }
+impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {
+    fn provider_factory(
+        &self,
+    ) -> &reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
+    > {
+        &self.provider_factory
+    }
+}
+
 
 /// A fully type configured node builder.
 ///
@@ -167,15 +177,6 @@ impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
-impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {
-    fn provider_factory(
-        &self,
-    ) -> &reth_provider::providers::ProviderFactory<
-        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
-    > {
-        &self.provider_factory
-    }
-}
 
 {
     /// Advances the state of the node builder to the next state where all customizable
