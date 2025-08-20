@@ -1,8 +1,17 @@
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_storage_provider::writer::UnifiedStorageWriter;
+use reth_provider::writer::UnifiedStorageWriter;
+use reth_provider::DatabaseProviderFactory;
+use reth_provider::DBProvider;
+use reth_storage_api::{
+    BlockWriter, StateWriter, TrieWriter, HistoryWriter, StageCheckpointWriter, BlockExecutionWriter,
+    StorageLocation,
+};
+use reth_provider::OriginalValuesKnown;
+use reth_provider::StaticFileProviderFactory;
+use reth_provider::StaticFileWriter;
+
 
 use alloy_consensus::BlockHeader;
-
 use alloy_consensus::Transaction;
 
 use reth_arbitrum_rpc::ArbNitroApiServer;
@@ -162,6 +171,7 @@ pub type ArbNodeComponents<N> = ComponentsBuilder<
 #[derive(Clone)]
 pub struct ArbFollowerExec<N: FullNodeComponents> {
     pub provider: N::Provider,
+    pub db_factory: reth_provider::providers::ProviderFactory<N>,
     pub beacon: reth_node_api::ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     pub evm_config:
         reth_arbitrum_evm::ArbEvmConfig<ChainSpec, reth_arbitrum_primitives::ArbPrimitives>,
@@ -195,28 +205,16 @@ where
                 > + Send,
         >,
     > {
-        use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
         use reth_evm::execute::BlockBuilder;
-        use reth_payload_primitives::EngineApiMessageVersion;
         use reth_revm::{database::StateProviderDatabase, db::State};
 
         let provider = self.provider.clone();
         let evm_config = self.evm_config.clone();
         let beacon = self.beacon.clone();
+        let db_factory = self.db_factory.clone();
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         Box::pin(async move {
-            let _ = beacon
-                .fork_choice_updated(
-                    ForkchoiceState {
-                        head_block_hash: parent_hash,
-                        safe_block_hash: parent_hash,
-                        finalized_block_hash: parent_hash,
-                    },
-                    None,
-                    EngineApiMessageVersion::default(),
-                )
-                .await?;
 
             let parent_header = {
                 let mut attempts = 0u32;
@@ -251,7 +249,7 @@ where
             let sealed_parent =
                 reth_primitives_traits::SealedHeader::new(parent_header, parent_hash);
 
-            let (exec_data, block_hash, send_root) = {
+            {
                 let state_provider = provider.state_by_block_hash(parent_hash)?;
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
@@ -707,56 +705,51 @@ where
                     header.extra_data.as_ref(),
                 );
 
-                let exec_data =
-                    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload::block_to_payload(sealed_block);
-                (exec_data, block_hash, send_root)
-            };
+                {
+                    let provider_rw = db_factory.database_provider_rw()?;
+                    let static_file_provider = db_factory.static_file_provider();
 
-            {
-                use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-                use reth_storage_provider::writer::UnifiedStorageWriter;
+                    let exec_outcome = reth_execution_types::ExecutionOutcome::new(
+                        db.take_bundle(),
+                        vec![outcome.execution_result.receipts],
+                        sealed_parent.number() + 1,
+                        Vec::new(),
+                    );
 
-                let executed: ExecutedBlockWithTrieUpdates<<N::Types as NodeTypes>::Primitives> =
-                    ExecutedBlockWithTrieUpdates {
+                    let executed = ExecutedBlockWithTrieUpdates {
                         block: ExecutedBlock {
                             recovered_block: std::sync::Arc::new(outcome.block),
-                            execution_output: std::sync::Arc::new(reth_execution_types::ExecutionOutcome::new(
-                                db.take_bundle(),
-                                vec![outcome.execution_result.receipts],
-                                sealed_parent.number() + 1,
-                                Vec::new(),
-                            )),
+                            execution_output: std::sync::Arc::new(exec_outcome),
                             hashed_state: std::sync::Arc::new(outcome.hashed_state),
                         },
                         trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
                     };
 
-                let provider_rw = provider.database_provider_rw()?;
-                let static_file_provider = provider.static_file_provider();
-                UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
-                    .save_blocks(vec![executed])?;
-                UnifiedStorageWriter::commit(provider_rw)?;
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
+                        .save_blocks(vec![executed])?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
 
-                match provider.header(&block_hash) {
-                    Ok(Some(_)) => {
-                        reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after direct import");
+                    match provider.header(&block_hash) {
+                        Ok(Some(_)) => {
+                            reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after direct import");
+                        }
+                        Ok(None) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after direct import");
+                        }
+                        Err(e) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
+                        }
                     }
-                    Ok(None) => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after direct import");
-                    }
-                    Err(e) => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
-                    }
-                }
-                match provider.header(&parent_hash) {
-                    Ok(Some(_)) => {
-                        reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after direct import");
-                    }
-                    Ok(None) => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after direct import");
-                    }
-                    Err(e) => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
+                    match provider.header(&parent_hash) {
+                        Ok(Some(_)) => {
+                            reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after direct import");
+                        }
+                        Ok(None) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after direct import");
+                        }
+                        Err(e) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
+                        }
                     }
                 }
 
@@ -846,6 +839,7 @@ where
 
         let follower: ArbFollowerExec<N> = ArbFollowerExec {
             provider: ctx.node.provider().clone(),
+            db_factory: ctx.node.provider_factory().clone(),
             beacon: rpc_handle.beacon_engine_handle.clone(),
             evm_config: reth_arbitrum_evm::ArbEvmConfig::new(
                 ctx.config.chain.clone(),
