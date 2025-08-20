@@ -180,16 +180,13 @@ where
                         info.balance = info.balance.saturating_add(needed_fee);
                     }
                 } else {
-                    use revm::primitives::AccountInfo;
-                    state.bundle_state.state.insert(sender, revm::database::BundleAccount {
+                    use revm_state::AccountInfo;
+                    use revm_database::{BundleAccount, AccountStatus};
+                    state.bundle_state.state.insert(sender, BundleAccount {
                         info: Some(AccountInfo { balance: needed_fee, ..Default::default() }),
                         storage: Default::default(),
-                        previous_info: None,
-                        reset_storage: false,
-                        storage_was_destroyed: false,
-                        is_touched: true,
-                        is_created: true,
-                        is_selfdestruct: false,
+                        original_info: None,
+                        status: AccountStatus::Changed,
                     });
                 }
             }
