@@ -131,7 +131,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
     let provider = input.state_provider;
     let addr = arbos_state_address();
 
-    let root_storage_key: [u8; 32] = [0u8; 32];
+    let root_storage_key: &[u8] = &[];
 
     let version_slot = storage_key_map(&root_storage_key, uint_to_hash_u64_be(0));
     let arbos_version = read_storage_u64_be(provider, addr, version_slot)?;
@@ -157,14 +157,14 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
 }
 pub fn read_l2_per_block_gas_limit(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
-    let root_storage_key: [u8; 32] = [0u8; 32];
+    let root_storage_key: &[u8] = &[];
     let l2_pricing_subspace = subspace(&root_storage_key, &[1u8]);
     let per_block_gas_limit_slot = storage_key_map(&l2_pricing_subspace, uint_to_hash_u64_be(1));
     read_storage_u64_be(provider, addr, per_block_gas_limit_slot)
 }
 pub fn read_l2_base_fee(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
-    let root_storage_key: [u8; 32] = [0u8; 32];
+    let root_storage_key: &[u8] = &[];
     let l2_pricing_subspace = subspace(&root_storage_key, &[1u8]);
     let price_per_unit_slot = storage_key_map(&l2_pricing_subspace, uint_to_hash_u64_be(2));
     read_storage_u64_be(provider, addr, price_per_unit_slot)
