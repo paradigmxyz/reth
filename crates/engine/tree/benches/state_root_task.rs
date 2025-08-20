@@ -1,5 +1,5 @@
 //! Benchmark for `StateRootTask` complete workflow, including sending state
-//! updates using the incoming messages sender and waiting for the final result.
+//! updates via the `state_hook` obtained from the `PayloadProcessor` handle and waiting for the final result.
 
 #![allow(missing_docs)]
 
