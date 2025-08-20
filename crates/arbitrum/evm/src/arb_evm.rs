@@ -24,7 +24,9 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         };
         tx.caller = sender;
         tx.gas_limit = signed.gas_limit();
-        if matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) && tx.gas_limit == 0 {
+        if (matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal)
+            || matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit)) && tx.gas_limit == 0
+        {
             tx.gas_limit = 1_000_000;
         }
         tx.gas_priority_fee = Some(0);
