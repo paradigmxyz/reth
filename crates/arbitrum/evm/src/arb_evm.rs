@@ -24,7 +24,7 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         };
         tx.caller = sender;
         tx.gas_limit = signed.gas_limit();
-        tx.gas_price = 0;
+        tx.gas_price = signed.max_fee_per_gas();
         tx.gas_priority_fee = Some(0);
         match signed.tx_type() {
             reth_arbitrum_primitives::ArbTxType::Legacy => {
