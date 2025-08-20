@@ -1,3 +1,6 @@
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+use reth_storage_provider::writer::UnifiedStorageWriter;
+
 use alloy_consensus::BlockHeader;
 
 use alloy_consensus::Transaction;
@@ -709,53 +712,56 @@ where
                 (exec_data, block_hash, send_root)
             };
 
-            let res = beacon.new_payload(exec_data).await?;
-            match res.status {
-                PayloadStatusEnum::Valid
-                | PayloadStatusEnum::Accepted
-                | PayloadStatusEnum::Syncing => {}
-                other => return Err(eyre::eyre!("new_payload returned status {other:?}")),
-            }
+            {
+                use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+                use reth_storage_provider::writer::UnifiedStorageWriter;
 
-            let fcu = ForkchoiceState {
-                head_block_hash: block_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
-            let fcu_res =
-                beacon.fork_choice_updated(fcu, None, EngineApiMessageVersion::default()).await?;
-            if !matches!(
-                fcu_res.payload_status.status,
-                PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing
-            ) {
-                return Err(eyre::eyre!(
-                    "fork_choice_updated not valid/syncing: {:?}",
-                    fcu_res.payload_status
-                ));
+                let executed: ExecutedBlockWithTrieUpdates<<N::Types as NodeTypes>::Primitives> =
+                    ExecutedBlockWithTrieUpdates {
+                        block: ExecutedBlock {
+                            recovered_block: std::sync::Arc::new(outcome.block),
+                            execution_output: std::sync::Arc::new(reth_execution_types::ExecutionOutcome::new(
+                                db.take_bundle(),
+                                vec![outcome.execution_result.receipts],
+                                sealed_parent.number() + 1,
+                                Vec::new(),
+                            )),
+                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                        },
+                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                    };
+
+                let provider_rw = provider.database_provider_rw()?;
+                let static_file_provider = provider.static_file_provider();
+                UnifiedStorageWriter::from(&provider_rw, &static_file_provider)
+                    .save_blocks(vec![executed])?;
+                UnifiedStorageWriter::commit(provider_rw)?;
+
+                match provider.header(&block_hash) {
+                    Ok(Some(_)) => {
+                        reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after direct import");
+                    }
+                    Ok(None) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after direct import");
+                    }
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
+                    }
+                }
+                match provider.header(&parent_hash) {
+                    Ok(Some(_)) => {
+                        reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after direct import");
+                    }
+                    Ok(None) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after direct import");
+                    }
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
+                    }
+                }
+
+                Ok((block_hash, send_root))
             }
-            match provider.header(&block_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after FCU");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after FCU");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
-                }
-            }
-            match provider.header(&parent_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after FCU");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after FCU");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
-                }
-            }
-            Ok((block_hash, send_root))
         })
     }
 }
