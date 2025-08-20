@@ -653,7 +653,13 @@ where
                 let l1bf = read_u256_be32(&mut cur)?;
                 let extra_gas = if cur.is_empty() { 0u64 } else { read_u64_be(&mut cur)? };
                 let batch_num = u256_to_u64_checked(&batch_num_u256, "batch number")?;
-                let base_gas = batch_gas_cost.ok_or_else(|| eyre::eyre!("cannot compute batch gas cost"))?;
+                let base_gas = match batch_gas_cost {
+                    Some(v) => v,
+                    None => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", batch_num = batch_num, "batch_gas_cost missing; proceeding with 0");
+                        0
+                    }
+                };
                 let batch_data_gas = base_gas.saturating_add(extra_gas);
                 let report = encode_batch_posting_report_data(
                     batch_timestamp,
