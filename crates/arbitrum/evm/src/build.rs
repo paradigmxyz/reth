@@ -174,10 +174,23 @@ where
                 let needed_fee = alloy_primitives::U256::from(gas_limit) * gas_price;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
+                let _ = state.load_cache_account(sender);
                 if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     if let Some(info) = acc.info.as_mut() {
                         info.balance = info.balance.saturating_add(needed_fee);
                     }
+                } else {
+                    use revm::primitives::AccountInfo;
+                    state.bundle_state.state.insert(sender, revm::database::BundleAccount {
+                        info: Some(AccountInfo { balance: needed_fee, ..Default::default() }),
+                        storage: Default::default(),
+                        previous_info: None,
+                        reset_storage: false,
+                        storage_was_destroyed: false,
+                        is_touched: true,
+                        is_created: true,
+                        is_selfdestruct: false,
+                    });
                 }
             }
             let mut tx_env = tx.to_tx_env();
