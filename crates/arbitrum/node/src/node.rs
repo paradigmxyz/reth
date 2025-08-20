@@ -552,6 +552,8 @@ where
                         let gas_limit = read_u256_be32(&mut cur)?;
                         let gas = u256_to_u64_checked(&gas_limit, "retryable gas limit")?;
                         let max_fee_per_gas = read_u256_be32(&mut cur)?;
+                        let min_bf = next_env.max_fee_per_gas.unwrap_or(alloy_primitives::U256::ZERO);
+                        let max_fee_per_gas = if max_fee_per_gas < min_bf { min_bf } else { max_fee_per_gas };
                         let data_len = read_u256_be32(&mut cur)?;
                         let data_len_u64 = u256_to_u64_checked(&data_len, "retryable data length")?;
                         if data_len_u64 as usize > cur.len() {
