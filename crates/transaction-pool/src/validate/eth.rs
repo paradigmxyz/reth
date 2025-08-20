@@ -609,6 +609,7 @@ where
         }
     }
 
+    /// Validates that the sender’s account has valid or no bytecode.
     fn validate_account_bytecode<P>(
         &self,
         transaction: &Tx,
@@ -618,6 +619,13 @@ where
     where
         P: AccountInfoReader,
     {
+        // Unless Prague is active, the signer account shouldn't have bytecode.
+        //
+        // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
+        //
+        // Any other case means that the account is not an EOA, and should not be able to send
+        // transactions.
+
         if let Some(code_hash) = &account.bytecode_hash {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
@@ -626,7 +634,7 @@ where
                         return Err(TransactionValidationOutcome::Error(
                             *transaction.hash(),
                             Box::new(err),
-                        ))
+                        )) 
                     }
                 }
             } else {
@@ -644,7 +652,7 @@ where
         Ok(())
     }
 
-    // validate transaction nonce
+    /// Checks if the transaction nonce is valid.
     fn validate_nonce(
         &self,
         transaction: &Tx,
@@ -663,7 +671,7 @@ where
         Ok(())
     }
 
-    // validate account_balance
+    /// Ensures the sender has sufficient account balance.
     fn validate_account_balance(
         &self,
         transaction: &Tx,
@@ -685,8 +693,7 @@ where
         Ok(())
     }
 
-    // validate validate_blob_sidecar
-
+    /// Validates EIP-4844 blob sidecar data.
     fn validate_eip4844_blob(
         &self,
         transaction: &mut Tx,
@@ -760,6 +767,7 @@ where
         Ok(maybe_blob_sidecar)
     }
 
+    /// Returns the recovered authorities for the given transaction
     fn transaction_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
         let authorities = transaction.authorization_list().map(|auths| {
             auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
