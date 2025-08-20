@@ -190,8 +190,8 @@ where
                     state.bundle_state.state.insert(sender, BundleAccount {
                         info: Some(AccountInfo { balance: needed_fee, ..Default::default() }),
                         storage: Default::default(),
-                        original_info: None,
-                        status: AccountStatus::Changed,
+                        original_info: Some(Default::default()),
+                        status: AccountStatus::Loaded,
                     });
                 }
             }
