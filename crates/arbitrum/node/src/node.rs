@@ -15,6 +15,7 @@ use reth_provider::StaticFileWriter;
 use alloy_consensus::BlockHeader;
 use alloy_consensus::Transaction;
 
+use alloy_primitives::Sealable;
 use reth_arbitrum_rpc::ArbNitroApiServer;
 use reth_arbitrum_rpc::ArbNitroRpc;
 
@@ -219,10 +220,10 @@ where
 
         Box::pin(async move {
 
-            let parent_header = {
+            let sealed_parent = {
                 let mut attempts = 0u32;
                 loop {
-                    match provider.header(&parent_hash)? {
+                    match provider.sealed_header_by_hash(parent_hash)? {
                         Some(h) => break h,
                         None => {
                             if attempts < 60 {
@@ -247,10 +248,7 @@ where
                     }
                 }
             };
-            reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = parent_header.gas_limit, "follower: loaded parent header");
-
-            let sealed_parent =
-                reth_primitives_traits::SealedHeader::new(parent_header, parent_hash);
+            reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
 
             {
                 let state_provider = provider.state_by_block_hash(parent_hash)?;
@@ -719,7 +717,7 @@ where
                         Vec::new(),
                     );
 
-                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                    let executed = ExecutedBlockWithTrieUpdates {
                         block: ExecutedBlock {
                             recovered_block: std::sync::Arc::new(outcome.block),
                             execution_output: std::sync::Arc::new(exec_outcome),
@@ -817,6 +815,8 @@ where
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
     > + reth_node_api::ProviderFactoryExt,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+        reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -861,6 +861,8 @@ where
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
     > + reth_node_api::ProviderFactoryExt,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+        reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -869,7 +871,11 @@ where
 {
     type EthApi = EthB::EthApi;
 
-    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi> {
+    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>
+    where
+        <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+            reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    {
         &mut self.rpc_add_ons.hooks
     }
 }
