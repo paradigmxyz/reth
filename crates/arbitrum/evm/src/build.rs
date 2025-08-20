@@ -183,14 +183,21 @@ where
                 if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
                     if let Some(info) = acc.info.as_mut() {
                         info.balance = info.balance.saturating_add(needed_fee);
+                    } else {
+                        acc.info = Some(revm::state::AccountInfo { balance: needed_fee, ..Default::default() });
                     }
+                    let prev = acc.original_info.take().unwrap_or_default();
+                    let mut orig = prev;
+                    orig.balance = orig.balance.saturating_add(needed_fee);
+                    acc.original_info = Some(orig);
                 } else {
                     use revm::state::AccountInfo;
                     use revm::database::{BundleAccount, AccountStatus};
+                    let acc_info = AccountInfo { balance: needed_fee, ..Default::default() };
                     state.bundle_state.state.insert(sender, BundleAccount {
-                        info: Some(AccountInfo { balance: needed_fee, ..Default::default() }),
+                        info: Some(acc_info.clone()),
                         storage: Default::default(),
-                        original_info: Some(Default::default()),
+                        original_info: Some(acc_info),
                         status: AccountStatus::Loaded,
                     });
                 }
