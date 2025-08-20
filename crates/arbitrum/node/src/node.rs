@@ -1,3 +1,21 @@
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
+use reth_provider::writer::UnifiedStorageWriter;
+use reth_provider::DatabaseProviderFactory;
+use reth_provider::DBProvider;
+use reth_storage_api::{
+    BlockWriter, StateWriter, TrieWriter, HistoryWriter, StageCheckpointWriter, BlockExecutionWriter,
+    StorageLocation,
+};
+use reth_provider::OriginalValuesKnown;
+use reth_provider::providers::ProviderFactory;
+use reth_provider::StaticFileProviderFactory;
+use reth_provider::StaticFileWriter;
+
+
+use alloy_consensus::BlockHeader;
+use alloy_consensus::Transaction;
+
+use alloy_primitives::Sealable;
 use reth_arbitrum_rpc::ArbNitroApiServer;
 use reth_arbitrum_rpc::ArbNitroRpc;
 
@@ -155,6 +173,9 @@ pub type ArbNodeComponents<N> = ComponentsBuilder<
 #[derive(Clone)]
 pub struct ArbFollowerExec<N: FullNodeComponents> {
     pub provider: N::Provider,
+    pub db_factory: reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>,
+    >,
     pub beacon: reth_node_api::ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
     pub evm_config:
         reth_arbitrum_evm::ArbEvmConfig<ChainSpec, reth_arbitrum_primitives::ArbPrimitives>,
@@ -170,6 +191,11 @@ where
         > + Send
         + Sync
         + 'static,
+    reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>:
+        reth_provider::providers::ProviderNodeTypes
+        + reth_node_api::NodeTypes<
+            Primitives = reth_arbitrum_primitives::ArbPrimitives
+        >,
 {
     fn execute_message_to_block(
         &self,
@@ -185,12 +211,10 @@ where
         Box<
             dyn core::future::Future<
                     Output = eyre::Result<(alloy_primitives::B256, alloy_primitives::B256)>,
-                > + Send,
+                > + Send + '_,
         >,
     > {
-        use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
         use reth_evm::execute::BlockBuilder;
-        use reth_payload_primitives::EngineApiMessageVersion;
         use reth_revm::{database::StateProviderDatabase, db::State};
 
         let provider = self.provider.clone();
@@ -199,22 +223,11 @@ where
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         Box::pin(async move {
-            let _ = beacon
-                .fork_choice_updated(
-                    ForkchoiceState {
-                        head_block_hash: parent_hash,
-                        safe_block_hash: parent_hash,
-                        finalized_block_hash: parent_hash,
-                    },
-                    None,
-                    EngineApiMessageVersion::default(),
-                )
-                .await?;
 
-            let parent_header = {
+            let sealed_parent = {
                 let mut attempts = 0u32;
                 loop {
-                    match provider.header(&parent_hash)? {
+                    match provider.sealed_header_by_hash(parent_hash)? {
                         Some(h) => break h,
                         None => {
                             if attempts < 60 {
@@ -239,12 +252,9 @@ where
                     }
                 }
             };
-            reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = parent_header.gas_limit, "follower: loaded parent header");
+            reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
 
-            let sealed_parent =
-                reth_primitives_traits::SealedHeader::new(parent_header, parent_hash);
-
-            let (exec_data, block_hash, send_root) = {
+            {
                 let state_provider = provider.state_by_block_hash(parent_hash)?;
                 let mut db = State::builder()
                     .with_database(StateProviderDatabase::new(&state_provider))
@@ -264,11 +274,38 @@ where
                 )
                 .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
 
-                if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+                let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
+                if parent_bf > 0 {
+                    let parent_gas_limit = sealed_parent.gas_limit();
+                    let parent_gas_used = sealed_parent.gas_used();
+                    let target = parent_gas_limit / 8;
+                    let mut next_bf = parent_bf;
+                    if parent_gas_used > target {
+                        let delta = ((parent_bf as u128)
+                            * ((parent_gas_used - target) as u128)
+                            / (target as u128)
+                            / 8) as u64;
+                        let change = if delta == 0 { 1 } else { delta };
+                        next_bf = parent_bf.saturating_add(change);
+                    } else if parent_gas_used < target {
+                        let delta = ((parent_bf as u128)
+                            * ((target - parent_gas_used) as u128)
+                            / (target as u128)
+                            / 8) as u64;
+                        let change = if delta == 0 { 1 } else { delta };
+                        next_bf = parent_bf.saturating_sub(change);
+                    }
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559");
+                    next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
+                } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
                     next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
                 } else {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
                     next_env.max_fee_per_gas = Some(l1_base_fee);
                 }
+                let block_base_fee = next_env.max_fee_per_gas;
+
 
                 if next_env.gas_limit == 0 {
                     if let Some(gl) =
@@ -550,6 +587,8 @@ where
                         let gas_limit = read_u256_be32(&mut cur)?;
                         let gas = u256_to_u64_checked(&gas_limit, "retryable gas limit")?;
                         let max_fee_per_gas = read_u256_be32(&mut cur)?;
+                        let min_bf = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
+                        let max_fee_per_gas = if max_fee_per_gas < min_bf { min_bf } else { max_fee_per_gas };
                         let data_len = read_u256_be32(&mut cur)?;
                         let data_len_u64 = u256_to_u64_checked(&data_len, "retryable data length")?;
                         if data_len_u64 as usize > cur.len() {
@@ -613,8 +652,7 @@ where
                         let batch_num = u256_to_u64_checked(&batch_num_u256, "batch number")?;
                         let l1bf = read_u256_be32(&mut cur)?;
                         let extra_gas = if cur.is_empty() { 0u64 } else { read_u64_be(&mut cur)? };
-                        let base_data_gas = batch_gas_cost
-                            .ok_or_else(|| eyre::eyre!("cannot compute batch gas cost"))?;
+                        let base_data_gas = batch_gas_cost.unwrap_or(100_000);
                         let batch_data_gas = base_data_gas.saturating_add(extra_gas);
                         let data = encode_batch_posting_report_data(
                             batch_timestamp,
@@ -644,11 +682,13 @@ where
                         tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
                     let bal =
                         state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
+                    let gp = tx.max_fee_per_gas();
                     reth_tracing::tracing::info!(
                         target: "arb-reth::follower",
                         tx_type = ?tx.tx_type(),
                         sender = %sender,
                         sender_balance = %bal,
+                        max_fee_per_gas = %gp,
                         "follower: executing tx"
                     );
                     let recovered = Recovered::new_unchecked(tx.clone(), sender);
@@ -669,58 +709,55 @@ where
                     header.extra_data.as_ref(),
                 );
 
-                let exec_data =
-                    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload::block_to_payload(sealed_block);
-                (exec_data, block_hash, send_root)
-            };
+                {
+                    let provider_rw = self.db_factory.database_provider_rw()?;
+                    let static_file_provider = self.db_factory.static_file_provider();
 
-            let res = beacon.new_payload(exec_data).await?;
-            match res.status {
-                PayloadStatusEnum::Valid
-                | PayloadStatusEnum::Accepted
-                | PayloadStatusEnum::Syncing => {}
-                other => return Err(eyre::eyre!("new_payload returned status {other:?}")),
-            }
+                    let exec_outcome = reth_execution_types::ExecutionOutcome::new(
+                        db.take_bundle(),
+                        vec![outcome.execution_result.receipts],
+                        sealed_parent.number() + 1,
+                        Vec::new(),
+                    );
 
-            let fcu = ForkchoiceState {
-                head_block_hash: block_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
-            };
-            let fcu_res =
-                beacon.fork_choice_updated(fcu, None, EngineApiMessageVersion::default()).await?;
-            if !matches!(
-                fcu_res.payload_status.status,
-                PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing
-            ) {
-                return Err(eyre::eyre!(
-                    "fork_choice_updated not valid/syncing: {:?}",
-                    fcu_res.payload_status
-                ));
+                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                        block: ExecutedBlock {
+                            recovered_block: std::sync::Arc::new(outcome.block),
+                            execution_output: std::sync::Arc::new(exec_outcome),
+                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                        },
+                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                    };
+
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
+
+                    match provider.header(&block_hash) {
+                        Ok(Some(_)) => {
+                            reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after direct import");
+                        }
+                        Ok(None) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after direct import");
+                        }
+                        Err(e) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
+                        }
+                    }
+                    match provider.header(&parent_hash) {
+                        Ok(Some(_)) => {
+                            reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after direct import");
+                        }
+                        Ok(None) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after direct import");
+                        }
+                        Err(e) => {
+                            reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
+                        }
+                    }
+                }
+
+                Ok((block_hash, send_root))
             }
-            match provider.header(&block_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %block_hash, "follower: new block header visible after FCU");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, "follower: new block header NOT visible after FCU");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %block_hash, err = %e, "follower: error checking new block header");
-                }
-            }
-            match provider.header(&parent_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after FCU");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after FCU");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
-                }
-            }
-            Ok((block_hash, send_root))
         })
     }
 }
@@ -780,7 +817,9 @@ where
             ChainSpec = ChainSpec,
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
-    >,
+    > + reth_node_api::ProviderFactoryExt,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+        reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -805,6 +844,7 @@ where
 
         let follower: ArbFollowerExec<N> = ArbFollowerExec {
             provider: ctx.node.provider().clone(),
+            db_factory: reth_node_api::ProviderFactoryExt::provider_factory(&ctx.node).clone(),
             beacon: rpc_handle.beacon_engine_handle.clone(),
             evm_config: reth_arbitrum_evm::ArbEvmConfig::new(
                 ctx.config.chain.clone(),
@@ -823,7 +863,9 @@ where
             ChainSpec = ChainSpec,
             Primitives = reth_arbitrum_primitives::ArbPrimitives,
         >,
-    >,
+    > + reth_node_api::ProviderFactoryExt,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+        reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -832,7 +874,11 @@ where
 {
     type EthApi = EthB::EthApi;
 
-    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi> {
+    fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>
+    where
+        <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
+            reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    {
         &mut self.rpc_add_ons.hooks
     }
 }

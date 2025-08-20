@@ -117,13 +117,33 @@ where
         let block_basefee = alloy_primitives::U256::from(block_env.basefee);
         let block_coinbase = block_env.beneficiary;
 
-        let is_special = {
+        let is_sequenced = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                SubmitRetryable | Internal | Deposit | Contract => true,
-                _ => false,
+                Deposit | Internal => false,
+                _ => true,
             }
         };
+        let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+        let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
+        let needs_precredit = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                Internal => false,
+                Deposit => true,
+                _ => true,
+            }
+        };
+
+        let paid_gas_price = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                Legacy => block_basefee,
+                Deposit | Internal => block_basefee,
+                _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
+            }
+        };
+        let upfront_gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
 
         let start_ctx = ArbStartTxContext {
             sender,
@@ -160,19 +180,92 @@ where
             let _ = res;
         }
 
-        let res = if is_special {
-            let pre_nonce = {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-                match state.basic(sender) {
-                    Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
-                    Err(_) => 0,
-                }
+        let mut used_pre_nonce = None;
+
+        let current_nonce = {
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+            match state.basic(sender) {
+                Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
+                Err(_) => 0,
+            }
+        };
+
+        let mut tx_env = tx.to_tx_env();
+        if is_internal || is_deposit {
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+        }
+        if is_internal {
+            reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
+        }
+
+        if needs_precredit {
+            if is_sequenced {
+                used_pre_nonce = Some(current_nonce);
+            }
+
+            let mut effective_gas_limit = gas_limit;
+            if (is_internal || is_deposit) && gas_limit == 0 {
+                effective_gas_limit = 1_000_000;
+            }
+            let effective_gas_price = if is_internal || is_deposit {
+                block_basefee
+            } else {
+                upfront_gas_price
             };
-            let mut tx_env = tx.to_tx_env();
-            TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
-            let wrapped = WithTxEnv { tx_env, tx };
-            let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+            let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
+            tracing::info!(
+                target: "arb-reth::executor",
+                tx_type = ?tx.tx().tx_type(),
+                is_sequenced = is_sequenced,
+                gas_limit = effective_gas_limit,
+                paid_gas_price = %paid_gas_price,
+                upfront_gas_price = %upfront_gas_price,
+                needed_fee = %needed_fee,
+                "pre-crediting sender for upfront funds"
+            );
+
+            use alloy_primitives::map::HashMap;
+            use alloy_evm::block::state_changes::balance_increment_state;
+            use revm::state::AccountInfo;
+            use alloy_consensus::constants::KECCAK_EMPTY;
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+
+            let mut increments = HashMap::default();
+            increments.insert(sender, needed_fee.to::<u128>());
+            let _ = balance_increment_state(&increments, state);
+
+            let existing = match state.basic(sender) {
+                Ok(Some(info)) => info,
+                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: current_nonce, code_hash: KECCAK_EMPTY, code: None },
+            };
+            let mut updated = existing;
+            updated.balance = updated.balance.saturating_add(needed_fee);
+            state.insert_account(sender, updated);
+
+            let overlay_bal = state
+                .bundle_state
+                .state
+                .get(&sender)
+                .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
+                .unwrap_or_default();
+            tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
+        }
+
+
+
+
+
+
+        if let Some(pre_nonce) = used_pre_nonce {
+            reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
+        }
+
+        let wrapped = WithTxEnv { tx_env, tx };
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+
+        if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
@@ -184,10 +277,9 @@ where
                     }
                 }
             }
-            result
-        } else {
-            self.inner.execute_transaction_with_commit_condition(tx, f)
-        };
+        }
+
+        let res = result;
 
         let end_ctx = ArbEndTxContext {
             success: res.is_ok(),

@@ -81,6 +81,10 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T> = ComponentsFor<T>
     pub task_executor: TaskExecutor,
     /// The provider of the node.
     pub provider: T::Provider,
+    /// The provider factory for DB/static file access.
+    pub provider_factory: reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<T::Types, T::DB>,
+    >,
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
@@ -132,11 +136,24 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
     fn clone(&self) -> Self {
         Self {
             components: self.components.clone(),
+
+
             task_executor: self.task_executor.clone(),
             provider: self.provider.clone(),
+            provider_factory: self.provider_factory.clone(),
         }
     }
 }
+impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {
+    fn provider_factory(
+        &self,
+    ) -> &reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
+    > {
+        &self.provider_factory
+    }
+}
+
 
 /// A fully type configured node builder.
 ///
@@ -160,6 +177,7 @@ impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
+
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.

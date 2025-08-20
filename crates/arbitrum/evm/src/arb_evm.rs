@@ -24,14 +24,20 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         };
         tx.caller = sender;
         tx.gas_limit = signed.gas_limit();
-        tx.gas_price = 0;
+        if (matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal)
+            || matches!(signed.tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit)) && tx.gas_limit == 0
+        {
+            tx.gas_limit = 1_000_000;
+        }
         tx.gas_priority_fee = Some(0);
         match signed.tx_type() {
             reth_arbitrum_primitives::ArbTxType::Legacy => {
                 tx.value = signed.value();
+                tx.gas_price = signed.max_fee_per_gas();
             }
             _ => {
                 tx.value = alloy_primitives::U256::ZERO;
+                tx.gas_price = signed.max_fee_per_gas();
             }
         }
         tx.kind = kind;
@@ -73,6 +79,10 @@ impl reth_evm::TransactionEnv for ArbTransaction<TxEnv> {
 
     fn set_access_list(&mut self, access_list: alloy_eips::eip2930::AccessList) {
         self.0.set_access_list(access_list);
+    }
+
+    fn set_gas_price(&mut self, gas_price: u128) {
+        self.0.gas_price = gas_price;
     }
 }
 

@@ -39,6 +39,8 @@ reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-execution-types.workspace = true
 reth-consensus-common.workspace = true
+reth-chain-state.workspace = true
+reth-storage-api.workspace = true
 
 reth-revm.workspace = true
 
