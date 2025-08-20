@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use prewarm::{AccessRecord, PrewarmMetrics};
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
-    execute::{ExecutableTxFor, OwnedExecutableTxFor, WithTxEnv},
+    execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, EvmEnvFor, HaltReasonFor, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::NodePrimitives;
@@ -36,7 +36,7 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
-use revm::context::result::{ExecResultAndState, HaltReason, ResultAndState};
+use revm::context::result::ResultAndState;
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -53,6 +53,8 @@ pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
 
+/// Cache for transaction execution results and state access records.
+/// Maps transaction hashes to their execution results, access records, and optional created contract info.
 pub type TxCache<Evm> = Arc<
     DashMap<
         TxHash,
@@ -166,7 +168,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<Evm, I::Tx, I::Error>
+    ) -> PayloadHandle<Evm, WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -261,7 +263,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<Evm, I::Tx, I::Error>
+    ) -> PayloadHandle<Evm, WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -429,6 +431,7 @@ pub struct PayloadHandle<Evm: ConfigureEvm, Tx, Err> {
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Cache for transaction execution results and state access records
     pub tx_cache: TxCache<Evm>,
 }
 

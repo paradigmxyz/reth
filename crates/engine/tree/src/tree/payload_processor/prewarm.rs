@@ -8,13 +8,13 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_evm::{Database, RecoveredTx};
+use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
-use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{
     database::StateProviderDatabase,
     db::BundleState,
@@ -328,7 +328,7 @@ where
     /// executed sequentially.
     fn transact_batch(
         self,
-        txs: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
         tx_cache: TxCache<Evm>,
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
@@ -337,7 +337,7 @@ where
         let coinbase = evm.block().beneficiary;
 
         while let Ok(tx) = txs.recv() {
-            let tx_hash = *tx.as_executable().tx().tx_hash();
+            let tx_hash = *tx.tx().tx_hash();
 
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
@@ -359,7 +359,7 @@ where
                         target: "engine::tree",
                         %err,
                         %tx_hash,
-                        sender = %tx.as_executable().signer(),
+                        sender = %tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     return
@@ -466,8 +466,22 @@ pub(super) enum PrewarmTaskEvent {
 /// correctness.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccessRecord {
-    Account { address: Address, result: Option<AccountInfo> },
-    Storage { address: Address, index: U256, result: U256 },
+    /// Account access record containing account address and retrieved account information
+    Account {
+        /// The address of the account being accessed
+        address: Address,
+        /// The retrieved account information, if the account exists
+        result: Option<AccountInfo>,
+    },
+    /// Storage slot access record containing contract address, storage key, and value
+    Storage {
+        /// The address of the contract whose storage is being accessed
+        address: Address,
+        /// The storage slot index being accessed
+        index: U256,
+        /// The value stored at the specified storage slot
+        result: U256,
+    },
 }
 
 /// revm database wrapper that records state access
