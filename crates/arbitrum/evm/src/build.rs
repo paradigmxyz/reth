@@ -177,30 +177,22 @@ where
                     alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
                 };
                 let needed_fee = alloy_primitives::U256::from(gas_limit) * chosen_gas_price;
+                tracing::info!(
+                    target: "arb-reth::executor",
+                    tx_type = ?tx.tx().tx_type(),
+                    is_special = true,
+                    gas_limit = gas_limit,
+                    chosen_gas_price = %chosen_gas_price,
+                    needed_fee = %needed_fee,
+                    "pre-crediting sender for upfront funds"
+                );
+                use alloy_primitives::map::HashMap;
+                use alloy_evm::block::state_changes::balance_increment_state;
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
-                let _ = state.load_cache_account(sender);
-                if let Some(acc) = state.bundle_state.state.get_mut(&sender) {
-                    if let Some(info) = acc.info.as_mut() {
-                        info.balance = info.balance.saturating_add(needed_fee);
-                    } else {
-                        acc.info = Some(revm::state::AccountInfo { balance: needed_fee, ..Default::default() });
-                    }
-                    let prev = acc.original_info.take().unwrap_or_default();
-                    let mut orig = prev;
-                    orig.balance = orig.balance.saturating_add(needed_fee);
-                    acc.original_info = Some(orig);
-                } else {
-                    use revm::state::AccountInfo;
-                    use revm::database::{BundleAccount, AccountStatus};
-                    let acc_info = AccountInfo { balance: needed_fee, ..Default::default() };
-                    state.bundle_state.state.insert(sender, BundleAccount {
-                        info: Some(acc_info.clone()),
-                        storage: Default::default(),
-                        original_info: Some(acc_info),
-                        status: AccountStatus::Loaded,
-                    });
-                }
+                let mut increments = HashMap::default();
+                increments.insert(sender, needed_fee.to::<u128>());
+                let _ = balance_increment_state(&increments, state);
             }
             let mut tx_env = tx.to_tx_env();
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
