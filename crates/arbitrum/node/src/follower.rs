@@ -19,7 +19,7 @@ pub trait FollowerExecutor: Send + Sync {
         kind: u8,
         l1_base_fee: U256,
         batch_gas_cost: Option<u64>,
-    ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send + '_>>;
 }
 
 pub type DynFollowerExecutor = Arc<dyn FollowerExecutor>;

@@ -191,7 +191,11 @@ where
         > + Send
         + Sync
         + 'static,
-    reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>: reth_provider::providers::ProviderNodeTypes,
+    reth_node_api::NodeTypesWithDBAdapter<N::Types, N::DB>:
+        reth_provider::providers::ProviderNodeTypes
+        + reth_node_api::NodeTypes<
+            Primitives = reth_arbitrum_primitives::ArbPrimitives
+        >,
 {
     fn execute_message_to_block(
         &self,
@@ -207,7 +211,7 @@ where
         Box<
             dyn core::future::Future<
                     Output = eyre::Result<(alloy_primitives::B256, alloy_primitives::B256)>,
-                > + Send,
+                > + Send + '_,
         >,
     > {
         use reth_evm::execute::BlockBuilder;
@@ -648,8 +652,7 @@ where
                         let batch_num = u256_to_u64_checked(&batch_num_u256, "batch number")?;
                         let l1bf = read_u256_be32(&mut cur)?;
                         let extra_gas = if cur.is_empty() { 0u64 } else { read_u64_be(&mut cur)? };
-                        let base_data_gas = batch_gas_cost
-                            .ok_or_else(|| eyre::eyre!("cannot compute batch gas cost"))?;
+                        let base_data_gas = batch_gas_cost.unwrap_or(100_000);
                         let batch_data_gas = base_data_gas.saturating_add(extra_gas);
                         let data = encode_batch_posting_report_data(
                             batch_timestamp,
@@ -717,7 +720,7 @@ where
                         Vec::new(),
                     );
 
-                    let executed = ExecutedBlockWithTrieUpdates {
+                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
                         block: ExecutedBlock {
                             recovered_block: std::sync::Arc::new(outcome.block),
                             execution_output: std::sync::Arc::new(exec_outcome),
