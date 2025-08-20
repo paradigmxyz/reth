@@ -852,6 +852,10 @@ impl ConsensusTx for ArbTransactionSigned {
     fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
+            ArbTypedTransaction::Unsigned(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::Contract(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::Retry(tx) => tx.gas_fee_cap.into(),
+            ArbTypedTransaction::SubmitRetryable(tx) => tx.gas_fee_cap.into(),
             _ => 0,
         }
     }
@@ -871,7 +875,7 @@ impl ConsensusTx for ArbTransactionSigned {
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
-            _ => 0,
+            _ => self.max_fee_per_gas(),
         }
     }
 

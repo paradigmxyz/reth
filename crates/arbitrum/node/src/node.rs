@@ -648,11 +648,13 @@ where
                         tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
                     let bal =
                         state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
+                    let gp = tx.max_fee_per_gas();
                     reth_tracing::tracing::info!(
                         target: "arb-reth::follower",
                         tx_type = ?tx.tx_type(),
                         sender = %sender,
                         sender_balance = %bal,
+                        max_fee_per_gas = %gp,
                         "follower: executing tx"
                     );
                     let recovered = Recovered::new_unchecked(tx.clone(), sender);
