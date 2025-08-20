@@ -81,7 +81,7 @@ Reth buffers new blocks in memory before persisting them to disk for performance
 
 - `--engine.persistence-threshold 0` - Persists new canonical blocks to disk immediately
 
-Using this flag ensurs external processes can read new blocks without delay.
+Using this flag ensures external processes can read new blocks without delay.
 
 As soon as the reth process has persisted the block data, the external reader can read it from the database.
 
