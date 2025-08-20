@@ -113,7 +113,7 @@ impl ExecutorMetrics {
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
-        _get_cached_tx_result: impl Fn(
+        get_cached_tx_result: impl Fn(
             &mut <E::Evm as Evm>::DB,
             TxHash,
         ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
@@ -133,20 +133,22 @@ impl ExecutorMetrics {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
-                // TODO: Re-enable cached execution when the method is available
-                // if let Some(result) =
-                //     get_cached_tx_result(executor.evm_mut().db_mut(), *tx.tx().tx_hash())
-                // {
-                //     self.execution_results_cache_hits.increment(1);
-                //     executor.execute_transaction_with_cached_result(
-                //         tx,
-                //         result,
-                //         |_| alloy_evm::block::CommitChanges::Yes,
-                //     )?;
-                // } else {
+                if let Some(result) =
+                    get_cached_tx_result(executor.evm_mut().db_mut(), *tx.tx().tx_hash())
+                {
+                    self.execution_results_cache_hits.increment(1);
+                    // TODO: Re-enable when execute_transaction_with_cached_result is available
+                    // executor.execute_transaction_with_cached_result(
+                    //     tx,
+                    //     result,
+                    //     |_| alloy_evm::block::CommitChanges::Yes,
+                    // )?;
+                    // For now, just execute normally even if we have a cache hit
+                    executor.execute_transaction(tx)?;
+                } else {
                     self.execution_results_cache_misses.increment(1);
                     executor.execute_transaction(tx)?;
-                // }
+                }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
