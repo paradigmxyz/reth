@@ -33,7 +33,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
 use std::sync::{
     atomic::AtomicBool,
@@ -76,9 +76,7 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        parking_lot::Mutex<
-            Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ConfiguredSparseTrie>>,
-        >,
+        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
     >,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
@@ -365,21 +363,20 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let default_trie = SparseTrie::blind_from(if self.use_parallel_sparse_trie {
+            let accounts_trie = if self.use_parallel_sparse_trie {
                 ConfiguredSparseTrie::Parallel(Default::default())
             } else {
                 ConfiguredSparseTrie::Serial(Default::default())
-            });
+            };
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
-                    .with_accounts_trie(default_trie.clone())
-                    .with_default_storage_trie(default_trie)
+                    .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
                     .with_updates(true),
             )
         });
 
         let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
+            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
                 self.executor.clone(),
                 sparse_trie_rx,
                 proof_task_handle,
