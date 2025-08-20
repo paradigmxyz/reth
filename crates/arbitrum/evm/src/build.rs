@@ -124,6 +124,13 @@ where
                 _ => true,
             }
         };
+        let needs_precredit = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                Deposit => false,
+                _ => true,
+            }
+        };
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -171,7 +178,7 @@ where
 
         let mut used_pre_nonce = None;
 
-        if is_sequenced {
+        if needs_precredit {
             let pre_nonce = {
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
@@ -180,13 +187,15 @@ where
                     Err(_) => 0,
                 }
             };
-            used_pre_nonce = Some(pre_nonce);
+            if is_sequenced {
+                used_pre_nonce = Some(pre_nonce);
+            }
 
             let needed_fee = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
-                is_sequenced = true,
+                is_sequenced = is_sequenced,
                 gas_limit = gas_limit,
                 paid_gas_price = %paid_gas_price,
                 upfront_gas_price = %upfront_gas_price,
@@ -224,7 +233,7 @@ where
 
         let mut tx_env = tx.to_tx_env();
         if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0);
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         }
         if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) && tx.tx().gas_limit() == 0 {
             let block_env = alloy_evm::Evm::block(self.evm());
