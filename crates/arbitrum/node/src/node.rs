@@ -19,6 +19,7 @@ use alloy_primitives::Sealable;
 use reth_arbitrum_rpc::ArbNitroApiServer;
 use reth_arbitrum_rpc::ArbNitroRpc;
 
+use reth_primitives_traits::Block as _;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
 
@@ -824,6 +825,24 @@ where
                 l1_base_fee,
                 batch_gas_cost,
             )?;
+            if let Ok(maybe_block) = provider.block_by_hash(new_block_hash) {
+                if let Some(block) = maybe_block {
+                    let sealed = block.seal_unchecked(new_block_hash);
+                    let payload = <crate::engine::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes> as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
+                    match beacon.new_payload(payload).await {
+                        Ok(status) => {
+                            reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?status.status, %new_block_hash, "follower: submitted new_payload");
+                        }
+                        Err(err) => {
+                            reth_tracing::tracing::error!(target: "arb-reth::follower", %new_block_hash, %err, "follower: new_payload failed");
+                        }
+                    }
+                } else {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, "follower: block not found by hash after import; skipping new_payload");
+                }
+            } else {
+                reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, "follower: provider error fetching block by hash; skipping new_payload");
+            }
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
                 safe_block_hash: parent_hash,
