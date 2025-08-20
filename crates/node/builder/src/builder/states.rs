@@ -121,13 +121,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         <Self::Types as reth_node_api::NodeTypes>::Payload,
     > {
         self.components.payload_builder_handle()
-    fn provider_factory(
-        &self,
-    ) -> &reth_provider::providers::ProviderFactory<
-        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
-    > {
-        &self.provider_factory
-    }
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -136,7 +129,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
-impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {}
     }
 }
 
@@ -144,6 +136,8 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
     fn clone(&self) -> Self {
         Self {
             components: self.components.clone(),
+
+
             task_executor: self.task_executor.clone(),
             provider: self.provider.clone(),
             provider_factory: self.provider_factory.clone(),
@@ -173,6 +167,16 @@ impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
+impl<T: FullNodeTypes, C: NodeComponents<T>> reth_node_api::ProviderFactoryExt for NodeAdapter<T, C> {
+    fn provider_factory(
+        &self,
+    ) -> &reth_provider::providers::ProviderFactory<
+        reth_node_api::NodeTypesWithDBAdapter<Self::Types, Self::DB>,
+    > {
+        &self.provider_factory
+    }
+}
+
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
