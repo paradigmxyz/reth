@@ -1,3 +1,5 @@
+use alloy_consensus::Transaction;
+
 use reth_arbitrum_rpc::ArbNitroApiServer;
 use reth_arbitrum_rpc::ArbNitroRpc;
 
