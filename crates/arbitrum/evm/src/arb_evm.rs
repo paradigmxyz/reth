@@ -28,7 +28,7 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         match signed.tx_type() {
             reth_arbitrum_primitives::ArbTxType::Legacy => {
                 tx.value = signed.value();
-                tx.gas_price = signed.max_fee_per_gas();
+                tx.gas_price = 0;
             }
             _ => {
                 tx.value = alloy_primitives::U256::ZERO;

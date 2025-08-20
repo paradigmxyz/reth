@@ -117,11 +117,19 @@ where
         let block_basefee = alloy_primitives::U256::from(block_env.basefee);
         let block_coinbase = block_env.beneficiary;
 
-        let is_special = {
+        let is_sequenced = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                SubmitRetryable | Internal | Deposit | Contract => true,
-                _ => false,
+                Deposit | Internal => false,
+                _ => true,
+            }
+        };
+
+        let paid_gas_price = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                Legacy => block_basefee,
+                _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
 
@@ -160,7 +168,9 @@ where
             let _ = res;
         }
 
-        let res = if is_special {
+        let mut used_pre_nonce = None;
+
+        if is_sequenced {
             let pre_nonce = {
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
@@ -169,55 +179,61 @@ where
                     Err(_) => 0,
                 }
             };
-            {
-                let is_legacy = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy);
-                let chosen_gas_price = if is_legacy {
-                    alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
-                } else {
-                    alloy_primitives::U256::from(tx.tx().max_fee_per_gas())
-                };
-                let needed_fee = alloy_primitives::U256::from(gas_limit) * chosen_gas_price;
-                tracing::info!(
-                    target: "arb-reth::executor",
-                    tx_type = ?tx.tx().tx_type(),
-                    is_special = true,
-                    gas_limit = gas_limit,
-                    chosen_gas_price = %chosen_gas_price,
-                    needed_fee = %needed_fee,
-                    "pre-crediting sender for upfront funds"
-                );
-                use alloy_primitives::map::HashMap;
-                use alloy_evm::block::state_changes::balance_increment_state;
-                use revm::state::AccountInfo;
-                use alloy_consensus::constants::KECCAK_EMPTY;
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
+            used_pre_nonce = Some(pre_nonce);
 
-                let mut increments = HashMap::default();
-                increments.insert(sender, needed_fee.to::<u128>());
-                let _ = balance_increment_state(&increments, state);
+            let needed_fee = alloy_primitives::U256::from(gas_limit) * paid_gas_price;
+            tracing::info!(
+                target: "arb-reth::executor",
+                tx_type = ?tx.tx().tx_type(),
+                is_sequenced = true,
+                gas_limit = gas_limit,
+                paid_gas_price = %paid_gas_price,
+                needed_fee = %needed_fee,
+                "pre-crediting sender for upfront funds"
+            );
 
-                let inc_u256 = alloy_primitives::U256::from(needed_fee);
-                let existing = match state.basic(sender) {
-                    Ok(Some(info)) => info,
-                    _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: pre_nonce, code_hash: KECCAK_EMPTY, code: None },
-                };
-                let mut updated = existing;
-                updated.balance = updated.balance.saturating_add(inc_u256);
-                state.insert_account(sender, updated);
+            use alloy_primitives::map::HashMap;
+            use alloy_evm::block::state_changes::balance_increment_state;
+            use revm::state::AccountInfo;
+            use alloy_consensus::constants::KECCAK_EMPTY;
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
 
-                let overlay_bal = state
-                    .bundle_state
-                    .state
-                    .get(&sender)
-                    .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
-                    .unwrap_or_default();
-                tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
-            }
-            let mut tx_env = tx.to_tx_env();
+            let mut increments = HashMap::default();
+            increments.insert(sender, needed_fee.to::<u128>());
+            let _ = balance_increment_state(&increments, state);
+
+            let existing = match state.basic(sender) {
+                Ok(Some(info)) => info,
+                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: pre_nonce, code_hash: KECCAK_EMPTY, code: None },
+            };
+            let mut updated = existing;
+            updated.balance = updated.balance.saturating_add(needed_fee);
+            state.insert_account(sender, updated);
+
+            let overlay_bal = state
+                .bundle_state
+                .state
+                .get(&sender)
+                .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
+                .unwrap_or_default();
+            tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
+        }
+
+        let mut tx_env = tx.to_tx_env();
+
+        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
+            tx_env.gas_price = block_basefee.to::<u128>();
+        }
+
+        if let Some(pre_nonce) = used_pre_nonce {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
-            let wrapped = WithTxEnv { tx_env, tx };
-            let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        }
+
+        let wrapped = WithTxEnv { tx_env, tx };
+        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+
+        if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
                 let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
                 let state: &mut revm::database::State<D> = *db_ref;
@@ -229,10 +245,9 @@ where
                     }
                 }
             }
-            result
-        } else {
-            self.inner.execute_transaction_with_commit_condition(tx, f)
-        };
+        }
+
+        let res = result;
 
         let end_ctx = ArbEndTxContext {
             success: res.is_ok(),
