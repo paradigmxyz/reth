@@ -132,6 +132,7 @@ where
                 _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
+        let upfront_gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
 
         let start_ctx = ArbStartTxContext {
             sender,
@@ -181,13 +182,14 @@ where
             };
             used_pre_nonce = Some(pre_nonce);
 
-            let needed_fee = alloy_primitives::U256::from(gas_limit) * paid_gas_price;
+            let needed_fee = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
                 tx_type = ?tx.tx().tx_type(),
                 is_sequenced = true,
                 gas_limit = gas_limit,
                 paid_gas_price = %paid_gas_price,
+                upfront_gas_price = %upfront_gas_price,
                 needed_fee = %needed_fee,
                 "pre-crediting sender for upfront funds"
             );
@@ -222,9 +224,6 @@ where
 
         let mut tx_env = tx.to_tx_env();
 
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
-            tx_env.gas_price = block_basefee.to::<u128>();
-        }
 
         if let Some(pre_nonce) = used_pre_nonce {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
