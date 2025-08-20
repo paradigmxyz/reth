@@ -273,6 +273,8 @@ where
                     reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
                     next_env.max_fee_per_gas = Some(l1_base_fee);
                 }
+                let block_base_fee = next_env.max_fee_per_gas;
+
 
                 if next_env.gas_limit == 0 {
                     if let Some(gl) =
@@ -554,7 +556,7 @@ where
                         let gas_limit = read_u256_be32(&mut cur)?;
                         let gas = u256_to_u64_checked(&gas_limit, "retryable gas limit")?;
                         let max_fee_per_gas = read_u256_be32(&mut cur)?;
-                        let min_bf = next_env.max_fee_per_gas.unwrap_or(alloy_primitives::U256::ZERO);
+                        let min_bf = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
                         let max_fee_per_gas = if max_fee_per_gas < min_bf { min_bf } else { max_fee_per_gas };
                         let data_len = read_u256_be32(&mut cur)?;
                         let data_len_u64 = u256_to_u64_checked(&data_len, "retryable data length")?;
