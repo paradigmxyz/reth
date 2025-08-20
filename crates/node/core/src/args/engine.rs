@@ -101,7 +101,7 @@ impl Default for EngineArgs {
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: true,
             caching_and_prewarming_disabled: false,
-            parallel_sparse_trie_enabled: false,
+            parallel_sparse_trie_enabled: true,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
