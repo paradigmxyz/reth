@@ -35,7 +35,7 @@ pub struct EngineArgs {
     pub caching_and_prewarming_disabled: bool,
 
     /// Enable the parallel sparse trie in the engine.
-    #[arg(long = "engine.parallel-sparse-trie", default_value = "false")]
+    #[arg(long = "engine.parallel-sparse-trie", default_value = "true")]
     pub parallel_sparse_trie_enabled: bool,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
