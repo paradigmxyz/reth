@@ -181,12 +181,12 @@ where
                     }
                 } else {
                     use revm::state::AccountInfo;
-                    use revm::database::BundleAccount;
+                    use revm::database::{BundleAccount, AccountStatus};
                     state.bundle_state.state.insert(sender, BundleAccount {
                         info: Some(AccountInfo { balance: needed_fee, ..Default::default() }),
                         storage: Default::default(),
-                        original_info: Default::default(),
-                        status: Default::default(),
+                        original_info: None,
+                        status: AccountStatus::Changed,
                     });
                 }
             }
