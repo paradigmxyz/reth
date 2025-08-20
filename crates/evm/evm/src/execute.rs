@@ -551,7 +551,7 @@ where
     }
 }
 
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// A helper trait for types that can be converted into an [`ExecutableTx`] for the block
 /// executor.
 pub trait ExecutableTxFor<Evm: ConfigureEvm>:
     ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
