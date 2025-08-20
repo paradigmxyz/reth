@@ -133,17 +133,19 @@ impl ExecutorMetrics {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
+                let executable_tx = tx.as_executable();
                 if let Some(result) =
-                    get_cached_tx_result(executor.evm_mut().db_mut(), *tx.tx().tx_hash())
+                    get_cached_tx_result(executor.evm_mut().db_mut(), *executable_tx.tx().tx_hash())
                 {
                     self.execution_results_cache_hits.increment(1);
-                    // For now, mock the cached execution by just executing normally
-                    // When properly implemented, this will use the cached result
-                    let _ = result; // Avoid unused variable warning
-                    executor.execute_transaction(tx)?;
+                    executor.execute_transaction_with_cached_result(
+                        executable_tx,
+                        result,
+                        |_| alloy_evm::block::CommitChanges::Yes,
+                    )?;
                 } else {
                     self.execution_results_cache_misses.increment(1);
-                    executor.execute_transaction(tx)?;
+                    executor.execute_transaction(executable_tx)?;
                 }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
