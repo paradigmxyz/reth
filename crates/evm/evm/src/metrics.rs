@@ -137,13 +137,9 @@ impl ExecutorMetrics {
                     get_cached_tx_result(executor.evm_mut().db_mut(), *tx.tx().tx_hash())
                 {
                     self.execution_results_cache_hits.increment(1);
-                    // TODO: Re-enable when execute_transaction_with_cached_result is available
-                    // executor.execute_transaction_with_cached_result(
-                    //     tx,
-                    //     result,
-                    //     |_| alloy_evm::block::CommitChanges::Yes,
-                    // )?;
-                    // For now, just execute normally even if we have a cache hit
+                    // For now, mock the cached execution by just executing normally
+                    // When properly implemented, this will use the cached result
+                    let _ = result; // Avoid unused variable warning
                     executor.execute_transaction(tx)?;
                 } else {
                     self.execution_results_cache_misses.increment(1);

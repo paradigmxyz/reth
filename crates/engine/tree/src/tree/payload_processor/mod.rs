@@ -54,7 +54,8 @@ pub mod sparse_trie;
 use configured_sparse_trie::ConfiguredSparseTrie;
 
 /// Cache for transaction execution results and state access records.
-/// Maps transaction hashes to their execution results, access records, and optional created contract info.
+/// Maps transaction hashes to their execution results, access records, and optional created
+/// contract info.
 pub type TxCache<Evm> = Arc<
     DashMap<
         TxHash,
