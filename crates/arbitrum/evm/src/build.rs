@@ -124,6 +124,7 @@ where
                 _ => true,
             }
         };
+        let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let needs_precredit = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
@@ -131,6 +132,7 @@ where
                 _ => true,
             }
         };
+        let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -178,17 +180,18 @@ where
 
         let mut used_pre_nonce = None;
 
+        let current_nonce = {
+            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+            match state.basic(sender) {
+                Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
+                Err(_) => 0,
+            }
+        };
+
         if needs_precredit {
-            let pre_nonce = {
-                let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-                match state.basic(sender) {
-                    Ok(info_opt) => info_opt.map(|i| i.nonce).unwrap_or_default(),
-                    Err(_) => 0,
-                }
-            };
             if is_sequenced {
-                used_pre_nonce = Some(pre_nonce);
+                used_pre_nonce = Some(current_nonce);
             }
 
             let needed_fee = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
@@ -216,7 +219,7 @@ where
 
             let existing = match state.basic(sender) {
                 Ok(Some(info)) => info,
-                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: pre_nonce, code_hash: KECCAK_EMPTY, code: None },
+                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: current_nonce, code_hash: KECCAK_EMPTY, code: None },
             };
             let mut updated = existing;
             updated.balance = updated.balance.saturating_add(needed_fee);
@@ -232,8 +235,9 @@ where
         }
 
         let mut tx_env = tx.to_tx_env();
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal) {
+        if is_internal {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+            reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
 
