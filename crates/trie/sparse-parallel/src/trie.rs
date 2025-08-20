@@ -3287,27 +3287,36 @@ mod tests {
     }
 
     #[test]
-    fn test_update_subtrie_hashes() {
+    fn test_update_subtrie_hashes_prefix_set_matching() {
         // Create a trie and reveal leaf nodes using reveal_nodes
         let mut trie = ParallelSparseTrie::default();
 
-        // Create dummy leaf nodes that form an incorrect trie structure but enough to test the
-        // method
+        // Create dummy leaf nodes.
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
         let leaf_1_path = leaf_1_full_path.slice(..2);
         let leaf_1_key = leaf_1_full_path.slice(2..);
-        let leaf_2_full_path = Nibbles::from_nibbles([vec![1, 0], vec![0; 62]].concat());
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![0, 1], vec![0; 62]].concat());
         let leaf_2_path = leaf_2_full_path.slice(..2);
         let leaf_2_key = leaf_2_full_path.slice(2..);
-        let leaf_3_full_path = Nibbles::from_nibbles([vec![3, 0], vec![0; 62]].concat());
+        let leaf_3_full_path = Nibbles::from_nibbles([vec![0, 2], vec![0; 62]].concat());
         let leaf_3_path = leaf_3_full_path.slice(..2);
         let leaf_3_key = leaf_3_full_path.slice(2..);
         let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), 1);
         let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), 2);
         let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), 3);
 
+        // Create branch node with hashes for each leaf.
+        let child_hashes = [
+            RlpNode::word_rlp(&B256::repeat_byte(0x00)),
+            RlpNode::word_rlp(&B256::repeat_byte(0x11)),
+            // deliberately omit hash for leaf_3
+        ];
+        let branch_path = Nibbles::from_nibbles([0x0]);
+        let branch_node = create_branch_node_with_children(&[0x0, 0x1, 0x2], child_hashes);
+
         // Reveal nodes using reveal_nodes
         trie.reveal_nodes(vec![
+            RevealedSparseNode { path: branch_path, node: branch_node, masks: TrieMasks::none() },
             RevealedSparseNode { path: leaf_1_path, node: leaf_1, masks: TrieMasks::none() },
             RevealedSparseNode { path: leaf_2_path, node: leaf_2, masks: TrieMasks::none() },
             RevealedSparseNode { path: leaf_3_path, node: leaf_3, masks: TrieMasks::none() },
@@ -3319,16 +3328,16 @@ mod tests {
         let subtrie_2_index = SparseSubtrieType::from_path(&leaf_2_path).lower_index().unwrap();
         let subtrie_3_index = SparseSubtrieType::from_path(&leaf_3_path).lower_index().unwrap();
 
-        let unchanged_prefix_set = PrefixSetMut::from([
+        let mut unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
             leaf_2_full_path,
-            Nibbles::from_nibbles([0x2, 0x0, 0x0]),
+            Nibbles::from_nibbles([0x3, 0x0, 0x0]),
         ]);
         // Create a prefix set with the keys that match only the second subtrie
         let mut prefix_set = PrefixSetMut::from([
             // Match second subtrie
-            Nibbles::from_nibbles([0x1, 0x0, 0x0]),
-            Nibbles::from_nibbles([0x1, 0x0, 0x1, 0x0]),
+            Nibbles::from_nibbles([0x0, 0x1, 0x0]),
+            Nibbles::from_nibbles([0x0, 0x1, 0x1, 0x0]),
         ]);
         prefix_set.extend(unchanged_prefix_set.clone());
         trie.prefix_set = prefix_set;
@@ -3336,8 +3345,16 @@ mod tests {
         // Update subtrie hashes
         trie.update_subtrie_hashes();
 
+        // We expect that leaf 3 (0x02) should have been added to the prefix set, because it is
+        // missing a hash and is the root node of a lower subtrie, and therefore would need to have
+        // that hash calculated by `update_upper_subtrie_hashes`.
+        unchanged_prefix_set.insert(leaf_3_full_path);
+
         // Check that the prefix set was updated
-        assert_eq!(trie.prefix_set, unchanged_prefix_set);
+        assert_eq!(
+            trie.prefix_set.clone().freeze().into_iter().collect::<Vec<_>>(),
+            unchanged_prefix_set.freeze().into_iter().collect::<Vec<_>>()
+        );
         // Check that subtries were returned back to the array
         assert!(trie.lower_subtries[subtrie_1_index].as_revealed_ref().is_some());
         assert!(trie.lower_subtries[subtrie_2_index].as_revealed_ref().is_some());
