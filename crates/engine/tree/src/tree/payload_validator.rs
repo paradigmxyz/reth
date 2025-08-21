@@ -694,11 +694,20 @@ where
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
             |db, tx_hash| {
+                // Try to reuse cached execution result from prewarming.
+                // This validates that the state the transaction read during prewarming
+                // matches the current database state.
                 tx_cache.remove(&tx_hash).and_then(|(_, (traces, mut result, coinbase_deltas))| {
+                    // Validate each state access recorded during prewarming
                     for trace in traces {
                         let matches = match &trace {
                             AccessRecord::Account { address, result } => {
                                 match coinbase_deltas {
+                                    // Special handling for coinbase account:
+                                    // - During prewarming, coinbase had incomplete balance (missing earlier fees)
+                                    // - We skip validation here and apply deltas below
+                                    // - This only works if the tx didn't read coinbase balance
+                                    //   (if it did, coinbase_deltas would be None and cache wouldn't exist)
                                     Some((coinbase, _, _)) if *address == coinbase => {
                                         true
                                     }
@@ -739,9 +748,14 @@ where
                         }
                     }
 
+                    // Apply coinbase deltas to account for gas fees accumulated from previous transactions.
+                    // The cached result has the coinbase state from prewarming (incomplete balance),
+                    // so we update it to: current_balance + this_transaction's_fees
                     if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) = coinbase_deltas {
                         if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
                             if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
+                                // Current DB balance includes all fees from previous transactions
+                                // Add the delta (fees from this transaction) to get final state
                                 coinbase_account.info.nonce = coinbase_db.nonce + coinbase_nonce_delta;
                                 coinbase_account.info.balance = coinbase_db.balance + coinbase_balance_delta;
 
