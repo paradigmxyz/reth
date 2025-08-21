@@ -145,10 +145,6 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
-    fn pooled_transaction_hashes_max(&self, _max: usize) -> Vec<TxHash> {
-        vec![]
-    }
-
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }

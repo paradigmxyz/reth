@@ -302,11 +302,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: P2P
     fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
 
-    /// Returns only the first `max` hashes of transactions in the pool.
-    ///
-    /// Consumer: P2P
-    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash>;
-
     /// Returns the _full_ transaction objects all transactions in the pool that are allowed to be
     /// propagated.
     ///
