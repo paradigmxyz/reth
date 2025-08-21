@@ -172,9 +172,13 @@ where
     }
 
     /// Generate a state multiproof according to specified targets.
+    ///
+    /// `id` is an optional argument which is only used to differentiate concurrent calls in the
+    /// trace logs.
     pub fn decoded_multiproof(
         self,
         targets: MultiProofTargets,
+        id: u64,
     ) -> Result<DecodedMultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
@@ -202,8 +206,16 @@ where
         debug!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
+            ?id,
             "Starting parallel proof generation"
         );
+
+        let span = tracing::trace_span!(
+            target: "trie::parallel_proof",
+            "Account multiproof",
+            span_id=?id,
+        );
+        let _span_guard = span.enter();
 
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
@@ -460,7 +472,7 @@ mod tests {
             Default::default(),
             proof_task_handle.clone(),
         )
-        .decoded_multiproof(targets.clone())
+        .decoded_multiproof(targets.clone(), 0)
         .unwrap();
 
         let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
