@@ -14,6 +14,8 @@ pub mod app;
 pub mod chainspec;
 /// Optimism CLI commands.
 pub mod commands;
+/// Optimism CLI parsers.
+pub mod parsers;
 /// Module with a codec for reading and encoding receipts in files.
 ///
 /// Enables decoding and encoding `OpGethReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
@@ -38,13 +40,13 @@ use reth_optimism_chainspec::OpChainSpec;
 
 use std::{ffi::OsString, fmt, sync::Arc};
 
-use chainspec::OpChainSpecParser;
 use clap::{command, Parser};
 use commands::Commands;
 use futures_util::Future;
-use reth_cli::chainspec::ChainSpecParser;
+use parsers::OpCliParsers;
 use reth_cli_commands::launcher::FnLauncher;
 use reth_cli_runner::CliRunner;
+use reth_cli_util::RethCliParsers;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{args::LogArgs, version::version_metadata};
@@ -59,11 +61,10 @@ use reth_node_metrics as _;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = RollupArgs>
-{
+pub struct Cli<P: RethCliParsers = OpCliParsers, Ext: clap::Args + fmt::Debug = RollupArgs> {
     /// The command to run
     #[command(subcommand)]
-    pub command: Commands<Spec, Ext>,
+    pub command: Commands<P, Ext>,
 
     /// The logging configuration for the CLI.
     #[command(flatten)]
@@ -86,16 +87,17 @@ impl Cli {
     }
 }
 
-impl<C, Ext> Cli<C, Ext>
+impl<P, Ext> Cli<P, Ext>
 where
-    C: ChainSpecParser<ChainSpec = OpChainSpec>,
+    P: RethCliParsers,
+    P::ChainSpecParser: reth_cli::chainspec::ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
 {
     /// Configures the CLI and returns a [`CliApp`] instance.
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
     /// [`CliApp`] that can be further configured before running.
-    pub fn configure(self) -> CliApp<C, Ext> {
+    pub fn configure(self) -> CliApp<P, Ext> {
         CliApp::new(self)
     }
 
@@ -105,7 +107,15 @@ where
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
+            Ext,
+        ) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
@@ -114,12 +124,20 @@ where
     /// Execute the configured cli command with the provided [`CliRunner`].
     pub fn with_runner<L, Fut>(self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(
+            WithLaunchContext<
+                NodeBuilder<
+                    Arc<DatabaseEnv>,
+                    <P::ChainSpecParser as reth_cli::chainspec::ChainSpecParser>::ChainSpec,
+                >,
+            >,
+            Ext,
+        ) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         let mut this = self.configure();
         this.set_runner(runner);
-        this.run(FnLauncher::new::<C, Ext>(async move |builder, chain_spec| {
+        this.run(FnLauncher::new::<P::ChainSpecParser, Ext>(async move |builder, chain_spec| {
             launcher(builder, chain_spec).await
         }))
     }
@@ -127,7 +145,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{chainspec::OpChainSpecParser, commands::Commands, Cli};
+    use crate::{chainspec::OpChainSpecParser, commands::Commands, parsers::OpCliParsers, Cli};
     use clap::Parser;
     use reth_cli_commands::{node::NoArgs, NodeCommand};
     use reth_optimism_chainspec::{BASE_MAINNET, OP_DEV};
@@ -153,7 +171,7 @@ mod test {
 
     #[test]
     fn parse_node() {
-        let cmd = Cli::<OpChainSpecParser, RollupArgs>::parse_from([
+        let cmd = Cli::<OpCliParsers, RollupArgs>::parse_from([
             "op-reth",
             "node",
             "--chain",

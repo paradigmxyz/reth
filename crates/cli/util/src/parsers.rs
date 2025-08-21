@@ -8,6 +8,18 @@ use std::{
     time::Duration,
 };
 
+/// Trait for configuring CLI parsers across reth.
+///
+/// This trait provides configurable parsers for various CLI components,
+/// allowing customization of validation behavior.
+pub trait RethCliParsers: Clone + Send + Sync + 'static {
+    /// The chain specification parser type.
+    type ChainSpecParser: reth_cli::chainspec::ChainSpecParser + std::fmt::Debug;
+
+    /// The RPC module validator type.
+    type RpcModuleValidator: reth_rpc_server_types::RpcModuleValidator;
+}
+
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;

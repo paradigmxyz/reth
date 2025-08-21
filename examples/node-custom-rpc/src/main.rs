@@ -21,7 +21,7 @@ use jsonrpsee::{
     PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
-    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    cli::{Cli, EthereumCliParsers},
     node::EthereumNode,
     pool::TransactionPool,
 };
@@ -29,7 +29,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 fn main() {
-    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
+    Cli::<EthereumCliParsers, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
                 // configure default ethereum node

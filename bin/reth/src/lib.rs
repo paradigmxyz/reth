@@ -92,6 +92,9 @@ pub mod chainspec {
     pub use reth_ethereum_cli::chainspec::*;
 }
 
+/// Re-exported from `reth_ethereum_cli`
+pub use reth_ethereum_cli::parsers::EthereumCliParsers;
+
 /// Re-exported from `reth_provider`.
 pub mod providers {
     pub use reth_provider::*;
