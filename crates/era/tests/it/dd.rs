@@ -6,6 +6,7 @@ use alloy_primitives::U256;
 use reth_era::{
     e2s_types::IndexEntry,
     era1_file::{Era1Reader, Era1Writer},
+    era_file_ops::{StreamReader, StreamWriter},
     execution_types::CompressedBody,
 };
 use reth_ethereum_primitives::TransactionSigned;
@@ -94,7 +95,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
         let mut buffer = Vec::new();
         {
             let mut writer = Era1Writer::new(&mut buffer);
-            writer.write_era1_file(&file)?;
+            writer.write_file(&file)?;
         }
 
         // Read back from buffer

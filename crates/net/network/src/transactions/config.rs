@@ -125,6 +125,8 @@ pub enum TransactionPropagationKind {
     All,
     /// Propagate transactions to only trusted peers.
     Trusted,
+    /// Do not propagate transactions
+    None,
 }
 
 impl TransactionPropagationPolicy for TransactionPropagationKind {
@@ -132,6 +134,7 @@ impl TransactionPropagationPolicy for TransactionPropagationKind {
         match self {
             Self::All => true,
             Self::Trusted => peer.peer_kind.is_trusted(),
+            Self::None => false,
         }
     }
 
@@ -147,6 +150,7 @@ impl FromStr for TransactionPropagationKind {
         match s {
             "All" | "all" => Ok(Self::All),
             "Trusted" | "trusted" => Ok(Self::Trusted),
+            "None" | "none" => Ok(Self::None),
             _ => Err(format!("Invalid transaction propagation policy: {s}")),
         }
     }
