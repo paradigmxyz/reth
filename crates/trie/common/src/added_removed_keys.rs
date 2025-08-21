@@ -1,7 +1,7 @@
 //! Tracking of keys having been added and removed from the tries.
 
 use crate::HashedPostState;
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_trie::proof::AddedRemovedKeys;
 
 /// Tracks added and removed keys across account and storage tries.
