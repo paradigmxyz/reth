@@ -719,7 +719,7 @@ where
                         "Validating cached execution result"
                     );
                     // Validate each state access recorded during prewarming
-                    for trace in traces {
+                    for (trace_idx, trace) in traces.into_iter().enumerate() {
                         let matches = match &trace {
                             AccessRecord::Account { address, result } => {
                                 match coinbase_deltas {
@@ -783,7 +783,7 @@ where
                             tracing::debug!(
                                 target: "engine::cache",
                                 ?tx_hash,
-                                trace_index = traces.iter().position(|t| t == &trace).unwrap_or(0),
+                                trace_index = trace_idx,
                                 total_traces = trace_count,
                                 validation_time_us = validation_time.as_micros(),
                                 "Cache validation failed - state has changed"
