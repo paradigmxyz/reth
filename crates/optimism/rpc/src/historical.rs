@@ -135,78 +135,12 @@ where
         let historical = self.historical.clone();
 
         Box::pin(async move {
-            // Special handling for debug_traceTransaction
-            if req.method_name() == "debug_traceTransaction" {
-                // Try to parse the transaction hash from the first parameter
-                if let Ok(tx_hash) = parse_transaction_hash_from_params(&req.params()) {
-                    // Check if we can find the transaction locally
-                    let tx_found = historical
-                        .provider
-                        .transaction_by_hash_with_meta(tx_hash)
-                        .ok()
-                        .flatten()
-                        .is_some();
-
-                    // If not found locally, optimistically forward to historical endpoint
-                    if !tx_found {
-                        debug!(target: "rpc::historical", ?tx_hash, "transaction not found locally, forwarding to historical endpoint");
-
-                        if let Some(response) =
-                            forward_to_historical(&historical.client, &req).await
-                        {
-                            return response
-                        }
-                    }
-                }
+            // Check if request should be forwarded to historical endpoint
+            if let Some(response) = historical.maybe_forward_request(&req).await {
+                return response
             }
 
-            let maybe_block_id = match req.method_name() {
-                "eth_getBlockByNumber" |
-                "eth_getBlockByHash" |
-                "debug_traceBlockByNumber" |
-                "debug_traceBlockByHash" => parse_block_id_from_params(&req.params(), 0),
-                "eth_getBalance" |
-                "eth_getCode" |
-                "eth_getTransactionCount" |
-                "eth_call" |
-                "eth_estimateGas" |
-                "eth_createAccessList" |
-                "debug_traceCall" => parse_block_id_from_params(&req.params(), 1),
-                "eth_getStorageAt" | "eth_getProof" => parse_block_id_from_params(&req.params(), 2),
-                _ => None,
-            };
-
-            // if we've extracted a block ID, check if it's pre-Bedrock
-            if let Some(block_id) = maybe_block_id {
-                let is_pre_bedrock = match historical.provider.block_number_for_id(block_id) {
-                    Ok(Some(num)) => {
-                        debug!(target: "rpc::historical", ?block_id, block_num=num, bedrock=historical.bedrock_block, "found block number");
-                        num < historical.bedrock_block
-                    }
-                    Ok(None) if block_id.is_hash() => {
-                        // if we couldn't find the block number for the hash then we assume it is
-                        // pre-Bedrock
-                        debug!(target: "rpc::historical", ?block_id, "block hash not found locally, assuming pre-bedrock");
-                        true
-                    }
-                    _ => {
-                        // If we can't convert blockid to a number, assume it's post-Bedrock
-                        debug!(target: "rpc::historical", ?block_id, "could not determine block number; not forwarding");
-                        false
-                    }
-                };
-
-                // if the block is pre-Bedrock, forward the request to the historical client
-                if is_pre_bedrock {
-                    debug!(target: "rpc::historical", method = %req.method_name(), ?block_id, params=?req.params(), "forwarding pre-Bedrock request");
-
-                    if let Some(response) = forward_to_historical(&historical.client, &req).await {
-                        return response
-                    }
-                }
-            }
-
-            // handle the request with the inner service
+            // Handle the request with the inner service
             inner_service.call(req).await
         })
     }
@@ -233,6 +167,132 @@ struct HistoricalRpcInner<P> {
     bedrock_block: BlockNumber,
 }
 
+impl<P> HistoricalRpcInner<P>
+where
+    P: BlockReaderIdExt + TransactionsProvider + Send + Sync + Clone,
+{
+    /// Checks if a request should be forwarded to the historical endpoint and returns
+    /// the response if it was forwarded.
+    async fn maybe_forward_request(&self, req: &Request<'_>) -> Option<MethodResponse> {
+        let should_forward = match req.method_name() {
+            "debug_traceTransaction" => self.should_forward_transaction(req),
+            method => self.should_forward_block_request(method, req),
+        };
+
+        if should_forward {
+            return self.forward_to_historical(req).await
+        }
+
+        None
+    }
+
+    /// Determines if a transaction request should be forwarded
+    fn should_forward_transaction(&self, req: &Request<'_>) -> bool {
+        parse_transaction_hash_from_params(&req.params())
+            .ok()
+            .map(|tx_hash| {
+                let tx_found =
+                    self.provider.transaction_by_hash_with_meta(tx_hash).ok().flatten().is_some();
+
+                if !tx_found {
+                    debug!(
+                        target: "rpc::historical",
+                        ?tx_hash,
+                        "transaction not found locally, forwarding to historical endpoint"
+                    );
+                }
+                !tx_found
+            })
+            .unwrap_or(false)
+    }
+
+    /// Determines if a block-based request should be forwarded
+    fn should_forward_block_request(&self, method: &str, req: &Request<'_>) -> bool {
+        let maybe_block_id = extract_block_id_for_method(method, &req.params());
+
+        maybe_block_id.map(|block_id| self.is_pre_bedrock(block_id)).unwrap_or(false)
+    }
+
+    /// Checks if a block ID refers to a pre-bedrock block
+    fn is_pre_bedrock(&self, block_id: BlockId) -> bool {
+        match self.provider.block_number_for_id(block_id) {
+            Ok(Some(num)) => {
+                debug!(
+                    target: "rpc::historical",
+                    ?block_id,
+                    block_num=num,
+                    bedrock=self.bedrock_block,
+                    "found block number"
+                );
+                num < self.bedrock_block
+            }
+            Ok(None) if block_id.is_hash() => {
+                debug!(
+                    target: "rpc::historical",
+                    ?block_id,
+                    "block hash not found locally, assuming pre-bedrock"
+                );
+                true
+            }
+            _ => {
+                debug!(
+                    target: "rpc::historical",
+                    ?block_id,
+                    "could not determine block number; not forwarding"
+                );
+                false
+            }
+        }
+    }
+
+    /// Forwards a request to the historical endpoint
+    async fn forward_to_historical(&self, req: &Request<'_>) -> Option<MethodResponse> {
+        debug!(
+            target: "rpc::historical",
+            method = %req.method_name(),
+            params=?req.params(),
+            "forwarding request to historical endpoint"
+        );
+
+        let params = req.params();
+        let params_str = params.as_str().unwrap_or("[]");
+
+        let params = serde_json::from_str::<serde_json::Value>(params_str).ok()?;
+
+        let raw =
+            self.client.request::<_, serde_json::Value>(req.method_name(), params).await.ok()?;
+
+        let payload = jsonrpsee_types::ResponsePayload::success(raw).into();
+        Some(MethodResponse::response(req.id.clone(), payload, usize::MAX))
+    }
+}
+
+/// Error type for parameter parsing
+#[derive(Debug)]
+enum ParseError {
+    InvalidFormat,
+    MissingParameter,
+}
+
+/// Extracts the block ID from request parameters based on the method name
+fn extract_block_id_for_method(method: &str, params: &Params<'_>) -> Option<BlockId> {
+    match method {
+        "eth_getBlockByNumber" |
+        "eth_getBlockByHash" |
+        "debug_traceBlockByNumber" |
+        "debug_traceBlockByHash" => parse_block_id_from_params(params, 0),
+        "eth_getBalance" |
+        "eth_getCode" |
+        "eth_getTransactionCount" |
+        "eth_call" |
+        "eth_estimateGas" |
+        "eth_createAccessList" |
+        "debug_traceCall" => parse_block_id_from_params(params, 1),
+        "eth_getStorageAt" | "eth_getProof" => parse_block_id_from_params(params, 2),
+        _ => None,
+    }
+}
+
 /// Parses a `BlockId` from the given parameters at the specified position.
 fn parse_block_id_from_params(params: &Params<'_>, position: usize) -> Option<BlockId> {
     let values: Vec<serde_json::Value> = params.parse().ok()?;
@@ -241,26 +301,10 @@ fn parse_block_id_from_params(params: &Params<'_>, position: usize) -> Option<Bl
 }
 
 /// Parses a transaction hash from the first parameter.
-fn parse_transaction_hash_from_params(params: &Params<'_>) -> Result<B256, ()> {
-    let values: Vec<serde_json::Value> = params.parse().map_err(|_| ())?;
-    let val = values.into_iter().next().ok_or(())?;
-    serde_json::from_value::<B256>(val).map_err(|_| ())
-}
-
-/// Forwards a request to the historical endpoint and returns the response if successful.
-async fn forward_to_historical(
-    client: &HistoricalRpcClient,
-    req: &Request<'_>,
-) -> Option<MethodResponse> {
-    let params = req.params();
-    let params = params.as_str().unwrap_or("[]");
-    if let Ok(params) = serde_json::from_str::<serde_json::Value>(params) {
-        if let Ok(raw) = client.request::<_, serde_json::Value>(req.method_name(), params).await {
-            let payload = jsonrpsee_types::ResponsePayload::success(raw).into();
-            return Some(MethodResponse::response(req.id.clone(), payload, usize::MAX));
-        }
-    }
-    None
+fn parse_transaction_hash_from_params(params: &Params<'_>) -> Result<B256, ParseError> {
+    let values: Vec<serde_json::Value> = params.parse().map_err(|_| ParseError::InvalidFormat)?;
+    let val = values.into_iter().next().ok_or(ParseError::MissingParameter)?;
+    serde_json::from_value::<B256>(val).map_err(|_| ParseError::InvalidFormat)
 }
 
 #[cfg(test)]
@@ -341,5 +385,15 @@ mod tests {
         let params = Params::new(Some(r#"["not_a_hash"]"#));
         let result = parse_transaction_hash_from_params(&params);
         assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::InvalidFormat));
+    }
+
+    /// Tests that missing parameter returns appropriate error.
+    #[test]
+    fn returns_error_for_missing_parameter() {
+        let params = Params::new(Some(r#"[]"#));
+        let result = parse_transaction_hash_from_params(&params);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::MissingParameter));
     }
 }
