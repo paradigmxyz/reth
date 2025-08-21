@@ -385,7 +385,7 @@ where
 
             let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
 
-    // Calculate coinbase deltas to apply when reusing cached result
+            // Calculate coinbase deltas to apply when reusing cached result
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
                 let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
