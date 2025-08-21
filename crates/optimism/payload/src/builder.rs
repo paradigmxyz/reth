@@ -181,7 +181,7 @@ where
         Txs:
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { mut cached_reads, config, cancel, best_payload, .. } = args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -280,6 +280,7 @@ where
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
+            max_tx_bytes: None,
         };
         self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
             .into_payload()
