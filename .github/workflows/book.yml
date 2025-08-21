@@ -50,10 +50,16 @@ jobs:
   build:
     if: false
     runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "Build job disabled"
 
   deploy:
     if: false
     runs-on: ubuntu-latest
+    steps:
+      - name: Disabled
+        run: echo "Deploy job disabled"
 
     # deploy:
     #   # Only deploy if a push to main
@@ -72,7 +78,7 @@ jobs:
 
     timeout-minutes: 60
 
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+    # steps:
+    #   - name: Deploy to GitHub Pages
+    #     id: deployment
+    #     uses: actions/deploy-pages@v4
