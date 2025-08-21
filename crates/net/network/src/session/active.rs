@@ -533,6 +533,209 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         // terminate the task
         Some(Poll::Ready(()))
     }
+
+    /// Processes incoming commands from the session manager
+    fn process_incoming_commands(&mut self, cx: &mut Context<'_>) -> Result<bool, Poll<()>> {
+        let mut progress = false;
+
+        loop {
+            match self.commands_rx.poll_next_unpin(cx) {
+                Poll::Pending => break,
+                Poll::Ready(None) => {
+                    // Manager was dropped, terminate this session
+                    return Err(Poll::Ready(()));
+                }
+                Poll::Ready(Some(cmd)) => {
+                    progress = true;
+                    match cmd {
+                        SessionCommand::Disconnect { reason } => {
+                            debug!(
+                                target: "net::session",
+                                ?reason,
+                                remote_peer_id=?self.remote_peer_id,
+                                "Received disconnect command for session"
+                            );
+                            let reason = reason.unwrap_or(DisconnectReason::DisconnectRequested);
+                            return Err(self.try_disconnect(reason, cx));
+                        }
+                        SessionCommand::Message(msg) => {
+                            self.on_internal_peer_message(msg);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(progress)
+    }
+
+    /// Processes internal peer requests
+    fn process_internal_requests(&mut self, cx: &mut Context<'_>) -> bool {
+        let mut progress = false;
+        let deadline = self.request_deadline();
+
+        while let Poll::Ready(Some(req)) = self.internal_request_rx.poll_next_unpin(cx) {
+            progress = true;
+            self.on_internal_peer_request(req, deadline);
+        }
+
+        progress
+    }
+
+    /// Processes received requests from remote peers
+    fn process_received_requests(&mut self, cx: &mut Context<'_>) {
+        // Advance all active requests by removing and re-adding them
+        for idx in (0..self.received_requests_from_remote.len()).rev() {
+            let mut req = self.received_requests_from_remote.swap_remove(idx);
+            match req.rx.poll(cx) {
+                Poll::Pending => {
+                    // Not ready yet, put it back
+                    self.received_requests_from_remote.push(req);
+                }
+                Poll::Ready(resp) => {
+                    self.handle_outgoing_response(req.request_id, resp);
+                }
+            }
+        }
+    }
+
+    /// Sends queued outgoing messages
+    fn send_queued_messages(&mut self, cx: &mut Context<'_>) -> Result<bool, Poll<()>> {
+        let mut progress = false;
+
+        while self.conn.poll_ready_unpin(cx).is_ready() {
+            if let Some(msg) = self.queued_outgoing.pop_front() {
+                progress = true;
+                let res = match msg {
+                    OutgoingMessage::Eth(msg) => self.conn.start_send_unpin(msg),
+                    OutgoingMessage::Broadcast(msg) => self.conn.start_send_broadcast(msg),
+                    OutgoingMessage::Raw(msg) => self.conn.start_send_raw(msg),
+                };
+                if let Err(err) = res {
+                    debug!(target: "net::session", %err, remote_peer_id=?self.remote_peer_id, "failed to send message");
+                    return Err(self.close_on_error(err, cx));
+                }
+            } else {
+                // No more messages to send
+                break
+            }
+        }
+
+        Ok(progress)
+    }
+
+    /// Handles the main receive loop for incoming messages
+    /// Returns true if any progress was made, false if budget exhausted or no progress
+    fn handle_receive_loop(
+        &mut self,
+        cx: &mut Context<'_>,
+        budget: &mut u32,
+    ) -> Result<bool, Poll<()>> {
+        let mut progress = false;
+
+        loop {
+            // Check budget
+            *budget -= 1;
+            if *budget == 0 {
+                // Make sure we're woken up again
+                cx.waker().wake_by_ref();
+                return Ok(progress);
+            }
+
+            // Try to resend pending message
+            if let Some(msg) = self.pending_message_to_session.take() {
+                match self.to_session_manager.poll_reserve(cx) {
+                    Poll::Ready(Ok(_)) => {
+                        let _ = self.to_session_manager.send_item(msg);
+                    }
+                    Poll::Ready(Err(_)) => return Err(Poll::Ready(())),
+                    Poll::Pending => {
+                        self.pending_message_to_session = Some(msg);
+                        return Ok(progress);
+                    }
+                };
+            }
+
+            // Check throttling conditions
+            if self.should_throttle_incoming() {
+                return Ok(progress);
+            }
+
+            // Poll for incoming messages
+            match self.conn.poll_next_unpin(cx) {
+                Poll::Pending => break,
+                Poll::Ready(None) => {
+                    if self.is_disconnecting() {
+                        break
+                    }
+                    debug!(target: "net::session", remote_peer_id=?self.remote_peer_id, "eth stream completed");
+                    return Err(self.emit_disconnect(cx));
+                }
+                Poll::Ready(Some(res)) => match res {
+                    Ok(msg) => {
+                        trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?self.remote_peer_id, "received eth message");
+                        match self.on_incoming_message(msg) {
+                            OnIncomingMessageOutcome::Ok => {
+                                progress = true;
+                            }
+                            OnIncomingMessageOutcome::BadMessage { error, message } => {
+                                debug!(target: "net::session", %error, msg=?message, remote_peer_id=?self.remote_peer_id, "received invalid protocol message");
+                                return Err(self.close_on_error(error, cx));
+                            }
+                            OnIncomingMessageOutcome::NoCapacity(msg) => {
+                                self.pending_message_to_session = Some(msg);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        debug!(target: "net::session", %err, remote_peer_id=?self.remote_peer_id, "failed to receive message");
+                        return Err(self.close_on_error(err, cx));
+                    }
+                },
+            }
+        }
+
+        Ok(progress)
+    }
+
+    /// Checks if incoming messages should be throttled
+    fn should_throttle_incoming(&self) -> bool {
+        // Throttle if too many received requests are pending
+        if self.received_requests_from_remote.len() > MAX_QUEUED_OUTGOING_RESPONSES {
+            return true;
+        }
+
+        // Throttle if too many responses are queued
+        if self.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
+            self.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
+        {
+            return true;
+        }
+
+        false
+    }
+
+    /// Handles interval-based operations (range updates and timeout checks)
+    fn handle_interval_operations(&mut self, cx: &mut Context<'_>) {
+        // Handle range update intervals
+        if let Some(interval) = &mut self.range_update_interval {
+            while interval.poll_tick(cx).is_ready() {
+                self.queued_outgoing.push_back(
+                    EthMessage::BlockRangeUpdate(self.local_range_info.to_message()).into(),
+                );
+            }
+        }
+
+        // Handle request timeout intervals
+        while self.internal_request_timeout_interval.poll_tick(cx).is_ready() {
+            if self.check_timed_out_requests(Instant::now()) {
+                if let Poll::Ready(Ok(_)) = self.to_session_manager.poll_reserve(cx) {
+                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: self.remote_peer_id };
+                    self.pending_message_to_session = Some(msg);
+                }
+            }
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> Future for ActiveSession<N> {
@@ -558,194 +761,44 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         let mut budget = 4;
 
         // The main poll loop that drives the session
-        'main: loop {
+        loop {
             let mut progress = false;
 
-            // we prioritize incoming commands sent from the session manager
-            loop {
-                match this.commands_rx.poll_next_unpin(cx) {
-                    Poll::Pending => break,
-                    Poll::Ready(None) => {
-                        // this is only possible when the manager was dropped, in which case we also
-                        // terminate this session
-                        return Poll::Ready(())
-                    }
-                    Poll::Ready(Some(cmd)) => {
-                        progress = true;
-                        match cmd {
-                            SessionCommand::Disconnect { reason } => {
-                                debug!(
-                                    target: "net::session",
-                                    ?reason,
-                                    remote_peer_id=?this.remote_peer_id,
-                                    "Received disconnect command for session"
-                                );
-                                let reason =
-                                    reason.unwrap_or(DisconnectReason::DisconnectRequested);
-
-                                return this.try_disconnect(reason, cx)
-                            }
-                            SessionCommand::Message(msg) => {
-                                this.on_internal_peer_message(msg);
-                            }
-                        }
-                    }
-                }
+            // Process incoming commands from the session manager
+            match this.process_incoming_commands(cx) {
+                Ok(command_progress) => progress |= command_progress,
+                Err(err) => return err,
             }
 
-            let deadline = this.request_deadline();
+            progress |= this.process_internal_requests(cx);
 
-            while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
-                progress = true;
-                this.on_internal_peer_request(req, deadline);
-            }
-
-            // Advance all active requests.
-            // We remove each request one by one and add them back.
-            for idx in (0..this.received_requests_from_remote.len()).rev() {
-                let mut req = this.received_requests_from_remote.swap_remove(idx);
-                match req.rx.poll(cx) {
-                    Poll::Pending => {
-                        // not ready yet
-                        this.received_requests_from_remote.push(req);
-                    }
-                    Poll::Ready(resp) => {
-                        this.handle_outgoing_response(req.request_id, resp);
-                    }
-                }
-            }
+            this.process_received_requests(cx);
 
             // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.queued_outgoing.pop_front() {
-                    progress = true;
-                    let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
-                        OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
-                        OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
-                    };
-                    if let Err(err) = res {
-                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
-                        // notify the manager
-                        return this.close_on_error(err, cx)
-                    }
-                } else {
-                    // no more messages to send over the wire
-                    break
-                }
+            match this.send_queued_messages(cx) {
+                Ok(send_progress) => progress |= send_progress,
+                Err(err) => return err,
             }
 
-            // read incoming messages from the wire
-            'receive: loop {
-                // ensure we still have enough budget for another iteration
-                budget -= 1;
-                if budget == 0 {
-                    // make sure we're woken up again
-                    cx.waker().wake_by_ref();
-                    break 'main
-                }
-
-                // try to resend the pending message that we could not send because the channel was
-                // full. [`PollSender`] will ensure that we're woken up again when the channel is
-                // ready to receive the message, and will only error if the channel is closed.
-                if let Some(msg) = this.pending_message_to_session.take() {
-                    match this.to_session_manager.poll_reserve(cx) {
-                        Poll::Ready(Ok(_)) => {
-                            let _ = this.to_session_manager.send_item(msg);
-                        }
-                        Poll::Ready(Err(_)) => return Poll::Ready(()),
-                        Poll::Pending => {
-                            this.pending_message_to_session = Some(msg);
-                            break 'receive
-                        }
-                    };
-                }
-
-                // check whether we should throttle incoming messages
-                if this.received_requests_from_remote.len() > MAX_QUEUED_OUTGOING_RESPONSES {
-                    // we're currently waiting for the responses to the peer's requests which aren't
-                    // queued as outgoing yet
-                    //
-                    // Note: we don't need to register the waker here because we polled the requests
-                    // above
-                    break 'receive
-                }
-
-                // we also need to check if we have multiple responses queued up
-                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
-                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
-                {
-                    // if we've queued up more responses than allowed, we don't poll for new
-                    // messages and break the receive loop early
-                    //
-                    // Note: we don't need to register the waker here because we still have
-                    // queued messages and the sink impl registered the waker because we've
-                    // already advanced it to `Pending` earlier
-                    break 'receive
-                }
-
-                match this.conn.poll_next_unpin(cx) {
-                    Poll::Pending => break,
-                    Poll::Ready(None) => {
-                        if this.is_disconnecting() {
-                            break
-                        }
-                        debug!(target: "net::session", remote_peer_id=?this.remote_peer_id, "eth stream completed");
-                        return this.emit_disconnect(cx)
-                    }
-                    Poll::Ready(Some(res)) => {
-                        match res {
-                            Ok(msg) => {
-                                trace!(target: "net::session", msg_id=?msg.message_id(), remote_peer_id=?this.remote_peer_id, "received eth message");
-                                // decode and handle message
-                                match this.on_incoming_message(msg) {
-                                    OnIncomingMessageOutcome::Ok => {
-                                        // handled successfully
-                                        progress = true;
-                                    }
-                                    OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
-                                        return this.close_on_error(error, cx)
-                                    }
-                                    OnIncomingMessageOutcome::NoCapacity(msg) => {
-                                        // failed to send due to lack of capacity
-                                        this.pending_message_to_session = Some(msg);
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
-                                return this.close_on_error(err, cx)
-                            }
-                        }
+            // Handle the main receive loop for incoming messages
+            match this.handle_receive_loop(cx, &mut budget) {
+                Ok(receive_progress) => {
+                    progress |= receive_progress;
+                    // If budget was exhausted, exit the main loop
+                    if budget == 0 {
+                        break
                     }
                 }
+                Err(err) => return err,
             }
 
+            // If no progress was made, exit the main loop
             if !progress {
-                break 'main
+                break
             }
         }
 
-        if let Some(interval) = &mut this.range_update_interval {
-            // queue in new range updates if the interval is ready
-            while interval.poll_tick(cx).is_ready() {
-                this.queued_outgoing.push_back(
-                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                );
-            }
-        }
-
-        while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
-            // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) {
-                if let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx) {
-                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                    this.pending_message_to_session = Some(msg);
-                }
-            }
-        }
-
+        this.handle_interval_operations(cx);
         this.shrink_to_fit();
 
         Poll::Pending
