@@ -575,13 +575,15 @@ where
         }
 
         // Checks for nonce
-        if let Err(err) = self.validate_nonce(&transaction, &account) {
-            return err
+        match self.validate_nonce(&transaction, &account) {
+            Ok(_) => {}
+            Err(err) => return TransactionValidationOutcome::Invalid(transaction, err.into()),
         }
 
         // checks for max cost not exceedng account_balance
-        if let Err(err) = self.validate_account_balance(&transaction, &account) {
-            return err
+        match self.validate_account_balance(&transaction, &account) {
+            Ok(_) => {}
+            Err(err) => return TransactionValidationOutcome::Invalid(transaction, err.into()),
         }
 
         // heavy blob tx validation
@@ -634,7 +636,7 @@ where
                         return Err(TransactionValidationOutcome::Error(
                             *transaction.hash(),
                             Box::new(err),
-                        )) 
+                        ))
                     }
                 }
             } else {
@@ -657,16 +659,15 @@ where
         &self,
         transaction: &Tx,
         account: &Account,
-    ) -> Result<(), TransactionValidationOutcome<Tx>> {
+    ) -> Result<(), InvalidTransactionError> {
         let tx_nonce = transaction.nonce();
 
         // Checks for nonce
         if tx_nonce < account.nonce {
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
-                    .into(),
-            ))
+            return Err(InvalidTransactionError::NonceNotConsistent {
+                tx: tx_nonce,
+                state: account.nonce,
+            })
         }
         Ok(())
     }
@@ -676,19 +677,16 @@ where
         &self,
         transaction: &Tx,
         account: &Account,
-    ) -> Result<(), TransactionValidationOutcome<Tx>> {
+    ) -> Result<(), InvalidTransactionError> {
         let cost = transaction.cost();
 
         // Checks for max cost
         if cost > &account.balance {
             let expected = *cost;
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                InvalidTransactionError::InsufficientFunds(
-                    GotExpected { got: account.balance, expected }.into(),
-                )
-                .into(),
-            ))
+            return Err(InvalidTransactionError::InsufficientFunds(
+                GotExpected { got: account.balance, expected }.into(),
+            )
+            .into())
         }
         Ok(())
     }
