@@ -9274,8 +9274,16 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
+ "brotli",
+ "eyre",
+ "futures-util",
  "reth-optimism-primitives",
  "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
 ]
 
 [[package]]
