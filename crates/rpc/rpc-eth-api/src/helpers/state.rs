@@ -11,12 +11,14 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
-use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
+use reth_rpc_convert::RpcConvert;
+use reth_rpc_eth_types::{
+    error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
+};
 use reth_storage_api::{
     BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
-use std::future;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -195,7 +197,13 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
+pub trait LoadState:
+    LoadPendingBlock
+    + EthApiTypes<
+        Error: FromEvmError<Self::Evm> + FromEthApiError,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
+    > + RpcNodeCoreExt
+{
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)
@@ -208,8 +216,19 @@ pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
     fn state_at_block_id(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send {
-        future::ready(self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err))
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move {
+            if at.is_pending() {
+                if let Ok(Some(state)) = self.local_pending_state().await {
+                    return Ok(state)
+                }
+            }
+
+            self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
+        }
     }
 
     /// Returns the _latest_ state
@@ -223,7 +242,10 @@ pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
     fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<StateProviderBox, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
         async move {
             if let Some(block_id) = block_id {
                 self.state_at_block_id(block_id).await
@@ -244,7 +266,7 @@ pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
         at: BlockId,
     ) -> impl Future<Output = Result<(EvmEnvFor<Self::Evm>, BlockId), Self::Error>> + Send
     where
-        Self: LoadPendingBlock + SpawnBlocking,
+        Self: SpawnBlocking,
     {
         async move {
             if at.is_pending() {
