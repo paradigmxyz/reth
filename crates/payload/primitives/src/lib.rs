@@ -146,7 +146,8 @@ pub fn validate_payload_timestamp(
     }
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
-    if version.is_v5() && !is_osaka {
+    // TODO: Select timestamp for Amsterdam for now turn v5 on by default
+    if version.is_v5() && !is_prague {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
         //
