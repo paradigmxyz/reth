@@ -81,7 +81,7 @@ where
         >,
     >,
     /// Whether to use the parallel sparse trie.
-    use_parallel_sparse_trie: bool,
+    disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
 }
@@ -109,7 +109,7 @@ where
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
             trie_input: None,
-            use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
+            disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
         }
     }
 }
@@ -365,10 +365,10 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let default_trie = SparseTrie::blind_from(if self.use_parallel_sparse_trie {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            } else {
+            let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
+            } else {
+                ConfiguredSparseTrie::Parallel(Default::default())
             });
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()

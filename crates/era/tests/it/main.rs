@@ -10,6 +10,7 @@ use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader},
+    era_file_ops::FileReader,
 };
 use reth_era_downloader::EraClient;
 use std::{

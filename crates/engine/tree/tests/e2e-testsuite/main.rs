@@ -33,10 +33,7 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
         ))
         .with_network(NetworkSetup::single_node())
         .with_tree_config(
-            TreeConfig::default()
-                .with_legacy_state_root(false)
-                .with_has_enough_parallelism(true)
-                .with_enable_parallel_sparse_trie(true),
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
         )
 }
 

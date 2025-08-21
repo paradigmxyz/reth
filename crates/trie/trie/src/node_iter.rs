@@ -43,7 +43,10 @@ struct SeekedHashedEntry<V> {
     result: Option<(B256, V)>,
 }
 
-/// An iterator over existing intermediate branch nodes and updated leaf nodes.
+/// Iterates over trie nodes for hash building.
+///
+/// This iterator depends on the ordering guarantees of [`TrieCursor`],
+/// and additionally uses hashed cursor lookups when operating on storage tries.
 #[derive(Debug)]
 pub struct TrieNodeIter<C, H: HashedCursor> {
     /// The walker over intermediate nodes.
