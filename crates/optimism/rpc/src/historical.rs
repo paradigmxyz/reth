@@ -191,17 +191,32 @@ where
         parse_transaction_hash_from_params(&req.params())
             .ok()
             .map(|tx_hash| {
-                let tx_found =
-                    self.provider.transaction_by_hash_with_meta(tx_hash).ok().flatten().is_some();
-
-                if !tx_found {
-                    debug!(
-                        target: "rpc::historical",
-                        ?tx_hash,
-                        "transaction not found locally, forwarding to historical endpoint"
-                    );
+                // Check if we can find the transaction locally and get its metadata
+                match self.provider.transaction_by_hash_with_meta(tx_hash) {
+                    Ok(Some((_, meta))) => {
+                        // Transaction found - check if it's pre-bedrock based on block number
+                        let is_pre_bedrock = meta.block_number < self.bedrock_block;
+                        if is_pre_bedrock {
+                            debug!(
+                                target: "rpc::historical",
+                                ?tx_hash,
+                                block_num = meta.block_number,
+                                bedrock = self.bedrock_block,
+                                "transaction found in pre-bedrock block, forwarding to historical endpoint"
+                            );
+                        }
+                        is_pre_bedrock
+                    }
+                    _ => {
+                        // Transaction not found locally, optimistically forward to historical endpoint
+                        debug!(
+                            target: "rpc::historical",
+                            ?tx_hash,
+                            "transaction not found locally, forwarding to historical endpoint"
+                        );
+                        true
+                    }
                 }
-                !tx_found
             })
             .unwrap_or(false)
     }
