@@ -381,6 +381,7 @@ where
 
             let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
 
+    // Calculate coinbase deltas to apply when reusing cached result
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
                 let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
@@ -456,21 +457,14 @@ pub(super) enum PrewarmTaskEvent {
 }
 
 /// Captures state reads during transaction prewarming for cache validation.
-///
-/// Distinguishes:
-/// - `Account`: Account-level data (ETH balance, nonce, code hash, storage root). ETH balance
-///   doesn't affect storage root.
-/// - `Storage`: Contract storage slots (e.g., token balances). Changes affect storage root.
-///
-/// Used to validate and reuse prewarmed results, avoiding duplicate executions while ensuring
-/// correctness.
+/// Used to validate and reuse prewarmed results, avoiding duplicate executions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccessRecord {
     Account { address: Address, result: Option<AccountInfo> },
     Storage { address: Address, index: U256, result: U256 },
 }
 
-/// revm database wrapper that records state access
+/// revm database wrapper that records state access to validate state diffs
 #[derive(Debug)]
 struct EVMRecordingDatabase<DB> {
     inner_db: DB,
@@ -522,6 +516,7 @@ impl CoinbaseBalanceEVMInspector {
     }
 }
 
+/// Tracks whether the coinbase address balance is read during EVM execution.
 impl<CTX> Inspector<CTX> for CoinbaseBalanceEVMInspector
 where
     CTX: ContextTr<Journal: JournalExt>,
