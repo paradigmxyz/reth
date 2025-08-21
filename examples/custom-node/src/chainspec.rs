@@ -50,17 +50,12 @@ impl Hardforks for CustomChainSpec {
 impl EthChainSpec for CustomChainSpec {
     type Header = CustomHeader;
 
-
+    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> reth_ethereum::chainspec::BaseFeeParams {
+        self.inner.base_fee_params_at_timestamp(timestamp)
+    }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<alloy_eips::eip7840::BlobParams> {
         self.inner.blob_params_at_timestamp(timestamp)
-    }
-
-    fn base_fee_params_at_timestamp(
-        &self,
-        timestamp: u64,
-    ) -> reth_ethereum::chainspec::BaseFeeParams {
-        self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {

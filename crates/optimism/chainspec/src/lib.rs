@@ -243,8 +243,6 @@ impl EthChainSpec for OpChainSpec {
         self.inner.chain()
     }
 
-
-
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }

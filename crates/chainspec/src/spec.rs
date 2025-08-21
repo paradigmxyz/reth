@@ -393,8 +393,6 @@ impl ChainSpec {
         }
     }
 
-
-
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         self.genesis_header.hash()
