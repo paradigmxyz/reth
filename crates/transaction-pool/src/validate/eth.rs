@@ -685,8 +685,7 @@ where
             let expected = *cost;
             return Err(InvalidTransactionError::InsufficientFunds(
                 GotExpected { got: account.balance, expected }.into(),
-            )
-            .into())
+            ))
         }
         Ok(())
     }
