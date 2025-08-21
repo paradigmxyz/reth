@@ -9269,6 +9269,14 @@ dependencies = [
 [[package]]
 name = "reth-optimism-flashblocks"
 version = "1.6.0"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "alloy-serde",
+ "reth-optimism-primitives",
+ "serde",
+]
 
 [[package]]
 name = "reth-optimism-forks"
