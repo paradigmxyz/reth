@@ -50,7 +50,10 @@ impl Hardforks for CustomChainSpec {
 impl EthChainSpec for CustomChainSpec {
     type Header = CustomHeader;
 
-    fn base_fee_params_at_timestamp(&self, timestamp: u64) -> reth_ethereum::chainspec::BaseFeeParams {
+    fn base_fee_params_at_timestamp(
+        &self,
+        timestamp: u64,
+    ) -> reth_ethereum::chainspec::BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
