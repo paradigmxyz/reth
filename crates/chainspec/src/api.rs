@@ -24,8 +24,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
         self.chain().id()
     }
 
-    /// Get the [`BaseFeeParams`] for the chain at the given block.
-    fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams;
+
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
@@ -85,9 +84,7 @@ impl EthChainSpec for ChainSpec {
         self.chain
     }
 
-    fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
-        self.base_fee_params_at_block(block_number)
-    }
+
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.base_fee_params_at_timestamp(timestamp)
