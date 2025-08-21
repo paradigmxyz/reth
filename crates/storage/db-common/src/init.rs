@@ -428,7 +428,7 @@ where
     // write state to db
     dump_state(collector, provider_rw, block)?;
 
-    info!(target: "reth::cli", "All accounts written to database, starting state root computation");
+    info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(provider_rw)?;
