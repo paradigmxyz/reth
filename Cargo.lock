@@ -9267,6 +9267,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-flashblocks"
+version = "1.6.0"
+
+[[package]]
 name = "reth-optimism-forks"
 version = "1.6.0"
 dependencies = [
