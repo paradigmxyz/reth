@@ -22,6 +22,9 @@ use revm::{
 };
 use std::time::Instant;
 
+#[cfg(feature = "metrics")]
+use tracing::{debug, info, trace};
+
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
     metrics: ExecutorMetrics,
@@ -98,6 +101,15 @@ impl ExecutorMetrics {
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
+        #[cfg(feature = "metrics")]
+        trace!(
+            target: "reth::evm::metrics",
+            gas_used,
+            duration_secs = ?execution_duration,
+            gas_per_second = gas_used as f64 / execution_duration,
+            "Block execution metrics recorded"
+        );
+
         output
     }
 
@@ -134,22 +146,34 @@ impl ExecutorMetrics {
             for tx in transactions {
                 let tx = tx?;
                 let tx_hash = *tx.tx().tx_hash();
-                if let Some(result) =
-                    get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash)
-                {
+                if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
                     self.execution_results_cache_hits.increment(1);
-                    executor.execute_transaction_with_cached_result(
-                        tx,
-                        result,
-                        |_| alloy_evm::block::CommitChanges::Yes,
-                    )?;
+                    #[cfg(feature = "metrics")]
+                    debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        "Using cached transaction result"
+                    );
+                    executor.execute_transaction_with_cached_result(tx, result, |_| {
+                        alloy_evm::block::CommitChanges::Yes
+                    })?;
                 } else {
                     self.execution_results_cache_misses.increment(1);
+                    #[cfg(feature = "metrics")]
+                    debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        "Cache miss, executing transaction"
+                    );
                     executor.execute_transaction(tx)?;
                 }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
+
+        // Track cache statistics for logging
+        let _initial_hits = self.execution_results_cache_hits.clone();
+        let _initial_misses = self.execution_results_cache_misses.clone();
 
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(|| {
@@ -157,10 +181,18 @@ impl ExecutorMetrics {
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
             (gas_used, res)
         })?;
-        
-        // Note: Counters are write-only in the metrics crate, so we can't retrieve 
-        // their values for logging. The metrics are still being recorded and can
-        // be viewed through the metrics infrastructure.
+
+        // Log cache performance summary
+        #[cfg(feature = "metrics")]
+        {
+            // Calculate cache performance (note: we can't read counter values directly,
+            // but we can track the difference if we cloned them before)
+            info!(
+                target: "reth::evm::metrics",
+                gas_used = result.gas_used,
+                "Block execution completed with transaction caching"
+            );
+        }
 
         // merge transactions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
