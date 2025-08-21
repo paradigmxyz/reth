@@ -697,7 +697,27 @@ where
                 // Try to reuse cached execution result from prewarming.
                 // This validates that the state the transaction read during prewarming
                 // matches the current database state.
-                tx_cache.remove(&tx_hash).and_then(|(_, (traces, mut result, coinbase_deltas))| {
+                let cache_result = tx_cache.remove(&tx_hash);
+                
+                if cache_result.is_none() {
+                    tracing::trace!(
+                        target: "engine::cache",
+                        ?tx_hash,
+                        "No cached result found for transaction"
+                    );
+                    return None;
+                }
+                
+                cache_result.and_then(|(_, (traces, mut result, coinbase_deltas))| {
+                    let validation_start = std::time::Instant::now();
+                    let trace_count = traces.len();
+                    tracing::trace!(
+                        target: "engine::cache",
+                        ?tx_hash,
+                        trace_count,
+                        has_coinbase_deltas = coinbase_deltas.is_some(),
+                        "Validating cached execution result"
+                    );
                     // Validate each state access recorded during prewarming
                     for trace in traces {
                         let matches = match &trace {
@@ -720,7 +740,14 @@ where
                                         };
 
                                         if !matches {
-                                            debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_account, "Can't re-use cached execution result");
+                                            tracing::debug!(
+                                                target: "engine::cache",
+                                                ?tx_hash,
+                                                ?address,
+                                                cached_account = ?result,
+                                                db_account = ?db_account,
+                                                "Account state mismatch - cache invalidated"
+                                            );
                                         }
 
                                         matches
@@ -736,7 +763,15 @@ where
                                 };
 
                                 if !matches {
-                                    debug!(target: "engine::tree", ?tx_hash, ?trace, ?db_storage, "Can't re-use cached execution result");
+                                    tracing::debug!(
+                                        target: "engine::cache",
+                                        ?tx_hash,
+                                        ?address,
+                                        ?index,
+                                        cached_storage = ?result,
+                                        db_storage = ?db_storage,
+                                        "Storage slot mismatch - cache invalidated"
+                                    );
                                 }
 
                                 matches
@@ -744,6 +779,15 @@ where
                         };
 
                         if !matches {
+                            let validation_time = validation_start.elapsed();
+                            tracing::debug!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                trace_index = traces.iter().position(|t| t == &trace).unwrap_or(0),
+                                total_traces = trace_count,
+                                validation_time_us = validation_time.as_micros(),
+                                "Cache validation failed - state has changed"
+                            );
                             return None;
                         }
                     }
@@ -759,7 +803,17 @@ where
                                 coinbase_account.info.nonce = coinbase_db.nonce + coinbase_nonce_delta;
                                 coinbase_account.info.balance = coinbase_db.balance + coinbase_balance_delta;
 
-                                debug!(target: "engine::tree", ?tx_hash, "Re-using cached execution result");
+                                let validation_time = validation_start.elapsed();
+                                tracing::debug!(
+                                    target: "engine::cache",
+                                    ?tx_hash,
+                                    trace_count,
+                                    ?coinbase,
+                                    ?coinbase_nonce_delta,
+                                    ?coinbase_balance_delta,
+                                    validation_time_us = validation_time.as_micros(),
+                                    "Successfully validated and reused cached execution result"
+                                );
                                 return Some(result)
                             }
                         }

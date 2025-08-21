@@ -375,7 +375,11 @@ where
 
             let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
             if coinbase_balance_read {
-                debug!(target: "engine::tree", ?tx_hash, "Can't cache execution result");
+                tracing::debug!(
+                    target: "engine::cache",
+                    ?tx_hash,
+                    "Cannot cache execution result - transaction reads coinbase balance"
+                );
                 continue
             }
 
@@ -385,11 +389,28 @@ where
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
                 let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
-                debug!(target: "engine::tree", ?tx_hash, ?coinbase_before, ?coinbase_after, ?nonce_delta, ?balance_delta, "Calculating coinbase deltas");
+                tracing::trace!(
+                    target: "engine::cache",
+                    ?tx_hash,
+                    ?coinbase_before,
+                    ?coinbase_after,
+                    ?nonce_delta,
+                    ?balance_delta,
+                    "Calculated coinbase deltas for cache"
+                );
                 (coinbase, nonce_delta, balance_delta)
             });
 
-            debug!(target: "engine::tree", ?tx_hash, length = execution_trace.len(), "Caching execution result");
+            tracing::debug!(
+                target: "engine::cache",
+                ?tx_hash,
+                trace_count = execution_trace.len(),
+                accounts_accessed = execution_trace.iter().filter(|t| matches!(t, AccessRecord::Account { .. })).count(),
+                storage_accessed = execution_trace.iter().filter(|t| matches!(t, AccessRecord::Storage { .. })).count(),
+                has_coinbase_deltas = coinbase_deltas.is_some(),
+                gas_used = res.result.gas_used(),
+                "Caching prewarmed execution result"
+            );
 
             tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
         }
