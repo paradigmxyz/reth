@@ -6120,7 +6120,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "9.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "auto_impl",
  "revm",
@@ -10754,7 +10754,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "28.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10772,7 +10772,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "bitvec",
  "phf",
@@ -10783,7 +10783,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "9.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10799,7 +10799,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "10.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10814,7 +10814,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.4"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10827,7 +10827,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.4"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "auto_impl",
  "either",
@@ -10839,7 +10839,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "9.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10857,7 +10857,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "9.1.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "auto_impl",
  "either",
@@ -10894,7 +10894,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "25.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10905,7 +10905,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "26.0.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10930,7 +10930,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10941,7 +10941,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.4"
-source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#3db1775f36483c40667f6eec1262d54dfc1a26e7"
+source = "git+https://github.com/Soubhik-10/revm?branch=remove-tx-index#ad89726ecf9ba66e67a6443d38aab383f5157a9b"
 dependencies = [
  "bitflags 2.9.2",
  "revm-bytecode",
