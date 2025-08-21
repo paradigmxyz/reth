@@ -87,10 +87,11 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
         let mut in_memory_hashes = Vec::new();
         for block in &self.in_memory {
             if range.contains(&block.recovered_block().number()) {
-                in_memory_hashes.insert(0, block.recovered_block().hash());
+                in_memory_hashes.push(block.recovered_block().hash());
                 earliest_block_number = Some(block.recovered_block().number());
             }
         }
+        in_memory_hashes.reverse();
 
         let mut hashes =
             self.historical.canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
