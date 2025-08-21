@@ -317,12 +317,22 @@ mod compact_receipt {
 
     impl<'a> From<&'a ArbReceipt> for CompactArbReceipt<'a> {
         fn from(receipt: &'a ArbReceipt) -> Self {
-            let inner = receipt.as_receipt();
-            Self {
-                is_legacy_like: !matches!(receipt, ArbReceipt::Deposit(_)),
-                success: inner.status().into(),
-                cumulative_gas_used: inner.cumulative_gas_used(),
-                logs: Cow::Borrowed(&inner.logs),
+            match receipt {
+                ArbReceipt::Legacy(r)
+                | ArbReceipt::Eip2930(r)
+                | ArbReceipt::Eip1559(r)
+                | ArbReceipt::Eip7702(r) => Self {
+                    is_legacy_like: true,
+                    success: r.status().into(),
+                    cumulative_gas_used: r.cumulative_gas_used(),
+                    logs: Cow::Borrowed(&r.logs),
+                },
+                ArbReceipt::Deposit(_) => Self {
+                    is_legacy_like: false,
+                    success: true,
+                    cumulative_gas_used: 0,
+                    logs: Cow::Owned(Vec::new()),
+                },
             }
         }
     }
