@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert_eq!(Header::bitflag_encoded_bytes(), 4);
+        assert_eq!(Header::bitflag_encoded_bytes(), 5);
         assert_eq!(HeaderExt::bitflag_encoded_bytes(), 1);
     }
 
