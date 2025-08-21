@@ -20,16 +20,14 @@ use reth_ethereum::{
     trie::{KeccakKeyHasher, KeyHasher},
     TransactionSigned,
 };
-use reth_node_builder::{rpc::PayloadValidatorBuilder, InvalidPayloadAttributesError};
-use reth_node_builder::rpc::EngineValidatorBuilder;
+use reth_node_builder::{
+    rpc::{EngineValidatorBuilder, PayloadValidatorBuilder},
+    InvalidPayloadAttributesError,
+};
 use reth_op::{
     node::{
-        engine::OpEngineValidator,
-        payload::OpAttributes,
-        OpBuiltPayload,
-        OpEngineTypes,
-        OpPayloadAttributes,
-        OpPayloadBuilderAttributes,
+        engine::OpEngineValidator, payload::OpAttributes, OpBuiltPayload, OpEngineTypes,
+        OpPayloadAttributes, OpPayloadBuilderAttributes,
     },
     primitives::Recovered,
     OpTransactionSigned,

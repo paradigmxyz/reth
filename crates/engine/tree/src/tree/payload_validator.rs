@@ -12,10 +12,13 @@ use crate::tree::{
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
     PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::{transaction::{Either, SignerRecoverable}, Transaction};
+use alloy_consensus::{
+    transaction::{Either, SignerRecoverable},
+    Transaction,
+};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Decodable;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -38,9 +41,9 @@ use reth_primitives_traits::{
     SealedHeader, SignedTransaction,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    StateCommitmentProvider, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
+    StateProvider, StateProviderFactory, StateReader, StateRootProvider,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
@@ -466,7 +469,6 @@ where
 
         let block = self.convert_to_block(input)?;
 
-
         // A helper macro that returns the block in case there was an error
         macro_rules! ensure_ok {
             ($expr:expr) => {
@@ -480,7 +482,7 @@ where
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
         // validate block consensus rules
         ensure_ok!(self.validate_block_inner(&block));
-        
+
         // Inclusion list verification
         if let Some(il) = &il {
             if let Err(err) = self.validate_block_inclusion_list(&state_provider, &block, il) {
@@ -489,7 +491,7 @@ where
                 return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
             }
         }
-        
+
         // now validate against the parent
         if let Err(e) =
             self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
@@ -959,7 +961,7 @@ where
         if block.number() < INCLUSION_LIST_FORK_BLOCK {
             return Ok(());
         }
-        
+
         // 1) Gather all tx hashes already in the block
         let included: BTreeSet<_> =
             block.transactions_recovered().map(|tx| tx.inner().tx_hash()).collect();
@@ -980,31 +982,31 @@ where
             // Get sender address
             let sender = recovered.signer();
 
-
             // Get nonce
             let account_nonce = match state_provider.account_nonce(&sender) {
                 Ok(Some(nonce)) => nonce,
                 Ok(None) => continue, // account does not exist, skip
                 Err(_) => continue,   // error reading nonce, skip
             };
-            
+
             // Check nonce
             if account_nonce == tx.nonce() {
-                
                 // Check balance (value + gas_limit * max_fee_per_gas)
                 let max_cost = tx.value().saturating_add(
                     U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
                 );
-    
+
                 let account_balance = match state_provider.account_balance(&sender) {
                     Ok(Some(balance)) => balance,
                     Ok(None) => continue, // account does not exist, skip
                     Err(_) => continue,   // error reading balance, skip
                 };
-                
+
                 if account_balance >= max_cost {
                     // Transaction would still be valid - inclusion list violation
-                    return Err(BlockExecutionError::Validation(BlockValidationError::InvalidInclusionList));
+                    return Err(BlockExecutionError::Validation(
+                        BlockValidationError::InvalidInclusionList,
+                    ));
                 }
             }
         }
@@ -1157,9 +1159,9 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Block(block) => block.block_with_parent(),
         }
     }
-    
+
     /// Returns inclusion list for payload.
-    pub fn inclusion_list(&self) -> Option<&Vec<Bytes>>{
+    pub fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         match self {
             Self::Payload(payload) => payload.inclusion_list(),
             Self::Block(_block) => None,

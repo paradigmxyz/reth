@@ -17,17 +17,14 @@ pub use reth_execution_errors::{
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader,
-    TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{
     context::result::ExecutionResult,
-    database::{
-        states::bundle_state::BundleRetention, BundleState, State,
-    },
+    database::{states::bundle_state::BundleRetention, BundleState, State},
 };
 
 /// A type that knows how to execute a block. It is assumed to operate on a

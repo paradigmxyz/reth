@@ -172,5 +172,5 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
             return Err(InvalidPayloadAttributesError::InvalidTimestamp);
         }
         Ok(())
-    }    
+    }
 }

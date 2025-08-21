@@ -17,14 +17,12 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_chainspec::EthChainSpec;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadBuilderError};
-use reth_payload_primitives::{
-    BuildNextEnv, BuiltPayload, PayloadBuilderAttributes,
-};
+use reth_payload_primitives::{BuildNextEnv, BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives_traits::{
     NodePrimitives, Recovered, SealedBlock, SealedHeader, SignedTransaction, WithEncoded,
 };
@@ -113,7 +111,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             prev_randao: attributes.payload_attributes.prev_randao,
             withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-            // TODO: impl IL into OP 
+            // TODO: impl IL into OP
             il: None,
         };
 
@@ -157,7 +155,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
     }
-    
+
     fn clone_with_il(&self, _il: Vec<Bytes>) -> Self {
         todo!()
     }

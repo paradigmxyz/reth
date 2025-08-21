@@ -321,7 +321,7 @@ where
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
-    
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -1188,7 +1188,7 @@ where
         // TODO
         //
         // Use _parent_hash
-        
+
         // TODO
         //
         // configure maximum elsewhere (e.g. global config)

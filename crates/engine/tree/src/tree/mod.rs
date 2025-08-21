@@ -28,9 +28,7 @@ use reth_payload_builder::{PayloadBuilderError, PayloadBuilderHandle, PayloadId}
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{
-    Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
