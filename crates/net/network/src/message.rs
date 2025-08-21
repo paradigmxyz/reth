@@ -109,7 +109,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
     },
     /// Represents a response to a request for receipts.
     ///
-    /// This is a variant of `Receipts` that was introduced in `eth/66`.
+    /// This is a variant of `Receipts` that was introduced in `eth/69`.
     /// The difference is that this variant does not require the inclusion of bloom filters in the
     /// response, making it more lightweight.
     Receipts69 {
