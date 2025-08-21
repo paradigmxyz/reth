@@ -453,23 +453,53 @@ impl alloy_consensus::TxReceipt for ArbReceipt {
     type Log = alloy_primitives::Log;
 
     fn status_or_post_state(&self) -> alloy_consensus::Eip658Value {
-        self.as_receipt().status_or_post_state()
+        match self {
+            ArbReceipt::Legacy(r)
+            | ArbReceipt::Eip2930(r)
+            | ArbReceipt::Eip1559(r)
+            | ArbReceipt::Eip7702(r) => r.status_or_post_state(),
+            ArbReceipt::Deposit(_) => alloy_consensus::Eip658Value::Eip658(true),
+        }
     }
 
     fn status(&self) -> bool {
-        self.as_receipt().status()
+        match self {
+            ArbReceipt::Legacy(r)
+            | ArbReceipt::Eip2930(r)
+            | ArbReceipt::Eip1559(r)
+            | ArbReceipt::Eip7702(r) => r.status(),
+            ArbReceipt::Deposit(_) => true,
+        }
     }
 
     fn bloom(&self) -> alloy_primitives::Bloom {
-        self.as_receipt().bloom()
+        match self {
+            ArbReceipt::Legacy(r)
+            | ArbReceipt::Eip2930(r)
+            | ArbReceipt::Eip1559(r)
+            | ArbReceipt::Eip7702(r) => r.bloom(),
+            ArbReceipt::Deposit(_) => alloy_primitives::Bloom::ZERO,
+        }
     }
 
     fn cumulative_gas_used(&self) -> u64 {
-        self.as_receipt().cumulative_gas_used()
+        match self {
+            ArbReceipt::Legacy(r)
+            | ArbReceipt::Eip2930(r)
+            | ArbReceipt::Eip1559(r)
+            | ArbReceipt::Eip7702(r) => r.cumulative_gas_used(),
+            ArbReceipt::Deposit(_) => 0,
+        }
     }
 
     fn logs(&self) -> &[Self::Log] {
-        self.as_receipt().logs()
+        match self {
+            ArbReceipt::Legacy(r)
+            | ArbReceipt::Eip2930(r)
+            | ArbReceipt::Eip1559(r)
+            | ArbReceipt::Eip7702(r) => r.logs(),
+            ArbReceipt::Deposit(_) => &[],
+        }
     }
 
     fn into_logs(self) -> alloc::vec::Vec<Self::Log> {
