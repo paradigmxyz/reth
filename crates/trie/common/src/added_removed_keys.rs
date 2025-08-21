@@ -53,7 +53,7 @@ impl MultiAddedRemovedKeys {
                 self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
 
             for (key, val) in &storage.storage {
-                if *val == U256::ZERO {
+                if val.is_zero() {
                     storage_removed_keys.insert_removed(*key);
                 } else {
                     storage_removed_keys.remove_removed(key);
