@@ -16,6 +16,11 @@ use tokio_tungstenite::{
 use url::Url;
 
 /// An asynchronous stream of [`FlashBlock`] from a websocket connection.
+///
+/// The stream attempts to connect to a websocket URL and then decode each received item.
+///
+/// If the connection fails, the error is returned and connection retried. The number of retries is
+/// unbounded.
 pub struct FlashBlockWsStream {
     ws_url: Url,
     state: State,
@@ -45,11 +50,11 @@ impl Stream for FlashBlockWsStream {
         let msg = ready!(self
             .stream
             .as_mut()
-            .expect("Stream state be unreachable without stream")
+            .expect("Stream state should be unreachable without stream")
             .poll_next_unpin(cx));
 
         Poll::Ready(msg.map(|msg| match msg {
-            Ok(Message::Binary(bytes)) => FlashBlock::decode(&bytes),
+            Ok(Message::Binary(bytes)) => FlashBlock::decode(bytes),
             Ok(msg) => Err(eyre!("Unexpected websocket message: {msg:?}")),
             Err(err) => Err(err.into()),
         }))
