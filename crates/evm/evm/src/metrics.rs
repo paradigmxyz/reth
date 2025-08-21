@@ -138,11 +138,6 @@ impl ExecutorMetrics {
                     get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash)
                 {
                     self.execution_results_cache_hits.increment(1);
-                    tracing::debug!(
-                        target: "engine::cache",
-                        ?tx_hash,
-                        "Cache hit - reusing prewarmed execution result"
-                    );
                     executor.execute_transaction_with_cached_result(
                         tx,
                         result,
@@ -150,11 +145,6 @@ impl ExecutorMetrics {
                     )?;
                 } else {
                     self.execution_results_cache_misses.increment(1);
-                    tracing::debug!(
-                        target: "engine::cache",
-                        ?tx_hash,
-                        "Cache miss - executing transaction from scratch"
-                    );
                     executor.execute_transaction(tx)?;
                 }
             }
@@ -168,23 +158,9 @@ impl ExecutorMetrics {
             (gas_used, res)
         })?;
         
-        // Log cache performance summary
-        let total_hits = self.execution_results_cache_hits.get();
-        let total_misses = self.execution_results_cache_misses.get();
-        if total_hits > 0 || total_misses > 0 {
-            let hit_rate = if (total_hits + total_misses) > 0 {
-                (total_hits as f64) / ((total_hits + total_misses) as f64) * 100.0
-            } else {
-                0.0
-            };
-            tracing::info!(
-                target: "engine::cache",
-                cache_hits = total_hits,
-                cache_misses = total_misses,
-                hit_rate_percent = format!("{:.2}", hit_rate),
-                "Block execution cache performance summary"
-            );
-        }
+        // Note: Counters are write-only in the metrics crate, so we can't retrieve 
+        // their values for logging. The metrics are still being recorded and can
+        // be viewed through the metrics infrastructure.
 
         // merge transactions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
