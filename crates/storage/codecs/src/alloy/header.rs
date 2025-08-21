@@ -39,7 +39,6 @@ pub(crate) struct Header {
     blob_gas_used: Option<u64>,
     excess_blob_gas: Option<u64>,
     parent_beacon_block_root: Option<B256>,
-    block_access_list_hash: Option<B256>,
     extra_fields: Option<HeaderExt>,
     extra_data: Bytes,
 }
@@ -59,6 +58,7 @@ pub(crate) struct Header {
 #[reth_codecs(crate = "crate")]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
+    block_access_list_hash:Option<B256>
 }
 
 impl HeaderExt {
@@ -79,7 +79,7 @@ impl Compact for AlloyHeader {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let extra_fields = HeaderExt { requests_hash: self.requests_hash };
+        let extra_fields = HeaderExt { requests_hash: self.requests_hash,block_access_list_hash:self.block_access_list_hash };
 
         let header = Header {
             parent_hash: self.parent_hash,
@@ -101,7 +101,6 @@ impl Compact for AlloyHeader {
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
             parent_beacon_block_root: self.parent_beacon_block_root,
-            block_access_list_hash: self.block_access_list_hash,
             extra_fields: extra_fields.into_option(),
             extra_data: self.extra_data.clone(),
         };
@@ -131,8 +130,11 @@ impl Compact for AlloyHeader {
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: header.parent_beacon_block_root,
             requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
+            block_access_list_hash: header
+                .extra_fields
+                .as_ref()
+                .and_then(|h| h.block_access_list_hash),
             extra_data: header.extra_data,
-            block_access_list_hash: header.block_access_list_hash,
         };
         (alloy_header, buf)
     }
@@ -165,14 +167,13 @@ mod tests {
         blob_gas_used: Some(0x60000),
         excess_blob_gas: Some(0x0),
         parent_beacon_block_root: Some(b256!("0xaa1d9606b7932f2280a19b3498b9ae9eebc6a83f1afde8e45944f79d353db4c1")),
-        block_access_list_hash:None,
         extra_data: bytes!("726574682f76312e302e302f6c696e7578"),
         extra_fields: None,
     };
 
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert_eq!(Header::bitflag_encoded_bytes(), 5);
+        assert_eq!(Header::bitflag_encoded_bytes(), 4);
         assert_eq!(HeaderExt::bitflag_encoded_bytes(), 1);
     }
 
@@ -192,7 +193,7 @@ mod tests {
     #[test]
     fn test_extra_fields() {
         let mut header = HOLESKY_BLOCK;
-        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()) });
+        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()),block_access_list_hash:Some(B256::random()) });
 
         let mut encoded_header = vec![];
         let len = header.to_compact(&mut encoded_header);
