@@ -1710,7 +1710,7 @@ impl MockTransactionSet {
     ///
     /// Let an example transaction set be `[(tx1, 1), (tx2, 2)]`, where the first element of the
     /// tuple is a transaction, and the second element is the nonce. If the `gap_pct` is 50, and
-    /// the `gap_range` is `1..=1`, then the resulting transaction set could would be either
+    /// the `gap_range` is `1..=1`, then the resulting transaction set could be either
     /// `[(tx1, 1), (tx2, 2)]` or `[(tx1, 1), (tx2, 3)]`, with a 50% chance of either.
     pub fn with_nonce_gaps(
         &mut self,

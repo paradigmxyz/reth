@@ -8,6 +8,7 @@ use reth_era::{
     e2s_types::IndexEntry,
     era1_file::Era1Writer,
     era1_types::{BlockIndex, Era1Id},
+    era_file_ops::{EraFileId, StreamWriter},
     execution_types::{
         Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,

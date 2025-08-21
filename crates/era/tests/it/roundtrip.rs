@@ -13,6 +13,7 @@ use reth_era::{
     e2s_types::IndexEntry,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
+    era_file_ops::{EraFileFormat, StreamReader, StreamWriter},
     execution_types::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },
@@ -45,7 +46,7 @@ async fn test_file_roundtrip(
     let mut buffer = Vec::new();
     {
         let mut writer = Era1Writer::new(&mut buffer);
-        writer.write_era1_file(&original_file)?;
+        writer.write_file(&original_file)?;
     }
 
     // Read back from buffer
@@ -228,7 +229,7 @@ async fn test_file_roundtrip(
                 Era1File::new(new_group, Era1Id::new(network, original_file.id.start_block, 1));
 
             let mut writer = Era1Writer::new(&mut recompressed_buffer);
-            writer.write_era1_file(&new_file)?;
+            writer.write_file(&new_file)?;
         }
 
         let reader = Era1Reader::new(Cursor::new(&recompressed_buffer));

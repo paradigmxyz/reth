@@ -237,16 +237,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvi
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        // TODO: return Ok(self.clone()) when engine tests stops relying on an
-        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
-        //Ok(self.clone())
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        // TODO: return Ok(self.clone()) when engine tests stops relying on an
-        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
-        //Ok(self.clone())
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 }
