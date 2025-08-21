@@ -772,19 +772,19 @@ alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "ba
 # op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
-revm = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "build-bal" }
-alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "build-bal" }
-revm-bytecode = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-primitives = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-interpreter = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-inspector = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-context = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-context-interface = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-revm-database-interface = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
-op-revm = { git = "https://github.com/Soubhik-10/revm", branch = "move-stuff" }
+revm = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+alloy-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "wo-txindex" }
+alloy-op-evm = { git = "https://github.com/Rimeeeeee/evm", branch = "wo-txindex" }
+revm-bytecode = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-database = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-state = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-primitives = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-interpreter = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-inspector = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-context = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-context-interface = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+revm-database-interface = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
+op-revm = { git = "https://github.com/Soubhik-10/revm", branch = "remove-tx-index" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
