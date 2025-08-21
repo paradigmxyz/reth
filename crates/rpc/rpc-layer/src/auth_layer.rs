@@ -21,12 +21,12 @@ use tower::{Layer, Service};
 ///     use std::net::SocketAddr;
 ///
 ///     const AUTH_PORT: u32 = 8551;
-///     const AUTH_ADDR: &str = "0.0.0.0";
-///     const AUTH_SECRET: &str =
-///         "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
+///      const AUTH_ADDR: &str = "127.0.0.1";
 ///
 ///     let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
-///     let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
+///     // Read JWT secret from environment; do not hardcode secrets in production.
+///     let secret_hex = std::env::var("RETH_AUTH_SECRET").expect("set RETH_AUTH_SECRET (hex)");
+///     let secret = JwtSecret::from_hex(&secret_hex).unwrap();
 ///     let validator = JwtAuthValidator::new(secret);
 ///     let layer = AuthLayer::new(validator);
 ///     let middleware = tower::ServiceBuilder::default().layer(layer);
