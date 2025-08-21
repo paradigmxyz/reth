@@ -15,6 +15,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_newPayloadV2",
     "engine_newPayloadV3",
     "engine_newPayloadV4",
+    "engine_newPayloadV5",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
     "engine_getBlobsV1",
