@@ -700,9 +700,10 @@ where
                 let cache_result = tx_cache.remove(&tx_hash);
 
                 if cache_result.is_none() {
-                    tracing::trace!(
+                    tracing::debug!(
                         target: "engine::cache",
                         ?tx_hash,
+                        cache_size = tx_cache.len(),
                         "No cached result found for transaction"
                     );
                     return None;
