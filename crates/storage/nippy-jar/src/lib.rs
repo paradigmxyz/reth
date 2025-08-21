@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::Read,
+    io::{Error, ErrorKind, Read},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -134,6 +134,9 @@ impl NippyJar<()> {
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
+    ///
+    /// This method automatically checks for and recovers from any interrupted
+    /// deletion operations before attempting to load the file.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
         Self::load(path)
     }
@@ -195,10 +198,25 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Loads the file configuration and returns [`Self`].
     ///
+    /// This method automatically checks for and recovers from any interrupted
+    /// deletion operations before attempting to load the file.
+    ///
     /// **The user must ensure the header type matches the one used during the jar's creation.**
     pub fn load(path: &Path) -> Result<Self, NippyJarError> {
-        // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
+        // Check for and recover from interrupted deletions
+        if Self::recover_interrupted_deletion(path)? {
+            // If an interrupted deletion was completed, the file no longer exists
+            return Err(reth_fs_util::FsPathError::open(
+                Error::new(
+                    ErrorKind::NotFound,
+                    "File was deleted during recovery from interrupted deletion",
+                ),
+                config_path,
+            )
+            .into());
+        }
+
         let config_file = File::open(&config_path)
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
@@ -233,19 +251,77 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Deletes from disk this [`NippyJar`] alongside every satellite file.
+    ///
+    /// This operation is designed to be consistent even during unexpected shutdown.
+    /// It uses a marker file approach to track deletion state and ensure cleanup
+    /// can be completed if interrupted.
     pub fn delete(self) -> Result<(), NippyJarError> {
-        // TODO(joshie): ensure consistency on unexpected shutdown
+        let marker_path = self.deletion_marker_path();
 
+        // Step 1: Create deletion marker file
+        debug!(target: "nippy-jar", ?marker_path, "Creating deletion marker.");
+        reth_fs_util::write(&marker_path, b"DELETING")?;
+
+        // Step 2: Delete all data files
         for path in
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
                 debug!(target: "nippy-jar", ?path, "Removing file.");
-                reth_fs_util::remove_file(path)?;
+                reth_fs_util::remove_file(&path)?;
             }
         }
 
+        // Step 3: Remove deletion marker (indicates successful completion)
+        debug!(target: "nippy-jar", ?marker_path, "Removing deletion marker.");
+        if marker_path.exists() {
+            reth_fs_util::remove_file(&marker_path)?;
+        }
+
         Ok(())
+    }
+
+    /// Returns the path for the deletion marker file
+    fn deletion_marker_path(&self) -> PathBuf {
+        self.path.with_extension("deleting")
+    }
+
+    /// Checks for and completes any interrupted deletion operations.
+    ///
+    /// This function should be called when loading or accessing `NippyJar` files
+    /// to ensure consistency after unexpected shutdowns. If a deletion marker
+    /// file is found, it indicates an interrupted deletion and will complete
+    /// the cleanup process.
+    ///
+    /// Returns `true` if an interrupted deletion was detected and completed,
+    /// `false` if no cleanup was needed.
+    pub fn recover_interrupted_deletion(path: &Path) -> Result<bool, NippyJarError> {
+        let marker_path = path.with_extension("deleting");
+
+        if !marker_path.exists() {
+            return Ok(false);
+        }
+
+        debug!(target: "nippy-jar", ?marker_path, "Found deletion marker, completing interrupted deletion.");
+
+        // Complete the interrupted deletion by removing all associated files
+        for file_path in [
+            path.to_path_buf(),
+            path.with_extension(INDEX_FILE_EXTENSION),
+            path.with_extension(OFFSETS_FILE_EXTENSION),
+            path.with_extension(CONFIG_FILE_EXTENSION),
+        ] {
+            if file_path.exists() {
+                debug!(target: "nippy-jar", ?file_path, "Removing remaining file from interrupted deletion.");
+                reth_fs_util::remove_file(&file_path)?;
+            }
+        }
+
+        // Remove the deletion marker
+        debug!(target: "nippy-jar", ?marker_path, "Removing deletion marker after cleanup.");
+        reth_fs_util::remove_file(&marker_path)?;
+
+        Ok(true)
     }
 
     /// Returns a [`DataReader`] of the data and offset file
