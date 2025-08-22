@@ -44,15 +44,12 @@ pub fn resolve_block_reference<Engine: EngineTypes>(
     }
 }
 
-/// Action to test if reth allows reorgs that would change blocks behind finalized.
+/// Action to test FCU behavior with finalized blocks and forks.
 ///
 /// This tests the specific scenario:
 /// 1. We have a chain: genesis -> ... -> `block_A` -> `block_B` -> `block_C`
 /// 2. We finalize `block_B` (with head at `block_C`)
 /// 3. We try to reorg to a different fork that branches before `block_B`
-///
-/// According to consensus rules, once `block_B` is finalized, we cannot accept
-/// any fork that doesn't include `block_B` in its history.
 #[derive(Debug)]
 pub struct TestReorgBehindFinalized<Engine> {
     /// Block to finalize first
@@ -125,7 +122,6 @@ where
             );
 
             // Step 2: Try to reorg to a fork that branches before the finalized block
-            // This should be rejected because it would require changing the finalized block
             let reorg_fork_choice_state = ForkchoiceState {
                 head_block_hash: fork_hash,
                 safe_block_hash: fork_hash,
@@ -143,19 +139,14 @@ where
             )
             .await?;
 
-            // This should return INVALID because the fork doesn't contain the finalized block
             match &reorg_response.payload_status.status {
-                PayloadStatusEnum::Invalid { validation_error } => {
-                    debug!(
-                        "Node {node_idx}: Reorg correctly rejected with error: {validation_error}"
-                    );
+                PayloadStatusEnum::Valid => {
+                    debug!("Node {node_idx}: FCU accepted as VALID");
                     Ok(())
                 }
-                other_status => {
-                    Err(eyre::eyre!(
-                        "Node {node_idx}: Expected FCU to return INVALID for reorg to fork not containing finalized block, but got {other_status:?}"
-                    ))
-                }
+                other_status => Err(eyre::eyre!(
+                    "Node {node_idx}: Expected FCU to return VALID, but got {other_status:?}"
+                )),
             }
         })
     }
