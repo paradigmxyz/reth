@@ -270,7 +270,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<C>),
+    P2P(Box<p2p::Command<C>>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]

@@ -39,7 +39,7 @@ impl Default for TransactionsManagerConfig {
 }
 
 /// Determines how new pending transactions are propagated to other peers in full.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactionPropagationMode {
     /// Send full transactions to sqrt of current peers.
