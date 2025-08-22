@@ -261,7 +261,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command<C>),
+    Db(Box<db::Command<C>>),
     /// Download public node snapshots
     #[command(name = "download")]
     Download(download::DownloadCommand<C>),
