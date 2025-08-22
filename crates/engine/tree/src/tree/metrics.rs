@@ -104,6 +104,94 @@ impl EngineApiMetrics {
     }
 }
 
+/// Metrics for the entire blockchain tree
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree")]
+pub(crate) struct TreeMetrics {
+    /// The highest block number in the canonical chain
+    pub canonical_chain_height: Gauge,
+    /// The number of reorgs
+    pub reorgs: Counter,
+    /// The latest reorg depth
+    pub latest_reorg_depth: Gauge,
+}
+
+/// Metrics for the `EngineApi`.
+#[derive(Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+pub(crate) struct EngineMetrics {
+    /// How many executed blocks are currently stored.
+    pub(crate) executed_blocks: Gauge,
+    /// How many already executed blocks were directly inserted into the tree.
+    pub(crate) inserted_already_executed_blocks: Counter,
+    /// The number of times the pipeline was run.
+    pub(crate) pipeline_runs: Counter,
+    /// The total count of forkchoice updated messages received.
+    pub(crate) forkchoice_updated_messages: Counter,
+    /// The total count of forkchoice updated messages with payload received.
+    pub(crate) forkchoice_with_attributes_updated_messages: Counter,
+    /// Newly arriving block hash is not present in executed blocks cache storage
+    pub(crate) executed_new_block_cache_miss: Counter,
+    /// The total count of new payload messages received.
+    pub(crate) new_payload_messages: Counter,
+    /// Histogram of persistence operation durations (in seconds)
+    pub(crate) persistence_duration: Histogram,
+    /// Tracks the how often we failed to deliver a newPayload response.
+    ///
+    /// This effectively tracks how often the message sender dropped the channel and indicates a CL
+    /// request timeout (e.g. it took more than 8s to send the response and the CL terminated the
+    /// request which resulted in a closed channel).
+    pub(crate) failed_new_payload_response_deliveries: Counter,
+    /// Tracks the how often we failed to deliver a forkchoice update response.
+    pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
+    // TODO add latency metrics
+}
+
+/// Metrics for non-execution related block validation.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation")]
+pub(crate) struct BlockValidationMetrics {
+    /// Total number of storage tries updated in the state root calculation
+    pub(crate) state_root_storage_tries_updated_total: Counter,
+    /// Total number of times the parallel state root computation fell back to regular.
+    pub(crate) state_root_parallel_fallback_total: Counter,
+    /// Histogram of state root duration
+    pub(crate) state_root_histogram: Histogram,
+    /// Latest state root duration
+    pub(crate) state_root_duration: Gauge,
+    /// Trie input computation duration
+    pub(crate) trie_input_duration: Histogram,
+    /// Payload conversion and validation latency
+    pub(crate) payload_validation_duration: Gauge,
+    /// Histogram of payload validation latency
+    pub(crate) payload_validation_histogram: Histogram,
+}
+
+impl BlockValidationMetrics {
+    /// Records a new state root time, updating both the histogram and state root gauge
+    pub(crate) fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
+        self.state_root_storage_tries_updated_total
+            .increment(trie_output.storage_tries_ref().len() as u64);
+        self.state_root_duration.set(elapsed_as_secs);
+        self.state_root_histogram.record(elapsed_as_secs);
+    }
+
+    /// Records a new payload validation time, updating both the histogram and the payload
+    /// validation gauge
+    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
+        self.payload_validation_duration.set(elapsed_as_secs);
+        self.payload_validation_histogram.record(elapsed_as_secs);
+    }
+}
+
+/// Metrics for the blockchain tree block buffer
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree.block_buffer")]
+pub(crate) struct BlockBufferMetrics {
+    /// Total blocks in the block buffer
+    pub blocks: Gauge,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,92 +401,4 @@ mod tests {
 
         assert!(found_metrics, "Expected to find sync.execution metrics");
     }
-}
-
-/// Metrics for the entire blockchain tree
-#[derive(Metrics)]
-#[metrics(scope = "blockchain_tree")]
-pub(crate) struct TreeMetrics {
-    /// The highest block number in the canonical chain
-    pub canonical_chain_height: Gauge,
-    /// The number of reorgs
-    pub reorgs: Counter,
-    /// The latest reorg depth
-    pub latest_reorg_depth: Gauge,
-}
-
-/// Metrics for the `EngineApi`.
-#[derive(Metrics)]
-#[metrics(scope = "consensus.engine.beacon")]
-pub(crate) struct EngineMetrics {
-    /// How many executed blocks are currently stored.
-    pub(crate) executed_blocks: Gauge,
-    /// How many already executed blocks were directly inserted into the tree.
-    pub(crate) inserted_already_executed_blocks: Counter,
-    /// The number of times the pipeline was run.
-    pub(crate) pipeline_runs: Counter,
-    /// The total count of forkchoice updated messages received.
-    pub(crate) forkchoice_updated_messages: Counter,
-    /// The total count of forkchoice updated messages with payload received.
-    pub(crate) forkchoice_with_attributes_updated_messages: Counter,
-    /// Newly arriving block hash is not present in executed blocks cache storage
-    pub(crate) executed_new_block_cache_miss: Counter,
-    /// The total count of new payload messages received.
-    pub(crate) new_payload_messages: Counter,
-    /// Histogram of persistence operation durations (in seconds)
-    pub(crate) persistence_duration: Histogram,
-    /// Tracks the how often we failed to deliver a newPayload response.
-    ///
-    /// This effectively tracks how often the message sender dropped the channel and indicates a CL
-    /// request timeout (e.g. it took more than 8s to send the response and the CL terminated the
-    /// request which resulted in a closed channel).
-    pub(crate) failed_new_payload_response_deliveries: Counter,
-    /// Tracks the how often we failed to deliver a forkchoice update response.
-    pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
-    // TODO add latency metrics
-}
-
-/// Metrics for non-execution related block validation.
-#[derive(Metrics)]
-#[metrics(scope = "sync.block_validation")]
-pub(crate) struct BlockValidationMetrics {
-    /// Total number of storage tries updated in the state root calculation
-    pub(crate) state_root_storage_tries_updated_total: Counter,
-    /// Total number of times the parallel state root computation fell back to regular.
-    pub(crate) state_root_parallel_fallback_total: Counter,
-    /// Histogram of state root duration
-    pub(crate) state_root_histogram: Histogram,
-    /// Latest state root duration
-    pub(crate) state_root_duration: Gauge,
-    /// Trie input computation duration
-    pub(crate) trie_input_duration: Histogram,
-    /// Payload conversion and validation latency
-    pub(crate) payload_validation_duration: Gauge,
-    /// Histogram of payload validation latency
-    pub(crate) payload_validation_histogram: Histogram,
-}
-
-impl BlockValidationMetrics {
-    /// Records a new state root time, updating both the histogram and state root gauge
-    pub(crate) fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
-        self.state_root_storage_tries_updated_total
-            .increment(trie_output.storage_tries_ref().len() as u64);
-        self.state_root_duration.set(elapsed_as_secs);
-        self.state_root_histogram.record(elapsed_as_secs);
-    }
-
-    /// Records a new payload validation time, updating both the histogram and the payload
-    /// validation gauge
-    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
-        self.payload_validation_duration.set(elapsed_as_secs);
-        self.payload_validation_histogram.record(elapsed_as_secs);
-    }
-}
-
-/// Metrics for the blockchain tree block buffer
-#[derive(Metrics)]
-#[metrics(scope = "blockchain_tree.block_buffer")]
-pub(crate) struct BlockBufferMetrics {
-    /// Total blocks in the block buffer
-    pub blocks: Gauge,
 }
