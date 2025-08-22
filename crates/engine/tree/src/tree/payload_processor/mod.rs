@@ -53,15 +53,19 @@ pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
 
+/// Optional coinbase nonce/balance change from a transaction.
+///
+/// Tuple layout:
+/// - Address: the coinbase address
+/// - u64: nonce delta
+/// - U256: balance delta
+pub type CoinbaseDeltas = Option<(Address, u64, U256)>;
+
 /// Cache for transaction execution results and state access records.
 /// Maps transaction hashes to their execution results, access records, and optional created
 /// contract info.
-pub type TxCache<Evm> = Arc<
-    DashMap<
-        TxHash,
-        (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>, Option<(Address, u64, U256)>),
-    >,
->;
+pub type TxCache<Evm> =
+    Arc<DashMap<TxHash, (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>, CoinbaseDeltas)>>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
