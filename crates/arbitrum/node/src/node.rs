@@ -277,35 +277,37 @@ where
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
 
-        let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
-        if parent_bf > 0 {
-            let parent_gas_limit = sealed_parent.gas_limit();
-            let parent_gas_used = sealed_parent.gas_used();
-            let target = parent_gas_limit / 8;
-            let mut next_bf = parent_bf;
-            if parent_gas_used > target {
-                let delta = ((parent_bf as u128)
-                    * ((parent_gas_used - target) as u128)
-                    / (target as u128)
-                    / 8) as u64;
-                let change = if delta == 0 { 1 } else { delta };
-                next_bf = parent_bf.saturating_add(change);
-            } else if parent_gas_used < target {
-                let delta = ((parent_bf as u128)
-                    * ((target - parent_gas_used) as u128)
-                    / (target as u128)
-                    / 8) as u64;
-                let change = if delta == 0 { 1 } else { delta };
-                next_bf = parent_bf.saturating_sub(change);
-            }
-            reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559");
-            next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
-        } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+        if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
             reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
         } else {
-            reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
-            next_env.max_fee_per_gas = Some(l1_base_fee);
+            let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
+            if parent_bf > 0 {
+                let parent_gas_limit = sealed_parent.gas_limit();
+                let parent_gas_used = sealed_parent.gas_used();
+                let target = parent_gas_limit / 8;
+                let mut next_bf = parent_bf;
+                if parent_gas_used > target {
+                    let delta = ((parent_bf as u128)
+                        * ((parent_gas_used - target) as u128)
+                        / (target as u128)
+                        / 8) as u64;
+                    let change = if delta == 0 { 1 } else { delta };
+                    next_bf = parent_bf.saturating_add(change);
+                } else if parent_gas_used < target {
+                    let delta = ((parent_bf as u128)
+                        * ((target - parent_gas_used) as u128)
+                        / (target as u128)
+                        / 8) as u64;
+                    let change = if delta == 0 { 1 } else { delta };
+                    next_bf = parent_bf.saturating_sub(change);
+                }
+                reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
+                next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
+            } else {
+                reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
+                next_env.max_fee_per_gas = Some(l1_base_fee);
+            }
         }
         let block_base_fee = next_env.max_fee_per_gas;
 
