@@ -68,7 +68,6 @@ async fn test_fee_history() -> eyre::Result<()> {
                 .max_change_denominator;
     assert_eq!(fee_history.base_fee_per_gas[0], genesis_base_fee);
     assert_eq!(fee_history.base_fee_per_gas[1], expected_first_base_fee,);
-
     // Spend some gas
     let builder = GasWaster::deploy_builder(&provider, U256::from(500)).send().await?;
     node.advance_block().await?;
