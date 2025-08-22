@@ -123,6 +123,7 @@ where
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
+
         // Try to expire pre-merge transaction history if configured
         ctx.expire_pre_merge_transactions()?;
 
@@ -163,7 +164,9 @@ where
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
-        pipeline.move_to_static_files()?;
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_err() {
+            pipeline.move_to_static_files()?;
+        }
 
         let pipeline_events = pipeline.events();
 

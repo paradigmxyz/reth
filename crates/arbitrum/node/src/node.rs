@@ -202,6 +202,9 @@ where
         + reth_node_api::NodeTypes<
             Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block_sync(
         provider: &N::Provider,
@@ -223,7 +226,13 @@ where
         kind: u8,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
-    ) -> eyre::Result<(alloy_primitives::B256, alloy_primitives::B256)> {
+    ) -> eyre::Result<(
+        alloy_primitives::B256,
+        alloy_primitives::B256,
+        reth_primitives_traits::SealedBlock<
+            alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>
+        >,
+    )> {
         use reth_evm::execute::BlockBuilder;
         use reth_revm::{database::StateProviderDatabase, db::State};
 
@@ -734,17 +743,27 @@ where
                 Vec::new(),
             );
 
-            let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
-                block: ExecutedBlock {
-                    recovered_block: std::sync::Arc::new(outcome.block),
-                    execution_output: std::sync::Arc::new(exec_outcome),
-                    hashed_state: std::sync::Arc::new(outcome.hashed_state),
-                },
-                trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
-            };
+            match provider.header(&new_block_hash) {
+                Ok(Some(_)) => {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
+                }
+                Ok(None) => {
+                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                        block: ExecutedBlock {
+                            recovered_block: std::sync::Arc::new(outcome.block),
+                            execution_output: std::sync::Arc::new(exec_outcome),
+                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                        },
+                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                    };
 
-            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
-            UnifiedStorageWriter::commit(provider_rw)?;
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
+                }
+                Err(e) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+                }
+            }
 
             match provider.header(&new_block_hash) {
                 Ok(Some(_)) => {
@@ -770,7 +789,7 @@ where
             }
         }
 
-        Ok((new_block_hash, new_send_root))
+        Ok((new_block_hash, new_send_root, sealed_block))
     }
 }
 
@@ -792,6 +811,9 @@ where
         + reth_node_api::NodeTypes<
             Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block(
         &self,
@@ -817,19 +839,25 @@ where
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         Box::pin(async move {
-            let (new_block_hash, new_send_root) = Self::execute_message_to_block_sync(
-                &provider,
-                &db_factory,
-                &evm_config,
-                parent_hash,
-                attrs.clone(),
-                &l2_owned,
-                poster,
-                request_id,
-                kind,
-                l1_base_fee,
-                batch_gas_cost,
-            )?;
+            let (new_block_hash, new_send_root, sealed_block) =
+                Self::execute_message_to_block_sync(
+                    &provider,
+                    &db_factory,
+                    &evm_config,
+                    parent_hash,
+                    attrs.clone(),
+                    &l2_owned,
+                    poster,
+                    request_id,
+                    kind,
+                    l1_base_fee,
+                    batch_gas_cost,
+                )?;
+
+            let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
+            let np = beacon.new_payload(payload).await?;
+            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
                 safe_block_hash: new_block_hash,
@@ -906,6 +934,9 @@ where
     > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -952,6 +983,9 @@ where
     > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
