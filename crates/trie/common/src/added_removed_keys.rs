@@ -31,8 +31,9 @@ impl MultiAddedRemovedKeys {
 
     /// Updates the set of removed keys based on a [`HashedPostState`].
     ///
-    /// Storage keys set to [`U256::ZERO`] are added to the set for their respective account. Keys
-    /// set to any other value are removed from their respective account.
+    /// Storage keys set to [`alloy_primitives::U256::ZERO`] are added to the set for their
+    /// respective account. Keys set to any other value are removed from their respective
+    /// account.
     pub fn update_with_state(&mut self, update: &HashedPostState) {
         for (hashed_address, storage) in &update.storages {
             let account = update
