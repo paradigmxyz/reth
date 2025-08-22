@@ -112,7 +112,7 @@ where
             requests_hash,
             block_access_list_hash: block_access_list
                 .as_ref()
-                .map(|bal| alloy_primitives::keccak256(&alloy_rlp::encode(bal))),
+                .map(|bal| alloy_primitives::keccak256(alloy_rlp::encode(bal))),
         };
 
         Ok(Block {
