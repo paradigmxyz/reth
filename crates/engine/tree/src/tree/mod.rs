@@ -2077,6 +2077,7 @@ where
     where
         Err: From<InsertBlockError<N::Block>>,
     {
+        let block_insert_start = Instant::now();
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
@@ -2160,6 +2161,8 @@ where
             ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
+        self.metrics.engine.block_insert_total_duration.record(block_insert_start.elapsed().as_secs_f64());
 
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))

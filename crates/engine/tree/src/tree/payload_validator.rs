@@ -429,6 +429,7 @@ where
             handle.cache_metrics(),
         );
 
+        let execution_start = Instant::now();
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let (output, execution_finish) =
@@ -438,6 +439,7 @@ where
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
+        self.metrics.engine.block_execution_duration.record(execution_start.elapsed().as_secs_f64());
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -563,6 +565,7 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        self.metrics.engine.block_validation_duration.record(root_time.elapsed().as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         // ensure state root matches
