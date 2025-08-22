@@ -71,11 +71,10 @@ impl BenchContext {
 
             let head_block = block_provider
                 .get_block_by_number(BlockNumberOrTag::Latest)
-                .full()
                 .await?
                 .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
             let head_number = head_block.header.number;
-            (Some(head_number + 1), Some(head_number + advance))
+            (Some(head_number), Some(head_number + advance))
         } else {
             (bench_args.from, bench_args.to)
         };
