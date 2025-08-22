@@ -3,7 +3,6 @@ use futures_util::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
 use std::{
-    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -73,10 +72,10 @@ impl<N: NodePrimitives, S> FlashBlockService<N, S> {
     }
 }
 
-impl<N: NodePrimitives, S: Stream<Item = FlashBlock> + Unpin> Future for FlashBlockService<N, S> {
-    type Output = Option<eyre::Result<ExecutedBlock<N>>>;
+impl<N: NodePrimitives, S: Stream<Item = FlashBlock> + Unpin> Stream for FlashBlockService<N, S> {
+    type Item = eyre::Result<ExecutedBlock<N>>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             match self.rx.poll_next_unpin(cx) {
                 Poll::Ready(Some(flashblock)) => self.add_flash_block(flashblock),
