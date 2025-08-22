@@ -115,20 +115,6 @@ where
             .inspect(|this: &LaunchContextWith<Attached<WithConfigs<Types::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
-            {
-                use reth_storage_api::BlockReader;
-                use reth_db_common::init::init_genesis;
-                if let Ok(provider) = ctx.provider_factory().provider() {
-                    match provider.header_by_number(0) {
-                        Ok(Some(_)) => {}
-                        _ => {
-                            reth_tracing::tracing::warn!(target: "reth::cli", "Genesis header #0 missing after with_genesis; attempting to initialize genesis again");
-                            let _ = init_genesis(ctx.provider_factory());
-                        }
-                    }
-                }
-            }
-
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
@@ -136,6 +122,7 @@ where
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
+
 
         // Try to expire pre-merge transaction history if configured
         ctx.expire_pre_merge_transactions()?;
