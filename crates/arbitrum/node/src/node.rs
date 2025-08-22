@@ -248,17 +248,7 @@ where
                             std::thread::sleep(std::time::Duration::from_millis(250));
                             continue;
                         }
-                        let gen_opt = provider.header_by_number(0)?;
-                        if let Some(gen) = gen_opt {
-                            let gh = reth_primitives_traits::SealedHeader::new(
-                                gen.clone(),
-                                gen.hash_slow(),
-                            )
-                            .hash();
-                            reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, have_genesis=%gh, "missing parent header; canonical genesis differs?");
-                        } else {
-                            reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header; canonical genesis not found");
-                        }
+                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header after retries");
                         return Err(eyre::eyre!("missing parent header"));
                     }
                 }
@@ -743,25 +733,32 @@ where
                 Vec::new(),
             );
 
-            match provider.header(&new_block_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
-                }
-                Ok(None) => {
-                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
-                        block: ExecutedBlock {
-                            recovered_block: std::sync::Arc::new(outcome.block),
-                            execution_output: std::sync::Arc::new(exec_outcome),
-                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
-                        },
-                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
-                    };
+            let new_number = sealed_parent.number() + 1;
+            let exists_by_number = provider.header_by_number(new_number).ok().flatten().is_some();
 
-                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
-                    UnifiedStorageWriter::commit(provider_rw)?;
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+            if exists_by_number {
+                reth_tracing::tracing::info!(target: "arb-reth::follower", number = new_number, "follower: block number already present; skipping save");
+            } else {
+                match provider.header(&new_block_hash) {
+                    Ok(Some(_)) => {
+                        reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
+                    }
+                    Ok(None) => {
+                        let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                            block: ExecutedBlock {
+                                recovered_block: std::sync::Arc::new(outcome.block),
+                                execution_output: std::sync::Arc::new(exec_outcome),
+                                hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                            },
+                            trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                        };
+
+                        UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
+                        UnifiedStorageWriter::commit(provider_rw)?;
+                    }
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+                    }
                 }
             }
 
