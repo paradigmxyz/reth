@@ -11,6 +11,7 @@ use crate::transactions::constants::tx_fetcher::{
 };
 use alloy_primitives::B256;
 use derive_more::{Constructor, Display};
+
 use reth_eth_wire::NetworkPrimitives;
 use reth_ethereum_primitives::TxType;
 
@@ -57,6 +58,24 @@ impl TransactionPropagationMode {
             Self::Sqrt => (peer_count as f64).sqrt().round() as usize,
             Self::All => peer_count,
             Self::Max(max) => peer_count.min(*max),
+        }
+    }
+}
+impl FromStr for TransactionPropagationMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_lowercase();
+        if s == "sqrt" {
+            Ok(Self::Sqrt)
+        } else if s == "all" {
+            Ok(Self::All)
+        } else if let Some(num) = s.strip_prefix("max:") {
+            num.parse::<usize>()
+                .map(TransactionPropagationMode::Max)
+                .map_err(|_| format!("Invalid number for Max variant: {num}"))
+        } else {
+            Err(format!("Invalid transaction propagation mode: {s}"))
         }
     }
 }
