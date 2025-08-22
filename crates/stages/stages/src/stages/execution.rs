@@ -191,7 +191,7 @@ where
         // If there's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
         if provider.prune_modes_ref().has_receipts_pruning() {
-            return Ok(());
+            return Ok(())
         }
 
         // Get next expected receipt number
@@ -232,7 +232,7 @@ where
                     if next_receipt_num_after_unwind > next_static_file_receipt_num {
                         // This means we need a deeper unwind.
                     } else {
-                        return Ok(());
+                        return Ok(())
                     }
                 }
 
@@ -280,7 +280,7 @@ where
     /// Execute the stage
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let start_block = input.next_block();
@@ -348,7 +348,7 @@ where
                 return Err(StageError::Block {
                     block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
-                });
+                })
             }
             results.push(result);
 
@@ -420,7 +420,7 @@ where
                 // means that we didn't send the notification to ExExes
                 return Err(StageError::PostExecuteCommit(
                     "Previous post execute commit input wasn't processed",
-                ));
+                ))
             }
         }
 
