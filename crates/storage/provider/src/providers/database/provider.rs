@@ -959,6 +959,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
         &self,
         highest_uninterrupted_block: BlockNumber,
     ) -> ProviderResult<SealedHeader<Self::Header>> {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            if let Some(h) =
+                self.tx.get::<tables::Headers<Self::Header>>(highest_uninterrupted_block)?
+            {
+                return Ok(SealedHeader::seal_slow(h));
+            }
+            return Err(ProviderError::HeaderNotFound(highest_uninterrupted_block.into()));
+        }
+
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
