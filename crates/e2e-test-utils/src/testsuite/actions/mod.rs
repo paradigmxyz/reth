@@ -16,7 +16,7 @@ pub mod node_ops;
 pub mod produce_blocks;
 pub mod reorg;
 
-pub use custom_fcu::{BlockReference, TestReorgBehindFinalized};
+pub use custom_fcu::{BlockReference, FinalizeBlock, SendForkchoiceUpdate};
 pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads};
 pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
 pub use node_ops::{

@@ -6,8 +6,8 @@ use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
     actions::{
-        BlockReference, CaptureBlock, CreateFork, MakeCanonical, ProduceBlocks,
-        TestReorgBehindFinalized,
+        BlockReference, CaptureBlock, CreateFork, FinalizeBlock, MakeCanonical, ProduceBlocks,
+        SendForkchoiceUpdate,
     },
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -58,13 +58,20 @@ async fn test_reorg_to_fork_behind_finalized() -> Result<()> {
         // Create a fork from block 5 (before block 7 which will be finalized)
         .with_action(CreateFork::<EthEngineTypes>::new(5, 5)) // Fork from block 5, add 5 blocks
         .with_action(CaptureBlock::new("fork_tip"))
-        // Test the scenario: finalize block 7, then try to reorg to the fork
-        .with_action(TestReorgBehindFinalized::<EthEngineTypes>::new(
-            BlockReference::Tag("block_7".to_string()), // Finalize block 7
-            BlockReference::Tag("block_10".to_string()), // Current head at block 10
-            BlockReference::Tag("fork_tip".to_string()), /* Try to switch to fork that doesn't
-                                                         * contain block 7 */
-        ));
+        // Step 1: Finalize block 7 with head at block 10
+        .with_action(
+            FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("block_7".to_string()))
+                .with_head(BlockReference::Tag("block_10".to_string())),
+        )
+        // Step 2: Attempt to reorg to a fork that doesn't contain the finalized block
+        .with_action(
+            SendForkchoiceUpdate::<EthEngineTypes>::new(
+                BlockReference::Tag("block_7".to_string()), // Keep finalized
+                BlockReference::Tag("fork_tip".to_string()), // New safe
+                BlockReference::Tag("fork_tip".to_string()), // New head
+            )
+            .with_expected_status(alloy_rpc_types_engine::PayloadStatusEnum::Valid),
+        );
 
     test.run::<EthereumNode>().await?;
 
