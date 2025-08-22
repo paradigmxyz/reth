@@ -58,9 +58,27 @@ impl BenchContext {
             .await?
             .is_empty();
 
+        // Computes the block range for the benchmark.
+        //
+        // - If `--advance` is provided, fetches the latest block and sets:
+        //     - `from = head + 1`
+        //     - `to = head + advance`
+        // - Otherwise, uses the values from `--from` and `--to`.
+        let (from, to) = if let Some(advance) = bench_args.advance {
+            let head_block = block_provider
+                .get_block_by_number(BlockNumberOrTag::Latest)
+                .full()
+                .await?
+                .ok_or_else(|| eyre::eyre!("Failed to fetch latest block for --advance"))?;
+            let head_number = head_block.header.number;
+            (Some(head_number + 1), Some(head_number + advance))
+        } else {
+            (bench_args.from, bench_args.to)
+        };
+
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.
-        let mut benchmark_mode = BenchMode::new(bench_args.from, bench_args.to)?;
+        let mut benchmark_mode = BenchMode::new(from, to)?;
 
         // construct the authenticated provider
         let auth_jwt = bench_args
