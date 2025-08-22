@@ -241,7 +241,7 @@ where
                     &static_file_provider,
                     provider,
                     StaticFileSegment::Receipts,
-                )?);
+                )?)
             }
         }
 
