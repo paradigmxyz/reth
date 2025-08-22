@@ -764,6 +764,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         }
 
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            info!(target: "reth::cli", "Skipping storage consistency verification due to RETH_DISABLE_STATIC_FILES=1");
+            return Ok(None);
+        }
         info!(target: "reth::cli", "Verifying storage consistency.");
 
         let mut unwind_target: Option<BlockNumber> = None;
