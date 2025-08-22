@@ -851,9 +851,15 @@ where
                     batch_gas_cost,
                 )?;
 
-            let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
-            let np = beacon.new_payload(payload).await?;
-            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+            let already_present = provider.header(&new_block_hash).ok().flatten().is_some();
+
+            if !already_present {
+                let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
+                let np = beacon.new_payload(payload).await?;
+                reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+            } else {
+                reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: skipping newPayload; block already present");
+            }
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
