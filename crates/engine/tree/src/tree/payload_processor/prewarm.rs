@@ -373,6 +373,14 @@ where
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
 
+            // Because coinbase is updated in every transaction with gas fees, we handle it in the
+            // following way: if the only update is balance change from gas fees, we can re-use the
+            // execution result and manually increase the balance by the delta; if the coinbase
+            // balance was read, we cannot re-use the execution result because the balance may be
+            // not correct as it doesn't have all previous increments from fees
+
+            // Skip caching if coinbase balance was read, as the value would be incorrect without
+            // all prior fee increments from previous transactions
             let coinbase_balance_read = std::mem::take(&mut evm.inspector_mut().balance_read);
             if coinbase_balance_read {
                 tracing::debug!(
@@ -385,7 +393,8 @@ where
 
             let execution_trace = std::mem::take(&mut evm.db_mut().recorded_traces);
 
-            // Calculate coinbase deltas to apply when reusing cached result
+            // Calculate coinbase nonce and balance deltas to reuse execution result by manually
+            // adjusting for gas fee changes, if no read occurred and the only update is from fees
             let coinbase_deltas = res.state.get(&coinbase).map(|coinbase_after| {
                 let nonce_delta = coinbase_after.info.nonce - coinbase_before.nonce;
                 let balance_delta = coinbase_after.info.balance - coinbase_before.balance;
@@ -525,6 +534,11 @@ impl<DB: revm::Database> revm::Database for EVMRecordingDatabase<DB> {
     }
 }
 
+/// Flags when a transaction reads the block coinbase's balance during EVM execution.
+///
+/// Rationale: During prewarming the coinbase balance is incomplete (prior tx fee credits
+/// are not yet applied). If a tx observes that balance, its behavior may differ from a
+/// real execution, so cached results must be disabled for safety.
 #[derive(Debug)]
 struct CoinbaseBalanceEVMInspector {
     coinbase: Address,
@@ -532,6 +546,8 @@ struct CoinbaseBalanceEVMInspector {
 }
 
 impl CoinbaseBalanceEVMInspector {
+    /// Constructs an inspector for the given `coinbase` address. The `balance_read` flag
+    /// starts as `false` and flips to `true` the first time a coinbase balance read is seen.
     const fn new(coinbase: Address) -> Self {
         Self { coinbase, balance_read: false }
     }
@@ -543,12 +559,14 @@ where
     CTX: ContextTr<Journal: JournalExt>,
 {
     fn step(&mut self, interpreter: &mut Interpreter, _context: &mut CTX) {
+        // Fast-path: once we've observed a read, avoid further work.
         if self.balance_read {
             return
         }
 
         match interpreter.bytecode.opcode() {
             opcode::BALANCE => {
+                // BALANCE <addr>: mark if the queried address equals coinbase.
                 if let Ok(addr) = interpreter.stack.peek(0) {
                     if Address::from_word(B256::from(addr.to_be_bytes())) == self.coinbase {
                         self.balance_read = true;
@@ -556,6 +574,7 @@ where
                 }
             }
             opcode::SELFBALANCE => {
+                // SELFBALANCE: mark if the current call target is the coinbase account.
                 if interpreter.input.target_address == self.coinbase {
                     self.balance_read = true;
                 }
