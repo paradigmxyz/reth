@@ -681,6 +681,10 @@ where
                 vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode Internal failed"))?]
             }
+            0xff => {
+                reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
+                Vec::new()
+            }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
 

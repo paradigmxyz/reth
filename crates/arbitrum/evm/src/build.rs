@@ -195,7 +195,7 @@ where
         if is_internal || is_deposit {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         }
-        if is_internal {
+        if is_internal || is_deposit {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
 
