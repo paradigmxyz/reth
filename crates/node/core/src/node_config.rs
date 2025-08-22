@@ -324,6 +324,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// If the database is empty, returns the genesis block.
     pub fn lookup_head<Factory>(&self, factory: &Factory) -> ProviderResult<Head>
     where
+        ChainSpec: EthChainSpec,
         Factory: DatabaseProviderFactory<
             Provider: HeaderProvider + StageCheckpointReader + BlockHashReader,
         >,
@@ -332,9 +333,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 
-        let header = provider
-            .header_by_number(head)?
-            .expect("the header for the latest block is missing, database is corrupt");
+        let header = if let Some(h) = provider.header_by_number(head)? {
+            h
+        } else {
+            let gh = self.chain.genesis_hash();
+            let h = provider
+                .header_by_hash_or_number(gh.into())?
+                .ok_or_else(|| reth_storage_errors::provider::ProviderError::HeaderNotFound(head.into()))?;
+            h
+        };
 
         let total_difficulty = provider
             .header_td_by_number(head)?
