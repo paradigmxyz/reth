@@ -1017,7 +1017,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
-            return Ok(self.tx.get::<tables::Headers<Self::Header>>(num)?);
+            if let Some(h) = self.tx.get::<tables::Headers<Self::Header>>(num)? {
+                return Ok(Some(h));
+            }
+            if num == 0 {
+                return Ok(Some(self.chain_spec.genesis_header().clone()));
+            }
+            return Ok(None);
         }
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
@@ -1075,9 +1081,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
                     return Ok(Some(SealedHeader::new(header, hash)));
                 }
                 return Ok(Some(SealedHeader::seal_slow(header)));
-            } else {
-                return Ok(None);
             }
+            if number == 0 {
+                let h = self.chain_spec.genesis_header().clone();
+                return Ok(Some(SealedHeader::seal_slow(h)));
+            }
+            return Ok(None);
         }
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
