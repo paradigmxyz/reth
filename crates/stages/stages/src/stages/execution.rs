@@ -385,7 +385,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break;
+                break
             }
         }
 
@@ -434,7 +434,7 @@ where
                 let Some(reverts) =
                     state.bundle.reverts.get_mut((block_number - start_block) as usize)
                 else {
-                    break;
+                    break
                 };
 
                 // If both account history and storage history pruning is configured, clear reverts
