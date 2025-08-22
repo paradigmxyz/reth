@@ -743,17 +743,27 @@ where
                 Vec::new(),
             );
 
-            let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
-                block: ExecutedBlock {
-                    recovered_block: std::sync::Arc::new(outcome.block),
-                    execution_output: std::sync::Arc::new(exec_outcome),
-                    hashed_state: std::sync::Arc::new(outcome.hashed_state),
-                },
-                trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
-            };
+            match provider.header(&new_block_hash) {
+                Ok(Some(_)) => {
+                    reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
+                }
+                Ok(None) => {
+                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                        block: ExecutedBlock {
+                            recovered_block: std::sync::Arc::new(outcome.block),
+                            execution_output: std::sync::Arc::new(exec_outcome),
+                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                        },
+                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                    };
 
-            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
-            UnifiedStorageWriter::commit(provider_rw)?;
+                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
+                }
+                Err(e) => {
+                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+                }
+            }
 
             match provider.header(&new_block_hash) {
                 Ok(Some(_)) => {
