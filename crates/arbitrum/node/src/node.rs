@@ -724,70 +724,6 @@ where
             header.extra_data.as_ref(),
         );
 
-        {
-            let provider_rw = db_factory.database_provider_rw()?;
-            let static_file_provider = db_factory.static_file_provider();
-
-            let exec_outcome = reth_execution_types::ExecutionOutcome::new(
-                db.take_bundle(),
-                vec![outcome.execution_result.receipts],
-                sealed_parent.number() + 1,
-                Vec::new(),
-            );
-
-            let new_number = sealed_parent.number() + 1;
-            let exists_by_number = provider.header_by_number(new_number).ok().flatten().is_some();
-
-            if exists_by_number {
-                reth_tracing::tracing::info!(target: "arb-reth::follower", number = new_number, "follower: block number already present; skipping save");
-            } else {
-                match provider.header(&new_block_hash) {
-                    Ok(Some(_)) => {
-                        reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
-                    }
-                    Ok(None) => {
-                        let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
-                            block: ExecutedBlock {
-                                recovered_block: std::sync::Arc::new(outcome.block),
-                                execution_output: std::sync::Arc::new(exec_outcome),
-                                hashed_state: std::sync::Arc::new(outcome.hashed_state),
-                            },
-                            trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
-                        };
-
-                        UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
-                        UnifiedStorageWriter::commit(provider_rw)?;
-                    }
-                    Err(e) => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
-                    }
-                }
-            }
-
-            match provider.header(&new_block_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: new block header visible after direct import");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, "follower: new block header NOT visible after direct import");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking new block header");
-                }
-            }
-            match provider.header(&parent_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %parent_hash, "follower: parent header visible after direct import");
-                }
-                Ok(None) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, "follower: parent header NOT visible after direct import");
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %parent_hash, err = %e, "follower: error checking parent header");
-                }
-            }
-        }
-
         Ok((new_block_hash, new_send_root, sealed_block))
     }
 }
@@ -853,15 +789,9 @@ where
                     batch_gas_cost,
                 )?;
 
-            let already_present = provider.header(&new_block_hash).ok().flatten().is_some();
-
-            if !already_present {
-                let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
-                let np = beacon.new_payload(payload).await?;
-                reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
-            } else {
-                reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: skipping newPayload; block already present");
-            }
+            let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
+            let np = beacon.new_payload(payload).await?;
+            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
