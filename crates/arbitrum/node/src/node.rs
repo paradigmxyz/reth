@@ -226,7 +226,13 @@ where
         kind: u8,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
-    ) -> eyre::Result<(alloy_primitives::B256, alloy_primitives::B256)> {
+    ) -> eyre::Result<(
+        alloy_primitives::B256,
+        alloy_primitives::B256,
+        reth_primitives_traits::SealedBlock<
+            alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>
+        >,
+    )> {
         use reth_evm::execute::BlockBuilder;
         use reth_revm::{database::StateProviderDatabase, db::State};
 
@@ -773,7 +779,7 @@ where
             }
         }
 
-        Ok((new_block_hash, new_send_root))
+        Ok((new_block_hash, new_send_root, sealed_block))
     }
 }
 
@@ -823,31 +829,24 @@ where
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         Box::pin(async move {
-            let (new_block_hash, new_send_root) = Self::execute_message_to_block_sync(
-                &provider,
-                &db_factory,
-                &evm_config,
-                parent_hash,
-                attrs.clone(),
-                &l2_owned,
-                poster,
-                request_id,
-                kind,
-                l1_base_fee,
-                batch_gas_cost,
-            )?;
+            let (new_block_hash, new_send_root, sealed_block) =
+                Self::execute_message_to_block_sync(
+                    &provider,
+                    &db_factory,
+                    &evm_config,
+                    parent_hash,
+                    attrs.clone(),
+                    &l2_owned,
+                    poster,
+                    request_id,
+                    kind,
+                    l1_base_fee,
+                    batch_gas_cost,
+                )?;
 
-            let maybe_block = provider
-                .block_by_hash(new_block_hash)
-                .map_err(|e| eyre::eyre!("block_by_hash error: {e}"))?;
-            if let Some(block) = maybe_block {
-                let sealed = block.seal_slow();
-                let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed);
-                let np = beacon.new_payload(payload).await?;
-                reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
-            } else {
-                return Err(eyre::eyre!("new block not found by hash after execution: {new_block_hash:?}"));
-            }
+            let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
+            let np = beacon.new_payload(payload).await?;
+            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
