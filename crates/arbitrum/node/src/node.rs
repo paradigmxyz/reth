@@ -202,6 +202,9 @@ where
         + reth_node_api::NodeTypes<
             Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block_sync(
         provider: &N::Provider,
@@ -792,6 +795,9 @@ where
         + reth_node_api::NodeTypes<
             Primitives = reth_arbitrum_primitives::ArbPrimitives
         >,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
 {
     fn execute_message_to_block(
         &self,
@@ -830,6 +836,19 @@ where
                 l1_base_fee,
                 batch_gas_cost,
             )?;
+
+            let maybe_block = provider
+                .block_by_hash(new_block_hash)
+                .map_err(|e| eyre::eyre!("block_by_hash error: {e}"))?;
+            if let Some(block) = maybe_block {
+                let sealed = block.seal_slow();
+                let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed);
+                let np = beacon.new_payload(payload).await?;
+                reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+            } else {
+                return Err(eyre::eyre!("new block not found by hash after execution: {new_block_hash:?}"));
+            }
+
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
                 safe_block_hash: new_block_hash,
@@ -906,6 +925,9 @@ where
     > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -952,6 +974,9 @@ where
     > + reth_node_api::ProviderFactoryExt,
     <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Storage:
         reth_provider::providers::ChainStorage<reth_arbitrum_primitives::ArbPrimitives>,
+    <<N as reth_node_api::FullNodeTypes>::Types as reth_node_api::NodeTypes>::Payload: reth_payload_primitives::PayloadTypes<
+        ExecutionData = reth_arbitrum_payload::ArbExecutionData
+    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
