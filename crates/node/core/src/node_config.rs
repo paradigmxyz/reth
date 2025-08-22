@@ -349,9 +349,16 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             // p2p
             .unwrap_or_default();
 
-        let hash = provider
-            .block_hash(head)?
-            .expect("the hash for the latest block is missing, database is corrupt");
+        let hash = match provider.block_hash(head)? {
+            Some(h) => h,
+            None => {
+                if head == 0 {
+                    self.chain.genesis_hash()
+                } else {
+                    panic!("the hash for the latest block is missing, database is corrupt")
+                }
+            }
+        };
 
         Ok(Head {
             number: head,
