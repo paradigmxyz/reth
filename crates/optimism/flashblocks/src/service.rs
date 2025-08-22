@@ -5,7 +5,7 @@ use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives};
 use std::{
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 use tracing::{debug, error, info};
 
@@ -77,12 +77,12 @@ impl<N: NodePrimitives, S: Stream<Item = FlashBlock> + Unpin> Future for FlashBl
     type Output = Option<eyre::Result<ExecutedBlock<N>>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Some(flashblock) = ready!(self.rx.poll_next_unpin(cx)) {
-            self.add_flash_block(flashblock);
-
-            return Poll::Ready(Some(self.execute()));
+        loop {
+            match self.rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(flashblock)) => self.add_flash_block(flashblock),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Ready(Some(self.execute())),
+            }
         }
-
-        Poll::Ready(None)
     }
 }
