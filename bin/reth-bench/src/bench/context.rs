@@ -65,6 +65,10 @@ impl BenchContext {
         //     - `to = head + advance`
         // - Otherwise, uses the values from `--from` and `--to`.
         let (from, to) = if let Some(advance) = bench_args.advance {
+            if advance == 0 {
+                return Err(eyre::eyre!("--advance must be greater than 0"));
+            }
+
             let head_block = block_provider
                 .get_block_by_number(BlockNumberOrTag::Latest)
                 .full()
