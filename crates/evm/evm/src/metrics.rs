@@ -82,6 +82,19 @@ pub struct ExecutorMetrics {
     pub execution_results_cache_hits: Counter,
     /// The Counter for number of execution results cached misses when executing the latest block.
     pub execution_results_cache_misses: Counter,
+    
+    /// The Counter for number of transactions skipped due to cache hits.
+    pub transactions_skipped: Counter,
+    /// The Counter for total gas skipped due to cache hits.
+    pub gas_skipped: Counter,
+    /// The Histogram for gas skipped per cached transaction.
+    pub gas_skipped_per_tx_histogram: Histogram,
+    /// The Histogram for cache hit rate per block.
+    pub cache_hit_rate_histogram: Histogram,
+    /// The Counter for cache validation failures.
+    pub cache_validation_failures: Counter,
+    /// The Histogram for cache validation time per transaction.
+    pub cache_validation_time_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -141,23 +154,41 @@ impl ExecutorMetrics {
 
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
+        // Track cache statistics for logging
+        let mut cache_hits_in_block = 0u64;
+        let mut cache_misses_in_block = 0u64;
+        let mut gas_skipped_in_block = 0u64;
+        let mut transactions_skipped_in_block = 0u64;
+
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
                 let tx_hash = *tx.tx().tx_hash();
                 if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
+                    cache_hits_in_block += 1;
+                    transactions_skipped_in_block += 1;
                     self.execution_results_cache_hits.increment(1);
+                    self.transactions_skipped.increment(1);
+                    
+                    // Track gas skipped
+                    let gas_used = result.result.gas_used();
+                    gas_skipped_in_block += gas_used;
+                    self.gas_skipped.increment(gas_used);
+                    self.gas_skipped_per_tx_histogram.record(gas_used as f64);
+                    
                     #[cfg(feature = "metrics")]
                     debug!(
                         target: "reth::evm::metrics",
                         ?tx_hash,
+                        gas_skipped = gas_used,
                         "Using cached transaction result"
                     );
                     executor.execute_transaction_with_cached_result(tx, result, |_| {
                         alloy_evm::block::CommitChanges::Yes
                     })?;
                 } else {
+                    cache_misses_in_block += 1;
                     self.execution_results_cache_misses.increment(1);
                     #[cfg(feature = "metrics")]
                     debug!(
@@ -171,10 +202,6 @@ impl ExecutorMetrics {
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
 
-        // Track cache statistics for logging
-        let _initial_hits = self.execution_results_cache_hits.clone();
-        let _initial_misses = self.execution_results_cache_misses.clone();
-
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(|| {
             let res = f();
@@ -185,12 +212,30 @@ impl ExecutorMetrics {
         // Log cache performance summary
         #[cfg(feature = "metrics")]
         {
-            // Calculate cache performance (note: we can't read counter values directly,
-            // but we can track the difference if we cloned them before)
+            let total_txs = cache_hits_in_block + cache_misses_in_block;
+            let hit_rate = if total_txs > 0 {
+                (cache_hits_in_block as f64 / total_txs as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            // Record hit rate in histogram
+            self.cache_hit_rate_histogram.record(hit_rate);
+            
             info!(
                 target: "reth::evm::metrics",
+                cache_hits = cache_hits_in_block,
+                cache_misses = cache_misses_in_block,
+                hit_rate = format!("{:.2}%", hit_rate),
+                transactions_skipped = transactions_skipped_in_block,
+                gas_skipped = gas_skipped_in_block,
                 gas_used = result.gas_used,
-                "Block execution completed with transaction caching"
+                gas_saved_percent = format!("{:.2}%", if result.gas_used > 0 { 
+                    (gas_skipped_in_block as f64 / result.gas_used as f64) * 100.0 
+                } else { 
+                    0.0 
+                }),
+                "Block execution cache performance"
             );
         }
 
