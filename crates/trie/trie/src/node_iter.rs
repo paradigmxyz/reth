@@ -2,6 +2,7 @@ use crate::{
     hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
 };
 use alloy_primitives::B256;
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
@@ -48,9 +49,9 @@ struct SeekedHashedEntry<V> {
 /// This iterator depends on the ordering guarantees of [`TrieCursor`],
 /// and additionally uses hashed cursor lookups when operating on storage tries.
 #[derive(Debug)]
-pub struct TrieNodeIter<C, H: HashedCursor> {
+pub struct TrieNodeIter<C, H: HashedCursor, K> {
     /// The walker over intermediate nodes.
-    pub walker: TrieWalker<C>,
+    pub walker: TrieWalker<C, K>,
     /// The cursor for the hashed entries.
     pub hashed_cursor: H,
     /// The type of the trie.
@@ -77,22 +78,23 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     last_next_result: Option<(B256, H::Value)>,
 }
 
-impl<C, H: HashedCursor> TrieNodeIter<C, H>
+impl<C, H: HashedCursor, K> TrieNodeIter<C, H, K>
 where
     H::Value: Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
-    pub fn state_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::State)
     }
 
     /// Creates a new [`TrieNodeIter`] for the storage trie.
-    pub fn storage_trie(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn storage_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::Storage)
     }
 
     /// Creates a new [`TrieNodeIter`].
-    fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
+    fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -170,11 +172,12 @@ where
     }
 }
 
-impl<C, H> TrieNodeIter<C, H>
+impl<C, H, K> TrieNodeIter<C, H, K>
 where
     C: TrieCursor,
     H: HashedCursor,
     H::Value: Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Return the next trie node to be added to the hash builder.
     ///
@@ -340,7 +343,7 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
+        let walker = TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
 
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
@@ -469,8 +472,10 @@ mod tests {
         prefix_set.insert(Nibbles::unpack(account_3));
         let prefix_set = prefix_set.freeze();
 
-        let walker =
-            TrieWalker::state_trie(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
+        let walker = TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            prefix_set,
+        );
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
