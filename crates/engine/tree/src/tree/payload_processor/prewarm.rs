@@ -487,7 +487,7 @@ pub(super) enum PrewarmTaskEvent {
 }
 
 /// Captures state reads during transaction prewarming for cache validation.
-/// Used to validate and reuse prewarmed results, avoiding duplicate executions.
+/// Used to validate and reuse prewarmed results.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AccessRecord {
     /// Account access record containing account address and retrieved account information
