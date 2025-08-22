@@ -106,25 +106,36 @@ where
 
         let tx_cache = self.tx_cache.clone();
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::new();
+            // Pre-spawn all worker threads at initialization for better cache locality
+            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
+            
+            // Pre-spawn exactly max_concurrency workers
+            for _ in 0..max_concurrency {
+                let (tx, rx) = mpsc::channel();
+                let sender = actions_tx.clone();
+                let ctx = ctx.clone();
+                let done_tx = done_tx.clone();
+                let tx_cache = tx_cache.clone();
+
+                executor.spawn_blocking(move || {
+                    ctx.transact_batch(rx, tx_cache, sender, done_tx);
+                });
+
+                handles.push(tx);
+            }
+            
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
-                let task_idx = executing % max_concurrency;
-
-                if handles.len() <= task_idx {
-                    let (tx, rx) = mpsc::channel();
-                    let sender = actions_tx.clone();
-                    let ctx = ctx.clone();
-                    let done_tx = done_tx.clone();
-
-                    let tx_cache = tx_cache.clone();
-                    executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, tx_cache, sender, done_tx);
-                    });
-
-                    handles.push(tx);
+                // Route by sender affinity using FNV-1a hash for better cache locality
+                // This ensures transactions from the same sender go to the same worker
+                let signer = executable.signer();
+                let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+                for byte in signer.0 {
+                    hash ^= byte as u64;
+                    hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
                 }
+                let task_idx = (hash as usize) % max_concurrency;
 
                 let _ = handles[task_idx].send(executable);
 
