@@ -819,20 +819,6 @@ impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
 }
 
 pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
-    if let Ok(spec) = sepolia_baked_genesis_from_header(
-        421_614,
-        "0x5f5e100",
-        "0x0",
-        "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",
-        "0x1c9c380",
-        "0x",
-        "0x0",
-        "0x0",
-        None,
-        Some("0xb2d05e00"),
-    ) {
-        return spec;
-    }
     let mut spec = reth_chainspec::ChainSpec::default();
     spec.chain = Chain::from(421_614u64);
     spec
