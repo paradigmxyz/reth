@@ -791,6 +791,10 @@ where
 
             let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
             let np = beacon.new_payload(payload).await?;
+            if !matches!(np.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
+                reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: newPayload not valid/syncing");
+                eyre::bail!("newPayload status not valid/syncing: {:?}", np.status);
+            }
             reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
@@ -805,6 +809,10 @@ where
                     reth_payload_primitives::EngineApiMessageVersion::default(),
                 )
                 .await?;
+            if !matches!(fcu_resp.payload_status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
+                reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?fcu_resp.payload_status.status, %new_block_hash, "follower: FCU not valid/syncing");
+                eyre::bail!("forkchoiceUpdated status not valid/syncing: {:?}", fcu_resp.payload_status.status);
+            }
             reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?fcu_resp.payload_status.status, %new_block_hash, "follower: updated forkchoice to new head");
             Ok((new_block_hash, new_send_root))
         })
