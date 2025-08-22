@@ -959,6 +959,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
         &self,
         highest_uninterrupted_block: BlockNumber,
     ) -> ProviderResult<SealedHeader<Self::Header>> {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            if let Some(h) =
+                self.tx.get::<tables::Headers<Self::Header>>(highest_uninterrupted_block)?
+            {
+                return Ok(SealedHeader::seal_slow(h));
+            }
+            return Err(ProviderError::HeaderNotFound(highest_uninterrupted_block.into()));
+        }
+
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
@@ -1007,6 +1016,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            if let Some(h) = self.tx.get::<tables::Headers<Self::Header>>(num)? {
+                return Ok(Some(h));
+            }
+            if num == 0 {
+                return Ok(Some(self.chain_spec.genesis_header().clone()));
+            }
+            return Ok(None);
+        }
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             num,
@@ -1057,6 +1075,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            if let Some(header) = self.tx.get::<tables::Headers<Self::Header>>(number)? {
+                if let Some(hash) = self.tx.get::<tables::CanonicalHeaders>(number)? {
+                    return Ok(Some(SealedHeader::new(header, hash)));
+                }
+                return Ok(Some(SealedHeader::seal_slow(header)));
+            }
+            if number == 0 {
+                let h = self.chain_spec.genesis_header().clone();
+                return Ok(Some(SealedHeader::seal_slow(h)));
+            }
+            return Ok(None);
+        }
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
@@ -1107,6 +1138,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
 
 impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
+        if std::env::var("RETH_DISABLE_STATIC_FILES").is_ok() {
+            return Ok(self.tx.get::<tables::CanonicalHeaders>(number)?);
+        }
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,

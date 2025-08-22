@@ -771,6 +771,7 @@ pub fn sepolia_baked_genesis_from_header(
     let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
 
     let mut header = alloy_consensus::Header::default();
+    header.number = 0u64.into();
     header.gas_limit = gas_limit.to::<u64>();
     header.difficulty = U256::from(1u64);
     header.nonce = nonce.into();

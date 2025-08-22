@@ -248,17 +248,7 @@ where
                             std::thread::sleep(std::time::Duration::from_millis(250));
                             continue;
                         }
-                        let gen_opt = provider.header_by_number(0)?;
-                        if let Some(gen) = gen_opt {
-                            let gh = reth_primitives_traits::SealedHeader::new(
-                                gen.clone(),
-                                gen.hash_slow(),
-                            )
-                            .hash();
-                            reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, have_genesis=%gh, "missing parent header; canonical genesis differs?");
-                        } else {
-                            reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header; canonical genesis not found");
-                        }
+                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header after retries");
                         return Err(eyre::eyre!("missing parent header"));
                     }
                 }
@@ -287,35 +277,37 @@ where
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
 
-        let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
-        if parent_bf > 0 {
-            let parent_gas_limit = sealed_parent.gas_limit();
-            let parent_gas_used = sealed_parent.gas_used();
-            let target = parent_gas_limit / 8;
-            let mut next_bf = parent_bf;
-            if parent_gas_used > target {
-                let delta = ((parent_bf as u128)
-                    * ((parent_gas_used - target) as u128)
-                    / (target as u128)
-                    / 8) as u64;
-                let change = if delta == 0 { 1 } else { delta };
-                next_bf = parent_bf.saturating_add(change);
-            } else if parent_gas_used < target {
-                let delta = ((parent_bf as u128)
-                    * ((target - parent_gas_used) as u128)
-                    / (target as u128)
-                    / 8) as u64;
-                let change = if delta == 0 { 1 } else { delta };
-                next_bf = parent_bf.saturating_sub(change);
-            }
-            reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559");
-            next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
-        } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+        if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
             reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
         } else {
-            reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
-            next_env.max_fee_per_gas = Some(l1_base_fee);
+            let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
+            if parent_bf > 0 {
+                let parent_gas_limit = sealed_parent.gas_limit();
+                let parent_gas_used = sealed_parent.gas_used();
+                let target = parent_gas_limit / 8;
+                let mut next_bf = parent_bf;
+                if parent_gas_used > target {
+                    let delta = ((parent_bf as u128)
+                        * ((parent_gas_used - target) as u128)
+                        / (target as u128)
+                        / 8) as u64;
+                    let change = if delta == 0 { 1 } else { delta };
+                    next_bf = parent_bf.saturating_add(change);
+                } else if parent_gas_used < target {
+                    let delta = ((parent_bf as u128)
+                        * ((target - parent_gas_used) as u128)
+                        / (target as u128)
+                        / 8) as u64;
+                    let change = if delta == 0 { 1 } else { delta };
+                    next_bf = parent_bf.saturating_sub(change);
+                }
+                reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
+                next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
+            } else {
+                reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
+                next_env.max_fee_per_gas = Some(l1_base_fee);
+            }
         }
         let block_base_fee = next_env.max_fee_per_gas;
 
@@ -743,25 +735,32 @@ where
                 Vec::new(),
             );
 
-            match provider.header(&new_block_hash) {
-                Ok(Some(_)) => {
-                    reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
-                }
-                Ok(None) => {
-                    let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
-                        block: ExecutedBlock {
-                            recovered_block: std::sync::Arc::new(outcome.block),
-                            execution_output: std::sync::Arc::new(exec_outcome),
-                            hashed_state: std::sync::Arc::new(outcome.hashed_state),
-                        },
-                        trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
-                    };
+            let new_number = sealed_parent.number() + 1;
+            let exists_by_number = provider.header_by_number(new_number).ok().flatten().is_some();
 
-                    UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
-                    UnifiedStorageWriter::commit(provider_rw)?;
-                }
-                Err(e) => {
-                    reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+            if exists_by_number {
+                reth_tracing::tracing::info!(target: "arb-reth::follower", number = new_number, "follower: block number already present; skipping save");
+            } else {
+                match provider.header(&new_block_hash) {
+                    Ok(Some(_)) => {
+                        reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: block already imported; skipping save");
+                    }
+                    Ok(None) => {
+                        let executed: ExecutedBlockWithTrieUpdates<reth_arbitrum_primitives::ArbPrimitives> = ExecutedBlockWithTrieUpdates {
+                            block: ExecutedBlock {
+                                recovered_block: std::sync::Arc::new(outcome.block),
+                                execution_output: std::sync::Arc::new(exec_outcome),
+                                hashed_state: std::sync::Arc::new(outcome.hashed_state),
+                            },
+                            trie: ExecutedTrieUpdates::Present(std::sync::Arc::new(outcome.trie_updates)),
+                        };
+
+                        UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(vec![executed])?;
+                        UnifiedStorageWriter::commit(provider_rw)?;
+                    }
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(target: "arb-reth::follower", %new_block_hash, err = %e, "follower: error checking block existence before import");
+                    }
                 }
             }
 
@@ -854,9 +853,15 @@ where
                     batch_gas_cost,
                 )?;
 
-            let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
-            let np = beacon.new_payload(payload).await?;
-            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+            let already_present = provider.header(&new_block_hash).ok().flatten().is_some();
+
+            if !already_present {
+                let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
+                let np = beacon.new_payload(payload).await?;
+                reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: submitted newPayload for new head");
+            } else {
+                reth_tracing::tracing::info!(target: "arb-reth::follower", %new_block_hash, "follower: skipping newPayload; block already present");
+            }
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
