@@ -1,5 +1,7 @@
 //! E2E test implementations using the e2e test framework for engine tree functionality.
 
+mod fcu_finalized_blocks;
+
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
