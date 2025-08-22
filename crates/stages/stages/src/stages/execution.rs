@@ -496,7 +496,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            });
+            })
         }
 
         self.ensure_consistency(provider, input.checkpoint.block_number, Some(unwind_to))?;
