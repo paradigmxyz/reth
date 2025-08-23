@@ -799,7 +799,7 @@ where
                 logs_bloom = %hdr.logs_bloom,
                 mix_hash = %hdr.mix_hash,
                 extra_len = hdr.extra_data.len(),
-                txs = sealed_block.body().len(),
+                txs = sealed_block.body().transactions.len(),
                 %new_block_hash,
                 "follower: pre-newPayload header summary"
             );
