@@ -15,6 +15,7 @@ use reth_chainspec::EthChainSpec;
 use reth_node_builder::invalid_block_hook::InvalidBlockHookExt;
 use reth_node_builder::rpc::PayloadValidatorBuilder;
 use reth_node_api::AddOnsContext;
+use reth_tracing::tracing;
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
@@ -105,6 +106,11 @@ where
             .with_state_root_fallback(true)
             .with_enable_parallel_sparse_trie(false)
             .with_legacy_state_root(true);
+
+        tracing::info!(
+            target: "arb-reth::engine",
+            "arb engine: building tree validator with legacy_state_root=true, state_root_fallback=true, parallel_sparse_trie=false"
+        );
 
         let payload_validator = crate::validator::ArbEngineValidator::new(ctx.node.provider().clone());
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
