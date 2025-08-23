@@ -233,6 +233,11 @@ Networking:
 
           [default: All]
 
+      --disable-tx-gossip
+          Disable transaction pool gossip
+
+          Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -287,6 +292,11 @@ RPC:
 
           [default: <CACHE_DIR>.ipc]
 
+      --ipc.permissions <IPC_SOCKET_PERMISSIONS>
+          Set the permissions for the IPC socket file, in octal format.
+
+          If not specified, the permissions will be set by the system's umask.
+
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
 
@@ -311,6 +321,11 @@ RPC:
           Filename for auth IPC socket/pipe within the datadir
 
           [default: <CACHE_DIR>_engine_api.ipc]
+
+      --disable-auth-server
+          Disable the auth/engine API server.
+
+          This will prevent the authenticated engine-API server from starting. Use this if you're running a node that doesn't need to serve engine API requests.
 
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
@@ -384,6 +399,13 @@ RPC:
           Maximum number of concurrent getproof requests
 
           [default: 25]
+
+      --rpc.pending-block <KIND>
+          Configures the pending block behavior for RPC responses.
+
+          Options: full (include all transactions), empty (header only), none (disable pending blocks).
+
+          [default: full]
 
       --builder.disallow <PATH>
           Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
@@ -489,6 +511,9 @@ TxPool:
 
           [default: 7]
 
+      --txpool.minimum-priority-fee <MINIMUM_PRIORITY_FEE>
+          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected
+
       --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
 
@@ -551,6 +576,11 @@ TxPool:
 
       --txpool.disable-transactions-backup
           Disables transaction backup to disk on node shutdown
+
+      --txpool.max-batch-size <MAX_BATCH_SIZE>
+          Max batch size for transaction pool insertions
+
+          [default: 1]
 
 Builder:
       --builder.extradata <EXTRA_DATA>
@@ -627,6 +657,9 @@ Debug:
           compare them against local execution when a bad block is encountered, helping identify
           discrepancies in state execution.
 
+      --ethstats <ETHSTATS>
+          The URL of the ethstats server to connect to. Example: `nodename:secret@host:port`
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
@@ -654,6 +687,9 @@ Database:
 
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
+
+      --db.max-readers <MAX_READERS>
+          Maximum number of readers allowed to access the database concurrently
 
 Dev testnet:
       --dev
@@ -702,6 +738,9 @@ Pruning:
       --prune.receipts.full
           Prunes all receipt data
 
+      --prune.receipts.pre-merge
+          Prune receipts before the merge block
+
       --prune.receipts.distance <BLOCKS>
           Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks
 
@@ -709,7 +748,7 @@ Pruning:
           Prune receipts before the specified block number. The specified block number is not pruned
 
       --prune.receiptslogfilter <FILTER_CONFIG>
-          Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+          Configure receipts log filter. Format: <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
       --prune.accounthistory.full
           Prunes all account history
@@ -747,13 +786,16 @@ Engine:
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
           Configure the target number of blocks to keep in memory
 
-          [default: 2]
+          [default: 0]
 
       --engine.legacy-state-root
           Enable legacy state root
 
       --engine.disable-caching-and-prewarming
           Disable cross-block caching and parallel prewarming
+
+      --engine.disable-parallel-sparse-trie
+          Disable the parallel sparse trie in the engine
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls
@@ -833,12 +875,12 @@ Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
 
-          [default: terminal]
-
           Possible values:
           - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
           - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
           - terminal: Represents terminal-friendly formatting for logs
+
+          [default: terminal]
 
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
@@ -848,12 +890,12 @@ Logging:
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
 
-          [default: terminal]
-
           Possible values:
           - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
           - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
           - terminal: Represents terminal-friendly formatting for logs
+
+          [default: terminal]
 
       --log.file.filter <FILTER>
           The filter to use for logs written to the log file
@@ -886,12 +928,12 @@ Logging:
       --color <COLOR>
           Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
 
-          [default: always]
-
           Possible values:
           - always: Colors on
           - auto:   Colors on
           - never:  Colors off
+
+          [default: always]
 
 Display:
   -v, --verbosity...

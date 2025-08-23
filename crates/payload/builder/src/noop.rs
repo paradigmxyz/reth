@@ -64,3 +64,10 @@ impl<T: PayloadTypes> Default for NoopPayloadBuilderService<T> {
         service
     }
 }
+
+impl<T: PayloadTypes> PayloadBuilderHandle<T> {
+    /// Returns a new noop instance.
+    pub fn noop() -> Self {
+        Self::new(mpsc::unbounded_channel().0)
+    }
+}

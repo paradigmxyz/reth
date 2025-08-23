@@ -1,6 +1,7 @@
 use core::ops::Not;
 
 use crate::{
+    added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, MultiProofTargets, Nibbles,
 };
@@ -207,15 +208,23 @@ impl HashedPostState {
     ///
     /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
     /// are done correctly.
-    pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
+    pub fn partition_by_targets(
+        mut self,
+        targets: &MultiProofTargets,
+        added_removed_keys: &MultiAddedRemovedKeys,
+    ) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
         self.storages.retain(|&address, storage| {
+            let storage_added_removed_keys = added_removed_keys.get_storage(&address);
+
             let (retain, storage_not_in_targets) = match targets.get(&address) {
                 Some(storage_in_targets) => {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) {
+                        if storage_in_targets.contains(&slot) &&
+                            !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
+                        {
                             return true
                         }
 
@@ -333,6 +342,41 @@ impl HashedPostState {
             .collect();
 
         HashedPostStateSorted { accounts, storages }
+    }
+
+    /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by
+    /// draining.
+    ///
+    /// This effectively clears all the fields in the [`HashedPostStateSorted`].
+    ///
+    /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
+    /// post state, like `into_sorted`.
+    pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
+        let mut updated_accounts = Vec::new();
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, info) in self.accounts.drain() {
+            if let Some(info) = info {
+                updated_accounts.push((hashed_address, info));
+            } else {
+                destroyed_accounts.insert(hashed_address);
+            }
+        }
+        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+
+        let storages = self
+            .storages
+            .drain()
+            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .collect();
+
+        HashedPostStateSorted { accounts, storages }
+    }
+
+    /// Clears the account and storage maps of this `HashedPostState`.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storages.clear();
     }
 }
 
@@ -940,7 +984,8 @@ mod tests {
         };
         let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
 
-        let (with_targets, without_targets) = state.partition_by_targets(&targets);
+        let (with_targets, without_targets) =
+            state.partition_by_targets(&targets, &MultiAddedRemovedKeys::new());
 
         assert_eq!(
             with_targets,

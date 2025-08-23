@@ -99,7 +99,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// time in pool (were added earlier) are returned first.
     ///
     /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
-    /// could potentially be become invalid at point of execution. Therefore, this iterator
+    /// could potentially become invalid at point of execution. Therefore, this iterator
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
@@ -109,6 +109,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             independent: self.independent_transactions.values().cloned().collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
+            last_priority: None,
             skip_blobs: false,
         }
     }
@@ -158,7 +159,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    ) -> impl ExactSizeIterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id.values().map(|tx| tx.transaction.clone())
     }
 
@@ -292,7 +293,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
         base_fee: u64,
     ) {
-        assert!(
+        debug_assert!(
             !self.contains(tx.id()),
             "transaction already included {:?}",
             self.get(tx.id()).unwrap().transaction

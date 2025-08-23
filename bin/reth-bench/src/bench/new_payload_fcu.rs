@@ -9,10 +9,10 @@ use crate::{
             GAS_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::{call_forkchoice_updated, call_new_payload},
+    valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
 };
 use alloy_provider::Provider;
-use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
+use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use humantime::parse_duration;
@@ -39,32 +39,23 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&self.benchmark, self.rpc_url).await?;
+        let BenchContext {
+            benchmark_mode,
+            block_provider,
+            auth_provider,
+            mut next_block,
+            is_optimism,
+        } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
+                let header = block.header.clone();
 
-                let block = block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| {
-                        // try to convert unknowns into op type so that we can also support optimism
-                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
-                    })
-                    .unwrap()
-                    .into_consensus();
-
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
-
-                // Convert to execution payload
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-                let header = block.header;
-                let head_block_hash = payload.block_hash();
+                let (version, params) = block_to_new_payload(block, is_optimism).unwrap();
+                let head_block_hash = header.hash;
                 let safe_block_hash =
                     block_provider.get_block_by_number(header.number.saturating_sub(32).into());
 
@@ -81,9 +72,8 @@ impl Command {
                 sender
                     .send((
                         header,
-                        blob_versioned_hashes,
-                        payload,
-                        sidecar,
+                        version,
+                        params,
                         head_block_hash,
                         safe_block_hash,
                         finalized_block_hash,
@@ -98,7 +88,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload, sidecar, head, safe, finalized)) = {
+        while let Some((header, version, params, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -118,19 +108,11 @@ impl Command {
             };
 
             let start = Instant::now();
-            let message_version = call_new_payload(
-                &auth_provider,
-                payload,
-                sidecar,
-                header.parent_beacon_block_root,
-                versioned_hashes,
-            )
-            .await?;
+            call_new_payload(&auth_provider, version, params).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
-            call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
-                .await?;
+            call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
 
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();

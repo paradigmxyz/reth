@@ -1,6 +1,6 @@
 # Review of other codebases
 
-This document contains some of our research in how other codebases designed various parts of their stack.
+This document contains some of our research on how other codebases designed various parts of their stack.
 
 ## P2P
 
@@ -18,7 +18,7 @@ This document contains some of our research in how other codebases designed vari
 
 ## Database
 
-* [Erigon's DB walkthrough](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) contains an overview. They made the most noticeable improvements on storage reduction.
+* [Erigon's DB walkthrough](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) contains an overview. They made the most noticeable improvements in storage reduction.
 * [Gio's erigon-db table macros](https://github.com/gio256/erigon-db) + [Akula's macros](https://github.com/akula-bft/akula/blob/74b172ee1d2d2a4f04ce057b5a76679c1b83df9c/src/kv/tables.rs#L61).
 
 ## Header Downloaders

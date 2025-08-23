@@ -55,7 +55,7 @@ TLC (Triple-Level Cell) NVMe drives, on the other hand, use three bits of data p
 
 Most of the time during syncing is spent executing transactions, which is a single-threaded operation due to potential state dependencies of a transaction on previous ones.
 
-As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages](https://github.com/paradigmxyz/reth/blob/main/docs/crates/stages) (like sender recovery or bodies downloading), but these stages are not the primary bottleneck for syncing.
+As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages](https://github.com/paradigmxyz/reth/blob/main/docs/crates/stages.md) (like sender recovery or bodies downloading), but these stages are not the primary bottleneck for syncing.
 
 ## Memory
 

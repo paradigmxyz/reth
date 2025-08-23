@@ -4,8 +4,6 @@ description: Trace API for inspecting Ethereum state and transactions.
 
 # `trace` Namespace
 
-{/* TODO: We should probably document the format of the traces themselves, OE does not do that */}
-
 The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces.
 
 A similar module exists (with other debug functions) with Geth-style traces ([`debug`](/jsonrpc/debug)).
@@ -16,6 +14,128 @@ There are two types of methods in this API:
 
 -   **Ad-hoc tracing APIs** for performing diagnostics on calls or transactions (historical or hypothetical).
 -   **Transaction-trace filtering APIs** for getting full externality traces on any transaction executed by reth.
+
+## Trace Format Specification
+
+The trace API returns different types of trace data depending on the requested trace types. Understanding these formats is crucial for interpreting the results.
+
+### TraceResults
+
+The `TraceResults` object is returned by ad-hoc tracing methods (`trace_call`, `trace_callMany`, `trace_rawTransaction`, `trace_replayTransaction`, `trace_replayBlockTransactions`). It contains the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `output` | `string` | The return value of the traced call, encoded as hex |
+| `stateDiff` | `object \| null` | State changes caused by the transaction (only if `stateDiff` trace type requested) |
+| `trace` | `array \| null` | Array of transaction traces (only if `trace` trace type requested) |
+| `vmTrace` | `object \| null` | Virtual machine execution trace (only if `vmTrace` trace type requested) |
+
+### LocalizedTransactionTrace
+
+Individual transaction traces in `trace_block`, `trace_filter`, `trace_get`, and `trace_transaction` methods return `LocalizedTransactionTrace` objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | `object` | The action performed by this trace |
+| `result` | `object \| null` | The result of the trace execution |
+| `error` | `string \| null` | Error message if the trace failed |
+| `blockHash` | `string \| null` | Hash of the block containing this trace |
+| `blockNumber` | `number \| null` | Number of the block containing this trace |
+| `transactionHash` | `string \| null` | Hash of the transaction containing this trace |
+| `transactionPosition` | `number \| null` | Position of the transaction in the block |
+| `subtraces` | `number` | Number of child traces |
+| `traceAddress` | `array` | Position of this trace in the call tree |
+| `type` | `string` | Type of action: `"call"`, `"create"`, `"suicide"`, or `"reward"` |
+
+### Action Types
+
+#### Call Action (`type: "call"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `callType` | `string` | Type of call: `"call"`, `"callcode"`, `"delegatecall"`, or `"staticcall"` |
+| `from` | `string` | Address of the caller |
+| `to` | `string` | Address of the callee |
+| `gas` | `string` | Gas provided for the call |
+| `input` | `string` | Input data for the call |
+| `value` | `string` | Value transferred in the call |
+
+#### Create Action (`type: "create"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `from` | `string` | Address of the creator |
+| `gas` | `string` | Gas provided for contract creation |
+| `init` | `string` | Contract initialization code |
+| `value` | `string` | Value sent to the new contract |
+
+#### Suicide Action (`type: "suicide"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | `string` | Address of the contract being destroyed |
+| `refundAddress` | `string` | Address receiving the remaining balance |
+| `balance` | `string` | Balance transferred to refund address |
+
+#### Reward Action (`type: "reward"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `author` | `string` | Address receiving the reward |
+| `value` | `string` | Amount of the reward |
+| `rewardType` | `string` | Type of reward: `"block"` or `"uncle"` |
+
+### Result Format
+
+When a trace executes successfully, the `result` field contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gasUsed` | `string` | Amount of gas consumed by this trace |
+| `output` | `string` | Return data from the trace execution |
+| `address` | `string` | Created contract address (for create actions only) |
+| `code` | `string` | Deployed contract code (for create actions only) |
+
+### State Diff Format
+
+When `stateDiff` trace type is requested, the `stateDiff` field contains an object mapping addresses to their state changes:
+
+```json
+{
+  "0x123...": {
+    "balance": {
+      "*": {
+        "from": "0x0",
+        "to": "0x1000"
+      }
+    },
+    "nonce": {
+      "*": {
+        "from": "0x0",
+        "to": "0x1"
+      }
+    },
+    "code": {
+      "*": {
+        "from": "0x",
+        "to": "0x608060405234801561001057600080fd5b50..."
+      }
+    },
+    "storage": {
+      "0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563": {
+        "*": {
+          "from": "0x0",
+          "to": "0x1"
+        }
+      }
+    }
+  }
+}
+```
+
+### VM Trace Format
+
+When `vmTrace` trace type is requested, the `vmTrace` field contains detailed virtual machine execution information including opcodes, stack, memory, and storage changes at each step. The exact format depends on the specific VM tracer implementation.
 
 ## Ad-hoc tracing APIs
 
@@ -71,7 +191,14 @@ The third and optional parameter is a block number, block hash, or a block tag (
         "output": "0x",
         "stateDiff": null,
         "trace": [{
-            "action": { ... },
+            "action": {
+                "callType": "call",
+                "from": "0x0000000000000000000000000000000000000000",
+                "to": "0x0000000000000000000000000000000000000000",
+                "gas": "0x76c0",
+                "input": "0x",
+                "value": "0x0"
+            },
             "result": {
                 "gasUsed": "0x0",
                 "output": "0x"
@@ -170,9 +297,16 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
     "jsonrpc": "2.0",
     "result": {
         "output": "0x",
-            "stateDiff": null,
-            "trace": [{
-            "action": { ... },
+        "stateDiff": null,
+        "trace": [{
+            "action": {
+                "callType": "call",
+                "from": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                "to": "0x6295ee1b4f6dd65047762f924ecd367c17eabf8f",
+                "gas": "0x186a0",
+                "input": "0x",
+                "value": "0x0"
+            },
             "result": {
                 "gasUsed": "0x0",
                 "output": "0x"
@@ -181,7 +315,7 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
             "traceAddress": [],
             "type": "call"
         }],
-            "vmTrace": null
+        "vmTrace": null
     }
 }
 ```
@@ -206,7 +340,14 @@ Replays all transactions in a block returning the requested traces for each tran
             "output": "0x",
             "stateDiff": null,
             "trace": [{
-                "action": { ... },
+                "action": {
+                    "callType": "call",
+                    "from": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                    "to": "0x6295ee1b4f6dd65047762f924ecd367c17eabf8f",
+                    "gas": "0x186a0",
+                    "input": "0x",
+                    "value": "0x0"
+                },
                 "result": {
                     "gasUsed": "0x0",
                     "output": "0x"
@@ -215,10 +356,9 @@ Replays all transactions in a block returning the requested traces for each tran
                 "traceAddress": [],
                 "type": "call"
             }],
-            "transactionHash": "0x...",
+            "transactionHash": "0x4e70b5d8d5dc43e0e61e4a8f1e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4",
             "vmTrace": null
-        },
-        { ... }
+        }
     ]
 }
 ```
@@ -242,10 +382,17 @@ Replays a transaction, returning the traces.
         "output": "0x",
         "stateDiff": null,
         "trace": [{
-            "action": { ... },
+            "action": {
+                "callType": "call",
+                "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+                "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+                "gas": "0x13e99",
+                "input": "0x16c72721",
+                "value": "0x0"
+            },
             "result": {
-                "gasUsed": "0x0",
-                "output": "0x"
+                "gasUsed": "0x183",
+                "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
             },
             "subtraces": 0,
             "traceAddress": [],
@@ -292,8 +439,7 @@ Returns traces created at given block.
             "transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
             "transactionPosition": 0,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```
@@ -345,8 +491,7 @@ All properties are optional.
             "transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
             "transactionPosition": 3,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```
@@ -430,8 +575,7 @@ Returns all traces of given transaction
             "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
             "transactionPosition": 2,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```

@@ -19,6 +19,10 @@ use std::{
     sync::Arc,
 };
 
+/// A helper type to obtain components for a given node when [`FullNodeTypes::Types`] is a [`Node`]
+/// implementation.
+pub type ComponentsFor<N> = <<<N as FullNodeTypes>::Types as Node<N>>::ComponentsBuilder as NodeComponentsBuilder<N>>::Components;
+
 /// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
@@ -68,8 +72,6 @@ where
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
-
-    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
 
     type Storage = <N::Types as NodeTypes>::Storage;
 

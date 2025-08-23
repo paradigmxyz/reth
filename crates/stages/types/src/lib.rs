@@ -19,7 +19,7 @@ mod checkpoints;
 pub use checkpoints::{
     AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
     HeadersCheckpoint, IndexHistoryCheckpoint, MerkleCheckpoint, StageCheckpoint,
-    StageUnitCheckpoint, StorageHashingCheckpoint,
+    StageUnitCheckpoint, StorageHashingCheckpoint, StorageRootMerkleCheckpoint,
 };
 
 mod execution;

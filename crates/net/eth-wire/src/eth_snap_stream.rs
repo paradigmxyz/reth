@@ -44,7 +44,7 @@ pub enum EthSnapStreamError {
     StatusNotInHandshake,
 }
 
-/// Combined message type that include either eth or snao protocol messages
+/// Combined message type that include either eth or snap protocol messages
 #[derive(Debug)]
 pub enum EthSnapMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// An Ethereum protocol message

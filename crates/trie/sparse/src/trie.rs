@@ -1,4 +1,8 @@
-use crate::blinded::{BlindedProvider, RevealedNode};
+use crate::{
+    provider::{RevealedNode, TrieNodeProvider},
+    LeafLookup, LeafLookupError, RevealedSparseNode, SparseTrieInterface, SparseTrieUpdates,
+    TrieMasks,
+};
 use alloc::{
     borrow::Cow,
     boxed::Box,
@@ -20,50 +24,11 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{trace, warn};
 
-/// Struct for passing around branch node mask information.
-///
-/// Branch nodes can have up to 16 children (one for each nibble).
-/// The masks represent which children are stored in different ways:
-/// - `hash_mask`: Indicates which children are stored as hashes in the database
-/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
-///
-/// These masks are essential for efficient trie traversal and serialization, as they
-/// determine how nodes should be encoded and stored on disk.
-#[derive(Debug)]
-pub struct TrieMasks {
-    /// Branch node hash mask, if any.
-    ///
-    /// When a bit is set, the corresponding child node's hash is stored in the trie.
-    ///
-    /// This mask enables selective hashing of child nodes.
-    pub hash_mask: Option<TrieMask>,
-    /// Branch node tree mask, if any.
-    ///
-    /// When a bit is set, the corresponding child subtree is stored in the database.
-    pub tree_mask: Option<TrieMask>,
-}
-
-impl TrieMasks {
-    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub const fn none() -> Self {
-        Self { hash_mask: None, tree_mask: None }
-    }
-}
-
-/// A struct for keeping the hashmaps from `RevealedSparseTrie`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SparseTrieState {
-    /// Map from a path (nibbles) to its corresponding sparse trie node.
-    nodes: HashMap<Nibbles, SparseNode>,
-    /// When a branch is set, the corresponding child subtree is stored in the database.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
-    /// When a bit is set, the corresponding child is stored as a hash in the database.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// Map from leaf key paths to their values.
-    values: HashMap<Nibbles, Vec<u8>>,
-}
+/// The level below which the sparse trie hashes are calculated in
+/// [`SerialSparseTrie::update_subtrie_hashes`].
+const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -77,64 +42,39 @@ pub struct SparseTrieState {
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Default, Clone)]
-pub enum SparseTrie {
-    /// This is a variant that can be used to store a previously allocated trie. In these cases,
-    /// the trie will still be treated as blind, but the allocated trie will be reused if the trie
-    /// becomes revealed.
-    AllocatedEmpty {
-        /// This is the state of the allocated trie.
-        allocated: SparseTrieState,
-    },
+#[derive(PartialEq, Eq, Debug)]
+pub enum SparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
-    /// This is the default state. In this state,
-    /// the trie cannot be directly queried or modified until nodes are revealed.
-    #[default]
-    Blind,
+    /// This is the default state. In this state, the trie cannot be directly queried or modified
+    /// until nodes are revealed.
+    ///
+    /// In this state the `SparseTrie` can optionally carry with it a cleared `SerialSparseTrie`.
+    /// This allows for reusing the trie's allocations between payload executions.
+    Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
     /// In this state, the trie can be queried and modified for the parts
     /// that have been revealed. Other parts remain blind and require revealing
     /// before they can be accessed.
-    Revealed(Box<RevealedSparseTrie>),
+    Revealed(Box<T>),
 }
 
-impl fmt::Debug for SparseTrie {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AllocatedEmpty { .. } => write!(f, "AllocatedEmpty"),
-            Self::Blind => write!(f, "Blind"),
-            Self::Revealed(revealed) => write!(f, "Revealed({revealed:?})"),
-        }
+impl<T: Default> Default for SparseTrie<T> {
+    fn default() -> Self {
+        Self::Blind(None)
     }
 }
 
-impl SparseTrie {
-    /// Creates a new blind sparse trie.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
-    ///
-    /// let trie = SparseTrie::blind();
-    /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::default();
-    /// assert!(trie.is_blind());
-    /// ```
-    pub const fn blind() -> Self {
-        Self::Blind
-    }
-
+impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
     ///
-    /// let trie = SparseTrie::revealed_empty();
+    /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -151,41 +91,61 @@ impl SparseTrie {
     ///
     /// # Returns
     ///
-    /// A mutable reference to the underlying [`RevealedSparseTrie`].
+    /// A mutable reference to the underlying [`SparseTrieInterface`].
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
-    ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        // we take the allocated state here, which will make sure we are either `Blind` or
-        // `Revealed`, and giving us the allocated state if we were `AllocatedEmpty`.
-        let allocated = self.take_allocated_state();
-
-        // if `Blind`, we initialize the revealed trie
+    ) -> SparseTrieResult<&mut T> {
+        // if `Blind`, we initialize the revealed trie with the given root node, using a
+        // pre-allocated trie if available.
         if self.is_blind() {
-            let mut revealed = RevealedSparseTrie::from_root(root, masks, retain_updates)?;
+            let mut revealed_trie = if let Self::Blind(Some(cleared_trie)) = core::mem::take(self) {
+                cleared_trie
+            } else {
+                Box::default()
+            };
 
-            // If we had an allocated state, we use its maps internally. use_allocated_state copies
-            // over any information we had from revealing.
-            if let Some(allocated) = allocated {
-                revealed.use_allocated_state(allocated);
-            }
-
-            *self = Self::Revealed(Box::new(revealed));
+            *revealed_trie = revealed_trie.with_root(root, masks, retain_updates)?;
+            *self = Self::Revealed(revealed_trie);
         }
+
         Ok(self.as_revealed_mut().unwrap())
+    }
+}
+
+impl<T: SparseTrieInterface> SparseTrie<T> {
+    /// Creates a new blind sparse trie.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    ///
+    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// assert!(trie.is_blind());
+    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// assert!(trie.is_blind());
+    /// ```
+    pub const fn blind() -> Self {
+        Self::Blind(None)
     }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
     pub const fn is_blind(&self) -> bool {
-        matches!(self, Self::Blind)
+        matches!(self, Self::Blind(_))
+    }
+
+    /// Returns `true` if the sparse trie is revealed.
+    pub const fn is_revealed(&self) -> bool {
+        matches!(self, Self::Revealed(_))
     }
 
     /// Returns an immutable reference to the underlying revealed sparse trie.
     ///
     /// Returns `None` if the trie is blinded.
-    pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie> {
+    pub const fn as_revealed_ref(&self) -> Option<&T> {
         if let Self::Revealed(revealed) = self {
             Some(revealed)
         } else {
@@ -196,22 +156,9 @@ impl SparseTrie {
     /// Returns a mutable reference to the underlying revealed sparse trie.
     ///
     /// Returns `None` if the trie is blinded.
-    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie> {
+    pub fn as_revealed_mut(&mut self) -> Option<&mut T> {
         if let Self::Revealed(revealed) = self {
             Some(revealed)
-        } else {
-            None
-        }
-    }
-
-    /// Take the allocated state if this is `AllocatedEmpty`, otherwise returns `None`.
-    ///
-    /// Converts this `SparseTrie` into `Blind` if this was `AllocatedEmpty`.
-    pub fn take_allocated_state(&mut self) -> Option<SparseTrieState> {
-        if let Self::AllocatedEmpty { allocated } = self {
-            let state = core::mem::take(allocated);
-            *self = Self::Blind;
-            Some(state)
         } else {
             None
         }
@@ -225,16 +172,6 @@ impl SparseTrie {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.wipe();
         Ok(())
-    }
-
-    /// Returns a `SparseTrieState` obtained by clearing the sparse trie state and reusing the
-    /// allocated state if it was `AllocatedEmpty` or `Revealed`.
-    pub fn cleared(self) -> SparseTrieState {
-        match self {
-            Self::Revealed(revealed) => revealed.cleared_state(),
-            Self::AllocatedEmpty { allocated } => allocated,
-            Self::Blind => Default::default(),
-        }
     }
 
     /// Calculates the root hash of the trie.
@@ -267,9 +204,20 @@ impl SparseTrie {
         let revealed = self.as_revealed_mut()?;
         Some((revealed.root(), revealed.take_updates()))
     }
-}
 
-impl SparseTrie {
+    /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
+    /// itself a `Blind` with a pre-allocated [`SparseTrieInterface`], this will return
+    /// a `Blind` carrying a cleared pre-allocated [`SparseTrieInterface`].
+    pub fn clear(self) -> Self {
+        match self {
+            Self::Blind(_) => self,
+            Self::Revealed(mut trie) => {
+                trie.clear();
+                Self::Blind(Some(trie))
+            }
+        }
+    }
+
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
     ///
     /// # Errors
@@ -279,7 +227,7 @@ impl SparseTrie {
         &mut self,
         path: Nibbles,
         value: Vec<u8>,
-        provider: impl BlindedProvider,
+        provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value, provider)?;
@@ -294,7 +242,7 @@ impl SparseTrie {
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
-        provider: impl BlindedProvider,
+        provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path, provider)?;
@@ -316,7 +264,7 @@ impl SparseTrie {
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
 #[derive(Clone, PartialEq, Eq)]
-pub struct RevealedSparseTrie {
+pub struct SerialSparseTrie {
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -336,9 +284,9 @@ pub struct RevealedSparseTrie {
     rlp_buf: Vec<u8>,
 }
 
-impl fmt::Debug for RevealedSparseTrie {
+impl fmt::Debug for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RevealedSparseTrie")
+        f.debug_struct("SerialSparseTrie")
             .field("nodes", &self.nodes)
             .field("branch_tree_masks", &self.branch_node_tree_masks)
             .field("branch_hash_masks", &self.branch_node_hash_masks)
@@ -356,7 +304,7 @@ fn encode_nibbles(nibbles: &Nibbles) -> String {
     encoded[..nibbles.len()].to_string()
 }
 
-impl fmt::Display for RevealedSparseTrie {
+impl fmt::Display for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // This prints the trie in preorder traversal, using a stack
         let mut stack = Vec::new();
@@ -422,7 +370,7 @@ impl fmt::Display for RevealedSparseTrie {
     }
 }
 
-impl Default for RevealedSparseTrie {
+impl Default for SerialSparseTrie {
     fn default() -> Self {
         Self {
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
@@ -436,130 +384,43 @@ impl Default for RevealedSparseTrie {
     }
 }
 
-impl RevealedSparseTrie {
-    /// Creates a new revealed sparse trie from the given root node.
-    ///
-    /// This function initializes the internal structures and then reveals the root.
-    /// It is a convenient method to create a [`RevealedSparseTrie`] when you already have
-    /// the root node available.
-    ///
-    /// # Returns
-    ///
-    /// A [`RevealedSparseTrie`] if successful, or an error if revealing fails.
-    pub fn from_root(
+impl SparseTrieInterface for SerialSparseTrie {
+    fn with_root(
+        mut self,
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
-        let mut this = Self {
-            nodes: HashMap::default(),
-            branch_node_tree_masks: HashMap::default(),
-            branch_node_hash_masks: HashMap::default(),
-            values: HashMap::default(),
-            prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
-            updates: None,
-        }
-        .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), root, masks)?;
-        Ok(this)
-    }
-}
+        self = self.with_updates(retain_updates);
 
-impl RevealedSparseTrie {
-    /// Sets the fields of this `RevealedSparseTrie` to the fields of the input
-    /// `SparseTrieState`.
-    ///
-    /// This is meant for reusing the allocated maps contained in the `SparseTrieState`.
-    ///
-    /// Copies over any existing nodes, branch masks, and values.
-    pub fn use_allocated_state(&mut self, mut other: SparseTrieState) {
-        for (path, node) in self.nodes.drain() {
-            other.nodes.insert(path, node);
-        }
-        for (path, mask) in self.branch_node_tree_masks.drain() {
-            other.branch_node_tree_masks.insert(path, mask);
-        }
-        for (path, mask) in self.branch_node_hash_masks.drain() {
-            other.branch_node_hash_masks.insert(path, mask);
-        }
-        for (path, value) in self.values.drain() {
-            other.values.insert(path, value);
-        }
+        // A fresh/cleared `SerialSparseTrie` has a `SparseNode::Empty` at its root. Delete that
+        // so we can reveal the new root node.
+        let path = Nibbles::default();
+        let _removed_root = self.nodes.remove(&path).expect("root node should exist");
+        debug_assert_eq!(_removed_root, SparseNode::Empty);
 
-        self.nodes = other.nodes;
-        self.branch_node_tree_masks = other.branch_node_tree_masks;
-        self.branch_node_hash_masks = other.branch_node_hash_masks;
-        self.values = other.values;
+        self.reveal_node(path, root, masks)?;
+        Ok(self)
     }
 
-    /// Configures the trie to retain information about updates.
-    ///
-    /// If `retain_updates` is true, the trie will record branch node updates and deletions.
-    /// This information can then be used to efficiently update an external database.
-    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+    fn with_updates(mut self, retain_updates: bool) -> Self {
         if retain_updates {
             self.updates = Some(SparseTrieUpdates::default());
         }
         self
     }
 
-    /// Returns a reference to the current sparse trie updates.
-    ///
-    /// If no updates have been made/recorded, returns an empty update set.
-    pub fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
-    }
-
-    /// Returns an immutable reference to all nodes in the sparse trie.
-    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
-        &self.nodes
-    }
-
-    /// Retrieves a reference to the leaf value stored at the given key path, if it is revealed.
-    ///
-    /// This method efficiently retrieves values from the trie without traversing
-    /// the entire node structure, as values are stored in a separate map.
-    ///
-    /// Note: a value can exist in the full trie and this function still returns `None`
-    /// because the value has not been revealed.
-    /// Hence a `None` indicates two possibilities:
-    /// - The value does not exists in the trie, so it cannot be revealed
-    /// - The value has not yet been revealed. In order to determine which is true, one would need
-    ///   an exclusion proof.
-    pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
-        self.values.get(path)
-    }
-
-    /// Consumes and returns the currently accumulated trie updates.
-    ///
-    /// This is useful when you want to apply the updates to an external database,
-    /// and then start tracking a new set of updates.
-    pub fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
-    }
-
-    /// Reserves capacity in the nodes map for at least `additional` more nodes.
-    pub fn reserve_nodes(&mut self, additional: usize) {
+    fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
-
-    /// Reveals a trie node if it has not been revealed before.
-    ///
-    /// This internal function decodes a trie node and inserts it into the nodes map.
-    /// It handles different node types (leaf, extension, branch) by appropriately
-    /// adding them to the trie structure and recursively revealing their children.
-    ///
-    ///
-    /// # Returns
-    ///
-    /// `Ok(())` if successful, or an error if node was not revealed.
-    pub fn reveal_node(
+    fn reveal_node(
         &mut self,
         path: Nibbles,
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?path, ?node, ?masks, "reveal_node called");
+
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
@@ -664,7 +525,7 @@ impl RevealedSparseTrie {
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
                         full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value);
+                        self.values.insert(full, leaf.value.clone());
                         entry.insert(SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
@@ -689,12 +550,564 @@ impl RevealedSparseTrie {
                     let mut full = *entry.key();
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value);
+                    self.values.insert(full, leaf.value.clone());
                 }
             },
         }
 
         Ok(())
+    }
+
+    fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        nodes.sort_unstable_by_key(|node| node.path);
+        for node in nodes {
+            self.reveal_node(node.path, node.node, node.masks)?;
+        }
+        Ok(())
+    }
+
+    fn update_leaf<P: TrieNodeProvider>(
+        &mut self,
+        full_path: Nibbles,
+        value: Vec<u8>,
+        provider: P,
+    ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, ?value, "update_leaf called");
+
+        self.prefix_set.insert(full_path);
+        let existing = self.values.insert(full_path, value);
+        if existing.is_some() {
+            // trie structure unchanged, return immediately
+            return Ok(())
+        }
+
+        let mut current = Nibbles::default();
+        while let Some(node) = self.nodes.get_mut(&current) {
+            match node {
+                SparseNode::Empty => {
+                    *node = SparseNode::new_leaf(full_path);
+                    break
+                }
+                &mut SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                }
+                SparseNode::Leaf { key: current_key, .. } => {
+                    current.extend(current_key);
+
+                    // this leaf is being updated
+                    if current == full_path {
+                        unreachable!("we already checked leaf presence in the beginning");
+                    }
+
+                    // find the common prefix
+                    let common = current.common_prefix_length(&full_path);
+
+                    // update existing node
+                    let new_ext_key = current.slice(current.len() - current_key.len()..common);
+                    *node = SparseNode::new_ext(new_ext_key);
+
+                    // create a branch node and corresponding leaves
+                    self.nodes.reserve(3);
+                    self.nodes.insert(
+                        current.slice(..common),
+                        SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            full_path.get_unchecked(common),
+                        ),
+                    );
+                    self.nodes.insert(
+                        full_path.slice(..=common),
+                        SparseNode::new_leaf(full_path.slice(common + 1..)),
+                    );
+                    self.nodes.insert(
+                        current.slice(..=common),
+                        SparseNode::new_leaf(current.slice(common + 1..)),
+                    );
+
+                    break;
+                }
+                SparseNode::Extension { key, .. } => {
+                    current.extend(key);
+
+                    if !full_path.starts_with(&current) {
+                        // find the common prefix
+                        let common = current.common_prefix_length(&full_path);
+                        *key = current.slice(current.len() - key.len()..common);
+
+                        // If branch node updates retention is enabled, we need to query the
+                        // extension node child to later set the hash mask for a parent branch node
+                        // correctly.
+                        if self.updates.is_some() {
+                            // Check if the extension node child is a hash that needs to be revealed
+                            if self.nodes.get(&current).unwrap().is_hash() {
+                                warn!(
+                                    target: "trie::sparse",
+                                    leaf_full_path = ?full_path,
+                                    child_path = ?current,
+                                    "Extension node child not revealed in update_leaf, falling back to db",
+                                );
+                                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                    provider.trie_node(&current)?
+                                {
+                                    let decoded = TrieNode::decode(&mut &node[..])?;
+                                    trace!(
+                                        target: "trie::sparse",
+                                        ?current,
+                                        ?decoded,
+                                        ?tree_mask,
+                                        ?hash_mask,
+                                        "Revealing extension node child",
+                                    );
+                                    self.reveal_node(
+                                        current,
+                                        decoded,
+                                        TrieMasks { hash_mask, tree_mask },
+                                    )?;
+                                }
+                            }
+                        }
+
+                        // create state mask for new branch node
+                        // NOTE: this might overwrite the current extension node
+                        self.nodes.reserve(3);
+                        let branch = SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            full_path.get_unchecked(common),
+                        );
+                        self.nodes.insert(current.slice(..common), branch);
+
+                        // create new leaf
+                        let new_leaf = SparseNode::new_leaf(full_path.slice(common + 1..));
+                        self.nodes.insert(full_path.slice(..=common), new_leaf);
+
+                        // recreate extension to previous child if needed
+                        let key = current.slice(common + 1..);
+                        if !key.is_empty() {
+                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
+                        }
+
+                        break;
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let nibble = full_path.get_unchecked(current.len());
+                    current.push_unchecked(nibble);
+                    if !state_mask.is_bit_set(nibble) {
+                        state_mask.set_bit(nibble);
+                        let new_leaf = SparseNode::new_leaf(full_path.slice(current.len()..));
+                        self.nodes.insert(current, new_leaf);
+                        break;
+                    }
+                }
+            };
+        }
+
+        Ok(())
+    }
+
+    fn remove_leaf<P: TrieNodeProvider>(
+        &mut self,
+        full_path: &Nibbles,
+        provider: P,
+    ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, "remove_leaf called");
+
+        if self.values.remove(full_path).is_none() {
+            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {
+                // Leaf is present in the trie, but it's blinded.
+                return Err(SparseTrieErrorKind::BlindedNode { path: *full_path, hash }.into())
+            }
+
+            trace!(target: "trie::sparse", ?full_path, "Leaf node is not present in the trie");
+            // Leaf is not present in the trie.
+            return Ok(())
+        }
+        self.prefix_set.insert(*full_path);
+
+        // If the path wasn't present in `values`, we still need to walk the trie and ensure that
+        // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
+        // in `nodes`, but not in the `values`.
+
+        let mut removed_nodes = self.take_nodes_for_path(full_path)?;
+        // Pop the first node from the stack which is the leaf node we want to remove.
+        let mut child = removed_nodes.pop().expect("leaf exists");
+        #[cfg(debug_assertions)]
+        {
+            let mut child_path = child.path;
+            let SparseNode::Leaf { key, .. } = &child.node else { panic!("expected leaf node") };
+            child_path.extend(key);
+            assert_eq!(&child_path, full_path);
+        }
+
+        // If we don't have any other removed nodes, insert an empty node at the root.
+        if removed_nodes.is_empty() {
+            debug_assert!(self.nodes.is_empty());
+            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+
+            return Ok(())
+        }
+
+        // Walk the stack of removed nodes from the back and re-insert them back into the trie,
+        // adjusting the node type as needed.
+        while let Some(removed_node) = removed_nodes.pop() {
+            let removed_path = removed_node.path;
+
+            let new_node = match &removed_node.node {
+                SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                &SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: removed_path, hash }.into())
+                }
+                SparseNode::Leaf { .. } => {
+                    unreachable!("we already popped the leaf node")
+                }
+                SparseNode::Extension { key, .. } => {
+                    // If the node is an extension node, we need to look at its child to see if we
+                    // need to merge them.
+                    match &child.node {
+                        SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                        &SparseNode::Hash(hash) => {
+                            return Err(
+                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
+                            )
+                        }
+                        // For a leaf node, we collapse the extension node into a leaf node,
+                        // extending the key. While it's impossible to encounter an extension node
+                        // followed by a leaf node in a complete trie, it's possible here because we
+                        // could have downgraded the extension node's child into a leaf node from
+                        // another node type.
+                        SparseNode::Leaf { key: leaf_key, .. } => {
+                            self.nodes.remove(&child.path);
+
+                            let mut new_key = *key;
+                            new_key.extend(leaf_key);
+                            SparseNode::new_leaf(new_key)
+                        }
+                        // For an extension node, we collapse them into one extension node,
+                        // extending the key
+                        SparseNode::Extension { key: extension_key, .. } => {
+                            self.nodes.remove(&child.path);
+
+                            let mut new_key = *key;
+                            new_key.extend(extension_key);
+                            SparseNode::new_ext(new_key)
+                        }
+                        // For a branch node, we just leave the extension node as-is.
+                        SparseNode::Branch { .. } => removed_node.node,
+                    }
+                }
+                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
+                    // If the node is a branch node, we need to check the number of children left
+                    // after deleting the child at the given nibble.
+
+                    if let Some(removed_nibble) = removed_node.unset_branch_nibble {
+                        state_mask.unset_bit(removed_nibble);
+                    }
+
+                    // If only one child is left set in the branch node, we need to collapse it.
+                    if state_mask.count_bits() == 1 {
+                        let child_nibble =
+                            state_mask.first_set_bit_index().expect("state mask is not empty");
+
+                        // Get full path of the only child node left.
+                        let mut child_path = removed_path;
+                        child_path.push_unchecked(child_nibble);
+
+                        trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
+
+                        if self.nodes.get(&child_path).unwrap().is_hash() {
+                            warn!(
+                                target: "trie::sparse",
+                                ?child_path,
+                                leaf_full_path = ?full_path,
+                                "Branch node child not revealed in remove_leaf, falling back to db",
+                            );
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                provider.trie_node(&child_path)?
+                            {
+                                let decoded = TrieNode::decode(&mut &node[..])?;
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?child_path,
+                                    ?decoded,
+                                    ?tree_mask,
+                                    ?hash_mask,
+                                    "Revealing remaining blinded branch child"
+                                );
+                                self.reveal_node(
+                                    child_path,
+                                    decoded,
+                                    TrieMasks { hash_mask, tree_mask },
+                                )?;
+                            }
+                        }
+
+                        // Get the only child node.
+                        let child = self.nodes.get(&child_path).unwrap();
+
+                        let mut delete_child = false;
+                        let new_node = match child {
+                            SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                            &SparseNode::Hash(hash) => {
+                                return Err(SparseTrieErrorKind::BlindedNode {
+                                    path: child_path,
+                                    hash,
+                                }
+                                .into())
+                            }
+                            // If the only child is a leaf node, we downgrade the branch node into a
+                            // leaf node, prepending the nibble to the key, and delete the old
+                            // child.
+                            SparseNode::Leaf { key, .. } => {
+                                delete_child = true;
+
+                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
+                                new_key.extend(key);
+                                SparseNode::new_leaf(new_key)
+                            }
+                            // If the only child node is an extension node, we downgrade the branch
+                            // node into an even longer extension node, prepending the nibble to the
+                            // key, and delete the old child.
+                            SparseNode::Extension { key, .. } => {
+                                delete_child = true;
+
+                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
+                                new_key.extend(key);
+                                SparseNode::new_ext(new_key)
+                            }
+                            // If the only child is a branch node, we downgrade the current branch
+                            // node into a one-nibble extension node.
+                            SparseNode::Branch { .. } => {
+                                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
+                            }
+                        };
+
+                        if delete_child {
+                            self.nodes.remove(&child_path);
+                        }
+
+                        if let Some(updates) = self.updates.as_mut() {
+                            updates.updated_nodes.remove(&removed_path);
+                            updates.removed_nodes.insert(removed_path);
+                        }
+
+                        new_node
+                    }
+                    // If more than one child is left set in the branch, we just re-insert it as-is.
+                    else {
+                        SparseNode::new_branch(state_mask)
+                    }
+                }
+            };
+
+            child = RemovedSparseNode {
+                path: removed_path,
+                node: new_node.clone(),
+                unset_branch_nibble: None,
+            };
+            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
+            self.nodes.insert(removed_path, new_node);
+        }
+
+        Ok(())
+    }
+
+    fn root(&mut self) -> B256 {
+        // Take the current prefix set
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let rlp_node = self.rlp_node_allocate(&mut prefix_set);
+        if let Some(root_hash) = rlp_node.as_hash() {
+            root_hash
+        } else {
+            keccak256(rlp_node)
+        }
+    }
+
+    fn update_subtrie_hashes(&mut self) {
+        self.update_rlp_node_level(SPARSE_TRIE_SUBTRIE_HASHES_LEVEL);
+    }
+
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
+        self.values.get(full_path)
+    }
+
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
+    fn take_updates(&mut self) -> SparseTrieUpdates {
+        self.updates.take().unwrap_or_default()
+    }
+
+    fn wipe(&mut self) {
+        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.values = HashMap::default();
+        self.prefix_set = PrefixSetMut::all();
+        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+    }
+
+    fn clear(&mut self) {
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
+        self.values.clear();
+        self.prefix_set.clear();
+        self.updates = None;
+        self.rlp_buf.clear();
+    }
+
+    fn find_leaf(
+        &self,
+        full_path: &Nibbles,
+        expected_value: Option<&Vec<u8>>,
+    ) -> Result<LeafLookup, LeafLookupError> {
+        // Helper function to check if a value matches the expected value
+        fn check_value_match(
+            actual_value: &Vec<u8>,
+            expected_value: Option<&Vec<u8>>,
+            path: &Nibbles,
+        ) -> Result<(), LeafLookupError> {
+            if let Some(expected) = expected_value {
+                if actual_value != expected {
+                    return Err(LeafLookupError::ValueMismatch {
+                        path: *path,
+                        expected: Some(expected.clone()),
+                        actual: actual_value.clone(),
+                    });
+                }
+            }
+            Ok(())
+        }
+
+        let mut current = Nibbles::default(); // Start at the root
+
+        // Inclusion proof
+        //
+        // First, do a quick check if the value exists in our values map.
+        // We assume that if there exists a leaf node, then its value will
+        // be in the `values` map.
+        if let Some(actual_value) = self.values.get(full_path) {
+            // We found the leaf, check if the value matches (if expected value was provided)
+            check_value_match(actual_value, expected_value, full_path)?;
+            return Ok(LeafLookup::Exists);
+        }
+
+        // If the value does not exist in the `values` map, then this means that the leaf either:
+        // - Does not exist in the trie
+        // - Is missing from the witness
+        // We traverse the trie to find the location where this leaf would have been, showing
+        // that it is not in the trie. Or we find a blinded node, showing that the witness is
+        // not complete.
+        while current.len() < full_path.len() {
+            match self.nodes.get(&current) {
+                Some(SparseNode::Empty) | None => {
+                    // None implies no node is at the current path (even in the full trie)
+                    // Empty node means there is a node at this path and it is "Empty"
+                    return Ok(LeafLookup::NonExistent);
+                }
+                Some(&SparseNode::Hash(hash)) => {
+                    // We hit a blinded node - cannot determine if leaf exists
+                    return Err(LeafLookupError::BlindedNode { path: current, hash });
+                }
+                Some(SparseNode::Leaf { key, .. }) => {
+                    // We found a leaf node before reaching our target depth
+                    current.extend(key);
+                    if &current == full_path {
+                        // This should have been handled by our initial values map check
+                        if let Some(value) = self.values.get(full_path) {
+                            check_value_match(value, expected_value, full_path)?;
+                            return Ok(LeafLookup::Exists);
+                        }
+                    }
+
+                    // The leaf node's path doesn't match our target path,
+                    // providing an exclusion proof
+                    return Ok(LeafLookup::NonExistent);
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    // Temporarily append the extension key to `current`
+                    let saved_len = current.len();
+                    current.extend(key);
+
+                    if full_path.len() < current.len() || !full_path.starts_with(&current) {
+                        current.truncate(saved_len); // restore
+                        return Ok(LeafLookup::NonExistent);
+                    }
+                    // Prefix matched, so we keep walking with the longer `current`.
+                }
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    // Check if branch has a child at the next nibble in our path
+                    let nibble = full_path.get_unchecked(current.len());
+                    if !state_mask.is_bit_set(nibble) {
+                        // No child at this nibble - exclusion proof
+                        return Ok(LeafLookup::NonExistent);
+                    }
+
+                    // Continue down the branch
+                    current.push_unchecked(nibble);
+                }
+            }
+        }
+
+        // We've traversed to the end of the path and didn't find a leaf
+        // Check if there's a node exactly at our target path
+        match self.nodes.get(full_path) {
+            Some(SparseNode::Leaf { key, .. }) if key.is_empty() => {
+                // We found a leaf with an empty key (exact match)
+                // This should be handled by the values map check above
+                if let Some(value) = self.values.get(full_path) {
+                    check_value_match(value, expected_value, full_path)?;
+                    return Ok(LeafLookup::Exists);
+                }
+            }
+            Some(&SparseNode::Hash(hash)) => {
+                return Err(LeafLookupError::BlindedNode { path: *full_path, hash });
+            }
+            _ => {
+                // No leaf at exactly the target path
+                return Ok(LeafLookup::NonExistent);
+            }
+        }
+
+        // If we get here, there's no leaf at the target path
+        Ok(LeafLookup::NonExistent)
+    }
+}
+
+impl SerialSparseTrie {
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// This function initializes the internal structures and then reveals the root.
+    /// It is a convenient method to create a trie when you already have the root node available.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node of the trie
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    pub fn from_root(
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
+    }
+
+    /// Returns a reference to the current sparse trie updates.
+    ///
+    /// If no updates have been made/recorded, returns an empty update set.
+    pub fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
+    /// Returns an immutable reference to all nodes in the sparse trie.
+    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+        &self.nodes
     }
 
     /// Reveals either a node or its hash placeholder based on the provided child data.
@@ -834,61 +1247,6 @@ impl RevealedSparseTrie {
         }
 
         Ok(nodes)
-    }
-
-    /// Removes all nodes and values from the trie, resetting it to a blank state
-    /// with only an empty root node.
-    ///
-    /// Note: All previously tracked changes to the trie are also removed.
-    pub fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
-        self.values = HashMap::default();
-        self.prefix_set = PrefixSetMut::all();
-        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
-    }
-
-    /// This clears all data structures in the sparse trie, keeping the backing data structures
-    /// allocated.
-    ///
-    /// This is useful for reusing the trie without needing to reallocate memory.
-    pub fn clear(&mut self) {
-        self.nodes.clear();
-        self.branch_node_tree_masks.clear();
-        self.branch_node_hash_masks.clear();
-        self.values.clear();
-        self.prefix_set.clear();
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
-        self.rlp_buf.clear();
-    }
-
-    /// Returns the cleared `SparseTrieState` for this `RevealedSparseTrie`.
-    pub fn cleared_state(mut self) -> SparseTrieState {
-        self.clear();
-        SparseTrieState {
-            nodes: self.nodes,
-            branch_node_tree_masks: self.branch_node_tree_masks,
-            branch_node_hash_masks: self.branch_node_hash_masks,
-            values: self.values,
-        }
-    }
-
-    /// Calculates and returns the root hash of the trie.
-    ///
-    /// Before computing the hash, this function processes any remaining (dirty) nodes by
-    /// updating their RLP encodings. The root hash is either:
-    /// 1. The cached hash (if no dirty nodes were found)
-    /// 2. The keccak256 hash of the root node's RLP representation
-    pub fn root(&mut self) -> B256 {
-        // Take the current prefix set
-        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let rlp_node = self.rlp_node_allocate(&mut prefix_set);
-        if let Some(root_hash) = rlp_node.as_hash() {
-            root_hash
-        } else {
-            keccak256(rlp_node)
-        }
     }
 
     /// Recalculates and updates the RLP hashes of nodes deeper than or equal to the specified
@@ -1280,7 +1638,7 @@ impl RevealedSparseTrie {
                             updates.updated_nodes.remove(&path);
                             updates.removed_nodes.insert(path);
                         } else if self
-                            .branch_node_hash_masks
+                            .branch_node_tree_masks
                             .get(&path)
                             .is_none_or(|mask| mask.is_empty()) &&
                             self.branch_node_hash_masks
@@ -1321,542 +1679,6 @@ impl RevealedSparseTrie {
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
         buffers.rlp_node_stack.pop().unwrap().rlp_node
-    }
-}
-
-/// Error type for a leaf lookup operation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LeafLookupError {
-    /// The path leads to a blinded node, cannot determine if leaf exists.
-    /// This means the witness is not complete.
-    BlindedNode {
-        /// Path to the blinded node.
-        path: Nibbles,
-        /// Hash of the blinded node.
-        hash: B256,
-    },
-    /// The path leads to a leaf with a different value than expected.
-    /// This means the witness is malformed.
-    ValueMismatch {
-        /// Path to the leaf.
-        path: Nibbles,
-        /// Expected value.
-        expected: Option<Vec<u8>>,
-        /// Actual value found.
-        actual: Vec<u8>,
-    },
-}
-
-/// Success value for a leaf lookup operation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LeafLookup {
-    /// Leaf exists with expected value.
-    Exists,
-    /// Leaf does not exist (exclusion proof found).
-    NonExistent {
-        /// Path where the search diverged from the target path.
-        diverged_at: Nibbles,
-    },
-}
-
-impl RevealedSparseTrie {
-    /// Attempts to find a leaf node at the specified path.
-    ///
-    /// This method traverses the trie from the root down to the given path, checking
-    /// if a leaf exists at that path. It can be used to verify the existence of a leaf
-    /// or to generate an exclusion proof (proof that a leaf does not exist).
-    ///
-    /// # Parameters
-    ///
-    /// - `path`: The path to search for.
-    /// - `expected_value`: Optional expected value. If provided, will verify the leaf value
-    ///   matches.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(LeafLookup::Exists)` if the leaf exists with the expected value.
-    /// - `Ok(LeafLookup::NonExistent)` if the leaf definitely does not exist (exclusion proof).
-    /// - `Err(LeafLookupError)` if the search encountered a blinded node or found a different
-    ///   value.
-    pub fn find_leaf(
-        &self,
-        path: &Nibbles,
-        expected_value: Option<&Vec<u8>>,
-    ) -> Result<LeafLookup, LeafLookupError> {
-        // Helper function to check if a value matches the expected value
-        fn check_value_match(
-            actual_value: &Vec<u8>,
-            expected_value: Option<&Vec<u8>>,
-            path: &Nibbles,
-        ) -> Result<(), LeafLookupError> {
-            if let Some(expected) = expected_value {
-                if actual_value != expected {
-                    return Err(LeafLookupError::ValueMismatch {
-                        path: *path,
-                        expected: Some(expected.clone()),
-                        actual: actual_value.clone(),
-                    });
-                }
-            }
-            Ok(())
-        }
-
-        let mut current = Nibbles::default(); // Start at the root
-
-        // Inclusion proof
-        //
-        // First, do a quick check if the value exists in our values map.
-        // We assume that if there exists a leaf node, then its value will
-        // be in the `values` map.
-        if let Some(actual_value) = self.values.get(path) {
-            // We found the leaf, check if the value matches (if expected value was provided)
-            check_value_match(actual_value, expected_value, path)?;
-            return Ok(LeafLookup::Exists);
-        }
-
-        // If the value does not exist in the `values` map, then this means that the leaf either:
-        // - Does not exist in the trie
-        // - Is missing from the witness
-        // We traverse the trie to find the location where this leaf would have been, showing
-        // that it is not in the trie. Or we find a blinded node, showing that the witness is
-        // not complete.
-        while current.len() < path.len() {
-            match self.nodes.get(&current) {
-                Some(SparseNode::Empty) | None => {
-                    // None implies no node is at the current path (even in the full trie)
-                    // Empty node means there is a node at this path and it is "Empty"
-                    return Ok(LeafLookup::NonExistent { diverged_at: current });
-                }
-                Some(&SparseNode::Hash(hash)) => {
-                    // We hit a blinded node - cannot determine if leaf exists
-                    return Err(LeafLookupError::BlindedNode { path: current, hash });
-                }
-                Some(SparseNode::Leaf { key, .. }) => {
-                    // We found a leaf node before reaching our target depth
-
-                    // Temporarily append the leaf key to `current`
-                    let saved_len = current.len();
-                    current.extend(key);
-
-                    if &current == path {
-                        // This should have been handled by our initial values map check
-                        if let Some(value) = self.values.get(path) {
-                            check_value_match(value, expected_value, path)?;
-                            return Ok(LeafLookup::Exists);
-                        }
-                    }
-
-                    let diverged_at = current.slice(..saved_len);
-
-                    // The leaf node's path doesn't match our target path,
-                    // providing an exclusion proof
-                    return Ok(LeafLookup::NonExistent { diverged_at });
-                }
-                Some(SparseNode::Extension { key, .. }) => {
-                    // Temporarily append the extension key to `current`
-                    let saved_len = current.len();
-                    current.extend(key);
-
-                    if path.len() < current.len() || !path.starts_with(&current) {
-                        let diverged_at = current.slice(..saved_len);
-                        current.truncate(saved_len); // restore
-                        return Ok(LeafLookup::NonExistent { diverged_at });
-                    }
-                    // Prefix matched, so we keep walking with the longer `current`.
-                }
-                Some(SparseNode::Branch { state_mask, .. }) => {
-                    // Check if branch has a child at the next nibble in our path
-                    let nibble = path.get_unchecked(current.len());
-                    if !state_mask.is_bit_set(nibble) {
-                        // No child at this nibble - exclusion proof
-                        return Ok(LeafLookup::NonExistent { diverged_at: current });
-                    }
-
-                    // Continue down the branch
-                    current.push_unchecked(nibble);
-                }
-            }
-        }
-
-        // We've traversed to the end of the path and didn't find a leaf
-        // Check if there's a node exactly at our target path
-        match self.nodes.get(path) {
-            Some(SparseNode::Leaf { key, .. }) if key.is_empty() => {
-                // We found a leaf with an empty key (exact match)
-                // This should be handled by the values map check above
-                if let Some(value) = self.values.get(path) {
-                    check_value_match(value, expected_value, path)?;
-                    return Ok(LeafLookup::Exists);
-                }
-            }
-            Some(&SparseNode::Hash(hash)) => {
-                return Err(LeafLookupError::BlindedNode { path: *path, hash });
-            }
-            _ => {
-                // No leaf at exactly the target path
-                let parent_path = if path.is_empty() {
-                    Nibbles::default()
-                } else {
-                    path.slice(0..path.len() - 1)
-                };
-                return Ok(LeafLookup::NonExistent { diverged_at: parent_path });
-            }
-        }
-
-        // If we get here, there's no leaf at the target path
-        Ok(LeafLookup::NonExistent { diverged_at: current })
-    }
-
-    /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
-    /// value.
-    ///
-    /// This method updates the internal prefix set and, if the leaf did not previously exist,
-    /// adjusts the trie structure by inserting new leaf nodes, splitting branch nodes, or
-    /// collapsing extension nodes as needed.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the update is successful.
-    ///
-    /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
-    /// provider returns an error.
-    pub fn update_leaf(
-        &mut self,
-        path: Nibbles,
-        value: Vec<u8>,
-        provider: impl BlindedProvider,
-    ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(path);
-        let existing = self.values.insert(path, value);
-        if existing.is_some() {
-            // trie structure unchanged, return immediately
-            return Ok(())
-        }
-
-        let mut current = Nibbles::default();
-        while let Some(node) = self.nodes.get_mut(&current) {
-            match node {
-                SparseNode::Empty => {
-                    *node = SparseNode::new_leaf(path);
-                    break
-                }
-                &mut SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
-                }
-                SparseNode::Leaf { key: current_key, .. } => {
-                    current.extend(current_key);
-
-                    // this leaf is being updated
-                    if current == path {
-                        unreachable!("we already checked leaf presence in the beginning");
-                    }
-
-                    // find the common prefix
-                    let common = current.common_prefix_length(&path);
-
-                    // update existing node
-                    let new_ext_key = current.slice(current.len() - current_key.len()..common);
-                    *node = SparseNode::new_ext(new_ext_key);
-
-                    // create a branch node and corresponding leaves
-                    self.nodes.reserve(3);
-                    self.nodes.insert(
-                        current.slice(..common),
-                        SparseNode::new_split_branch(
-                            current.get_unchecked(common),
-                            path.get_unchecked(common),
-                        ),
-                    );
-                    self.nodes.insert(
-                        path.slice(..=common),
-                        SparseNode::new_leaf(path.slice(common + 1..)),
-                    );
-                    self.nodes.insert(
-                        current.slice(..=common),
-                        SparseNode::new_leaf(current.slice(common + 1..)),
-                    );
-
-                    break;
-                }
-                SparseNode::Extension { key, .. } => {
-                    current.extend(key);
-
-                    if !path.starts_with(&current) {
-                        // find the common prefix
-                        let common = current.common_prefix_length(&path);
-                        *key = current.slice(current.len() - key.len()..common);
-
-                        // If branch node updates retention is enabled, we need to query the
-                        // extension node child to later set the hash mask for a parent branch node
-                        // correctly.
-                        if self.updates.is_some() {
-                            // Check if the extension node child is a hash that needs to be revealed
-                            if self.nodes.get(&current).unwrap().is_hash() {
-                                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                    provider.blinded_node(&current)?
-                                {
-                                    let decoded = TrieNode::decode(&mut &node[..])?;
-                                    trace!(
-                                        target: "trie::sparse",
-                                        ?current,
-                                        ?decoded,
-                                        ?tree_mask,
-                                        ?hash_mask,
-                                        "Revealing extension node child",
-                                    );
-                                    self.reveal_node(
-                                        current,
-                                        decoded,
-                                        TrieMasks { hash_mask, tree_mask },
-                                    )?;
-                                }
-                            }
-                        }
-
-                        // create state mask for new branch node
-                        // NOTE: this might overwrite the current extension node
-                        self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(
-                            current.get_unchecked(common),
-                            path.get_unchecked(common),
-                        );
-                        self.nodes.insert(current.slice(..common), branch);
-
-                        // create new leaf
-                        let new_leaf = SparseNode::new_leaf(path.slice(common + 1..));
-                        self.nodes.insert(path.slice(..=common), new_leaf);
-
-                        // recreate extension to previous child if needed
-                        let key = current.slice(common + 1..);
-                        if !key.is_empty() {
-                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
-                        }
-
-                        break;
-                    }
-                }
-                SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path.get_unchecked(current.len());
-                    current.push_unchecked(nibble);
-                    if !state_mask.is_bit_set(nibble) {
-                        state_mask.set_bit(nibble);
-                        let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
-                        self.nodes.insert(current, new_leaf);
-                        break;
-                    }
-                }
-            };
-        }
-
-        Ok(())
-    }
-
-    /// Removes a leaf node from the trie at the specified key path.
-    ///
-    /// This function removes the leaf value from the internal values map and then traverses
-    /// the trie to remove or adjust intermediate nodes, merging or collapsing them as necessary.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the leaf is successfully removed, otherwise returns an error
-    /// if the leaf is not present or if a blinded node prevents removal.
-    pub fn remove_leaf(
-        &mut self,
-        path: &Nibbles,
-        provider: impl BlindedProvider,
-    ) -> SparseTrieResult<()> {
-        if self.values.remove(path).is_none() {
-            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(path) {
-                // Leaf is present in the trie, but it's blinded.
-                return Err(SparseTrieErrorKind::BlindedNode { path: *path, hash }.into())
-            }
-
-            trace!(target: "trie::sparse", ?path, "Leaf node is not present in the trie");
-            // Leaf is not present in the trie.
-            return Ok(())
-        }
-        self.prefix_set.insert(*path);
-
-        // If the path wasn't present in `values`, we still need to walk the trie and ensure that
-        // there is no node at the path. When a leaf node is a blinded `Hash`, it will have an entry
-        // in `nodes`, but not in the `values`.
-
-        let mut removed_nodes = self.take_nodes_for_path(path)?;
-        // Pop the first node from the stack which is the leaf node we want to remove.
-        let mut child = removed_nodes.pop().expect("leaf exists");
-        #[cfg(debug_assertions)]
-        {
-            let mut child_path = child.path;
-            let SparseNode::Leaf { key, .. } = &child.node else { panic!("expected leaf node") };
-            child_path.extend(key);
-            assert_eq!(&child_path, path);
-        }
-
-        // If we don't have any other removed nodes, insert an empty node at the root.
-        if removed_nodes.is_empty() {
-            debug_assert!(self.nodes.is_empty());
-            self.nodes.insert(Nibbles::default(), SparseNode::Empty);
-
-            return Ok(())
-        }
-
-        // Walk the stack of removed nodes from the back and re-insert them back into the trie,
-        // adjusting the node type as needed.
-        while let Some(removed_node) = removed_nodes.pop() {
-            let removed_path = removed_node.path;
-
-            let new_node = match &removed_node.node {
-                SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                &SparseNode::Hash(hash) => {
-                    return Err(SparseTrieErrorKind::BlindedNode { path: removed_path, hash }.into())
-                }
-                SparseNode::Leaf { .. } => {
-                    unreachable!("we already popped the leaf node")
-                }
-                SparseNode::Extension { key, .. } => {
-                    // If the node is an extension node, we need to look at its child to see if we
-                    // need to merge them.
-                    match &child.node {
-                        SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                        &SparseNode::Hash(hash) => {
-                            return Err(
-                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
-                            )
-                        }
-                        // For a leaf node, we collapse the extension node into a leaf node,
-                        // extending the key. While it's impossible to encounter an extension node
-                        // followed by a leaf node in a complete trie, it's possible here because we
-                        // could have downgraded the extension node's child into a leaf node from
-                        // another node type.
-                        SparseNode::Leaf { key: leaf_key, .. } => {
-                            self.nodes.remove(&child.path);
-
-                            let mut new_key = *key;
-                            new_key.extend(leaf_key);
-                            SparseNode::new_leaf(new_key)
-                        }
-                        // For an extension node, we collapse them into one extension node,
-                        // extending the key
-                        SparseNode::Extension { key: extension_key, .. } => {
-                            self.nodes.remove(&child.path);
-
-                            let mut new_key = *key;
-                            new_key.extend(extension_key);
-                            SparseNode::new_ext(new_key)
-                        }
-                        // For a branch node, we just leave the extension node as-is.
-                        SparseNode::Branch { .. } => removed_node.node,
-                    }
-                }
-                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
-                    // If the node is a branch node, we need to check the number of children left
-                    // after deleting the child at the given nibble.
-
-                    if let Some(removed_nibble) = removed_node.unset_branch_nibble {
-                        state_mask.unset_bit(removed_nibble);
-                    }
-
-                    // If only one child is left set in the branch node, we need to collapse it.
-                    if state_mask.count_bits() == 1 {
-                        let child_nibble =
-                            state_mask.first_set_bit_index().expect("state mask is not empty");
-
-                        // Get full path of the only child node left.
-                        let mut child_path = removed_path;
-                        child_path.push_unchecked(child_nibble);
-
-                        trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
-
-                        if self.nodes.get(&child_path).unwrap().is_hash() {
-                            trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.blinded_node(&child_path)?
-                            {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(
-                                    target: "trie::sparse",
-                                    ?child_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing remaining blinded branch child"
-                                );
-                                self.reveal_node(
-                                    child_path,
-                                    decoded,
-                                    TrieMasks { hash_mask, tree_mask },
-                                )?;
-                            }
-                        }
-
-                        // Get the only child node.
-                        let child = self.nodes.get(&child_path).unwrap();
-
-                        let mut delete_child = false;
-                        let new_node = match child {
-                            SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                            &SparseNode::Hash(hash) => {
-                                return Err(SparseTrieErrorKind::BlindedNode {
-                                    path: child_path,
-                                    hash,
-                                }
-                                .into())
-                            }
-                            // If the only child is a leaf node, we downgrade the branch node into a
-                            // leaf node, prepending the nibble to the key, and delete the old
-                            // child.
-                            SparseNode::Leaf { key, .. } => {
-                                delete_child = true;
-
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend(key);
-                                SparseNode::new_leaf(new_key)
-                            }
-                            // If the only child node is an extension node, we downgrade the branch
-                            // node into an even longer extension node, prepending the nibble to the
-                            // key, and delete the old child.
-                            SparseNode::Extension { key, .. } => {
-                                delete_child = true;
-
-                                let mut new_key = Nibbles::from_nibbles_unchecked([child_nibble]);
-                                new_key.extend(key);
-                                SparseNode::new_ext(new_key)
-                            }
-                            // If the only child is a branch node, we downgrade the current branch
-                            // node into a one-nibble extension node.
-                            SparseNode::Branch { .. } => {
-                                SparseNode::new_ext(Nibbles::from_nibbles_unchecked([child_nibble]))
-                            }
-                        };
-
-                        if delete_child {
-                            self.nodes.remove(&child_path);
-                        }
-
-                        if let Some(updates) = self.updates.as_mut() {
-                            updates.updated_nodes.remove(&removed_path);
-                            updates.removed_nodes.insert(removed_path);
-                        }
-
-                        new_node
-                    }
-                    // If more than one child is left set in the branch, we just re-insert it as-is.
-                    else {
-                        SparseNode::new_branch(state_mask)
-                    }
-                }
-            };
-
-            child = RemovedSparseNode {
-                path: removed_path,
-                node: new_node.clone(),
-                unset_branch_nibble: None,
-            };
-            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
-            self.nodes.insert(removed_path, new_node);
-        }
-
-        Ok(())
     }
 }
 
@@ -2036,7 +1858,7 @@ struct RemovedSparseNode {
     unset_branch_nibble: Option<u8>,
 }
 
-/// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`] calculations.
+/// Collection of reusable buffers for [`SerialSparseTrie::rlp_node`] calculations.
 ///
 /// These buffers reduce allocations when computing RLP representations during trie updates.
 #[derive(Debug, Default)]
@@ -2089,20 +1911,6 @@ pub struct RlpNodeStackItem {
     pub node_type: SparseNodeType,
 }
 
-/// Tracks modifications to the sparse trie structure.
-///
-/// Maintains references to both modified and pruned/removed branches, enabling
-/// one to make batch updates to a persistent database.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SparseTrieUpdates {
-    /// Collection of updated intermediate nodes indexed by full path.
-    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    /// Collection of removed intermediate nodes indexed by full path.
-    pub removed_nodes: HashSet<Nibbles>,
-    /// Flag indicating whether the trie was wiped.
-    pub wiped: bool,
-}
-
 impl SparseTrieUpdates {
     /// Create new wiped sparse trie updates.
     pub fn wiped() -> Self {
@@ -2129,7 +1937,7 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod find_leaf_tests {
     use super::*;
-    use crate::blinded::DefaultBlindedProvider;
+    use crate::provider::DefaultTrieNodeProvider;
     use alloy_primitives::map::foldhash::fast::RandomState;
     // Assuming this exists
     use alloy_rlp::Encodable;
@@ -2152,8 +1960,8 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_existing_leaf() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
 
@@ -2171,8 +1979,8 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_value_mismatch() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
         let wrong_value = b"wrong_value".to_vec();
@@ -2190,32 +1998,27 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_not_found_empty_trie() {
         // Empty trie
-        let sparse = RevealedSparseTrie::default();
+        let sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
 
         // Leaf should not exist
         let result = sparse.find_leaf(&path, None);
-        assert_matches!(
-            result,
-            Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default()
-        );
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
     fn find_leaf_empty_trie() {
-        let sparse = RevealedSparseTrie::default();
+        let sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
         let result = sparse.find_leaf(&path, None);
-
-        // In an empty trie, the search diverges immediately at the root.
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default());
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
     fn find_leaf_exists_no_value_check() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         sparse.update_leaf(path, VALUE_A(), &provider).unwrap();
 
@@ -2225,8 +2028,8 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exists_with_value_check_ok() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let value = VALUE_A();
         sparse.update_leaf(path, value.clone(), &provider).unwrap();
@@ -2237,8 +2040,8 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_branch_divergence() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]); // Diverges at nibble 7
@@ -2247,16 +2050,13 @@ mod find_leaf_tests {
         sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged at the branch node because nibble '7' is not present.
-        let expected_divergence = Nibbles::from_nibbles_unchecked([0x1, 0x2]);
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
     fn find_leaf_exclusion_extension_divergence() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         // This will create an extension node at root with key 0x12
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
         // This path diverges from the extension key
@@ -2265,34 +2065,26 @@ mod find_leaf_tests {
         sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged where the extension node started because the path doesn't match its key prefix.
-        let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
     fn find_leaf_exclusion_leaf_divergence() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
 
         sparse.update_leaf(existing_leaf_path, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged when it hit the leaf node at the root, because the search path is longer
-        // than the leaf's key stored there. The code returns the path of the node (root)
-        // where the divergence occurred.
-        let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
     fn find_leaf_exclusion_path_ends_at_branch() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2]); // Path of the branch itself
@@ -2301,15 +2093,11 @@ mod find_leaf_tests {
         sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // The path ends, but the node at the path is a branch, not a leaf.
-        // Diverged at the parent of the node found at the search path.
-        let expected_divergence = Nibbles::from_nibbles_unchecked([0x1]);
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
-    fn find_leaf_error_blinded_node_at_leaf_path() {
+    fn find_leaf_error_trie_node_at_leaf_path() {
         // Scenario: The node *at* the leaf path is blinded.
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
@@ -2330,7 +2118,7 @@ mod find_leaf_tests {
         ); // Branch at 0x123, child 4
         nodes.insert(leaf_path, SparseNode::Hash(blinded_hash)); // Blinded node at 0x1234
 
-        let sparse = RevealedSparseTrie {
+        let sparse = SerialSparseTrie {
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -2350,7 +2138,7 @@ mod find_leaf_tests {
     }
 
     #[test]
-    fn find_leaf_error_blinded_node() {
+    fn find_leaf_error_trie_node() {
         let blinded_hash = B256::repeat_byte(0xAA);
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
@@ -2373,7 +2161,7 @@ mod find_leaf_tests {
         let mut values = HashMap::with_hasher(RandomState::default());
         values.insert(path_revealed_leaf, VALUE_A());
 
-        let sparse = RevealedSparseTrie {
+        let sparse = SerialSparseTrie {
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -2392,7 +2180,7 @@ mod find_leaf_tests {
     }
 
     #[test]
-    fn find_leaf_error_blinded_node_via_reveal() {
+    fn find_leaf_error_trie_node_via_reveal() {
         let blinded_hash = B256::repeat_byte(0xAA);
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]); // Path of the blinded node itself
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Path we will search for
@@ -2420,7 +2208,7 @@ mod find_leaf_tests {
 
         // 3. Initialize the sparse trie using from_root
         // This will internally create Hash nodes for paths "1" and "5" initially.
-        let mut sparse = RevealedSparseTrie::from_root(root_trie_node, TrieMasks::none(), false)
+        let mut sparse = SerialSparseTrie::from_root(root_trie_node, TrieMasks::none(), false)
             .expect("Failed to create trie from root");
 
         // Assertions before we reveal child5
@@ -2453,7 +2241,7 @@ mod find_leaf_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blinded::DefaultBlindedProvider;
+    use crate::provider::DefaultTrieNodeProvider;
     use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
@@ -2515,8 +2303,8 @@ mod tests {
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
-        let walker =
-            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze())
+            .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
@@ -2569,10 +2357,7 @@ mod tests {
     }
 
     /// Assert that the sparse trie nodes and the proof nodes from the hash builder are equal.
-    fn assert_eq_sparse_trie_proof_nodes(
-        sparse_trie: &RevealedSparseTrie,
-        proof_nodes: ProofNodes,
-    ) {
+    fn assert_eq_sparse_trie_proof_nodes(sparse_trie: &SerialSparseTrie, proof_nodes: ProofNodes) {
         let proof_nodes = proof_nodes
             .into_nodes_sorted()
             .into_iter()
@@ -2616,8 +2401,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::blind().is_blind());
-        assert!(!SparseTrie::revealed_empty().is_blind());
+        assert!(SparseTrie::<SerialSparseTrie>::blind().is_blind());
+        assert!(!SparseTrie::<SerialSparseTrie>::revealed_empty().is_blind());
     }
 
     #[test]
@@ -2638,8 +2423,8 @@ mod tests {
                 [key],
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
         sparse.update_leaf(key, value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2669,8 +2454,8 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
@@ -2700,8 +2485,8 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
@@ -2739,8 +2524,8 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
@@ -2779,8 +2564,8 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, old_value_encoded.clone(), &provider).unwrap();
         }
@@ -2814,8 +2599,8 @@ mod tests {
     fn sparse_trie_remove_leaf() {
         reth_tracing::init_test_tracing();
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
@@ -3068,8 +2853,8 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::from_root(
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
             false,
@@ -3113,8 +2898,8 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::from_root(
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
             false,
@@ -3153,9 +2938,9 @@ mod tests {
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
-                let default_provider = DefaultBlindedProvider;
+                let default_provider = DefaultTrieNodeProvider;
                 let provider_factory = create_test_provider_factory();
-                let mut sparse = RevealedSparseTrie::default().with_updates(true);
+                let mut sparse = SerialSparseTrie::default().with_updates(true);
 
                 for (update, keys_to_delete) in updates {
                     // Insert state updates into the sparse trie and calculate the root
@@ -3314,8 +3099,8 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::from_root(
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
                 hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
@@ -3424,8 +3209,8 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::from_root(
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
                 hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
@@ -3527,8 +3312,8 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::from_root(
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
                 hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
@@ -3582,8 +3367,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_get_changed_nodes_at_depth() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
@@ -3697,8 +3482,8 @@ mod tests {
             [Nibbles::default()],
         );
 
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         sparse.update_leaf(key1(), value_encoded(), &provider).unwrap();
         sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
@@ -3710,8 +3495,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_wipe() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default().with_updates(true);
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default().with_updates(true);
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
@@ -3748,6 +3533,11 @@ mod tests {
 
         sparse.wipe();
 
+        assert_matches!(
+            &sparse.updates,
+            Some(SparseTrieUpdates{ updated_nodes, removed_nodes, wiped })
+            if updated_nodes.is_empty() && removed_nodes.is_empty() && *wiped
+        );
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
     }
 
@@ -3755,8 +3545,8 @@ mod tests {
     fn sparse_trie_clear() {
         // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
         // contents as an empty sparse trie
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
         sparse
             .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
@@ -3773,20 +3563,14 @@ mod tests {
 
         sparse.clear();
 
-        // we have to update the root hash to be an empty one, because the `Default` impl of
-        // `RevealedSparseTrie` sets the root hash to `EMPTY_ROOT_HASH` in the constructor.
-        //
-        // The default impl is only used in tests.
-        sparse.nodes.insert(Nibbles::default(), SparseNode::Empty);
-
-        let empty_trie = RevealedSparseTrie::default();
+        let empty_trie = SerialSparseTrie::default();
         assert_eq!(empty_trie, sparse);
     }
 
     #[test]
     fn sparse_trie_display() {
-        let provider = DefaultBlindedProvider;
-        let mut sparse = RevealedSparseTrie::default();
+        let provider = DefaultTrieNodeProvider;
+        let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 

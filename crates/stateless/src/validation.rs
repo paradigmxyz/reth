@@ -4,7 +4,6 @@ use crate::{
     ExecutionWitness,
 };
 use alloc::{
-    boxed::Box,
     collections::BTreeMap,
     fmt::Debug,
     string::{String, ToString},
@@ -12,15 +11,14 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::B256;
-use alloy_rlp::Decodable;
+use alloy_primitives::{keccak256, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{block::error::BlockRecoveryError, Block as _, RecoveredBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
 /// Errors that can occur during stateless validation.
@@ -71,7 +69,7 @@ pub enum StatelessValidationError {
     HeaderDeserializationFailed,
 
     /// Error when the computed state root does not match the one in the block header.
-    #[error("mismatched post- state root: {got}\n {expected}")]
+    #[error("mismatched post-state root: {got}\n {expected}")]
     PostStateRootMismatch {
         /// The computed post-state root
         got: B256,
@@ -88,9 +86,9 @@ pub enum StatelessValidationError {
         expected: B256,
     },
 
-    /// Error when recovering signers
-    #[error("error recovering the signers in the block")]
-    SignerRecovery(#[from] Box<BlockRecoveryError<Block>>),
+    /// Custom error.
+    #[error("{0}")]
+    Custom(&'static str),
 }
 
 /// Performs stateless validation of a block using the provided witness data.
@@ -129,7 +127,7 @@ pub enum StatelessValidationError {
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
 pub fn stateless_validation<ChainSpec, E>(
-    current_block: Block,
+    current_block: RecoveredBlock<Block>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
@@ -153,7 +151,7 @@ where
 ///
 /// See `stateless_validation` for detailed documentation of the validation process.
 pub fn stateless_validation_with_trie<T, ChainSpec, E>(
-    current_block: Block,
+    current_block: RecoveredBlock<Block>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
@@ -163,16 +161,13 @@ where
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    let current_block = current_block
-        .try_into_recovered()
-        .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?;
-
-    let mut ancestor_headers: Vec<Header> = witness
+    let mut ancestor_headers: Vec<_> = witness
         .headers
         .iter()
-        .map(|serialized_header| {
-            let bytes = serialized_header.as_ref();
-            Header::decode(&mut &bytes[..])
+        .map(|bytes| {
+            let hash = keccak256(bytes);
+            alloy_rlp::decode_exact::<Header>(bytes)
+                .map(|h| SealedHeader::new(h, hash))
                 .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)
         })
         .collect::<Result<_, _>>()?;
@@ -180,25 +175,22 @@ where
     // ascending order.
     ancestor_headers.sort_by_key(|header| header.number());
 
-    // Validate block against pre-execution consensus rules
-    validate_block_consensus(chain_spec.clone(), &current_block)?;
-
     // Check that the ancestor headers form a contiguous chain and are not just random headers.
     let ancestor_hashes = compute_ancestor_hashes(&current_block, &ancestor_headers)?;
 
-    // Get the last ancestor header and retrieve its state root.
-    //
-    // There should be at least one ancestor header, this is because we need the parent header to
-    // retrieve the previous state root.
+    // There should be at least one ancestor header.
     // The edge case here would be the genesis block, but we do not create proofs for the genesis
     // block.
-    let pre_state_root = match ancestor_headers.last() {
-        Some(prev_header) => prev_header.state_root,
+    let parent = match ancestor_headers.last() {
+        Some(prev_header) => prev_header,
         None => return Err(StatelessValidationError::MissingAncestorHeader),
     };
 
+    // Validate block against pre-execution consensus rules
+    validate_block_consensus(chain_spec.clone(), &current_block, parent)?;
+
     // First verify that the pre-state reads are correct
-    let (mut trie, bytecode) = T::new(&witness, pre_state_root)?;
+    let (mut trie, bytecode) = T::new(&witness, parent.state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
@@ -231,17 +223,14 @@ where
 ///
 /// This function validates a block against Ethereum consensus rules by:
 ///
-/// 1. **Difficulty Validation:** Validates the header with total difficulty to verify proof-of-work
-///    (pre-merge) or to enforce post-merge requirements.
-///
-/// 2. **Header Validation:** Validates the sealed header against protocol specifications,
+/// 1. **Header Validation:** Validates the sealed header against protocol specifications,
 ///    including:
 ///    - Gas limit checks
 ///    - Base fee validation for EIP-1559
 ///    - Withdrawals root validation for Shanghai fork
 ///    - Blob-related fields validation for Cancun fork
 ///
-/// 3. **Pre-Execution Validation:** Validates block structure, transaction format, signature
+/// 2. **Pre-Execution Validation:** Validates block structure, transaction format, signature
 ///    validity, and other pre-execution requirements.
 ///
 /// This function acts as a preliminary validation before executing and validating the state
@@ -249,6 +238,7 @@ where
 fn validate_block_consensus<ChainSpec>(
     chain_spec: Arc<ChainSpec>,
     block: &RecoveredBlock<Block>,
+    parent: &SealedHeader<Header>,
 ) -> Result<(), StatelessValidationError>
 where
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
@@ -256,6 +246,7 @@ where
     let consensus = EthBeaconConsensus::new(chain_spec);
 
     consensus.validate_header(block.sealed_header())?;
+    consensus.validate_header_against_parent(block.sealed_header(), parent)?;
 
     consensus.validate_block_pre_execution(block)?;
 
@@ -277,18 +268,18 @@ where
 /// ancestor header to its corresponding block hash.
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block>,
-    ancestor_headers: &[Header],
+    ancestor_headers: &[SealedHeader],
 ) -> Result<BTreeMap<u64, B256>, StatelessValidationError> {
     let mut ancestor_hashes = BTreeMap::new();
 
-    let mut child_header = current_block.header();
+    let mut child_header = current_block.sealed_header();
 
     // Next verify that headers supplied are contiguous
     for parent_header in ancestor_headers.iter().rev() {
         let parent_hash = child_header.parent_hash();
         ancestor_hashes.insert(parent_header.number, parent_hash);
 
-        if parent_hash != parent_header.hash_slow() {
+        if parent_hash != parent_header.hash() {
             return Err(StatelessValidationError::InvalidAncestorChain); // Blocks must be contiguous
         }
 

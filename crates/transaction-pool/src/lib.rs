@@ -63,7 +63,7 @@
 //!
 //! ## Validation Process
 //!
-//! ### Stateless Checks  
+//! ### Stateless Checks
 //!
 //! Ethereum transactions undergo several stateless checks:
 //!
@@ -271,6 +271,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub use crate::{
+    batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
@@ -281,8 +282,9 @@ pub use crate::{
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
-        blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        NewTransactionEvent, TransactionEvent, TransactionEvents, TransactionListenerKind,
+        blob_tx_priority, fee_delta, state::SubPool, AddedTransactionOutcome,
+        AllTransactionsEvents, FullTransactionEvent, NewTransactionEvent, TransactionEvent,
+        TransactionEvents, TransactionListenerKind,
     },
     traits::*,
     validate::{
@@ -313,6 +315,7 @@ pub mod noop;
 pub mod pool;
 pub mod validate;
 
+pub mod batcher;
 pub mod blobstore;
 mod config;
 pub mod identifier;
@@ -360,6 +363,19 @@ where
         self.inner().config()
     }
 
+    /// Validates the given transaction
+    async fn validate(
+        &self,
+        origin: TransactionOrigin,
+        transaction: V::Transaction,
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+        let hash = *transaction.hash();
+
+        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+
+        (hash, outcome)
+    }
+
     /// Returns future that validates all transactions in the given iterator.
     ///
     /// This returns the validated transactions in the iterator's order.
@@ -377,17 +393,16 @@ where
             .collect()
     }
 
-    /// Validates the given transaction
-    async fn validate(
+    /// Validates all transactions with their individual origins.
+    ///
+    /// This returns the validated transactions in the same order as input.
+    async fn validate_all_with_origins(
         &self,
-        origin: TransactionOrigin,
-        transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
-        let hash = *transaction.hash();
-
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-
-        (hash, outcome)
+        transactions: Vec<(TransactionOrigin, V::Transaction)>,
+    ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
+        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
+        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
+        origins.into_iter().zip(tx_outcomes).collect()
     }
 
     /// Number of transactions in the entire pool
@@ -486,7 +501,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash> {
+    ) -> PoolResult<AddedTransactionOutcome> {
         let (_, tx) = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
         results.pop().expect("result length is the same as the input")
@@ -496,13 +511,25 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         if transactions.is_empty() {
             return Vec::new()
         }
         let validated = self.validate_all(origin, transactions).await;
 
         self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
+    }
+
+    async fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        if transactions.is_empty() {
+            return Vec::new()
+        }
+        let validated = self.validate_all_with_origins(transactions).await;
+
+        self.pool.add_transactions_with_origins(validated)
     }
 
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents> {
@@ -591,8 +618,19 @@ where
         self.pool.queued_transactions()
     }
 
+    fn pending_and_queued_txn_count(&self) -> (usize, usize) {
+        let data = self.pool.get_pool_data();
+        let pending = data.pending_transactions_count();
+        let queued = data.queued_transactions_count();
+        (pending, queued)
+    }
+
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         self.pool.all_transactions()
+    }
+
+    fn all_transaction_hashes(&self) -> Vec<TxHash> {
+        self.pool.all_transaction_hashes()
     }
 
     fn remove_transactions(

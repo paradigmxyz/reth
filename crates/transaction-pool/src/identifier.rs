@@ -1,7 +1,6 @@
 //! Identifier types for transactions and senders.
-use alloy_primitives::Address;
+use alloy_primitives::{map::HashMap, Address};
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 
 /// An internal mapping of addresses.
 ///
@@ -102,12 +101,13 @@ impl TransactionId {
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_nonce`
     pub fn ancestor(transaction_nonce: u64, on_chain_nonce: u64, sender: SenderId) -> Option<Self> {
-        (transaction_nonce > on_chain_nonce)
-            .then(|| Self::new(sender, transaction_nonce.saturating_sub(1)))
+        // SAFETY: transaction_nonce > on_chain_nonce ⇒ transaction_nonce >= 1
+        (transaction_nonce > on_chain_nonce).then(|| Self::new(sender, transaction_nonce - 1))
     }
 
     /// Returns the [`TransactionId`] that would come before this transaction.
     pub fn unchecked_ancestor(&self) -> Option<Self> {
+        // SAFETY: self.nonce != 0 ⇒ self.nonce >= 1
         (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
     }
 

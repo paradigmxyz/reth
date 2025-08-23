@@ -267,6 +267,12 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
+    /// The transaction priority fee is below the minimum required priority fee.
+    #[error("transaction priority fee below minimum required priority fee {minimum_priority_fee}")]
+    PriorityFeeBelowMinimum {
+        /// Minimum required priority fee.
+        minimum_priority_fee: u128,
+    },
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -381,7 +387,13 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
+            Self::PriorityFeeBelowMinimum { .. } => false,
         }
+    }
+
+    /// Returns `true` if an import failed due to an oversized transaction
+    pub const fn is_oversized(&self) -> bool {
+        matches!(self, Self::OversizedData(_, _))
     }
 
     /// Returns `true` if an import failed due to nonce gap.

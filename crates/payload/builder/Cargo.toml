@@ -38,7 +38,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 tokio = { workspace = true, features = ["sync", "rt"] }
 
