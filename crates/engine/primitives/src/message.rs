@@ -219,8 +219,18 @@ where
         payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
-        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+        let send_res = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        if let Err(e) = send_res {
+            tracing::error!(target: "reth::engine_api", "to_engine.send(NewPayload) failed: {}", e);
+            return Err(BeaconOnNewPayloadError::EngineUnavailable);
+        }
+        match rx.await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::error!(target: "reth::engine_api", "engine response channel closed for NewPayload: {}", e);
+                Err(BeaconOnNewPayloadError::EngineUnavailable)
+            }
+        }?
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
@@ -232,12 +242,19 @@ where
         payload_attrs: Option<Payload::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
-        Ok(self
-            .send_fork_choice_updated(state, payload_attrs, version)
-            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
-            .await?
-            .map_err(BeaconForkChoiceUpdateError::internal)?
-            .await?)
+        let fut = self.send_fork_choice_updated(state, payload_attrs, version).map_err(|e| {
+            tracing::error!(target: "reth::engine_api", "to_engine.send(ForkchoiceUpdated) failed");
+            BeaconForkChoiceUpdateError::EngineUnavailable
+        });
+        let res = fut.await;
+        let res = res.map_err(BeaconForkChoiceUpdateError::internal)?;
+        match res.await {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                tracing::error!(target: "reth::engine_api", "engine response channel closed for ForkchoiceUpdated: {}", e);
+                Err(BeaconForkChoiceUpdateError::EngineUnavailable)
+            }
+        }
     }
 
     /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
