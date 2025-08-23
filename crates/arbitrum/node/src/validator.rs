@@ -98,11 +98,9 @@ where
         _version: EngineApiMessageVersion,
         _payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, Types::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        let is_attrs = matches!(_payload_or_attrs, PayloadOrAttributes::Attributes(_));
         tracing::trace!(
             target: "arb-reth::engine",
             ?_version,
-            is_attrs,
             "arb engine: skipping version-specific withdrawals checks for Arbitrum"
         );
         Ok(())
