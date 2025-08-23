@@ -755,7 +755,7 @@ impl reth_codecs::Compact for ArbTransactionSigned {
             ArbTypedTransaction::from_compact(slice, tx_type_bits)
         };
 
-        (Self { hash: Default::default(), signature, transaction }, tail)
+        (Self { hash: Default::default(), signature, transaction, input_cache: Default::default() }, tail)
     }
 }
 
