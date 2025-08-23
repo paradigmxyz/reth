@@ -741,19 +741,19 @@ impl reth_codecs::Compact for ArbTransactionSigned {
 
         let (transaction, _) = if zstd_bit != 0 {
             #[cfg(feature = "std")]
-            let decomp_vec: alloc::vec::Vec<u8> = {
-                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+            {
+                let decomp_vec: alloc::vec::Vec<u8> = reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                     let mut decompressor = decompressor.borrow_mut();
                     decompressor.decompress(slice).to_vec()
-                })
-            };
+                });
+                ArbTypedTransaction::from_compact(&decomp_vec[..], tx_type_bits)
+            }
             #[cfg(not(feature = "std"))]
-            let decomp_vec: alloc::vec::Vec<u8> = {
+            {
                 let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
-                decompressor.decompress(slice).to_vec()
-            };
-            let mut tmp_slice: &[u8] = &decomp_vec;
-            ArbTypedTransaction::from_compact(tmp_slice, tx_type_bits)
+                let decomp_vec: alloc::vec::Vec<u8> = decompressor.decompress(slice).to_vec();
+                ArbTypedTransaction::from_compact(&decomp_vec[..], tx_type_bits)
+            }
         } else {
             ArbTypedTransaction::from_compact(slice, tx_type_bits)
         };
