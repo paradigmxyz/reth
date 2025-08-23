@@ -202,6 +202,7 @@ where
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
         let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else {
+            tracing::error!(target: "reth::engine_tree", "from_tree channel closed; emitting FatalError and stopping engine handler");
             return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::FatalError))
         };
 
