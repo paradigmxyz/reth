@@ -197,8 +197,10 @@ Networking:
           Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
 
       --tx-propagation-mode <PROPAGATION_MODE>
-          Transaction propagation mode (sqrt, all, max:<number>)
-         
+          Sets the transaction propagation mode by determining how new pending transactions are propagated to other peers in full.
+
+          Examples: sqrt, all, max:10
+
           [default: sqrt]
 
 Datadir:

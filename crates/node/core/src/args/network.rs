@@ -168,8 +168,10 @@ pub struct NetworkArgs {
     #[arg(long = "disable-tx-gossip")]
     pub disable_tx_gossip: bool,
 
-    /// Sets the transaction propagation mode. Examples: sqrt, all, max:10
-
+    /// Sets the transaction propagation mode by determining how new pending transactions are
+    /// propagated to other peers in full.
+    ///
+    /// Examples: sqrt, all, max:10
     #[arg(
         long = "tx-propagation-mode",
         default_value = "sqrt",
