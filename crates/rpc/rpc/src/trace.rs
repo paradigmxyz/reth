@@ -5,8 +5,6 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
 };
-use std::sync::Arc;
-
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Index,
@@ -40,32 +38,8 @@ use revm_inspectors::{
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
-
-/// Response type for storage tracing that contains all accessed storage slots
-/// for a transaction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransactionStorageAccess {
-    /// Hash of the transaction
-    pub transaction_hash: B256,
-    /// Tracks storage slots and access counter.
-    pub storage_access: HashMap<Address, HashMap<B256, u64>>,
-    /// Number of unique storage loads
-    pub unique_loads: u64,
-    /// Number of warm storage loads
-    pub warm_loads: u64,
-}
-
-/// Response type for storage tracing that contains all accessed storage slots
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BlockStorageAccess {
-    /// The block hash
-    pub block_hash: BlockHash,
-    /// All executed transactions in the block in the order they were executed
-    pub transactions: Vec<TransactionStorageAccess>,
-}
 
 /// `trace` API implementation.
 ///
@@ -626,7 +600,11 @@ where
 
         let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
 
-        Ok(Some(BlockStorageAccess { block_hash: block.hash(), transactions }))
+        Ok(Some(BlockStorageAccess {
+            block_hash: block.hash(),
+            block_number: block.number(),
+            transactions,
+        }))
     }
 }
 
@@ -772,6 +750,33 @@ struct TraceApiInner<Eth> {
     blocking_task_guard: BlockingTaskGuard,
     // eth config settings
     eth_config: EthConfig,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+/// for a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionStorageAccess {
+    /// Hash of the transaction
+    pub transaction_hash: B256,
+    /// Tracks storage slots and access counter.
+    pub storage_access: HashMap<Address, HashMap<B256, u64>>,
+    /// Number of unique storage loads
+    pub unique_loads: u64,
+    /// Number of warm storage loads
+    pub warm_loads: u64,
+}
+
+/// Response type for storage tracing that contains all accessed storage slots
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockStorageAccess {
+    /// The block hash
+    pub block_hash: BlockHash,
+    /// The block's number
+    pub block_number: u64,
+    /// All executed transactions in the block in the order they were executed
+    pub transactions: Vec<TransactionStorageAccess>,
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
