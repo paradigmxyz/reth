@@ -894,3 +894,4 @@ mod tests {
         let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
         assert_eq!(header.nonce, expected_nonce);
     }
+}
