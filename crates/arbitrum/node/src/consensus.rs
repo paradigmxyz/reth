@@ -98,7 +98,6 @@ where
         if h.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
             return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
-        validate_header_extra_data(h)?;
         Ok(())
     }
 
