@@ -805,7 +805,13 @@ where
             );
 
             let payload = reth_arbitrum_payload::ArbPayloadTypes::block_to_payload(sealed_block);
-            let np = beacon.new_payload(payload).await?;
+            let np = match beacon.new_payload(payload).await {
+                Ok(res) => res,
+                Err(e) => {
+                    reth_tracing::tracing::error!(target: "arb-reth::follower", error=%e, %new_block_hash, "follower: newPayload RPC failed");
+                    return Err(eyre::eyre!(e));
+                }
+            };
             if !matches!(np.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
                 reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: newPayload not valid/syncing");
                 eyre::bail!("newPayload status not valid/syncing: {:?}", np.status);
@@ -824,13 +830,19 @@ where
                 finalized = %fcu_state.finalized_block_hash,
                 "follower: submitting FCU"
             );
-            let fcu_resp = beacon
+            let fcu_resp = match beacon
                 .fork_choice_updated(
                     fcu_state,
                     None,
                     reth_payload_primitives::EngineApiMessageVersion::default(),
                 )
-                .await?;
+                .await {
+                Ok(res) => res,
+                Err(e) => {
+                    reth_tracing::tracing::error!(target: "arb-reth::follower", error=%e, %new_block_hash, "follower: FCU RPC failed");
+                    return Err(eyre::eyre!(e));
+                }
+            };
             if !matches!(fcu_resp.payload_status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
                 reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: FCU not valid/syncing");
                 eyre::bail!("forkchoiceUpdated status not valid/syncing: {:?}", fcu_resp.payload_status.status);
