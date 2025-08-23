@@ -442,6 +442,8 @@ where
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
 
+        let validation_start = Instant::now();
+
         let block = self.convert_to_block(input)?;
 
         // A helper macro that returns the block in case there was an error
@@ -481,6 +483,10 @@ where
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
             return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
         }
+
+        self.metrics
+            .block_validation
+            .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
