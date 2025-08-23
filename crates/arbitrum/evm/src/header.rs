@@ -169,3 +169,36 @@ pub fn read_l2_base_fee(provider: &dyn StateProvider) -> Option<u64> {
     let price_per_unit_slot = storage_key_map(&l2_pricing_subspace, uint_to_hash_u64_be(2));
     read_storage_u64_be(provider, addr, price_per_unit_slot)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+
+    #[test]
+    fn apply_to_header_encodes_sendroot_and_mix_parts() {
+        let send_root = B256::from_slice(&[0x11u8; 32]);
+        let send_count: u64 = 0x0102030405060708;
+        let l1_block_number: u64 = 0x1112131415161718;
+        let arbos_format_version: u64 = 0x2122232425262728;
+
+        let info = ArbHeaderInfo {
+            send_root,
+            send_count,
+            l1_block_number,
+            arbos_format_version,
+        };
+
+        let mut h = Header::default();
+        info.apply_to_header(&mut h);
+
+        assert_eq!(h.extra_data.len(), 32);
+        assert_eq!(&h.extra_data[..], &send_root.0[..]);
+
+        let mix = h.mix_hash;
+        let mut expect = [0u8; 32];
+        expect[0..8].copy_from_slice(&send_count.to_be_bytes());
+        expect[8..16].copy_from_slice(&l1_block_number.to_be_bytes());
+        expect[16..24].copy_from_slice(&arbos_format_version.to_be_bytes());
+        assert_eq!(mix, B256::from(expect));
+    }
+}
