@@ -112,6 +112,10 @@ where
             "arb engine: building tree validator with legacy_state_root=true, state_root_fallback=true, parallel_sparse_trie=false"
         );
 
+        tracing::info!(
+            target: "arb-reth::engine",
+            "arb engine: withdrawals presence checks disabled via ArbEngineValidator"
+        );
         let payload_validator = crate::validator::ArbEngineValidator::new(ctx.node.provider().clone());
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
