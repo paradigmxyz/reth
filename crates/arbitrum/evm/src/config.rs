@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(dead_code))]
 #![allow(unused)]
 use alloc::sync::Arc;
 use alloy_consensus::{proofs, Block, BlockBody, Header, TxReceipt};
@@ -145,8 +146,13 @@ where
         _chain_spec: &CS,
     ) -> Result<Self, reth_payload_primitives::PayloadBuilderError> {
         let attrs: reth_payload_builder::EthPayloadBuilderAttributes = attrs.clone().into();
+        let mut ts = attrs.timestamp;
+        let min_ts = parent.timestamp().saturating_add(1);
+        if ts < min_ts {
+            ts = min_ts;
+        }
         Ok(ArbNextBlockEnvAttributes {
-            timestamp: attrs.timestamp,
+            timestamp: ts,
             suggested_fee_recipient: attrs.suggested_fee_recipient,
             prev_randao: attrs.prev_randao,
             gas_limit: parent.gas_limit(),

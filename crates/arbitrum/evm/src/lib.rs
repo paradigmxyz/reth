@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(dead_code))]
 pub mod header;
 
 
@@ -671,7 +672,12 @@ use alloy_consensus::{BlockHeader as _, Transaction as _};
                 extra_data: Bytes::default().into(),
                 block_number: number,
                 timestamp: ts,
-                gas_used: 0, withdrawals: None, transactions: Vec::new(),
+                gas_used: 0,
+                transactions: Vec::new(),
+                withdrawals: None,
+                state_root: B256::ZERO,
+                receipts_root: B256::ZERO,
+                logs_bloom: alloy_primitives::Bloom::default(),
             }),
             sidecar: reth_arbitrum_payload::ArbSidecar { parent_beacon_block_root: Some(B256::ZERO) },
             parent_hash: B256::ZERO, block_hash: B256::ZERO,

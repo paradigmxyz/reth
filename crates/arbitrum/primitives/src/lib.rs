@@ -693,18 +693,75 @@ impl reth_codecs::Compact for ArbTransactionSigned {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let start = buf.as_mut().len();
-        let mut tmp = alloc::vec::Vec::new();
-        alloy_rlp::Encodable::encode(self, &mut tmp);
-        buf.put_slice(&tmp);
-        let end = buf.as_mut().len();
-        end.saturating_sub(start)
+
+        buf.put_u8(0);
+
+        let sig_bits = self.signature.to_compact(buf) as u8;
+
+        let mut tx_buf = alloc::vec::Vec::with_capacity(256);
+        let tx_bits = self.transaction.to_compact(&mut tx_buf) as u8;
+
+        let use_zstd = tx_buf.len() >= 32;
+        if use_zstd {
+            if cfg!(feature = "std") {
+                reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let compressed = compressor.compress(&tx_buf).expect("zstd compress");
+                    buf.put_slice(&compressed);
+                });
+            } else {
+                let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                let compressed = compressor.compress(&tx_buf).expect("zstd compress");
+                buf.put_slice(&compressed);
+            }
+        } else {
+            buf.put_slice(&tx_buf);
+        }
+
+        let flags = sig_bits | (tx_bits << 1) | ((use_zstd as u8) << 3);
+        buf.as_mut()[start] = flags;
+
+        buf.as_mut().len() - start
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         let (head, tail) = buf.split_at(len);
         let mut slice: &[u8] = head;
-        let decoded = alloy_rlp::Decodable::decode(&mut slice).expect("compact decode");
-        (decoded, tail)
+
+        let bitflags = slice.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, slice_after_sig) = Signature::from_compact(slice, sig_bit);
+        let mut slice = slice_after_sig;
+
+        let zstd_bit = bitflags >> 3;
+        let tx_type_bits = (bitflags & 0b110) >> 1;
+
+        let (transaction, _) = if zstd_bit != 0 {
+            #[cfg(feature = "std")]
+            {
+                let decomp_vec: alloc::vec::Vec<u8> =
+                    reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                        let mut decompressor = decompressor.borrow_mut();
+                        decompressor.decompress(slice).to_vec()
+                    });
+                let (tx, _tmp_tail) = ArbTypedTransaction::from_compact(&decomp_vec[..], tx_type_bits);
+                (tx, slice)
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
+                let decomp_vec: alloc::vec::Vec<u8> = decompressor.decompress(slice).to_vec();
+                let (tx, _tmp_tail) = ArbTypedTransaction::from_compact(&decomp_vec[..], tx_type_bits);
+                (tx, slice)
+            }
+        } else {
+            ArbTypedTransaction::from_compact(slice, tx_type_bits)
+        };
+
+        (Self { hash: Default::default(), signature, transaction, input_cache: Default::default() }, tail)
     }
 }
 

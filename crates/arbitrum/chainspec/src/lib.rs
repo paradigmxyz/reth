@@ -843,3 +843,55 @@ impl ChainSpecParser for ArbitrumChainSpecParser {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives_traits::SealedHeader;
+
+    #[test]
+    fn baked_genesis_basic_fields_match_inputs() {
+        let chain_id = 421614u64;
+        let base_fee_hex = "0x3b9aca00"; // 1_000_000_000
+        let timestamp_hex = "0x0";
+        let state_root_hex = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let gas_limit_hex = "0x1312d00"; // 20000000
+        let extra_data_hex = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let mix_hash_hex = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let nonce_hex = "0x1";
+
+        let spec = sepolia_baked_genesis_from_header(
+            chain_id,
+            base_fee_hex,
+            timestamp_hex,
+            state_root_hex,
+            gas_limit_hex,
+            extra_data_hex,
+            mix_hash_hex,
+            nonce_hex,
+            None,
+            Some("0x2faf080"), // 50_000_000_000
+        ).expect("ok");
+
+        let header = spec.genesis_header.header();
+        assert_eq!(header.number, 0u64);
+        assert_eq!(header.gas_limit, parse_hex_quantity(gas_limit_hex).to::<u64>());
+        assert_eq!(header.base_fee_per_gas, Some(parse_hex_quantity(base_fee_hex).to::<u64>()));
+        assert_eq!(header.timestamp, parse_hex_quantity(timestamp_hex).to::<u64>());
+
+        let extra = hex::decode(extra_data_hex.trim_start_matches("0x")).unwrap();
+        assert_eq!(&header.extra_data[..], &extra[..]);
+
+        let mix_bytes = {
+            let bytes = hex::decode(mix_hash_hex.trim_start_matches("0x")).unwrap();
+            let mut arr = [0u8; 32];
+            let copy = bytes.len().min(32);
+            if copy > 0 {
+                arr[32 - copy..].copy_from_slice(&bytes[bytes.len() - copy..]);
+            }
+            B256::from(arr)
+        };
+        assert_eq!(header.mix_hash, mix_bytes);
+        let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
+        assert_eq!(header.nonce, expected_nonce);
+    }
+}

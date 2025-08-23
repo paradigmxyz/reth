@@ -44,15 +44,16 @@ impl FollowerExecutor for FollowerExecutorHandle {
     fn execute_message_to_block(
         &self,
         parent_hash: B256,
-        _attrs: PayloadAttributes,
-        _l2msg_bytes: &[u8],
-        _poster: Address,
-        _request_id: Option<B256>,
-        _kind: u8,
-        _l1_base_fee: U256,
-        _batch_gas_cost: Option<u64>,
+        attrs: PayloadAttributes,
+        l2msg_bytes: &[u8],
+        poster: Address,
+        request_id: Option<B256>,
+        kind: u8,
+        l1_base_fee: U256,
+        batch_gas_cost: Option<u64>,
     ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send>> {
         let beacon = self.beacon.clone();
+        let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
         Box::pin(async move {
             let _ = beacon
                 .fork_choice_updated(
@@ -65,7 +66,23 @@ impl FollowerExecutor for FollowerExecutorHandle {
                     reth_payload_primitives::EngineApiMessageVersion::default(),
                 )
                 .await?;
-            eyre::bail!("execute_message_to_block not yet implemented")
+
+            if let Some(exec) = get_follower_executor() {
+                return exec
+                    .execute_message_to_block(
+                        parent_hash,
+                        attrs,
+                        &l2_owned,
+                        poster,
+                        request_id,
+                        kind,
+                        l1_base_fee,
+                        batch_gas_cost,
+                    )
+                    .await;
+            }
+
+            eyre::bail!("no follower executor registered")
         })
     }
 }
