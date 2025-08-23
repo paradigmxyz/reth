@@ -12,7 +12,48 @@
 
 use reth_tasks::{TaskExecutor, TaskManager};
 use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use tokio::runtime::{Handle, Runtime};
 use tracing::{debug, error, trace};
+
+/// A tokio runtime or handle.
+#[derive(Debug)]
+enum RuntimeOrHandle {
+    /// Owned runtime that can be used for blocking operations
+    Runtime(Runtime),
+    /// Handle to an existing runtime
+    Handle(Handle),
+}
+
+impl RuntimeOrHandle {
+    /// Returns a reference to the inner tokio runtime handle.
+    fn handle(&self) -> &Handle {
+        match self {
+            Self::Runtime(rt) => rt.handle(),
+            Self::Handle(handle) => handle,
+        }
+    }
+
+    /// Attempts to extract the runtime, returning an error if only a handle is available.
+    fn into_runtime(self, operation: &str) -> Result<Runtime, std::io::Error> {
+        let (rt, _handle) = self.into_runtime_or_handle();
+        rt.ok_or_else(|| {
+            std::io::Error::other(
+                format!("A tokio runtime is required to run {}. Please create a CliRunner with an owned runtime.", operation)
+            )
+        })
+    }
+
+    /// Chooses to return the owned runtime if it exists, otherwise returns `None` and the handle.
+    fn into_runtime_or_handle(self) -> (Option<Runtime>, Handle) {
+        match self {
+            Self::Runtime(runtime) => {
+                let handle = runtime.handle().clone();
+                (Some(runtime), handle)
+            }
+            Self::Handle(handle) => (None, handle),
+        }
+    }
+}
 
 /// Executes CLI commands.
 ///
@@ -20,7 +61,7 @@ use tracing::{debug, error, trace};
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CliRunner {
-    tokio_runtime: tokio::runtime::Runtime,
+    executor: RuntimeOrHandle,
 }
 
 impl CliRunner {
@@ -29,12 +70,29 @@ impl CliRunner {
     ///
     /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, std::io::Error> {
-        Ok(Self { tokio_runtime: tokio_runtime()? })
+        Ok(Self { executor: RuntimeOrHandle::Runtime(tokio_runtime()?) })
     }
 
     /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
-    pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
-        Self { tokio_runtime }
+    pub const fn from_runtime(tokio_runtime: Runtime) -> Self {
+        Self { executor: RuntimeOrHandle::Runtime(tokio_runtime) }
+    }
+
+    /// Create a new [`CliRunner`] from a tokio [`Handle`](tokio::runtime::Handle).
+    ///
+    /// # Warning
+    ///
+    /// When using a [`Handle`], some operations may panic if called from within
+    /// the same runtime context.
+    ///
+    /// Prefer using [`Self::from_runtime`] when possible.
+    pub const fn from_handle(handle: Handle) -> Self {
+        Self { executor: RuntimeOrHandle::Handle(handle) }
+    }
+
+    /// Returns the handle reference, regardless of whether this contains a runtime or handle
+    pub fn handle(&self) -> &Handle {
+        self.executor.handle()
     }
 }
 
@@ -54,8 +112,9 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
+        let tokio_runtime = self.executor.into_runtime("async commands")?;
         let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
-            AsyncCliRunner::new(self.tokio_runtime);
+            AsyncCliRunner::new(tokio_runtime);
 
         // Executes the command until it finished or ctrl-c was fired
         let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
@@ -99,7 +158,8 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        self.tokio_runtime.block_on(run_until_ctrl_c(fut))?;
+        let tokio_runtime = self.executor.into_runtime("async commands")?;
+        tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 
@@ -112,7 +172,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = self.tokio_runtime;
+        let tokio_runtime = self.executor.into_runtime("blocking tasks")?;
         let handle = tokio_runtime.handle().clone();
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime
