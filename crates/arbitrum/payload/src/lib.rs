@@ -407,4 +407,116 @@ mod tests {
         assert_eq!(ed.payload.as_v1().gas_limit, gas_limit);
         assert_eq!(ed.payload.as_v1().base_fee_per_gas, base_fee_per_gas);
     }
+#[test]
+fn block_to_payload_maps_fields_and_sidecar() {
+    use alloy_primitives::{address, b256, Bytes as ABytes};
+    use reth_primitives_traits::Block as _;
+    let header = alloy_consensus::Header {
+        parent_hash: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
+        ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
+        beneficiary: address!("00000000000000000000000000000000000000aa"),
+        state_root: b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        transactions_root: b256!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        receipts_root: b256!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+        logs_bloom: Bloom::default(),
+        difficulty: U256::ZERO,
+        number: 42,
+        gas_limit: 30_000_000,
+        gas_used: 21000,
+        timestamp: 1_700_000_007,
+        extra_data: ABytes::from_static(b"arb-extra").into(),
+        mix_hash: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
+        nonce: B64::ZERO,
+        base_fee_per_gas: Some(1_000_000_000u64),
+        withdrawals_root: None,
+        blob_gas_used: None,
+        excess_blob_gas: None,
+        requests_hash: None,
+        parent_beacon_block_root: Some(b256!("3333333333333333333333333333333333333333333333333333333333333333")),
+    };
+    let block = alloy_consensus::Block {
+        header: header.clone(),
+        body: alloy_consensus::BlockBody {
+            transactions: Vec::<reth_arbitrum_primitives::ArbTransactionSigned>::new(),
+            ommers: Vec::new(),
+            withdrawals: None,
+        },
+    };
+    let sealed = block.seal_slow();
+    let payload = ArbPayloadTypes::block_to_payload(sealed.clone());
+
+    let v1 = payload.payload.as_v1();
+    assert_eq!(payload.parent_hash, header.parent_hash);
+    assert_eq!(payload.block_hash, sealed.hash());
+    assert_eq!(payload.sidecar.parent_beacon_block_root, header.parent_beacon_block_root);
+
+    assert_eq!(v1.fee_recipient, header.beneficiary);
+    assert_eq!(v1.prev_randao, header.mix_hash);
+    assert_eq!(v1.gas_limit, header.gas_limit);
+    assert_eq!(v1.base_fee_per_gas, U256::from(header.base_fee_per_gas.unwrap_or_default()));
+    assert_eq!(&v1.extra_data[..], &header.extra_data[..]);
+    assert_eq!(v1.block_number, header.number);
+    assert_eq!(v1.timestamp, header.timestamp);
+    assert_eq!(v1.gas_used, header.gas_used);
+    assert_eq!(v1.state_root, header.state_root);
+    assert_eq!(v1.receipts_root, header.receipts_root);
+    assert_eq!(v1.logs_bloom, header.logs_bloom);
+    assert!(v1.withdrawals.is_none());
+    assert!(v1.transactions.is_empty());
+}
+
+#[test]
+fn execdata_try_into_block_with_sidecar_roundtrip_header() {
+    use reth_primitives_traits::Block as _;
+    let header = alloy_consensus::Header {
+        parent_hash: B256::from([0x44; 32]),
+        ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
+        beneficiary: Address::from([0x12; 20]),
+        state_root: B256::from([0xaa; 32]),
+        transactions_root: B256::from([0xbb; 32]),
+        receipts_root: B256::from([0xcc; 32]),
+        logs_bloom: Bloom::default(),
+        difficulty: U256::ZERO,
+        number: 7,
+        gas_limit: 32_000_000,
+        gas_used: 21_000,
+        timestamp: 1_700_000_123,
+        extra_data: Bytes::default().into(),
+        mix_hash: B256::from([0x22; 32]),
+        nonce: B64::ZERO,
+        base_fee_per_gas: Some(87500000u64),
+        withdrawals_root: None,
+        blob_gas_used: None,
+        excess_blob_gas: None,
+        requests_hash: None,
+        parent_beacon_block_root: Some(B256::from([0x35; 32])),
+    };
+    let block = alloy_consensus::Block {
+        header: header.clone(),
+        body: alloy_consensus::BlockBody {
+            transactions: Vec::<reth_arbitrum_primitives::ArbTransactionSigned>::new(),
+            ommers: Vec::new(),
+            withdrawals: None,
+        },
+    };
+    let sealed = block.seal_slow();
+    let exec = ArbPayloadTypes::block_to_payload(sealed.clone());
+    let rebuilt = exec.try_into_block_with_sidecar(&exec.sidecar).expect("ok");
+
+    let h = rebuilt.header;
+    assert_eq!(h.parent_hash, header.parent_hash);
+    assert_eq!(h.beneficiary, header.beneficiary);
+    assert_eq!(h.state_root, header.state_root);
+    assert_eq!(h.receipts_root, header.receipts_root);
+    assert_eq!(h.logs_bloom, header.logs_bloom);
+    assert_eq!(h.number, header.number);
+    assert_eq!(h.gas_limit, header.gas_limit);
+    assert_eq!(h.gas_used, header.gas_used);
+    assert_eq!(h.timestamp, header.timestamp);
+    assert_eq!(h.extra_data, header.extra_data);
+    assert_eq!(h.mix_hash, header.mix_hash);
+    assert_eq!(h.base_fee_per_gas, header.base_fee_per_gas);
+    assert_eq!(h.parent_beacon_block_root, header.parent_beacon_block_root);
+}
+
 }
