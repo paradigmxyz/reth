@@ -33,7 +33,7 @@ pub struct Cases<T> {
 }
 
 impl<T: Case> Cases<T> {
-    /// Run the contained test cases.
+    /// Runs all test cases and returns a vector of `CaseResult`.
     pub fn run(&self) -> Vec<CaseResult> {
         self.test_cases
             .par_iter()
