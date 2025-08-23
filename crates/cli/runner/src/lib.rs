@@ -288,3 +288,59 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    #[test]
+    fn test_runtime_works() {
+        let runner = CliRunner::try_default_runtime().unwrap();
+        let result = runner.run_until_ctrl_c(async {
+            sleep(Duration::from_millis(10)).await;
+            Ok::<(), std::io::Error>(())
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_only_fails_with_error() {
+        let rt = tokio_runtime().unwrap();
+        let runner = CliRunner::from_handle(rt.handle().clone());
+
+        let result = runner.run_until_ctrl_c(async { Ok::<(), std::io::Error>(()) });
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("tokio runtime is required"));
+        assert!(error_msg.contains("async commands"));
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Cannot start a runtime from within a runtime")]
+    async fn test_handle_block_on_panics_in_async_context() {
+        let handle = Handle::current();
+
+        // block_on() tries to enter the runtime, but we're already inside it so it panics
+        handle.block_on(async { "panic!" });
+    }
+
+    #[test]
+    fn test_handle_block_on_works_from_sync_context() {
+        let rt = tokio_runtime().unwrap();
+        let handle = rt.handle().clone();
+
+        // It does not panic because we're outside the async runtime context
+        std::thread::spawn(move || {
+            let result = handle.block_on(async {
+                sleep(Duration::from_millis(10)).await;
+                "success"
+            });
+            assert_eq!(result, "success");
+        })
+        .join()
+        .unwrap();
+    }
+}
