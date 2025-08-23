@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_database::BundleState;
 use std::sync::OnceLock;
@@ -138,41 +138,78 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 }
 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
-        let state = &self.trie_input().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let trie_input = self.trie_input();
+        let state = &trie_input.state;
+        let hashed_address = keccak256(address);
+        let mut hashed_storage = state.storages.get(&hashed_address).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
-        self.historical.storage_root(address, hashed_storage)
+
+        let mut storage_trie_input = TrieInput::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            hashed_storage,
+        ));
+        storage_trie_input.prepend_cached(trie_input.nodes.clone(), trie_input.state.clone());
+
+        self.historical.state_root_from_nodes(storage_trie_input)
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_proof(
         &self,
         address: Address,
         slot: B256,
         storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let state = &self.trie_input().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let trie_input = self.trie_input();
+        let state = &trie_input.state;
+        let hashed_address = keccak256(address);
+        let mut hashed_storage = state.storages.get(&hashed_address).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
-        self.historical.storage_proof(address, slot, hashed_storage)
+
+        let mut storage_trie_input = TrieInput::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            hashed_storage,
+        ));
+        storage_trie_input.prepend_cached(trie_input.nodes.clone(), trie_input.state.clone());
+
+        let account_proof = self.historical.proof(storage_trie_input, address, &[slot])?;
+        Ok(account_proof
+            .storage_proofs
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| StorageProof::new(slot)))
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_multiproof(
         &self,
         address: Address,
         slots: &[B256],
         storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        let state = &self.trie_input().state;
-        let mut hashed_storage =
-            state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let trie_input = self.trie_input();
+        let state = &trie_input.state;
+        let hashed_address = keccak256(address);
+        let mut hashed_storage = state.storages.get(&hashed_address).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
-        self.historical.storage_multiproof(address, slots, hashed_storage)
+
+        let mut storage_trie_input = TrieInput::from_state(HashedPostState::from_hashed_storage(
+            hashed_address,
+            hashed_storage,
+        ));
+        storage_trie_input.prepend_cached(trie_input.nodes.clone(), trie_input.state.clone());
+
+        let multiproof = self.historical.multiproof(
+            storage_trie_input,
+            reth_trie::MultiProofTargets::account_with_slots(
+                hashed_address,
+                slots.iter().map(keccak256),
+            ),
+        )?;
+        Ok(multiproof
+            .storages
+            .get(&hashed_address)
+            .cloned()
+            .unwrap_or_else(StorageMultiProof::empty))
     }
 }
 
