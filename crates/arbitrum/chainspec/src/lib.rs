@@ -872,7 +872,7 @@ mod tests {
             Some("0x2faf080"), // 50_000_000_000
         ).expect("ok");
 
-        let SealedHeader { header, .. } = spec.genesis_header;
+        let header = spec.genesis_header.header();
         assert_eq!(header.number, 0u64);
         assert_eq!(header.gas_limit, parse_hex_quantity(gas_limit_hex).to::<u64>());
         assert_eq!(header.base_fee_per_gas, Some(parse_hex_quantity(base_fee_hex).to::<u64>()));
