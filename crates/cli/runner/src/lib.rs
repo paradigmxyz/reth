@@ -54,7 +54,20 @@ impl RuntimeOrHandle {
         }
     }
 
-    // Block on a future, handling both `Runtime` and `Handle` cases.
+    /// Block on a future, handling both `Runtime` and `Handle` cases.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Safe: Called from outside async context
+    /// std::thread::spawn(move || {
+    ///     let result = handle.block_on(async { "ok" });
+    /// });
+    ///
+    /// // Unsafe: Would panic if called directly in async context
+    /// // async fn bad() {
+    /// //     handle.block_on(async { "panic!" }); // Don't do this!
+    /// // }
+    /// ```
     fn block_on<F>(&self, fut: F) -> Result<F::Output, std::io::Error>
     where
         F: Future + Send + 'static,
@@ -118,6 +131,15 @@ impl CliRunner {
     /// the same runtime context.
     ///
     /// Prefer using [`Self::from_runtime`] when possible.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Use from a separate thread to avoid async context issues
+    /// std::thread::spawn(move || {
+    ///     let runner = CliRunner::from_handle(handle);
+    ///     runner.run_until_ctrl_c_with_handle(fut);
+    /// });
+    /// ```
     pub const fn from_handle(handle: Handle) -> Self {
         Self { executor: RuntimeOrHandle::Handle(handle) }
     }
