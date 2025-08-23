@@ -1,7 +1,7 @@
-use reth_chainspec::EthChainSpec;
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use alloy_genesis::{Genesis, GenesisAccount};
+use reth_chainspec::EthChainSpec;
 use alloy_primitives::{hex, keccak256, Address, Bytes, B256, U256};
 use anyhow::Result;
 use reth_chainspec::ChainSpec;

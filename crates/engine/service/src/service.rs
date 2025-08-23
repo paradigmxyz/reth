@@ -104,6 +104,14 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
+        let tree_config = if engine_kind.is_arbitrum() {
+            tree_config
+                .with_state_root_fallback(true)
+                .with_enable_parallel_sparse_trie(false)
+        } else {
+            tree_config
+        };
+
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
             blockchain_db,
             consensus,
