@@ -9272,6 +9272,7 @@ name = "reth-optimism-flashblocks"
 version = "1.6.0"
 dependencies = [
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
@@ -9279,8 +9280,15 @@ dependencies = [
  "eyre",
  "futures-util",
  "reth-chain-state",
+ "reth-errors",
+ "reth-evm",
+ "reth-execution-types",
  "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-revm",
+ "reth-rpc-eth-api",
+ "reth-storage-api",
+ "revm-database",
  "serde",
  "serde_json",
  "tokio",
