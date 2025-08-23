@@ -1,14 +1,13 @@
 use crate::eth::ArbEthApi;
-use reth_rpc_eth_api::{
-    helpers::{EthBlocks, LoadBlock},
-    FromEvmError, RpcConvert, RpcNodeCore,
-};
-use reth_storage_api::{BlockIdReader, BlockReader, HeaderProvider, ProviderHeader};
 use crate::error::ArbEthApiError;
-use reth_primitives_traits::RecoveredBlock;
-use reth_rpc_eth_types::EthApiError;
-use std::sync::Arc;
 use alloy_eips::BlockId;
+use reth_primitives_traits::RecoveredBlock;
+use reth_rpc_eth_api::{
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
+    FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
+};
+use reth_storage_api::{BlockIdReader, BlockReader, HeaderProvider};
+use std::sync::Arc;
 
 impl<N, Rpc> EthBlocks for ArbEthApi<N, Rpc>
 where
