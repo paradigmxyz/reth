@@ -63,10 +63,10 @@ where
         }
 
         let hdr = sealed_block.header();
-        let base_fee = hdr.base_fee_per_gas();
-        let gas_limit = hdr.gas_limit();
-        let extra_len = hdr.extra_data().len();
-        let parent = hdr.parent_hash();
+        let base_fee = hdr.base_fee_per_gas;
+        let gas_limit = hdr.gas_limit;
+        let extra_len = hdr.extra_data.len();
+        let parent = hdr.parent_hash;
         tracing::trace!(
             target: "arb-reth::engine",
             %parent,
