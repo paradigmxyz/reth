@@ -66,19 +66,19 @@ pub struct CliRunner {
 
 impl CliRunner {
     /// Attempts to create a new [`CliRunner`] using the default tokio
-    /// [`Runtime`](tokio::runtime::Runtime).
+    /// [`Runtime`].
     ///
     /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, std::io::Error> {
         Ok(Self { executor: RuntimeOrHandle::Runtime(tokio_runtime()?) })
     }
 
-    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
+    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`].
     pub const fn from_runtime(tokio_runtime: Runtime) -> Self {
         Self { executor: RuntimeOrHandle::Runtime(tokio_runtime) }
     }
 
-    /// Create a new [`CliRunner`] from a tokio [`Handle`](tokio::runtime::Handle).
+    /// Create a new [`CliRunner`] from a tokio [`Handle`].
     ///
     /// # Warning
     ///
