@@ -818,11 +818,22 @@ where
                                     ?coinbase_nonce_delta,
                                     ?coinbase_balance_delta,
                                     validation_time_us = validation_time.as_micros(),
-                                    "Successfully validated and reused cached execution result"
+                                    "Successfully validated and reused cached execution result with coinbase deltas"
                                 );
                                 return Some(result)
                             }
                         }
+                    } else {
+                        // No coinbase deltas, but validation passed - return the cached result
+                        let validation_time = validation_start.elapsed();
+                        tracing::debug!(
+                            target: "engine::cache",
+                            ?tx_hash,
+                            trace_count,
+                            validation_time_us = validation_time.as_micros(),
+                            "Successfully validated and reused cached execution result without coinbase deltas"
+                        );
+                        return Some(result)
                     }
 
                     None
