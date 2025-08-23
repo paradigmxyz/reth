@@ -429,14 +429,54 @@ where
             handle.cache_metrics(),
         );
 
-        let (output, execution_finish) = if self.config.state_provider_metrics() {
-            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
-            state_provider.record_total_latency();
-            (output, execution_finish)
-        } else {
-            ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
+        // Execute the block and handle any execution errors
+        let (output, execution_finish) = {
+            let execution_result = if self.config.state_provider_metrics() {
+                let state_provider =
+                    InstrumentedStateProvider::from_state_provider(&state_provider);
+                let result = self.execute_block(&state_provider, env, &input, &mut handle);
+                state_provider.record_total_latency();
+                result
+            } else {
+                self.execute_block(&state_provider, env, &input, &mut handle)
+            };
+
+            match execution_result {
+                Ok(result) => result,
+                Err(execution_err) => {
+                    // If execution failed, we should first check if there are any header validation
+                    // errors that take precedence over the execution error
+                    let block = self.convert_to_block(input)?;
+
+                    // Validate block consensus rules which includes header validation
+                    if let Err(consensus_err) = self.validate_block_inner(&block) {
+                        // Header validation error takes precedence over execution error
+                        return Err(InsertBlockError::new(
+                            block.into_sealed_block(),
+                            consensus_err.into(),
+                        )
+                        .into())
+                    }
+
+                    // Also validate against the parent
+                    if let Err(consensus_err) = self
+                        .consensus
+                        .validate_header_against_parent(block.sealed_header(), &parent_block)
+                    {
+                        // Parent validation error takes precedence over execution error
+                        return Err(InsertBlockError::new(
+                            block.into_sealed_block(),
+                            consensus_err.into(),
+                        )
+                        .into())
+                    }
+
+                    // No header validation errors, return the original execution error
+                    return Err(
+                        InsertBlockError::new(block.into_sealed_block(), execution_err).into()
+                    )
+                }
+            }
         };
 
         // after executing the block we can stop executing transactions
