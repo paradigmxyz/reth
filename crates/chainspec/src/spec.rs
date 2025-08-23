@@ -335,6 +335,13 @@ impl ChainSpec {
         self.chain.is_ethereum()
     }
 
+    /// Returns `true` if this chain contains Arbitrum configuration.
+    #[inline]
+    pub const fn is_arbitrum(&self) -> bool {
+        let id = self.chain().id();
+        id == 42161 || id == 42170 || id == 421613 || id == 421614
+    }
+
     /// Returns `true` if this chain is Optimism mainnet.
     #[inline]
     pub fn is_optimism_mainnet(&self) -> bool {

@@ -1,3 +1,4 @@
+use reth_chainspec::EthChainSpec;
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use alloy_genesis::{Genesis, GenesisAccount};
