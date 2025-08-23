@@ -138,7 +138,12 @@ pub struct FileInfo {
 
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
-    pub fn new(dir: PathBuf, file_name: String, max_size_bytes: u64, max_files: usize) -> Self {
+    pub const fn new(
+        dir: PathBuf,
+        file_name: String,
+        max_size_bytes: u64,
+        max_files: usize,
+    ) -> Self {
         Self { dir, file_name, max_size_bytes, max_files }
     }
 
