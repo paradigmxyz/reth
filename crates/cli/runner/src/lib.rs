@@ -323,7 +323,7 @@ mod tests {
     async fn test_handle_block_on_panics_in_async_context() {
         let handle = Handle::current();
 
-        // block_on() tries to enter the runtime, but we're already inside it so it panics
+        // block_on() tries to enter the runtime, but we're already inside it so it does panic
         handle.block_on(async { "panic!" });
     }
 
