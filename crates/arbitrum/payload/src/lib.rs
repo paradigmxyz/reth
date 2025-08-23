@@ -411,6 +411,8 @@ mod tests {
 fn block_to_payload_maps_fields_and_sidecar() {
     use alloy_primitives::{address, b256, Bytes as ABytes};
     use reth_primitives_traits::Block as _;
+    use reth_payload_primitives::PayloadTypes;
+
     let header = alloy_consensus::Header {
         parent_hash: b256!("1111111111111111111111111111111111111111111111111111111111111111"),
         ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
@@ -468,6 +470,8 @@ fn block_to_payload_maps_fields_and_sidecar() {
 #[test]
 fn execdata_try_into_block_with_sidecar_roundtrip_header() {
     use reth_primitives_traits::Block as _;
+    use reth_payload_primitives::PayloadTypes;
+
     let header = alloy_consensus::Header {
         parent_hash: B256::from([0x44; 32]),
         ommers_hash: alloy_consensus::EMPTY_OMMER_ROOT_HASH,
