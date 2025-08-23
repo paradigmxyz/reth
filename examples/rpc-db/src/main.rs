@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p rpc-db
+//! cargo run -p example-rpc-db
 //! ```
 //!
 //! This installs an additional RPC method `myrpcExt_customMethod` that can be queried via [cast](https://github.com/foundry-rs/foundry)

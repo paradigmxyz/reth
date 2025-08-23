@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p manual-p2p
+//! cargo run -p example-manual-p2p
 //! ```
 
 #![warn(unused_crate_dependencies)]
