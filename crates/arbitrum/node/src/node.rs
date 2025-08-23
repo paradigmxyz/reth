@@ -312,17 +312,15 @@ where
         }
         let block_base_fee = next_env.max_fee_per_gas;
 
-        if next_env.gas_limit == 0 {
-            if let Some(gl) =
-                reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider)
-            {
-                reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "overriding zero gas_limit from ArbOS state");
-                next_env.gas_limit = gl;
-            } else {
-                const INITIAL_PER_BLOCK_GAS_LIMIT_V0: u64 = 20_000_000;
-                reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using default {}", INITIAL_PER_BLOCK_GAS_LIMIT_V0);
-                next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_V0;
-            }
+        if let Some(gl) =
+            reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider)
+        {
+            reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
+            next_env.gas_limit = gl;
+        } else if next_env.gas_limit == 0 {
+            const INITIAL_PER_BLOCK_GAS_LIMIT_V0: u64 = 20_000_000;
+            reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using default {}", INITIAL_PER_BLOCK_GAS_LIMIT_V0);
+            next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_V0;
         }
 
         let mut builder = evm_config
