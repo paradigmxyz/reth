@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 use reth_arbitrum_payload::ArbExecutionData;
 use reth_engine_tree::tree::{BasicEngineValidator, TreeConfig};
 use reth_node_builder::rpc::EngineValidatorBuilder;
+use reth_chainspec::EthChainSpec;
+use reth_node_builder::invalid_block_hook::InvalidBlockHookExt;
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]

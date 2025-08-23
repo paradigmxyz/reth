@@ -979,7 +979,7 @@ where
             reth_arbitrum_rpc::ArbEthApiBuilder,
             (),
             ArbEngineApiBuilder<crate::validator::ArbPayloadValidatorBuilder>,
-            BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
+            crate::engine::ArbEngineValidatorBuilder,
             Identity,
         >;
 
