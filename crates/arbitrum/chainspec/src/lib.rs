@@ -874,7 +874,7 @@ mod tests {
 
         let SealedHeader { header, .. } = spec.genesis_header;
         assert_eq!(header.number, 0u64.into());
-        assert_eq!(header.gas_limit, U256::from(parse_hex_quantity(gas_limit_hex).to::<u64>()));
+        assert_eq!(header.gas_limit, parse_hex_quantity(gas_limit_hex).to::<u64>());
         assert_eq!(header.base_fee_per_gas, Some(parse_hex_quantity(base_fee_hex).to::<u64>()));
         assert_eq!(header.timestamp, parse_hex_quantity(timestamp_hex).to::<u64>());
 
