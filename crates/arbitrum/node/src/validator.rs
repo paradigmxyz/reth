@@ -40,10 +40,10 @@ where
         exec_data: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let expected_hash = exec_data.block_hash();
-        tracing::trace!(target: "arb-reth::engine", %expected_hash, "arb engine: start ensure_well_formed_payload");
+        tracing::info!(target: "arb-reth::engine", %expected_hash, "arb engine: start ensure_well_formed_payload");
         let txs_len = exec_data.payload.as_v1().transactions.len();
         let has_pbbr = exec_data.sidecar.parent_beacon_block_root.is_some();
-        tracing::trace!(target: "arb-reth::engine", txs_len, has_pbbr, "arb engine: arb payload summary before decode");
+        tracing::info!(target: "arb-reth::engine", txs_len, has_pbbr, "arb engine: arb payload summary before decode");
 
         let sealed_block = {
             exec_data
@@ -98,7 +98,7 @@ where
         _version: EngineApiMessageVersion,
         _payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, Types::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        tracing::trace!(
+        tracing::info!(
             target: "arb-reth::engine",
             ?_version,
             "arb engine: skipping version-specific withdrawals checks for Arbitrum"
@@ -111,7 +111,7 @@ where
         _version: EngineApiMessageVersion,
         _attributes: &Types::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        tracing::trace!(
+        tracing::info!(
             target: "arb-reth::engine",
             ?_version,
             "arb engine: attributes well-formed (withdrawals ignored for Arbitrum)"
