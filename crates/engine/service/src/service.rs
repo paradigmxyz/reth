@@ -89,13 +89,8 @@ where
         V: EngineValidator<N::Payload>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
-        let engine_kind = if chain_spec.is_optimism() {
-            EngineApiKind::OpStack
-        } else if chain_spec.is_arbitrum() {
-            EngineApiKind::Arbitrum
-        } else {
-            EngineApiKind::Ethereum
-        };
+        let engine_kind =
+            if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
@@ -103,15 +98,6 @@ where
             PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
-
-        let tree_config = if engine_kind.is_arbitrum() {
-            tree_config
-                .with_state_root_fallback(true)
-                .with_enable_parallel_sparse_trie(false)
-                .with_legacy_state_root(true)
-        } else {
-            tree_config
-        };
 
         let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
             blockchain_db,
