@@ -23,6 +23,7 @@ use reth_primitives_traits::Block as _;
 use reth_storage_api::BlockReader;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
+use reth_node_builder::rpc::EngineValidatorAddOn;
 
 #[derive(Debug, Clone, Default)]
 pub struct ArbNode {
@@ -824,7 +825,7 @@ pub struct ArbAddOns<
     EthB: EthApiBuilder<N> = reth_arbitrum_rpc::ArbEthApiBuilder,
     PVB = (),
     EB = ArbEngineApiBuilder<PVB>,
-    EVB = BasicEngineValidatorBuilder<crate::validator::ArbPayloadValidatorBuilder>,
+    EVB = BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
     RpcM = Identity,
 > {
     pub rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcM>,
@@ -979,7 +980,7 @@ where
             reth_arbitrum_rpc::ArbEthApiBuilder,
             (),
             ArbEngineApiBuilder<crate::validator::ArbPayloadValidatorBuilder>,
-            crate::engine::ArbEngineValidatorBuilder,
+            BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
             Identity,
         >;
 
@@ -999,7 +1000,9 @@ where
     fn add_ons(&self) -> <Self as Node<N>>::AddOns {
         let engine_api =
             ArbEngineApiBuilder::new(crate::validator::ArbPayloadValidatorBuilder::default());
-        ArbAddOns::default().with_engine_api(engine_api)
+        let add_ons: <Self as Node<N>>::AddOns =
+            ArbAddOns::default().with_engine_api(engine_api);
+        add_ons
     }
 }
 

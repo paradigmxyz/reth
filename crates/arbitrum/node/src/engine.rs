@@ -10,8 +10,11 @@ use std::marker::PhantomData;
 use reth_arbitrum_payload::ArbExecutionData;
 use reth_engine_tree::tree::{BasicEngineValidator, TreeConfig};
 use reth_node_builder::rpc::EngineValidatorBuilder;
+use reth_evm::ConfigureEngineEvm;
 use reth_chainspec::EthChainSpec;
 use reth_node_builder::invalid_block_hook::InvalidBlockHookExt;
+use reth_node_builder::rpc::PayloadValidatorBuilder;
+use reth_node_api::AddOnsContext;
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
@@ -49,6 +52,26 @@ where
     }
 }
 
+impl<N> PayloadValidatorBuilder<N> for ArbEngineValidatorBuilder
+where
+    N: FullNodeComponents<
+        Types: NodeTypes<
+            Payload: PayloadTypes<ExecutionData = ArbExecutionData>,
+            Primitives: NodePrimitives<
+                SignedTx = reth_arbitrum_primitives::ArbTransactionSigned,
+                Block = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned>,
+            >,
+        >,
+        Provider: StateProviderFactory,
+    >,
+{
+    type Validator = crate::validator::ArbEngineValidator<N::Provider>;
+
+    async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        Ok(crate::validator::ArbEngineValidator::new(ctx.node.provider().clone()))
+    }
+}
+
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ArbEngineValidatorBuilder;
@@ -64,6 +87,7 @@ where
             >,
         >,
         Provider: StateProviderFactory,
+        Evm: ConfigureEngineEvm<ArbExecutionData>,
     >,
 {
     type EngineValidator = BasicEngineValidator<
@@ -87,7 +111,7 @@ where
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),
-            ctx.node.consensus().clone(),
+            std::sync::Arc::new(ctx.node.consensus().clone()),
             ctx.node.evm_config().clone(),
             payload_validator,
             tree_config,
