@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(dead_code))]
 #![allow(unused)]
 use alloc::sync::Arc;
 use alloy_consensus::{proofs, Block, BlockBody, Header, TxReceipt};
