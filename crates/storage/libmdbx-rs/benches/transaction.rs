@@ -49,9 +49,9 @@ fn bench_get_rand_raw(c: &mut Criterion) {
                     key_val.iov_len = key.len();
                     key_val.iov_base = key.as_bytes().as_ptr().cast_mut().cast();
 
-                    mdbx_get(txn, dbi, &raw const key_val, &raw mut data_val);
-
-                    i += key_val.iov_len;
+                    let rc = mdbx_get(txn, dbi, &raw const key_val, &raw mut data_val);
+                    assert_eq!(0, rc);
+                    i += data_val.iov_len;
                 }
                 black_box(i);
             })
