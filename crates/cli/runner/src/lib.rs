@@ -53,6 +53,38 @@ impl RuntimeOrHandle {
             Self::Handle(handle) => (None, handle),
         }
     }
+
+    // Block on a future, handling both `Runtime` and `Handle` cases.
+    fn block_on<F>(&self, fut: F) -> Result<F::Output, std::io::Error>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        match self {
+            Self::Runtime(rt) => Ok(rt.block_on(fut)),
+            Self::Handle(handle) => {
+                // Check if we're in an async context to spawn a thread to avoid panic
+                if Handle::try_current().is_ok() {
+                    let handle = handle.clone();
+                    std::thread::spawn(move || handle.block_on(fut))
+                        .join()
+                        .map_err(|_| std::io::Error::other("Failed to join blocking thread"))
+                } else {
+                    Ok(handle.block_on(fut))
+                }
+            }
+        }
+    }
+
+    /// Spawn a blocking task that runs a future
+    fn spawn_blocking_task<F>(&self, fut: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let handle = self.handle().clone();
+        self.handle().spawn_blocking(move || handle.block_on(fut))
+    }
 }
 
 /// Executes CLI commands.
@@ -93,6 +125,16 @@ impl CliRunner {
     /// Returns the handle reference, regardless of whether this contains a runtime or handle
     pub fn handle(&self) -> &Handle {
         self.executor.handle()
+    }
+
+    /// Executes a regular future until completion or until external signal received
+    pub fn run_until_ctrl_c_with_handle<F, E>(self, fut: F) -> Result<(), E>
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Send + Sync + From<std::io::Error> + 'static,
+    {
+        self.executor.block_on(run_until_ctrl_c(fut)).map_err(E::from)??;
+        Ok(())
     }
 }
 
@@ -172,19 +214,21 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = self.executor.into_runtime("blocking tasks")?;
-        let handle = tokio_runtime.handle().clone();
-        let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
-        tokio_runtime
-            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
+        let fut = self.executor.spawn_blocking_task(fut);
+
+        self.executor
+            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))
+            .map_err(E::from)??;
 
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
         // the current thread but we want to exit right away.
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || drop(tokio_runtime))
-            .unwrap();
+        if let RuntimeOrHandle::Runtime(tokio_runtime) = self.executor {
+            std::thread::Builder::new()
+                .name("tokio-runtime-shutdown".to_string())
+                .spawn(move || drop(tokio_runtime))
+                .unwrap();
+        }
 
         Ok(())
     }
@@ -296,51 +340,54 @@ mod tests {
     use tokio::time::sleep;
 
     #[test]
-    fn test_runtime_works() {
+    fn test_runtime_with_run_until_ctrl_c() {
         let runner = CliRunner::try_default_runtime().unwrap();
         let result = runner.run_until_ctrl_c(async {
-            sleep(Duration::from_millis(10)).await;
+            sleep(Duration::from_millis(5)).await;
             Ok::<(), std::io::Error>(())
         });
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_handle_only_fails_with_error() {
+    fn test_handle_with_run_until_ctrl_c_with_handle() {
+        let rt = tokio_runtime().unwrap();
+        let handle = rt.handle().clone();
+
+        // Separate thread is used to avoid async context
+        let result = std::thread::spawn(move || {
+            let runner = CliRunner::from_handle(handle);
+            runner.run_until_ctrl_c_with_handle(async { Ok::<(), std::io::Error>(()) })
+        })
+        .join()
+        .unwrap();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_with_run_blocking_until_ctrl_c() {
+        let rt = tokio_runtime().unwrap();
+        let handle = rt.handle().clone();
+
+        let result = std::thread::spawn(move || {
+            let runner = CliRunner::from_handle(handle);
+            runner.run_blocking_until_ctrl_c(async { Ok::<(), std::io::Error>(()) })
+        })
+        .join()
+        .unwrap();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_fails_without_handle_support() {
         let rt = tokio_runtime().unwrap();
         let runner = CliRunner::from_handle(rt.handle().clone());
 
         let result = runner.run_until_ctrl_c(async { Ok::<(), std::io::Error>(()) });
 
         assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("tokio runtime is required"));
-        assert!(error_msg.contains("async commands"));
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "Cannot start a runtime from within a runtime")]
-    async fn test_handle_block_on_panics_in_async_context() {
-        let handle = Handle::current();
-
-        // block_on() tries to enter the runtime, but we're already inside it so it does panic
-        handle.block_on(async { "panic!" });
-    }
-
-    #[test]
-    fn test_handle_block_on_works_from_sync_context() {
-        let rt = tokio_runtime().unwrap();
-        let handle = rt.handle().clone();
-
-        // It does not panic because we're outside the async runtime context
-        std::thread::spawn(move || {
-            let result = handle.block_on(async {
-                sleep(Duration::from_millis(10)).await;
-                "success"
-            });
-            assert_eq!(result, "success");
-        })
-        .join()
-        .unwrap();
+        assert!(result.unwrap_err().to_string().contains("tokio runtime is required"));
     }
 }
