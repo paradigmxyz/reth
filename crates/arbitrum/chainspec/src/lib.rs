@@ -873,7 +873,7 @@ mod tests {
         ).expect("ok");
 
         let SealedHeader { header, .. } = spec.genesis_header;
-        assert_eq!(header.number, 0u64.into());
+        assert_eq!(header.number, U256::from(0u64));
         assert_eq!(header.gas_limit, parse_hex_quantity(gas_limit_hex).to::<u64>());
         assert_eq!(header.base_fee_per_gas, Some(parse_hex_quantity(base_fee_hex).to::<u64>()));
         assert_eq!(header.timestamp, parse_hex_quantity(timestamp_hex).to::<u64>());
@@ -891,6 +891,8 @@ mod tests {
             B256::from(arr)
         };
         assert_eq!(header.mix_hash, mix_bytes);
-        assert_eq!(header.nonce, parse_hex_quantity(nonce_hex).to::<u64>().into());
+        let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
     }
+        assert_eq!(header.nonce, expected_nonce);
+
 }
