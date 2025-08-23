@@ -261,7 +261,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command<C>),
+    Db(Box<db::Command<C>>),
     /// Download public node snapshots
     #[command(name = "download")]
     Download(download::DownloadCommand<C>),
@@ -270,7 +270,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<C>),
+    P2P(Box<p2p::Command<C>>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
