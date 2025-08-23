@@ -11,6 +11,7 @@ use crate::transactions::constants::tx_fetcher::{
 };
 use alloy_primitives::B256;
 use derive_more::{Constructor, Display};
+
 use reth_eth_wire::NetworkPrimitives;
 use reth_ethereum_primitives::TxType;
 
@@ -38,7 +39,7 @@ impl Default for TransactionsManagerConfig {
 }
 
 /// Determines how new pending transactions are propagated to other peers in full.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactionPropagationMode {
     /// Send full transactions to sqrt of current peers.
@@ -57,6 +58,26 @@ impl TransactionPropagationMode {
             Self::Sqrt => (peer_count as f64).sqrt().round() as usize,
             Self::All => peer_count,
             Self::Max(max) => peer_count.min(*max),
+        }
+    }
+}
+impl FromStr for TransactionPropagationMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_lowercase();
+        match s.as_str() {
+            "sqrt" => Ok(Self::Sqrt),
+            "all" => Ok(Self::All),
+            s => {
+                if let Some(num) = s.strip_prefix("max:") {
+                    num.parse::<usize>()
+                        .map(TransactionPropagationMode::Max)
+                        .map_err(|_| format!("Invalid number for Max variant: {num}"))
+                } else {
+                    Err(format!("Invalid transaction propagation mode: {s}"))
+                }
+            }
         }
     }
 }
@@ -255,3 +276,60 @@ where
 /// Type alias for `TypedRelaxedFilter`. This filter accepts known Ethereum transaction types and
 /// ignores unknown ones without penalizing the peer.
 pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter<TxType>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transaction_propagation_mode_from_str() {
+        // Test "sqrt" variant
+        assert_eq!(
+            TransactionPropagationMode::from_str("sqrt").unwrap(),
+            TransactionPropagationMode::Sqrt
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("SQRT").unwrap(),
+            TransactionPropagationMode::Sqrt
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("Sqrt").unwrap(),
+            TransactionPropagationMode::Sqrt
+        );
+
+        // Test "all" variant
+        assert_eq!(
+            TransactionPropagationMode::from_str("all").unwrap(),
+            TransactionPropagationMode::All
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("ALL").unwrap(),
+            TransactionPropagationMode::All
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("All").unwrap(),
+            TransactionPropagationMode::All
+        );
+
+        // Test "max:N" variant
+        assert_eq!(
+            TransactionPropagationMode::from_str("max:10").unwrap(),
+            TransactionPropagationMode::Max(10)
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("MAX:42").unwrap(),
+            TransactionPropagationMode::Max(42)
+        );
+        assert_eq!(
+            TransactionPropagationMode::from_str("Max:100").unwrap(),
+            TransactionPropagationMode::Max(100)
+        );
+
+        // Test invalid inputs
+        assert!(TransactionPropagationMode::from_str("invalid").is_err());
+        assert!(TransactionPropagationMode::from_str("max:not_a_number").is_err());
+        assert!(TransactionPropagationMode::from_str("max:").is_err());
+        assert!(TransactionPropagationMode::from_str("max").is_err());
+        assert!(TransactionPropagationMode::from_str("").is_err());
+    }
+}

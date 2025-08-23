@@ -76,6 +76,7 @@ members = [
     "crates/optimism/cli",
     "crates/optimism/consensus",
     "crates/optimism/evm/",
+    "crates/optimism/flashblocks/",
     "crates/optimism/hardforks/",
     "crates/optimism/node/",
     "crates/optimism/payload/",
@@ -430,6 +431,7 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = false }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-optimism-flashblocks = { path = "crates/optimism/flashblocks" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
 reth-stages = { path = "crates/stages/stages" }
@@ -467,7 +469,7 @@ revm-context = { version = "9.0.1", default-features = false }
 revm-context-interface = { version = "8.0.1", default-features = false }
 revm-database-interface = { version = "7.0.1", default-features = false }
 op-revm = { version = "9.0.1", default-features = false }
-revm-inspectors = "0.28.0"
+revm-inspectors = "0.28.2"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
@@ -478,7 +480,7 @@ alloy-primitives = { version = "1.3.1", default-features = false, features = ["m
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.3.1"
 alloy-sol-types = { version = "1.3.1", default-features = false }
-alloy-trie = { version = "0.9.0", default-features = false }
+alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.2.7"
 
@@ -529,6 +531,7 @@ bincode = "1.3"
 bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
 bytes = { version = "1.5", default-features = false }
+brotli = "8"
 cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"

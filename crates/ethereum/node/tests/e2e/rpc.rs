@@ -62,10 +62,12 @@ async fn test_fee_history() -> eyre::Result<()> {
 
     let genesis_base_fee = chain_spec.initial_base_fee().unwrap() as u128;
     let expected_first_base_fee = genesis_base_fee -
-        genesis_base_fee / chain_spec.base_fee_params_at_block(0).max_change_denominator;
+        genesis_base_fee /
+            chain_spec
+                .base_fee_params_at_timestamp(chain_spec.genesis_timestamp())
+                .max_change_denominator;
     assert_eq!(fee_history.base_fee_per_gas[0], genesis_base_fee);
     assert_eq!(fee_history.base_fee_per_gas[1], expected_first_base_fee,);
-
     // Spend some gas
     let builder = GasWaster::deploy_builder(&provider, U256::from(500)).send().await?;
     node.advance_block().await?;

@@ -21,7 +21,7 @@ use std::{
     cmp::{Ord, Ordering, PartialOrd},
     sync::mpsc,
 };
-use tracing::{instrument, trace};
+use tracing::{instrument, trace, warn};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -334,6 +334,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     if let Some(reveal_path) = reveal_path {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
                         if subtrie.nodes.get(&reveal_path).expect("node must exist").is_hash() {
+                            warn!(
+                                target: "trie::parallel_sparse",
+                                child_path = ?reveal_path,
+                                leaf_full_path = ?full_path,
+                                "Extension node child not revealed in update_leaf, falling back to db",
+                            );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&reveal_path)?
                             {
@@ -609,10 +615,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 let remaining_child_node =
                     match remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap() {
                         SparseNode::Hash(_) => {
-                            trace!(
+                            warn!(
                                 target: "trie::parallel_sparse",
-                                ?remaining_child_path,
-                                "Retrieving remaining blinded branch child",
+                                child_path = ?remaining_child_path,
+                                leaf_full_path = ?full_path,
+                                "Branch node child not revealed in remove_leaf, falling back to db",
                             );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&remaining_child_path)?
@@ -1535,6 +1542,12 @@ impl SparseSubtrie {
                 LeafUpdateStep::Complete { reveal_path, .. } => {
                     if let Some(reveal_path) = reveal_path {
                         if self.nodes.get(&reveal_path).expect("node must exist").is_hash() {
+                            warn!(
+                                target: "trie::parallel_sparse",
+                                child_path = ?reveal_path,
+                                leaf_full_path = ?full_path,
+                                "Extension node child not revealed in update_leaf, falling back to db",
+                            );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&reveal_path)?
                             {
@@ -2795,8 +2808,8 @@ mod tests {
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
-        let walker =
-            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze())
+            .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))

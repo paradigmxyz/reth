@@ -900,9 +900,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bada1fc392a33665de0dc50d401a3701b62583c655e3522a323490a5da016962"
+checksum = "e3412d52bb97c6c6cc27ccc28d4e6e8cf605469101193b50b0bd5813b1f990b5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -8025,6 +8025,7 @@ dependencies = [
  "revm-state",
  "schnellru",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.15",
  "tokio",
  "tracing",
@@ -9264,6 +9265,26 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "thiserror 2.0.15",
+]
+
+[[package]]
+name = "reth-optimism-flashblocks"
+version = "1.6.0"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "alloy-serde",
+ "brotli",
+ "eyre",
+ "futures-util",
+ "reth-optimism-primitives",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
 ]
 
 [[package]]
@@ -10870,9 +10891,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.28.0"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a76ba086ca57a718368e46e792a81c5eb7a30366956aa6293adbcec8b1181ce"
+checksum = "364d0b3c46727dc810a9ddc40799805e85236424a1a9ddec3909c734e03f0657"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
