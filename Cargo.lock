@@ -7415,6 +7415,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-engine-local",
  "reth-engine-primitives",
+ "reth-engine-tree",
  "reth-ethereum-consensus",
  "reth-evm",
  "reth-execution-types",
