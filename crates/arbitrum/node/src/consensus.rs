@@ -98,8 +98,6 @@ where
         if h.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
             return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
-        validate_header_extra_data(h)?;
-        validate_header_base_fee(h, &self.chain_spec)?;
         Ok(())
     }
 
@@ -111,7 +109,6 @@ where
         let h = header.header();
         validate_against_parent_hash_number(h, parent)?;
         validate_against_parent_timestamp(h, parent.header())?;
-        validate_against_parent_eip1559_base_fee(h, parent.header(), &self.chain_spec)?;
         Ok(())
     }
 }

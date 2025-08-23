@@ -3,7 +3,7 @@
 use alloy_rpc_types_engine::ClientVersionV1;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes};
-use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
+use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder, BasicEngineValidatorBuilder};
 use reth_node_core::version::{version_metadata, CLIENT_CODE};
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};

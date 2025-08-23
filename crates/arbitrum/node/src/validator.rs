@@ -11,6 +11,7 @@ use reth_payload_primitives::{
 use reth_node_api::{EngineTypes, FullNodeComponents, NodeTypes, PayloadTypes};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, Block};
 use reth_provider::StateProviderFactory;
+use reth_tracing::tracing;
 
 #[derive(Debug, Clone)]
 pub struct ArbEngineValidator<P> {
@@ -39,25 +40,48 @@ where
         exec_data: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let expected_hash = exec_data.block_hash();
+        tracing::trace!(target: "arb-reth::engine", %expected_hash, "arb engine: start ensure_well_formed_payload");
 
         let sealed_block = {
             exec_data
                 .try_into_block_with_sidecar(&exec_data.sidecar)
-                .map_err(|e| NewPayloadError::Other(format!("failed to decode arb payload: {e}").into()))?
+                .map_err(|e| {
+                    tracing::warn!(target: "arb-reth::engine", err=%e, "arb engine: failed to decode arb payload");
+                    NewPayloadError::Other(format!("failed to decode arb payload: {e}").into())
+                })?
                 .seal_slow()
         };
 
-        if expected_hash != sealed_block.hash() {
+        let got_hash = sealed_block.hash();
+        if expected_hash != got_hash {
+            tracing::warn!(target: "arb-reth::engine", got=%got_hash, expected=%expected_hash, "arb engine: block hash mismatch");
             return Err(NewPayloadError::Other(format!(
                 "block hash mismatch: execution={} consensus={}",
-                sealed_block.hash(),
+                got_hash,
                 expected_hash
             ).into()));
         }
 
+        let hdr = sealed_block.header();
+        let base_fee = hdr.base_fee_per_gas;
+        let gas_limit = hdr.gas_limit;
+        let extra_len = hdr.extra_data.len();
+        let parent = hdr.parent_hash;
+        tracing::trace!(
+            target: "arb-reth::engine",
+            %parent,
+            gas_limit=%gas_limit,
+            base_fee=?base_fee,
+            extra_len=%extra_len,
+            "arb engine: decoded sealed block header details"
+        );
+
         sealed_block
             .try_recover()
-            .map_err(|e| NewPayloadError::Other(format!("failed to recover senders: {e}").into()))
+            .map_err(|e| {
+                tracing::warn!(target: "arb-reth::engine", err=%e, "arb engine: failed to recover senders");
+                NewPayloadError::Other(format!("failed to recover senders: {e}").into())
+            })
     }
 }
 
