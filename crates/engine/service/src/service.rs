@@ -108,6 +108,7 @@ where
             tree_config
                 .with_state_root_fallback(true)
                 .with_enable_parallel_sparse_trie(false)
+                .with_legacy_state_root(true)
         } else {
             tree_config
         };
