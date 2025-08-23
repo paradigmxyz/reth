@@ -200,7 +200,7 @@ struct AsyncCliRunner {
 // === impl AsyncCliRunner ===
 
 impl AsyncCliRunner {
-    /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
+    /// Given a tokio [`Runtime`], creates additional context required to
     /// execute commands asynchronously.
     fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
         let task_manager = TaskManager::new(tokio_runtime.handle().clone());
@@ -216,7 +216,7 @@ pub struct CliContext {
     pub task_executor: TaskExecutor,
 }
 
-/// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
+/// Creates a new default tokio multi-thread [Runtime] with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()
