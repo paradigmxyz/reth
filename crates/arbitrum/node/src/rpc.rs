@@ -12,6 +12,9 @@ use crate::ARB_NAME_CLIENT;
 use reth_arbitrum_rpc::engine::ARB_ENGINE_CAPABILITIES;
 use reth_arbitrum_payload::ArbExecutionData;
 
+use reth_storage_api::BlockNumReader;
+use reth_provider::HeaderProvider;
+
 #[derive(Debug, Default, Clone)]
 pub struct ArbEngineApiBuilder<EV> {
     engine_validator_builder: EV,
@@ -65,6 +68,12 @@ where
             ctx.config.engine.accept_execution_requests_hash,
         );
 
+        {
+            let provider = ctx.node.provider();
+            if let Ok(best) = provider.best_block_number() {
+                reth_tracing::tracing::info!(target: "arb-reth::rpc", best_number = best, "rpc: initial provider head");
+            }
+        }
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }
