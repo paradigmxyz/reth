@@ -2,7 +2,7 @@
 
 use crate::launcher::Launcher;
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, HardforksOverrides};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -10,8 +10,9 @@ use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs,
+        EthereumHardforkOverrideArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs,
+        TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -113,6 +114,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "ERA")]
     pub era: EraArgs,
 
+    /// All hardfork overrides related arguments with --override prefix
+    #[command(flatten, next_help_heading = "Hardfork Overrides")]
+    pub hardfork_overrides: EthereumHardforkOverrideArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -137,7 +142,7 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 impl<C, Ext> NodeCommand<C, Ext>
 where
     C: ChainSpecParser,
-    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    C::ChainSpec: EthChainSpec + EthereumHardforks + HardforksOverrides,
     Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
@@ -168,6 +173,7 @@ where
             ext,
             engine,
             era,
+            hardfork_overrides,
         } = self;
 
         // set up node config
@@ -198,6 +204,9 @@ where
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
         }
+
+        node_config = node_config
+            .map_chainspec(|spec| spec.apply_hardforks_overrides(hardfork_overrides.as_vec()));
 
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
