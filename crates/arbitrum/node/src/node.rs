@@ -318,7 +318,7 @@ where
             reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
             next_env.gas_limit = gl;
         } else {
-            const INITIAL_PER_BLOCK_GAS_LIMIT_NITRO: u64 = 0x10000000000000;
+            const INITIAL_PER_BLOCK_GAS_LIMIT_NITRO: u64 = 0x4000000000000;
             reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using Nitro default {}", INITIAL_PER_BLOCK_GAS_LIMIT_NITRO);
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
