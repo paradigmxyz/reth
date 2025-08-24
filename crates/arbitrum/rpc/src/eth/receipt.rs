@@ -2,6 +2,8 @@ use std::vec;
 use reth_storage_api::HeaderProvider;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
+use alloy_consensus::ReceiptEnvelope;
+use reth_rpc_eth_types::receipt::build_receipt;
 
 #[derive(Clone, Debug)]
 pub struct ArbReceiptConverter<P> {
@@ -24,8 +26,14 @@ where
 
     fn convert_receipts(
         &self,
-        _receipts: vec::Vec<ConvertReceiptInput<'_, N>>,
+        receipts: vec::Vec<ConvertReceiptInput<'_, N>>,
     ) -> Result<vec::Vec<Self::RpcReceipt>, Self::Error> {
-        Ok(Default::default())
+        let mut out = Vec::with_capacity(receipts.len());
+        for input in receipts {
+            out.push(build_receipt(&input, None, |receipt_with_bloom| {
+                ReceiptEnvelope::Legacy(receipt_with_bloom)
+            }));
+        }
+        Ok(out)
     }
 }
