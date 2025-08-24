@@ -1,5 +1,14 @@
 use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+
+pub fn compute_nitro_mixhash(send_count: u64, l1_block_number: u64, arbos_version: u64) -> B256 {
+    let mut mix = [0u8; 32];
+    mix[0..8].copy_from_slice(&send_count.to_be_bytes());
+    mix[8..16].copy_from_slice(&l1_block_number.to_be_bytes());
+    mix[16..24].copy_from_slice(&arbos_version.to_be_bytes());
+    B256::from(mix)
+}
+
 pub fn extract_send_root_from_header_extra(extra: &[u8]) -> B256 {
     if extra.len() >= 32 {
         B256::from_slice(&extra[..32])
@@ -7,7 +16,7 @@ pub fn extract_send_root_from_header_extra(extra: &[u8]) -> B256 {
         B256::ZERO
     }
 }
-
+ 
 use reth_storage_api::StateProvider;
 
 #[derive(Clone, Debug, Default)]

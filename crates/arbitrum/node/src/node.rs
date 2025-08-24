@@ -334,6 +334,14 @@ where
                 next_env.suggested_fee_recipient = batch_poster_addr;
             }
         }
+        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO {
+            let sugg = attrs.suggested_fee_recipient;
+            if sugg != alloy_primitives::Address::ZERO {
+                next_env.suggested_fee_recipient = sugg;
+            } else {
+                next_env.suggested_fee_recipient = poster;
+            }
+        }
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
