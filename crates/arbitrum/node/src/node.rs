@@ -267,7 +267,7 @@ where
             .build();
 
         let mut attrs2 = attrs.clone();
-        attrs2.prev_randao = sealed_parent.mix_hash();
+        attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
         let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
