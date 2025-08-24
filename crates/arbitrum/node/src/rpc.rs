@@ -65,6 +65,14 @@ where
             ctx.config.engine.accept_execution_requests_hash,
         );
 
+        {
+            let provider = ctx.node.provider();
+            if let Ok(best) = provider.best_block_number() {
+                if let Ok(h) = provider.header_by_number(best) {
+                    reth_tracing::tracing::info!(target: "arb-reth::rpc", best_number = best, best_hash = ?h.map(|hdr| hdr.hash()), "rpc: initial provider head");
+                }
+            }
+        }
 
         Ok(reth_arbitrum_rpc::engine::ArbEngineApi::new(inner))
     }
