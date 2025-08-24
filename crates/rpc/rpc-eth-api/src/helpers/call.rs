@@ -103,6 +103,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
+                let mut parent_number = parent.number();
+                let mut parent_timestamp = parent.timestamp();
                 for block in block_state_calls {
                     let mut evm_env = this
                         .evm_config()
@@ -138,6 +140,28 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if let Some(state_overrides) = state_overrides {
                         apply_state_overrides(state_overrides, &mut db)
                             .map_err(Self::Error::from_eth_err)?;
+                    }
+
+                    // Validate block number and timestamp
+                    if validation {
+                        let current_number = evm_env.block_env.number.to::<u64>();
+                        if current_number <= parent_number {
+                            return Err(EthApiError::other(
+                                EthSimulateError::BlockNumberNotIncreased,
+                            )
+                            .into());
+                        }
+
+                        let current_timestamp = evm_env.block_env.timestamp.to::<u64>();
+                        if current_timestamp < parent_timestamp {
+                            return Err(EthApiError::other(
+                                EthSimulateError::BlockTimestampNotIncreased,
+                            )
+                            .into());
+                        }
+
+                        parent_number = current_number;
+                        parent_timestamp = current_timestamp;
                     }
 
                     let block_gas_limit = evm_env.block_env.gas_limit;
