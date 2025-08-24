@@ -1,6 +1,5 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use alloy_primitives::B256;
-use reth_storage_api::StateCommitmentProvider;
 pub use reth_storage_errors::provider::ConsistentViewError;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -27,8 +26,7 @@ pub struct ConsistentDbView<Factory> {
 
 impl<Factory> ConsistentDbView<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockNumReader + HeaderProvider>
-        + StateCommitmentProvider,
+    Factory: DatabaseProviderFactory<Provider: BlockNumReader + HeaderProvider>,
 {
     /// Creates new consistent database view.
     pub const fn new(factory: Factory, tip: Option<(B256, u64)>) -> Self {

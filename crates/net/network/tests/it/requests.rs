@@ -508,7 +508,7 @@ async fn test_eth69_get_receipts() {
         let (tx, rx) = oneshot::channel();
         handle0.send_request(
             *handle1.peer_id(),
-            reth_network::PeerRequest::GetReceipts {
+            reth_network::PeerRequest::GetReceipts69 {
                 request: reth_eth_wire::GetReceipts(vec![block_hash]),
                 response: tx,
             },
@@ -521,9 +521,8 @@ async fn test_eth69_get_receipts() {
         };
         assert_eq!(receipts_response.0.len(), 1);
         assert_eq!(receipts_response.0[0].len(), 2);
-        // When using GetReceipts request with ETH69 peers, the response should still include bloom
-        // filters The protocol version handling is done at a lower level
-        assert_eq!(receipts_response.0[0][0].receipt.cumulative_gas_used, 21000);
-        assert_eq!(receipts_response.0[0][1].receipt.cumulative_gas_used, 42000);
+        // ETH69 receipts do not include bloom filters - verify the structure
+        assert_eq!(receipts_response.0[0][0].cumulative_gas_used, 21000);
+        assert_eq!(receipts_response.0[0][1].cumulative_gas_used, 42000);
     }
 }

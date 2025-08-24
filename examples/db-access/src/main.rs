@@ -57,7 +57,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
-    // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
+    // We can convert a header to a sealed header which contains the hash w/o needing to recompute
     // it every time.
     let sealed_header = SealedHeader::seal_slow(header);
 
@@ -180,7 +180,7 @@ fn receipts_provider_example<
         .receipts_by_block(100.into())?
         .ok_or(eyre::eyre!("no receipts found for block"))?;
 
-    // Can check if a address/topic filter is present in a header, if it is we query the block and
+    // Can check if an address/topic filter is present in a header, if it is we query the block and
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();
