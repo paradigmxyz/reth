@@ -266,13 +266,15 @@ where
             .with_bundle_update()
             .build();
 
+        let mut attrs2 = attrs.clone();
+        attrs2.prev_randao = sealed_parent.mix_hash();
         let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
         > as reth_evm::ConfigureEvm>::NextBlockEnvCtx::build_next_env(
             &reth_payload_builder::EthPayloadBuilderAttributes::new(
                 parent_hash,
-                attrs.clone().into(),
+                attrs2.into(),
             ),
             &sealed_parent,
             evm_config.chain_spec().as_ref(),
