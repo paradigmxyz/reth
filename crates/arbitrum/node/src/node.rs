@@ -327,7 +327,11 @@ where
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
-        if kind == 13 {
+        let sugg = attrs.suggested_fee_recipient;
+        if sugg != alloy_primitives::Address::ZERO {
+            next_env.suggested_fee_recipient = sugg;
+        }
+        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO && kind == 13 {
             let mut cur = &l2_owned[..];
             if cur.len() >= 32 + 20 {
                 cur = &cur[32..];
@@ -339,12 +343,7 @@ where
             }
         }
         if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO {
-            let sugg = attrs.suggested_fee_recipient;
-            if sugg != alloy_primitives::Address::ZERO {
-                next_env.suggested_fee_recipient = sugg;
-            } else {
-                next_env.suggested_fee_recipient = poster;
-            }
+            next_env.suggested_fee_recipient = poster;
         }
 
         let mut builder = evm_config
