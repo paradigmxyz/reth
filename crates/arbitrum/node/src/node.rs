@@ -278,7 +278,11 @@ where
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
 
-        if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
+        let chain_id = evm_config.chain_spec().chain().id();
+        if chain_id == 421_614 {
+            const NITRO_BASE_FEE: u64 = 0x05f5e100;
+            next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(NITRO_BASE_FEE));
+        } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
             reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
         } else {
@@ -312,13 +316,13 @@ where
         }
         let block_base_fee = next_env.max_fee_per_gas;
 
-        if let Some(gl) =
-            reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider)
-        {
+        const INITIAL_PER_BLOCK_GAS_LIMIT_NITRO: u64 = 0x4000000000000;
+        if chain_id == 421_614 {
+            next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
+        } else if let Some(gl) = reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider) {
             reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
             next_env.gas_limit = gl;
         } else {
-            const INITIAL_PER_BLOCK_GAS_LIMIT_NITRO: u64 = 0x4000000000000;
             reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using Nitro default {}", INITIAL_PER_BLOCK_GAS_LIMIT_NITRO);
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
