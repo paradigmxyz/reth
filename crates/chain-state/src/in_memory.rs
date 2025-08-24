@@ -328,30 +328,43 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
-            // clear all numbers
-            numbers.clear();
+            // Remove blocks and numbers incrementally instead of full rebuild
+            let mut blocks_to_remove = Vec::new();
+            let mut numbers_to_remove = Vec::new();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
-                .map(|(_, b)| b.block.clone())
-                .collect::<Vec<_>>();
+            // Collect blocks and numbers to remove (numbers <= persisted_height)
+            for (&number, &hash) in numbers.iter() {
+                if number <= persisted_height {
+                    blocks_to_remove.push(hash);
+                    numbers_to_remove.push(number);
+                }
+            }
 
-            // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
+            // Remove the persisted blocks and numbers
+            for hash in blocks_to_remove {
+                blocks.remove(&hash);
+            }
+            for number in numbers_to_remove {
+                numbers.remove(&number);
+            }
 
-            // re-insert the blocks in natural order and connect them to their parent blocks
-            for block in old_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
-                let block_state = BlockState::with_parent(block, parent);
-                let hash = block_state.hash();
-                let number = block_state.number();
+            // Update parent links for remaining blocks - only need to update blocks
+            // whose parents might have been removed
+            let remaining_block_hashes: Vec<_> = blocks.keys().copied().collect();
+            for &hash in &remaining_block_hashes {
+                if let Some(block_state) = blocks.get(&hash) {
+                    let parent_hash = block_state.block_ref().recovered_block().parent_hash();
+                    let new_parent = blocks.get(&parent_hash).cloned();
 
-                // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
+                    // Only update if parent link needs to change
+                    if block_state.parent.as_ref().map(|p| p.hash()) !=
+                        new_parent.as_ref().map(|p| p.hash())
+                    {
+                        let new_block_state =
+                            BlockState::with_parent(block_state.block.clone(), new_parent);
+                        blocks.insert(hash, Arc::new(new_block_state));
+                    }
+                }
             }
 
             // also shift the pending state if it exists
