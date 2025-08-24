@@ -39,7 +39,7 @@ impl EraFileFormat for EraFile {
     type EraGroup = EraGroup;
     type Id = EraId;
 
-    /// Create a new [`Era1File`]
+    /// Create a new [`EraFile`]
     fn new(group: EraGroup, id: EraId) -> Self {
         Self { version: Version, group, id }
     }
@@ -135,7 +135,7 @@ impl<R: Read + Seek> StreamReader<R> for EraReader<R> {
     type File = EraFile;
     type Iterator = BeaconBlockIterator<R>;
 
-    /// Create a new [`Era1Reader`]
+    /// Create a new [`EraReader`]
     fn new(reader: R) -> Self {
         Self { reader: E2StoreReader::new(reader) }
     }
@@ -151,8 +151,8 @@ impl<R: Read + Seek> StreamReader<R> for EraReader<R> {
 }
 
 impl<R: Read + Seek> EraReader<R> {
-    /// Reads and parses an Era1 file from the underlying reader, assembling all components
-    /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
+    /// Reads and parses an era file from the underlying reader, assembling all components
+    /// into a complete [`EraFile`] with an [`EraId`] that includes the provided network name.
     pub fn read_and_assemble(mut self, network_name: String) -> Result<EraFile, E2sError> {
         // Validate version entry
         let _version_entry = match self.reader.read_version()? {
@@ -197,9 +197,9 @@ impl<R: Read + Seek> EraReader<R> {
 
 impl FileReader for EraReader<File> {}
 
-/// Writer for Era1 files that builds on top of [`E2StoreWriter`]
+/// Writer for Era files that builds on top of [`E2StoreWriter`]
 #[derive(Debug)]
-pub struct BeaconEraWriter<W: Write> {
+pub struct EraWriter<W: Write> {
     writer: E2StoreWriter<W>,
     has_written_version: bool,
     has_written_blocks: bool,
@@ -207,10 +207,10 @@ pub struct BeaconEraWriter<W: Write> {
     has_written_slot_indices: bool,
 }
 
-impl<W: Write> StreamWriter<W> for BeaconEraWriter<W> {
+impl<W: Write> StreamWriter<W> for EraWriter<W> {
     type File = EraFile;
 
-    /// Create a new [`Era1Writer`]
+    /// Create a new [`EraWriter`]
     fn new(writer: W) -> Self {
         Self {
             writer: E2StoreWriter::new(writer),
@@ -265,7 +265,7 @@ impl<W: Write> StreamWriter<W> for BeaconEraWriter<W> {
     }
 }
 
-impl<W: Write> BeaconEraWriter<W> {
+impl<W: Write> EraWriter<W> {
     /// Write for a single slot
     pub fn write_slot(
         &mut self,
