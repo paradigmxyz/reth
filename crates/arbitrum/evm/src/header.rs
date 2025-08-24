@@ -148,6 +148,10 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
     let l1_block_num_slot = storage_key_map(&blockhashes_sub, uint_to_hash_u64_be(0));
     let l1_block_number = read_storage_u64_be(provider, addr, l1_block_num_slot).unwrap_or(0);
 
+    if l1_block_number == 0 {
+        return None;
+    }
+
     Some(ArbHeaderInfo {
         send_root,
         send_count,
