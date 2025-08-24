@@ -129,7 +129,7 @@ where
     {
         return Err(ConsensusError::BodyBlockAccessListHashDiff(
             GotExpected {
-                got: alloy_primitives::keccak256(alloy_rlp::encode(&body.block_access_list())),
+                got: alloy_primitives::keccak256(alloy_rlp::encode(body.block_access_list())),
                 expected: header.block_access_list_hash().unwrap(),
             }
             .into(),
