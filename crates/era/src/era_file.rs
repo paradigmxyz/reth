@@ -63,7 +63,7 @@ pub struct EraReader<R: Read> {
     reader: E2StoreReader<R>,
 }
 
-/// An iterator of [`BlockTuple`] streaming from [`E2StoreReader`].
+/// An iterator of [`BeaconBlockIterator`] streaming from [`E2StoreReader`].
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct BeaconBlockIterator<R: Read> {

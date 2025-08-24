@@ -142,12 +142,12 @@ pub struct EraId {
 }
 
 impl EraId {
-    /// Create a new [`Era1Id`]
+    /// Create a new [`EraId`]
     pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
         Self { network_name: network_name.into(), start_slot, slot_count, hash: None }
     }
 
-    /// Add a hash identifier to  [`Era1Id`]
+    /// Add a hash identifier to  [`EraId`]
     pub const fn with_hash(mut self, hash: [u8; 4]) -> Self {
         self.hash = Some(hash);
         self
