@@ -5,6 +5,7 @@ use crate::{
     MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
+use alloy_block_access_list::BlockAccessList;
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
@@ -195,6 +196,9 @@ pub trait BlockBody:
     {
         self.recover_signers_unchecked()
     }
+
+    /// Returns the block access list for the block body.
+    fn block_access_list(&self) -> &BlockAccessList;
 }
 
 impl<T, H> BlockBody for alloy_consensus::BlockBody<T, H>
@@ -223,6 +227,10 @@ where
 
     fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
         Some(&self.ommers)
+    }
+
+    fn block_access_list(&self) -> &BlockAccessList {
+        self.block_access_list.as_ref().unwrap()
     }
 }
 

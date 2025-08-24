@@ -395,6 +395,11 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+
+    /// Error when the hash of block access list is different from the expected hash.
+    #[error("mismatched block access list hash: {0}")]
+    BodyBlockAccessListHashDiff(GotExpectedBoxed<B256>),
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),

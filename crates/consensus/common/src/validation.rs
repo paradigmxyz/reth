@@ -123,6 +123,18 @@ where
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
+    if header.block_access_list_hash().is_some() &&
+        alloy_primitives::keccak256(alloy_rlp::encode(&body.block_access_list())) !=
+            header.block_access_list_hash().unwrap()
+    {
+        return Err(ConsensusError::BodyBlockAccessListHashDiff(
+            GotExpected {
+                got: alloy_primitives::keccak256(alloy_rlp::encode(&body.block_access_list())),
+                expected: header.block_access_list_hash().unwrap(),
+            }
+            .into(),
+        ))
+    }
 
     Ok(())
 }
