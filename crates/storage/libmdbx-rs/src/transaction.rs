@@ -21,11 +21,10 @@ use std::{
 /// Compiler hint that this condition is unlikely to be true.
 /// Used to optimize the common case of non-timed-out transactions.
 #[inline(always)]
-fn unlikely(b: bool) -> bool {
+const fn unlikely(b: bool) -> bool {
     // std::hint::unlikely is unstable, so we just return the bool
     b
 }
-
 
 #[cfg(feature = "read-tx-timeouts")]
 use ffi::mdbx_txn_renew;
@@ -291,7 +290,7 @@ where
     #[cfg(feature = "read-tx-timeouts")]
     pub fn disable_timeout(&self) {
         if K::IS_READ_ONLY {
-           self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn_ptr());
+            self.env().txn_manager().remove_active_read_transaction(self.inner.txn.txn_ptr());
         }
     }
 }
@@ -557,7 +556,7 @@ impl Transaction<RW> {
 }
 
 /// A shareable pointer to an MDBX transaction.
-/// 
+///
 /// This enum dispatches to specialized implementations based on transaction type
 /// to optimize performance for read-only transactions.
 #[derive(Debug, Clone)]
@@ -567,7 +566,7 @@ pub(crate) enum TransactionPtr {
 }
 
 /// Completely lock-free read-only transaction pointer.
-/// 
+///
 /// Read-only transactions are inherently thread-safe in MDBX and don't need
 /// any locking. Even timeout renewal is safe without locks since MDBX handles
 /// concurrent renewal operations gracefully.
@@ -579,7 +578,7 @@ pub(crate) struct ReadOnlyTransactionPtr {
 }
 
 /// Read-write transaction pointer with full locking.
-/// 
+///
 /// Read-write transactions require locking for all operations to ensure safety.
 #[derive(Debug, Clone)]
 pub(crate) struct ReadWriteTransactionPtr {
@@ -608,7 +607,7 @@ impl TransactionPtr {
     }
 
     /// Get the raw transaction pointer
-    fn txn_ptr(&self) -> *mut ffi::MDBX_txn {
+    const fn txn_ptr(&self) -> *mut ffi::MDBX_txn {
         match self {
             Self::ReadOnly(ptr) => ptr.txn,
             Self::ReadWrite(ptr) => ptr.txn,
@@ -651,22 +650,22 @@ impl TransactionPtr {
         }
     }
 
-    /// Returns `true` if the transaction is timed out.
-    #[cfg(feature = "read-tx-timeouts")]
-    fn is_timed_out(&self) -> bool {
-        match self {
-            Self::ReadOnly(ptr) => ptr.is_timed_out(),
-            Self::ReadWrite(ptr) => ptr.is_timed_out(),
-        }
-    }
+    // /// Returns `true` if the transaction is timed out.
+    // #[cfg(feature = "read-tx-timeouts")]
+    // fn is_timed_out(&self) -> bool {
+    //     match self {
+    //         Self::ReadOnly(ptr) => ptr.is_timed_out(),
+    //         Self::ReadWrite(ptr) => ptr.is_timed_out(),
+    //     }
+    // }
 }
 
 impl ReadOnlyTransactionPtr {
-    /// Returns `true` if the transaction is timed out.
-    #[cfg(feature = "read-tx-timeouts")]
-    fn is_timed_out(&self) -> bool {
-        self.timed_out.load(std::sync::atomic::Ordering::Acquire)
-    }
+    // /// Returns `true` if the transaction is timed out.
+    // #[cfg(feature = "read-tx-timeouts")]
+    // fn is_timed_out(&self) -> bool {
+    //     self.timed_out.load(std::sync::atomic::Ordering::Acquire)
+    // }
 
     #[cfg(feature = "read-tx-timeouts")]
     pub(crate) fn set_timed_out(&self) {
@@ -717,7 +716,7 @@ impl ReadOnlyTransactionPtr {
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
-        // Double check without any locks 
+        // Double check without any locks
         // attempt renewal since MDBX handles concurrent renewals gracefully
         if self.timed_out.load(std::sync::atomic::Ordering::Acquire) {
             match unsafe { mdbx_txn_renew(self.txn) } {
@@ -741,7 +740,7 @@ impl ReadOnlyTransactionPtr {
 }
 
 impl ReadWriteTransactionPtr {
-     /// Returns `true` if the transaction is timed out.
+    /// Returns `true` if the transaction is timed out.
     #[cfg(feature = "read-tx-timeouts")]
     fn is_timed_out(&self) -> bool {
         self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
@@ -768,7 +767,7 @@ impl ReadWriteTransactionPtr {
         }
     }
 
-     /// Execute operation on read-write transaction (keeps existing locking behavior).
+    /// Execute operation on read-write transaction (keeps existing locking behavior).
     #[inline]
     pub(crate) fn txn_execute_fail_on_timeout<F, T>(&self, f: F) -> Result<T>
     where
@@ -799,7 +798,6 @@ impl ReadWriteTransactionPtr {
 
         Ok(f(self.txn))
     }
-
 }
 
 /// Commit latencies info.
