@@ -458,24 +458,24 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "28.0.1", default-features = false }
-revm-bytecode = { version = "6.0.1", default-features = false }
-revm-database = { version = "7.0.1", default-features = false }
-revm-state = { version = "7.0.1", default-features = false }
-revm-primitives = { version = "20.0.0", default-features = false }
-revm-interpreter = { version = "23.0.1", default-features = false }
-revm-inspector = { version = "8.0.2", default-features = false }
-revm-context = { version = "9.0.1", default-features = false }
-revm-context-interface = { version = "8.0.1", default-features = false }
-revm-database-interface = { version = "7.0.1", default-features = false }
-op-revm = { version = "9.0.1", default-features = false }
-revm-inspectors = "0.28.2"
+revm = { version = "29.0.0", default-features = false }
+revm-bytecode = { version = "6.2.2", default-features = false }
+revm-database = { version = "7.0.5", default-features = false }
+revm-state = { version = "7.0.5", default-features = false }
+revm-primitives = { version = "20.2.1", default-features = false }
+revm-interpreter = { version = "25.0.2", default-features = false }
+revm-inspector = { version = "10.0.0", default-features = false }
+revm-context = { version = "9.0.2", default-features = false }
+revm-context-interface = { version = "10.1.0", default-features = false }
+revm-database-interface = { version = "7.0.5", default-features = false }
+op-revm = { version = "10.0.0", default-features = false }
+revm-inspectors = "0.29.0"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.3.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.18.2", default-features = false }
+alloy-evm = { version = "0.19.0", default-features = false }
 alloy-primitives = { version = "1.3.1", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.3.1"
@@ -513,13 +513,13 @@ alloy-transport-ipc = { version = "1.0.23", default-features = false }
 alloy-transport-ws = { version = "1.0.23", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.18", default-features = false }
+alloy-op-evm = { version = "0.19", default-features = false }
 alloy-op-hardforks = "0.2.2"
-op-alloy-rpc-types = { version = "0.18.12", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.18.12", default-features = false }
-op-alloy-network = { version = "0.18.12", default-features = false }
-op-alloy-consensus = { version = "0.18.12", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.18.12", default-features = false }
+op-alloy-rpc-types = { version = "0.19.0", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.19.0", default-features = false }
+op-alloy-network = { version = "0.19.0", default-features = false }
+op-alloy-consensus = { version = "0.19.0", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.19.0", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
@@ -613,11 +613,11 @@ discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
-jsonrpsee = "0.25.1"
-jsonrpsee-core = "0.25.1"
-jsonrpsee-server = "0.25.1"
-jsonrpsee-http-client = "0.25.1"
-jsonrpsee-types = "0.25.1"
+jsonrpsee = "0.26.0"
+jsonrpsee-core = "0.26.0"
+jsonrpsee-server = "0.26.0"
+jsonrpsee-http-client = "0.26.0"
+jsonrpsee-types = "0.26.0"
 
 # http
 http = "1.0"
