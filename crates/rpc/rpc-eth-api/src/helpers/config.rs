@@ -1,21 +1,17 @@
 //! Loads chain configuration.
 
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::{
-    eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract},
-};
+use alloy_eips::eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_chainspec::{
-    ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head
-};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks, Head};
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
 use reth_node_api::NodePrimitives;
 use reth_revm::db::EmptyDB;
 use reth_rpc_eth_types::EthApiError;
-use reth_storage_api::{ BlockReaderIdExt};
+use reth_storage_api::BlockReaderIdExt;
 use revm::precompile::PrecompileId;
 use std::{borrow::Borrow, collections::BTreeMap};
 
@@ -28,7 +24,7 @@ pub trait EthConfigApi {
 }
 
 /// Handler for the `eth_config` RPC endpoint.
-/// 
+///
 /// Ref: <https://eips.ethereum.org/EIPS/eip-7910>
 #[derive(Debug, Clone)]
 pub struct EthConfigHandler<Provider, Evm> {
@@ -38,8 +34,9 @@ pub struct EthConfigHandler<Provider, Evm> {
 
 impl<Provider, Evm> EthConfigHandler<Provider, Evm>
 where
-    Provider:
-        ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks> + BlockReaderIdExt<Header = Header> + 'static,
+    Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
+        + BlockReaderIdExt<Header = Header>
+        + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Header>> + 'static,
 {
     /// Creates a new [`EthConfigHandler`].
@@ -78,10 +75,8 @@ where
         let current_precompiles =
             evm_to_precompiles_map(self.evm_config.evm_for_block(EmptyDB::default(), &latest));
 
-        let mut fork_timestamps = chain_spec
-            .forks_iter()
-            .filter_map(|(_, cond)| cond.as_timestamp())
-            .collect::<Vec<_>>();
+        let mut fork_timestamps =
+            chain_spec.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
         fork_timestamps.dedup();
 
         let (current_fork_idx, current_fork_timestamp) = fork_timestamps
@@ -101,9 +96,7 @@ where
 
         if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
             if let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied() {
-                if let Some(last_base_config) =
-                    self.fork_config_at_timestamp(last_fork_timestamp)
-                {
+                if let Some(last_base_config) = self.fork_config_at_timestamp(last_fork_timestamp) {
                     let fake_header = {
                         let mut header = latest.clone();
                         header.timestamp = last_fork_timestamp;
@@ -119,17 +112,15 @@ where
         }
 
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
-            if let Some(next_base_config) = self.fork_config_at_timestamp(next_fork_timestamp)
-            {
+            if let Some(next_base_config) = self.fork_config_at_timestamp(next_fork_timestamp) {
                 let fake_header = {
                     let mut header = latest;
                     header.timestamp = next_fork_timestamp;
                     header
                 };
-                let next_precompiles =
-                    evm_to_precompiles_map(
-                        self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
-                    );
+                let next_precompiles = evm_to_precompiles_map(
+                    self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+                );
                 let next = base_to_fork_config(&chain_spec, next_base_config, next_precompiles);
                 config.next = Some(next);
             }
@@ -141,8 +132,9 @@ where
 
 impl<Provider, Evm> EthConfigApiServer for EthConfigHandler<Provider, Evm>
 where
-    Provider:
-        ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks> + BlockReaderIdExt<Header = Header> + 'static,
+    Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
+        + BlockReaderIdExt<Header = Header>
+        + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Header>> + 'static,
 {
     fn config(&self) -> RpcResult<EthConfig> {

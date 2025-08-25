@@ -59,7 +59,7 @@ pub use reth_optimism_forks::*;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::{proofs::storage_root_unhashed, BlockHeader, Header};
-use alloy_eips::{eip7840::BlobParams};
+use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};

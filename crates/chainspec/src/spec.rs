@@ -473,21 +473,16 @@ impl ChainSpec {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self
-            .hardforks
-            .forks_iter()
-            .filter_map(|(_, condition)| {
-                // We filter out TTD-based forks w/o a pre-known block since those do not show up in
-                // the fork filter.
-                Some(match condition {
-                    ForkCondition::Block(block) |
-                    ForkCondition::TTD { fork_block: Some(block), .. } => {
-                        ForkFilterKey::Block(block)
-                    }
-                    ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                    _ => return None,
-                })
-            });
+        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+            // the fork filter.
+            Some(match condition {
+                ForkCondition::Block(block) |
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                _ => return None,
+            })
+        });
 
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
@@ -956,10 +951,22 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at the given timestamp.
+    pub fn with_prague_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Enable Osaka at genesis.
     pub fn osaka_activated(mut self) -> Self {
         self = self.prague_activated();
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at the given timestamp.
+    pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         self
     }
 

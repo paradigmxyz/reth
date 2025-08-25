@@ -42,7 +42,13 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::{helpers::{config::{EthConfigHandler, EthConfigApiServer}, pending_block::BuildPendingEnv}, RpcConvert, SignableTxRequest};
+use reth_rpc_eth_api::{
+    helpers::{
+        config::{EthConfigApiServer, EthConfigHandler},
+        pending_block::BuildPendingEnv,
+    },
+    RpcConvert, SignableTxRequest,
+};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -262,7 +268,8 @@ where
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
         );
 
-        let eth_config = EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let eth_config =
+            EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -271,10 +278,9 @@ where
                     validation_api.into_rpc(),
                 )?;
 
-                container.modules.merge_if_module_configured(
-                    RethRpcModule::Eth,
-                    eth_config.into_rpc(),
-                )?;
+                container
+                    .modules
+                    .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
 
                 Ok(())
             })
