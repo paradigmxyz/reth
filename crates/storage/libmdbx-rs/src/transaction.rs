@@ -143,7 +143,7 @@ where
     #[doc(hidden)]
     #[cfg(test)]
     pub fn txn(&self) -> *mut ffi::MDBX_txn {
-        self.inner.txn.txn
+        self.inner.txn.txn_ptr()
     }
 
     /// Returns a raw pointer to the MDBX environment.
