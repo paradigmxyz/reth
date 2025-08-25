@@ -153,7 +153,7 @@ where
             number: U256::from(next_number),
             beneficiary: attributes.suggested_fee_recipient,
             timestamp: U256::from(attributes.timestamp),
-            difficulty: U256::ZERO,
+            difficulty: U256::from(1),
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             basefee: attributes.max_fee_per_gas.unwrap_or_default().try_into().unwrap_or_default(),
@@ -166,6 +166,8 @@ where
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             extra_data: block.header().extra_data.clone().into(),
+            delayed_messages_read: 0,
+            l1_block_number: 0,
         }
     }
 
@@ -178,6 +180,8 @@ where
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data.into(),
+            delayed_messages_read: attributes.delayed_messages_read,
+            l1_block_number: attributes.l1_block_number,
         }
     }
 
@@ -221,6 +225,8 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root,
             extra_data: payload.payload.as_v1().extra_data.clone().into(),
+            delayed_messages_read: 0,
+            l1_block_number: 0,
         }
     }
 

@@ -39,10 +39,7 @@ impl ArbHeaderInfo {
 }
 
 const fn arbos_state_address() -> Address {
-    Address::new([
-        0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    ])
+    alloy_primitives::address!("00000000000000000000000000000000000a4b05")
 }
 
 fn uint_to_hash_u64_be(k: u64) -> B256 {
@@ -168,6 +165,13 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
         arbos_format_version: arbos_version,
     })
 }
+pub fn read_arbos_version(provider: &dyn StateProvider) -> Option<u64> {
+    let addr = arbos_state_address();
+    let root_storage_key: &[u8] = &[];
+    let version_slot = storage_key_map(&root_storage_key, uint_to_hash_u64_be(0));
+    read_storage_u64_be(provider, addr, version_slot)
+}
+
 pub fn read_l2_per_block_gas_limit(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
     let root_storage_key: &[u8] = &[];

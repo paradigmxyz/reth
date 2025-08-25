@@ -59,6 +59,8 @@ pub struct ArbBlockExecutionCtx {
     pub parent_hash: B256,
     pub parent_beacon_block_root: Option<B256>,
     pub extra_data: alloy_primitives::bytes::Bytes,
+    pub delayed_messages_read: u64,
+    pub l1_block_number: u64,
 }
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
@@ -129,7 +131,7 @@ where
         let needs_precredit = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                Internal => false,
+                Internal => true,
                 Deposit => true,
                 _ => true,
             }
@@ -192,7 +194,9 @@ where
         };
 
         let mut tx_env = tx.to_tx_env();
-        if is_internal || is_deposit {
+        if is_internal {
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+        } else if is_deposit {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         }
         if is_internal || is_deposit {

@@ -680,7 +680,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(Address::ZERO),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
         }
     }
 
@@ -697,7 +697,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(Address::ZERO),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
         }
     }
 }
@@ -1046,7 +1046,7 @@ impl ConsensusTx for ArbTransactionSigned {
                 Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
-            ArbTypedTransaction::Internal(_) => TxKind::Create,
+            ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
         }
     }
 

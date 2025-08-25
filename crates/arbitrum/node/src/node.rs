@@ -225,6 +225,8 @@ where
         poster: alloy_primitives::Address,
         request_id: Option<alloy_primitives::B256>,
         kind: u8,
+        l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
     ) -> eyre::Result<(
@@ -265,18 +267,23 @@ where
             .with_bundle_update()
             .build();
 
+        let mut attrs2 = attrs.clone();
+        attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
         let mut next_env = <reth_arbitrum_evm::ArbEvmConfig<
             ChainSpec,
             reth_arbitrum_primitives::ArbPrimitives,
         > as reth_evm::ConfigureEvm>::NextBlockEnvCtx::build_next_env(
             &reth_payload_builder::EthPayloadBuilderAttributes::new(
                 parent_hash,
-                attrs.clone().into(),
+                attrs2.into(),
             ),
             &sealed_parent,
             evm_config.chain_spec().as_ref(),
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
+        next_env.delayed_messages_read = delayed_messages_read;
+        next_env.l1_block_number = l1_block_number;
+
 
         let chain_id = evm_config.chain_spec().chain().id();
         if chain_id == 421_614 {
@@ -511,6 +518,23 @@ where
             out[12..32].copy_from_slice(addr.as_slice());
             out
         }
+        fn encode_start_block_data(
+            l1_base_fee: alloy_primitives::U256,
+            l1_block_number: u64,
+            l2_block_number: u64,
+            time_passed: u64,
+        ) -> alloy_primitives::Bytes {
+            const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
+            let selector = alloy_primitives::keccak256(SIG.as_bytes());
+            let mut out = Vec::with_capacity(4 + 32 * 4);
+            out.extend_from_slice(&selector.0[..4]);
+            out.extend_from_slice(&abi_encode_u256(&l1_base_fee));
+            out.extend_from_slice(&abi_encode_u64(l1_block_number));
+            out.extend_from_slice(&abi_encode_u64(l2_block_number));
+            out.extend_from_slice(&abi_encode_u64(time_passed));
+            alloy_primitives::Bytes::from(out)
+        }
+
         fn encode_batch_posting_report_data(
             batch_timestamp: alloy_primitives::U256,
             batch_poster: alloy_primitives::Address,
@@ -711,6 +735,30 @@ where
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
 
+        {
+            let parent_number = sealed_parent.number();
+            let parent_ts = sealed_parent.timestamp();
+            let l2_block_number = parent_number.saturating_add(1);
+            let time_passed = attrs.timestamp.saturating_sub(parent_ts);
+            let start_data = encode_start_block_data(
+                l1_base_fee,
+                l1_block_number,
+                l2_block_number,
+                time_passed,
+            );
+            let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
+                arb_alloy_consensus::tx::ArbInternalTx {
+                    chain_id: chain_id_u256,
+                    data: start_data,
+                }
+            );
+            let mut enc = env.encode_typed();
+            let mut s = enc.as_slice();
+            let start_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
+            txs.insert(0, start_tx);
+        }
+
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable};
         for tx in &txs {
@@ -780,6 +828,8 @@ where
         poster: alloy_primitives::Address,
         request_id: Option<alloy_primitives::B256>,
         kind: u8,
+        l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
     ) -> core::pin::Pin<
@@ -807,6 +857,8 @@ where
                     poster,
                     request_id,
                     kind,
+                    l1_block_number,
+                    delayed_messages_read,
                     l1_base_fee,
                     batch_gas_cost,
                 )?;
