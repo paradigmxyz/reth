@@ -19,6 +19,7 @@ reth-execution-types = { workspace = true, features = ["serde"] }
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-rpc-eth-api.workspace = true
+reth-rpc-eth-types.workspace = true
 reth-errors.workspace = true
 reth-storage-api.workspace = true
 
