@@ -653,7 +653,7 @@ impl TransactionPtr {
 
     /// Returns `true` if the transaction is timed out.
     #[cfg(feature = "read-tx-timeouts")]
-    pub(crate) fn is_timed_out(&self) -> bool {
+    fn is_timed_out(&self) -> bool {
         match self {
             Self::ReadOnly(ptr) => ptr.is_timed_out(),
             Self::ReadWrite(ptr) => ptr.is_timed_out(),
@@ -664,7 +664,7 @@ impl TransactionPtr {
 impl ReadOnlyTransactionPtr {
     /// Returns `true` if the transaction is timed out.
     #[cfg(feature = "read-tx-timeouts")]
-    pub(crate) fn is_timed_out(&self) -> bool {
+    fn is_timed_out(&self) -> bool {
         self.timed_out.load(std::sync::atomic::Ordering::Acquire)
     }
 
