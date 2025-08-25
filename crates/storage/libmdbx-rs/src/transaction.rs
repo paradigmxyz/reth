@@ -684,7 +684,7 @@ impl ReadOnlyTransactionPtr {
         #[cfg(feature = "read-tx-timeouts")]
         {
             if unlikely(self.timed_out.load(std::sync::atomic::Ordering::Acquire)) {
-                return self.handle_renewal_lockfree(f);
+                return Err(Error::ReadTransactionTimeout);
             }
         }
         Ok(f(self.txn))
