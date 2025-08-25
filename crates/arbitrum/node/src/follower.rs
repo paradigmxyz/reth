@@ -18,6 +18,7 @@ pub trait FollowerExecutor: Send + Sync {
         request_id: Option<B256>,
         kind: u8,
         l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: U256,
         batch_gas_cost: Option<u64>,
     ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send + '_>>;
@@ -51,6 +52,7 @@ impl FollowerExecutor for FollowerExecutorHandle {
         request_id: Option<B256>,
         kind: u8,
         l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: U256,
         batch_gas_cost: Option<u64>,
     ) -> Pin<Box<dyn Future<Output = Result<(B256, B256)>> + Send>> {
@@ -79,6 +81,7 @@ impl FollowerExecutor for FollowerExecutorHandle {
                         request_id,
                         kind,
                         l1_block_number,
+                        delayed_messages_read,
                         l1_base_fee,
                         batch_gas_cost,
                     )
