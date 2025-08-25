@@ -78,6 +78,7 @@ impl ArbPayload {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ArbSidecar {
     pub parent_beacon_block_root: Option<B256>,
+    pub nonce: B64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -112,7 +113,7 @@ impl ArbExecutionData {
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
-            sidecar: ArbSidecar { parent_beacon_block_root: None },
+            sidecar: ArbSidecar { parent_beacon_block_root: None, nonce: B64::ZERO },
             parent_hash: ep.parent_hash,
             block_hash: ep.block_hash,
         }
@@ -137,7 +138,7 @@ impl ArbExecutionData {
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
-            sidecar: ArbSidecar { parent_beacon_block_root: Some(parent_beacon_block_root) },
+            sidecar: ArbSidecar { parent_beacon_block_root: Some(parent_beacon_block_root), nonce: B64::ZERO },
             parent_hash: ep.parent_hash,
             block_hash: ep.block_hash,
         }
@@ -255,14 +256,14 @@ impl ArbExecutionData {
             transactions_root: tx_root,
             receipts_root: v1.receipts_root,
             logs_bloom: v1.logs_bloom,
-            difficulty: U256::from(0u8),
+            difficulty: U256::from(1u64),
             number: v1.block_number,
             gas_limit: v1.gas_limit,
             gas_used: v1.gas_used,
             timestamp: v1.timestamp,
             extra_data: v1.extra_data.clone().into(),
             mix_hash: v1.prev_randao,
-            nonce: B64::ZERO,
+            nonce: self.sidecar.nonce,
             base_fee_per_gas: Some(v1.base_fee_per_gas.to::<u64>()),
             withdrawals_root: None,
             blob_gas_used: None,
@@ -355,7 +356,7 @@ impl reth_payload_primitives::PayloadTypes for ArbPayloadTypes {
         };
         ArbExecutionData {
             payload: ArbPayload { v1 },
-            sidecar: ArbSidecar { parent_beacon_block_root: header.parent_beacon_block_root },
+            sidecar: ArbSidecar { parent_beacon_block_root: header.parent_beacon_block_root, nonce: header.nonce },
             parent_hash: header.parent_hash,
             block_hash: block.hash(),
         }
