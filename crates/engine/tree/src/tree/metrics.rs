@@ -60,10 +60,6 @@ pub(crate) struct EngineMetrics {
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
     /// block insert duration
     pub(crate) block_insert_total_duration: Histogram,
-    /// block execution duration
-    pub(crate) block_execution_duration: Histogram,
-    /// block validation duration
-    pub(crate) block_validation_duration: Histogram,
 }
 
 /// Metrics for non-execution related block validation.
