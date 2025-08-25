@@ -514,6 +514,7 @@ where
             transactions,
             ommers: block.body.ommers,
             withdrawals: block.body.withdrawals,
+            block_access_list: None,
         };
 
         let block = alloy_consensus::Block::new(header, body);
@@ -738,7 +739,7 @@ mod rpc_compat {
                 self.body().ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect();
             let header = header_builder(header, rlp_length)?;
 
-            Ok(Block { header, uncles, transactions, withdrawals })
+            Ok(Block { header, uncles, transactions, withdrawals, block_access_list: None })
         }
 
         /// Converts the block into an RPC [`Block`] with transaction hashes.
@@ -758,7 +759,7 @@ mod rpc_compat {
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
             let header = f(header, rlp_length)?;
 
-            Ok(Block { header, uncles, transactions, withdrawals })
+            Ok(Block { header, uncles, transactions, withdrawals, block_access_list: None })
         }
 
         /// Converts the block into an RPC [`Block`] with full transaction objects.
@@ -783,7 +784,8 @@ mod rpc_compat {
 
             let (block, senders) = self.split_sealed();
             let (header, body) = block.split_sealed_header_body();
-            let BlockBody { transactions, ommers, withdrawals } = body.into_ethereum_body();
+            let BlockBody { transactions, ommers, withdrawals, block_access_list } =
+                body.into_ethereum_body();
 
             let transactions = transactions
                 .into_iter()
@@ -806,7 +808,7 @@ mod rpc_compat {
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
             let header = header_builder(header, block_length)?;
 
-            let block = Block { header, uncles, transactions, withdrawals };
+            let block = Block { header, uncles, transactions, withdrawals, block_access_list };
 
             Ok(block)
         }
@@ -984,6 +986,7 @@ mod tests {
             transactions: vec![recovered_tx],
             ommers: vec![],
             withdrawals: None,
+            block_access_list: None,
         };
         let block_with_recovered = alloy_consensus::Block::new(header, body);
 

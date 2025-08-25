@@ -187,7 +187,12 @@ where
                     .map(|(_, stored_ommers)| stored_ommers.ommers)
                     .unwrap_or_default()
             };
-            bodies.push(alloy_consensus::BlockBody { transactions, ommers, withdrawals });
+            bodies.push(alloy_consensus::BlockBody {
+                transactions,
+                ommers,
+                withdrawals,
+                block_access_list: None,
+            });
         }
 
         Ok(bodies)
