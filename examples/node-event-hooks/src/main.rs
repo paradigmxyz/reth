@@ -24,12 +24,12 @@ fn main() {
                     println!("Node started");
                     Ok(())
                 })
-                .on_rpc_started(|_ctx, _handles| {
-                    println!("RPC started");
-                    Ok(())
-                })
                 .on_component_initialized(|_ctx| {
                     println!("All components initialized");
+                    Ok(())
+                })
+                .on_rpc_started(|_ctx, _handles| {
+                    println!("RPC started");
                     Ok(())
                 })
                 .launch()
