@@ -92,9 +92,6 @@ where
 {
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         let h = header.header();
-        if h.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero);
-        }
         if h.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
             return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
