@@ -265,7 +265,19 @@ where
         }
 
         let wrapped = WithTxEnv { tx_env, tx };
+        let mut saved_basefee: Option<u128> = None;
+        if is_internal {
+            let evm = self.inner.evm_mut();
+            let blk = evm.block();
+            saved_basefee = Some(blk.basefee);
+            blk.basefee = 0;
+        }
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        if let Some(orig) = saved_basefee {
+            let evm = self.inner.evm_mut();
+            let blk = evm.block();
+            blk.basefee = orig;
+        }
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
