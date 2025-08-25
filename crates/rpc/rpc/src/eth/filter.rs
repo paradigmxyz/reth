@@ -1188,7 +1188,10 @@ impl<
                 match chunk_task.await {
                     Ok(Ok(chunk_results)) => Ok(chunk_results),
                     Ok(Err(e)) => Err(e),
-                    Err(_join_err) => Err(EthFilterError::InternalError),
+                    Err(join_err) => {
+                        trace!(target: "rpc::eth::filter", error = ?join_err, "Task join error");
+                        Err(EthFilterError::InternalError)
+                    }
                 }
             });
 
