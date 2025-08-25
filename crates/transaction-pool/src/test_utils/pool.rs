@@ -184,7 +184,7 @@ pub(crate) enum ScenarioType {
 pub(crate) enum Scenario {
     /// Send a tx with the same nonce as on chain.
     OnchainNonce { nonce: u64 },
-    /// Send a tx with a higher nonce that what the sender has on chain
+    /// Send a tx with a higher nonce than what the sender has on chain
     HigherNonce { onchain: u64, nonce: u64 },
     Multi {
         // Execute multiple test scenarios
