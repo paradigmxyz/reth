@@ -193,7 +193,7 @@ where
 
         let mut tx_env = tx.to_tx_env();
         if is_internal {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0u128);
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         } else if is_deposit {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         }
@@ -265,19 +265,7 @@ where
         }
 
         let wrapped = WithTxEnv { tx_env, tx };
-        let mut saved_basefee: Option<u64> = None;
-        if is_internal {
-            let evm = self.inner.evm_mut();
-            let blk: &mut revm::context::BlockEnv = evm.block();
-            saved_basefee = Some(blk.basefee);
-            blk.basefee = 0;
-        }
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
-        if let Some(orig) = saved_basefee {
-            let evm = self.inner.evm_mut();
-            let blk: &mut revm::context::BlockEnv = evm.block();
-            blk.basefee = orig;
-        }
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
