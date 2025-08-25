@@ -116,4 +116,4 @@ The `FinishStage` is the final stage in the pipeline that performs cleanup and v
 
 Now that we have covered all of the stages that are currently included in the `Pipeline`, you know how the Reth client stays synced with the chain tip and updates the database with all of the new headers, bodies, senders and state changes. While this chapter provides an overview on how the pipeline stages work, the following chapters will dive deeper into the database, the networking stack and other exciting corners of the Reth codebase. Feel free to check out any parts of the codebase mentioned in this chapter, and when you are ready, the next chapter will dive into the `database`.
 
-[Next Chapter]()
+ <!-- TODO: add link when chapter is ready  [Next Chapter]() -->
