@@ -781,6 +781,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 continue
             }
 
+            if segment.is_receipts() &&
+                (provider.chain_spec().chain_id() == 100 ||
+                    provider.chain_spec().chain_id() == 10200)
+            {
+                // Gnosis and Chiado's historical import is broken and does not work with this
+                // check. They are importing receipts along with importing
+                // headers/bodies.
+                continue;
+            }
+
             let initial_highest_block = self.get_highest_static_file_block(segment);
 
             //  File consistency is broken if:
