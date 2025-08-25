@@ -1,6 +1,5 @@
 use crate::FlashBlock;
-use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::private::alloy_rlp::Decodable;
+use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
 use futures_util::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
@@ -10,7 +9,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SignerRecoverable,
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_api::helpers::pending_block::PendingEnvBuilder;
@@ -123,12 +122,12 @@ impl<
 
         builder.apply_pre_execution_changes()?;
 
-        let best_txs = self.blocks.iter().flat_map(|v| v.diff.transactions.clone());
+        let transactions = self.blocks.iter().flat_map(|v| v.diff.transactions.clone());
 
-        for tx in best_txs {
-            let tx = N::SignedTx::decode(&mut tx.as_ref())?;
-            let signer = tx.recover_signer_unchecked()?;
-            let tx = Recovered::new_unchecked(tx, signer);
+        for encoded in transactions {
+            let tx = N::SignedTx::decode_2718_exact(encoded.as_ref())?;
+            let signer = tx.try_recover()?;
+            let tx = WithEncoded::new(encoded, tx.with_signer(signer));
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
