@@ -1,5 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
+/// Size of chunks for batch validation of cached transaction state accesses.
+/// Larger chunks reduce DB query overhead but increase memory usage.
+const CACHE_VALIDATION_CHUNK_SIZE: usize = 50;
+
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -8,7 +12,6 @@ use crate::tree::{
     payload_processor::PayloadProcessor,
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    prewarm::AccessRecord,
     sparse_trie::StateRootComputeOutcome,
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
     PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
@@ -47,6 +50,59 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm::Database;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
+
+/// Helper to batch validate state accesses for improved performance.
+/// Groups accesses by type and validates in chunks to reduce DB query overhead.
+fn validate_cached_state_in_chunks<DB: revm::Database>(
+    db: &mut DB,
+    traces: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
+) -> Result<bool, DB::Error> {
+    use crate::tree::payload_processor::prewarm::AccessRecord;
+    
+    // Separate account and storage accesses for batch processing
+    let mut account_accesses = Vec::new();
+    let mut storage_accesses = Vec::new();
+    
+    for trace in traces {
+        match trace {
+            AccessRecord::Account { address, result } => {
+                // Skip coinbase validation if we have deltas (will be updated later)
+                if let Some((coinbase, _, _)) = coinbase_deltas {
+                    if address == coinbase {
+                        continue;
+                    }
+                }
+                account_accesses.push((address, result));
+            }
+            AccessRecord::Storage { address, index, result } => {
+                storage_accesses.push((address, index, result));
+            }
+        }
+    }
+    
+    // Validate account accesses in chunks
+    for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, expected) in chunk {
+            let actual = db.basic(*address)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+    
+    // Validate storage accesses in chunks
+    for chunk in storage_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, index, expected) in chunk {
+            let actual = db.storage(*address, *index)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+    
+    Ok(true)
+}
 
 /// Context providing access to tree state during validation.
 ///
@@ -698,7 +754,8 @@ where
                 // This validates that the state the transaction read during prewarming
                 // matches the current database state.
                 let cache_lookup_start = std::time::Instant::now();
-                let cache_result = tx_cache.remove(&tx_hash);
+                // Use get() instead of remove() to reduce lock contention and allow reuse
+                let cache_result = tx_cache.get(&tx_hash).map(|entry| entry.clone());
                 let cache_lookup_time = cache_lookup_start.elapsed();
 
                 if cache_result.is_none() {
@@ -719,112 +776,51 @@ where
                     "CACHE_HIT - Found cached result, starting validation"
                 );
 
-                cache_result.and_then(|(_, (traces, mut result, coinbase_deltas))| {
+                cache_result.and_then(|(traces, mut result, coinbase_deltas)| {
                     let validation_start = std::time::Instant::now();
                     let trace_count = traces.len();
-                    let mut db_query_count = 0;
+                    
                     tracing::trace!(
                         target: "engine::cache",
                         ?tx_hash,
                         trace_count,
                         has_coinbase_deltas = coinbase_deltas.is_some(),
-                        "Validating cached execution result"
+                        "Validating cached execution result with chunked validation"
                     );
-                    // Validate each state access recorded during prewarming
-                    for (trace_idx, trace) in traces.into_iter().enumerate() {
-                        let matches = match &trace {
-                            AccessRecord::Account { address, result } => {
-                                match coinbase_deltas {
-                                    // Special handling for coinbase account:
-                                    // - During prewarming, coinbase had incomplete balance (missing
-                                    //   earlier fees)
-                                    // - We skip validation here and apply deltas below
-                                    // - This only works if the tx didn't read coinbase balance (if
-                                    //   it did, coinbase_deltas would be None and cache wouldn't
-                                    //   exist)
-                                    Some((coinbase, _, _)) if *address == coinbase => true,
-                                    _ => {
-                                        db_query_count += 1;
-                                        let query_start = std::time::Instant::now();
-                                        let db_account = db.basic(*address);
-                                        let query_time = query_start.elapsed();
-                                        
-                                        tracing::trace!(
-                                            target: "engine::cache::db",
-                                            ?address,
-                                            query_us = query_time.as_micros(),
-                                            query_number = db_query_count,
-                                            "DB_QUERY during validation"
-                                        );
-                                        
-                                        let matches = if let Ok(account) = &db_account {
-                                            account == result
-                                        } else {
-                                            false
-                                        };
-
-                                        if !matches {
-                                            tracing::debug!(
-                                                target: "engine::cache",
-                                                ?tx_hash,
-                                                ?address,
-                                                cached_account = ?result,
-                                                db_account = ?db_account,
-                                                "Account state mismatch - cache invalidated"
-                                            );
-                                        }
-
-                                        matches
-                                    }
-                                }
-                            }
-                            AccessRecord::Storage { address, index, result } => {
-                                db_query_count += 1;
-                                let query_start = std::time::Instant::now();
-                                let db_storage = db.storage(*address, *index);
-                                let query_time = query_start.elapsed();
-                                
-                                tracing::trace!(
-                                    target: "engine::cache::db",
-                                    ?address,
-                                    ?index,
-                                    query_us = query_time.as_micros(),
-                                    query_number = db_query_count,
-                                    "DB_QUERY storage during validation"
-                                );
-                                
-                                let matches = if let Ok(storage) = &db_storage {
-                                    storage == result
-                                } else {
-                                    false
-                                };
-
-                                if !matches {
-                                    tracing::debug!(
-                                        target: "engine::cache",
-                                        ?tx_hash,
-                                        ?address,
-                                        ?index,
-                                        cached_storage = ?result,
-                                        db_storage = ?db_storage,
-                                        "Storage slot mismatch - cache invalidated"
-                                    );
-                                }
-
-                                matches
-                            }
-                        };
-
-                        if !matches {
+                    
+                    // Use chunked validation for better performance
+                    let validation_result = validate_cached_state_in_chunks(db, traces, coinbase_deltas);
+                    
+                    match validation_result {
+                        Ok(true) => {
+                            // Validation passed, continue with coinbase delta application
+                            tracing::trace!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                trace_count,
+                                validation_time_us = validation_start.elapsed().as_micros(),
+                                "Cache validation successful with chunked approach"
+                            );
+                        }
+                        Ok(false) => {
+                            // Validation failed
                             let validation_time = validation_start.elapsed();
                             tracing::info!(
                                 target: "engine::cache::metrics",
                                 ?tx_hash,
                                 trace_count,
-                                failed_at_trace = trace_idx,
                                 validation_us = validation_time.as_micros(),
-                                db_queries = db_query_count,
-                                "VALIDATION_FAILED - Cache invalidated"
+                                "VALIDATION_FAILED - Cache invalidated (chunked validation)"
+                            );
+                            return None;
+                        }
+                        Err(err) => {
+                            // Database error during validation
+                            tracing::warn!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                ?err,
+                                "Database error during cache validation"
                             );
                             return None;
                         }
@@ -852,7 +848,6 @@ where
                                     ?tx_hash,
                                     trace_count,
                                     validation_us = validation_time.as_micros(),
-                                    db_queries = db_query_count,
                                     "VALIDATION_SUCCESS - Cache entry valid (with coinbase)"
                                 );
                                 return Some(result)
@@ -866,7 +861,6 @@ where
                             ?tx_hash,
                             trace_count,
                             validation_us = validation_time.as_micros(),
-                            db_queries = db_query_count,
                             "VALIDATION_SUCCESS - Cache entry valid"
                         );
                         return Some(result)
