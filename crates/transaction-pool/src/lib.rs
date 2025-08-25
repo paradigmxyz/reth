@@ -9,7 +9,7 @@
 //!    - recording incoming transactions
 //!    - providing existing transactions
 //!    - ordering and providing the best transactions for block production
-//!    - monitoring memory footprint and enforce pool size limits
+//!    - monitoring memory footprint and enforcing pool size limits
 //!    - storing blob data for transactions in a separate blobstore on insertion
 //!
 //! ## Transaction Flow: From Network/RPC to Pool
@@ -145,7 +145,7 @@
 //! ### Transaction ordering
 //!
 //! The pending pool contains transactions that can be mined on the current state.
-//! The order in which they're returned are determined by a `Priority` value returned by the
+//! The order in which they're returned is determined by a `Priority` value returned by the
 //! `TransactionOrdering` type this pool is configured with.
 //!
 //! This is only used in the _pending_ pool to yield the best transactions for block production. The
