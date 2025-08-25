@@ -42,7 +42,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert, SignableTxRequest};
+use reth_rpc_eth_api::{helpers::{config::{EthConfigHandler, EthConfigApiServer}, pending_block::BuildPendingEnv}, RpcConvert, SignableTxRequest};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -234,7 +234,7 @@ impl<N, EthB, EV, EB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: EthChainSpec + EthereumHardforks,
+            ChainSpec: Hardforks + EthereumHardforks,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
@@ -262,11 +262,18 @@ where
             Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
         );
 
+        let eth_config = EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+
         self.inner
             .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
+                )?;
+
+                container.modules.merge_if_module_configured(
+                    RethRpcModule::Eth,
+                    eth_config.into_rpc(),
                 )?;
 
                 Ok(())
@@ -279,7 +286,7 @@ impl<N, EthB, EV, EB> RethRpcAddOns<N> for EthereumAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: EthChainSpec + EthereumHardforks,
+            ChainSpec: Hardforks + EthereumHardforks,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,

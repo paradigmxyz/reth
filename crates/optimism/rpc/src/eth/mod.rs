@@ -22,8 +22,8 @@ use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        config::EthConfigSpec, pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners,
-        EthApiSpec, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
+        EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, SignableTxRequest,
@@ -161,13 +161,6 @@ where
     fn signers(&self) -> &SignersForApi<Self> {
         self.inner.eth_api.signers()
     }
-}
-
-impl<N, Rpc> EthConfigSpec for OpEthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
-{
 }
 
 impl<N, Rpc> SpawnBlocking for OpEthApi<N, Rpc>

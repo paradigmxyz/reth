@@ -167,8 +167,4 @@ impl ConfigureEvm for MockEvmConfig {
     ) -> reth_evm::ExecutionCtxFor<'_, Self> {
         self.inner.context_for_next_block(parent, attributes)
     }
-
-    fn precompiles_for_timestamp(&self, timestamp: u64) -> PrecompilesMap {
-        self.inner.precompiles_for_timestamp(timestamp)
-    }
 }
