@@ -1007,7 +1007,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
-    /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
+    /// Builds the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
         S: BlobStore,
