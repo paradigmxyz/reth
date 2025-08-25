@@ -11,12 +11,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod block;
+mod evm;
 mod fees;
 pub mod receipt;
 mod rpc;
 pub mod transaction;
 
 pub use block::TryFromBlockResponse;
+pub use evm::EvmEnvConverter;
 pub use fees::{CallFees, CallFeesError};
 pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
