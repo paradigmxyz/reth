@@ -1,6 +1,5 @@
 use crate::FlashBlock;
 use alloy_eips::BlockNumberOrTag;
-use alloy_evm::block::{BlockExecutionError, BlockValidationError};
 use alloy_primitives::private::alloy_rlp::Decodable;
 use futures_util::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
@@ -130,20 +129,7 @@ impl<
             let tx = N::SignedTx::decode(&mut tx.as_ref())?;
             let signer = tx.recover_signer_unchecked()?;
             let tx = Recovered::new_unchecked(tx, signer);
-            let _gas_used = match builder.execute_transaction(tx) {
-                Ok(gas_used) => gas_used,
-                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
-                    error,
-                    ..
-                })) => {
-                    if error.is_nonce_too_low() {
-                        // if the nonce is too low, we can skip this transaction
-                    }
-                    continue
-                }
-                // this is an error that we should treat as fatal for this attempt
-                Err(err) => return Err(err.into()),
-            };
+            let _gas_used = builder.execute_transaction(tx)?;
         }
 
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
