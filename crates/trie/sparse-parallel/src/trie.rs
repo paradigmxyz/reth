@@ -1303,6 +1303,12 @@ impl ParallelSparseTrie {
         &mut self,
         prefix_set: &mut PrefixSet,
     ) -> (Vec<ChangedSubtrie>, PrefixSetMut) {
+        // Fast-path: If the prefix set is empty then no subtries can have been changed. Just return
+        // empty values.
+        if prefix_set.is_empty() {
+            return Default::default();
+        }
+
         // Clone the prefix set to iterate over its keys. Cloning is cheap, it's just an Arc.
         let prefix_set_clone = prefix_set.clone();
         let mut prefix_set_iter = prefix_set_clone.into_iter().copied().peekable();
