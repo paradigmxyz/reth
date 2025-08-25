@@ -69,9 +69,9 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
     pub(crate) state_root_parallel_fallback_total: Counter,
-    /// Histogram of state root duration
+    /// Histogram of state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_histogram: Histogram,
-    /// Latest state root duration
+    /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
