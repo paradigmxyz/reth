@@ -59,11 +59,11 @@ fn validate_cached_state_in_chunks<DB: revm::Database>(
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<bool, DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
-    
+
     // Separate account and storage accesses for batch processing
     let mut account_accesses = Vec::new();
     let mut storage_accesses = Vec::new();
-    
+
     for trace in traces {
         match trace {
             AccessRecord::Account { address, result } => {
@@ -80,7 +80,7 @@ fn validate_cached_state_in_chunks<DB: revm::Database>(
             }
         }
     }
-    
+
     // Validate account accesses in chunks
     for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
         for (address, expected) in chunk {
@@ -90,7 +90,7 @@ fn validate_cached_state_in_chunks<DB: revm::Database>(
             }
         }
     }
-    
+
     // Validate storage accesses in chunks
     for chunk in storage_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
         for (address, index, expected) in chunk {
@@ -100,7 +100,7 @@ fn validate_cached_state_in_chunks<DB: revm::Database>(
             }
         }
     }
-    
+
     Ok(true)
 }
 
@@ -768,7 +768,7 @@ where
                     );
                     return None;
                 }
-                
+
                 tracing::info!(
                     target: "engine::cache::metrics",
                     ?tx_hash,
@@ -779,7 +779,7 @@ where
                 cache_result.and_then(|(traces, mut result, coinbase_deltas)| {
                     let validation_start = std::time::Instant::now();
                     let trace_count = traces.len();
-                    
+
                     tracing::trace!(
                         target: "engine::cache",
                         ?tx_hash,
@@ -787,10 +787,11 @@ where
                         has_coinbase_deltas = coinbase_deltas.is_some(),
                         "Validating cached execution result with chunked validation"
                     );
-                    
+
                     // Use chunked validation for better performance
-                    let validation_result = validate_cached_state_in_chunks(db, traces, coinbase_deltas);
-                    
+                    let validation_result =
+                        validate_cached_state_in_chunks(db, traces, coinbase_deltas);
+
                     match validation_result {
                         Ok(true) => {
                             // Validation passed, continue with coinbase delta application
@@ -816,7 +817,7 @@ where
                         }
                         Err(err) => {
                             // Database error during validation
-                            tracing::warn!(
+                            tracing::error!(
                                 target: "engine::cache",
                                 ?tx_hash,
                                 ?err,
