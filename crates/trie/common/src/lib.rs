@@ -55,6 +55,8 @@ pub mod root;
 /// Buffer for trie updates.
 pub mod updates;
 
+pub mod added_removed_keys;
+
 /// Bincode-compatible serde implementations for trie types.
 ///
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows

@@ -25,8 +25,9 @@ pub fn is_database_empty<P: AsRef<Path>>(path: P) -> bool {
         true
     } else if path.is_file() {
         false
-    } else if let Ok(dir) = path.read_dir() {
-        dir.count() == 0
+    } else if let Ok(mut dir) = path.read_dir() {
+        // Check if directory has any entries without counting all of them
+        dir.next().is_none()
     } else {
         true
     }

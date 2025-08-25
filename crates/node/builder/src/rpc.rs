@@ -362,6 +362,29 @@ where
     }
 }
 
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
+    /// Returns the RPC server handles.
+    pub const fn rpc_server_handles(&self) -> &RethRpcServerHandles {
+        &self.rpc_server_handles
+    }
+
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.beacon_engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
+}
+
 /// Handle returned when only the regular RPC server (HTTP/WS/IPC) is launched.
 ///
 /// This handle provides access to the RPC server endpoints and registry, but does not
@@ -379,6 +402,29 @@ pub struct RpcServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcServerOnlyHandle<Node, EthApi> {
+    /// Returns the RPC server handle.
+    pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handle
+    }
+
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
+}
+
 /// Handle returned when only the authenticated Engine API server is launched.
 ///
 /// This handle provides access to the Engine API server and registry, but does not
@@ -394,6 +440,24 @@ pub struct AuthServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the consensus engine.
     pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> AuthServerOnlyHandle<Node, EthApi> {
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
 }
 
 /// Internal context struct for RPC setup shared between different launch methods
