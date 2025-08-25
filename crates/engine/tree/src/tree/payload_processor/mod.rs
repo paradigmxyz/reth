@@ -377,7 +377,6 @@ where
 
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
-                self.executor.clone(),
                 sparse_trie_rx,
                 proof_task_handle,
                 self.trie_metrics.clone(),
