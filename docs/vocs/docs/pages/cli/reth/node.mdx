@@ -238,6 +238,13 @@ Networking:
 
           Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
 
+      --tx-propagation-mode <PROPAGATION_MODE>
+          Sets the transaction propagation mode by determining how new pending transactions are propagated to other peers in full.
+
+          Examples: sqrt, all, max:10
+
+          [default: sqrt]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -906,6 +913,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

@@ -28,7 +28,7 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             },
         },
-        TransactionFetcherConfig, TransactionsManagerConfig,
+        TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -167,6 +167,17 @@ pub struct NetworkArgs {
     /// personal nodes, though providers should always opt to enable this flag.
     #[arg(long = "disable-tx-gossip")]
     pub disable_tx_gossip: bool,
+
+    /// Sets the transaction propagation mode by determining how new pending transactions are
+    /// propagated to other peers in full.
+    ///
+    /// Examples: sqrt, all, max:10
+    #[arg(
+        long = "tx-propagation-mode",
+        default_value = "sqrt",
+        help = "Transaction propagation mode (sqrt, all, max:<number>)"
+    )]
+    pub propagation_mode: TransactionPropagationMode,
 }
 
 impl NetworkArgs {
@@ -198,7 +209,7 @@ impl NetworkArgs {
         })
     }
     /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
-    pub fn transactions_manager_config(&self) -> TransactionsManagerConfig {
+    pub const fn transactions_manager_config(&self) -> TransactionsManagerConfig {
         TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::new(
                 self.max_concurrent_tx_requests,
@@ -208,7 +219,7 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
-            propagation_mode: Default::default(),
+            propagation_mode: self.propagation_mode,
         }
     }
 
@@ -351,6 +362,7 @@ impl Default for NetworkArgs {
             net_if: None,
             tx_propagation_policy: TransactionPropagationKind::default(),
             disable_tx_gossip: false,
+            propagation_mode: TransactionPropagationMode::Sqrt,
         }
     }
 }

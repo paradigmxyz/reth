@@ -368,12 +368,8 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
-        let hash = *transaction.hash();
-
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-
-        (hash, outcome)
+    ) -> TransactionValidationOutcome<V::Transaction> {
+        self.pool.validator().validate_transaction(origin, transaction).await
     }
 
     /// Returns future that validates all transactions in the given iterator.
@@ -383,13 +379,12 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
-    ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
+    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
         self.pool
             .validator()
             .validate_transactions_with_origin(origin, transactions)
             .await
             .into_iter()
-            .map(|tx| (tx.tx_hash(), tx))
             .collect()
     }
 
@@ -493,7 +488,7 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
-        let (_, tx) = self.validate(origin, transaction).await;
+        let tx = self.validate(origin, transaction).await;
         self.pool.add_transaction_and_subscribe(origin, tx)
     }
 
@@ -502,7 +497,7 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<AddedTransactionOutcome> {
-        let (_, tx) = self.validate(origin, transaction).await;
+        let tx = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
         results.pop().expect("result length is the same as the input")
     }
@@ -517,7 +512,7 @@ where
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
+        self.pool.add_transactions(origin, validated.into_iter())
     }
 
     async fn add_transactions_with_origins(
