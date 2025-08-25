@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 /// transactions (`TransactionOrigin::Local`) when inserted into the pool.
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
-    /// Tx to be inserted in to the pool
+    /// Tx to be inserted into the pool
     pool_tx: T,
     /// Channel to send result back to caller
     response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
