@@ -265,7 +265,7 @@ where
         }
 
         let wrapped = WithTxEnv { tx_env, tx };
-        let mut saved_basefee: Option<u128> = None;
+        let mut saved_basefee: Option<u64> = None;
         if is_internal {
             let evm = self.inner.evm_mut();
             let blk = evm.block();
