@@ -697,21 +697,32 @@ where
                 // Try to reuse cached execution result from prewarming.
                 // This validates that the state the transaction read during prewarming
                 // matches the current database state.
+                let cache_lookup_start = std::time::Instant::now();
                 let cache_result = tx_cache.remove(&tx_hash);
+                let cache_lookup_time = cache_lookup_start.elapsed();
 
                 if cache_result.is_none() {
-                    tracing::debug!(
-                        target: "engine::cache",
+                    tracing::info!(
+                        target: "engine::cache::metrics",
                         ?tx_hash,
+                        cache_lookup_us = cache_lookup_time.as_micros(),
                         cache_size = tx_cache.len(),
-                        "No cached result found for transaction"
+                        "CACHE_MISS - No cached result"
                     );
                     return None;
                 }
+                
+                tracing::info!(
+                    target: "engine::cache::metrics",
+                    ?tx_hash,
+                    cache_lookup_us = cache_lookup_time.as_micros(),
+                    "CACHE_HIT - Found cached result, starting validation"
+                );
 
                 cache_result.and_then(|(_, (traces, mut result, coinbase_deltas))| {
                     let validation_start = std::time::Instant::now();
                     let trace_count = traces.len();
+                    let mut db_query_count = 0;
                     tracing::trace!(
                         target: "engine::cache",
                         ?tx_hash,
@@ -733,7 +744,19 @@ where
                                     //   exist)
                                     Some((coinbase, _, _)) if *address == coinbase => true,
                                     _ => {
+                                        db_query_count += 1;
+                                        let query_start = std::time::Instant::now();
                                         let db_account = db.basic(*address);
+                                        let query_time = query_start.elapsed();
+                                        
+                                        tracing::trace!(
+                                            target: "engine::cache::db",
+                                            ?address,
+                                            query_us = query_time.as_micros(),
+                                            query_number = db_query_count,
+                                            "DB_QUERY during validation"
+                                        );
+                                        
                                         let matches = if let Ok(account) = &db_account {
                                             account == result
                                         } else {
@@ -756,7 +779,20 @@ where
                                 }
                             }
                             AccessRecord::Storage { address, index, result } => {
+                                db_query_count += 1;
+                                let query_start = std::time::Instant::now();
                                 let db_storage = db.storage(*address, *index);
+                                let query_time = query_start.elapsed();
+                                
+                                tracing::trace!(
+                                    target: "engine::cache::db",
+                                    ?address,
+                                    ?index,
+                                    query_us = query_time.as_micros(),
+                                    query_number = db_query_count,
+                                    "DB_QUERY storage during validation"
+                                );
+                                
                                 let matches = if let Ok(storage) = &db_storage {
                                     storage == result
                                 } else {
@@ -781,13 +817,14 @@ where
 
                         if !matches {
                             let validation_time = validation_start.elapsed();
-                            tracing::debug!(
-                                target: "engine::cache",
+                            tracing::info!(
+                                target: "engine::cache::metrics",
                                 ?tx_hash,
-                                trace_index = trace_idx,
-                                total_traces = trace_count,
-                                validation_time_us = validation_time.as_micros(),
-                                "Cache validation failed - state has changed"
+                                trace_count,
+                                failed_at_trace = trace_idx,
+                                validation_us = validation_time.as_micros(),
+                                db_queries = db_query_count,
+                                "VALIDATION_FAILED - Cache invalidated"
                             );
                             return None;
                         }
@@ -810,15 +847,13 @@ where
                                     coinbase_db.balance + coinbase_balance_delta;
 
                                 let validation_time = validation_start.elapsed();
-                                tracing::debug!(
-                                    target: "engine::cache",
+                                tracing::info!(
+                                    target: "engine::cache::metrics",
                                     ?tx_hash,
                                     trace_count,
-                                    ?coinbase,
-                                    ?coinbase_nonce_delta,
-                                    ?coinbase_balance_delta,
-                                    validation_time_us = validation_time.as_micros(),
-                                    "Successfully validated and reused cached execution result with coinbase deltas"
+                                    validation_us = validation_time.as_micros(),
+                                    db_queries = db_query_count,
+                                    "VALIDATION_SUCCESS - Cache entry valid (with coinbase)"
                                 );
                                 return Some(result)
                             }
@@ -826,12 +861,13 @@ where
                     } else {
                         // No coinbase deltas, but validation passed - return the cached result
                         let validation_time = validation_start.elapsed();
-                        tracing::debug!(
-                            target: "engine::cache",
+                        tracing::info!(
+                            target: "engine::cache::metrics",
                             ?tx_hash,
                             trace_count,
-                            validation_time_us = validation_time.as_micros(),
-                            "Successfully validated and reused cached execution result without coinbase deltas"
+                            validation_us = validation_time.as_micros(),
+                            db_queries = db_query_count,
+                            "VALIDATION_SUCCESS - Cache entry valid"
                         );
                         return Some(result)
                     }

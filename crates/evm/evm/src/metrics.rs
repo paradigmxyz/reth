@@ -23,7 +23,7 @@ use revm::{
 use std::time::Instant;
 
 #[cfg(feature = "metrics")]
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
@@ -209,7 +209,7 @@ impl ExecutorMetrics {
             (gas_used, res)
         })?;
 
-        // Log cache performance summary
+        // Log cache performance summary with enhanced metrics
         #[cfg(feature = "metrics")]
         {
             let total_txs = cache_hits_in_block + cache_misses_in_block;
@@ -218,24 +218,27 @@ impl ExecutorMetrics {
             } else {
                 0.0
             };
+            
+            let cache_benefit = if result.gas_used + gas_skipped_in_block > 0 {
+                (gas_skipped_in_block as f64 / (gas_skipped_in_block + result.gas_used) as f64) * 100.0
+            } else {
+                0.0
+            };
 
             // Record hit rate in histogram
             self.cache_hit_rate_histogram.record(hit_rate);
 
-            info!(
-                target: "reth::evm::metrics",
+            tracing::warn!(
+                target: "engine::cache::summary",
+                total_txs,
                 cache_hits = cache_hits_in_block,
                 cache_misses = cache_misses_in_block,
-                hit_rate = format!("{:.2}%", hit_rate),
+                hit_rate_percent = hit_rate,
                 transactions_skipped = transactions_skipped_in_block,
+                gas_executed = result.gas_used,
                 gas_skipped = gas_skipped_in_block,
-                gas_used = result.gas_used,
-                gas_saved_percent = format!("{:.2}%", if result.gas_used > 0 {
-                    (gas_skipped_in_block as f64 / result.gas_used as f64) * 100.0
-                } else {
-                    0.0
-                }),
-                "Block execution cache performance"
+                cache_benefit_percent = cache_benefit,
+                "BLOCK_CACHE_SUMMARY"
             );
         }
 
