@@ -305,9 +305,6 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
     }
 
-    /// Retrieve the list of precompiles active at specified timestamp.
-    fn precompiles_for_timestamp(&self, timestamp: u64) -> PrecompilesMap;
-
     /// Creates a strategy with given EVM and execution context.
     fn create_executor<'a, DB, I>(
         &'a self,
