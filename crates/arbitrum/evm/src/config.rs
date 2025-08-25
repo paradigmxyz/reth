@@ -72,8 +72,6 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
 
         if let Some(info) = derive_arb_header_info_from_state(&input) {
             info.apply_to_header(&mut header);
-        if let Some(info) = derive_arb_header_info_from_state(&input) {
-            info.apply_to_header(&mut header);
         } else {
             let l1_bn = input.execution_ctx.l1_block_number;
             if l1_bn != 0 {
@@ -82,8 +80,6 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
                     header.extra_data = alloy_primitives::Bytes::from(vec![0u8; 32]);
                 }
             }
-        }
-
         }
 
         Ok(alloy_consensus::Block::new(

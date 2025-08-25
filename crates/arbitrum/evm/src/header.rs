@@ -164,6 +164,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
         l1_block_number,
         arbos_format_version: arbos_version,
     })
+}
 pub fn read_arbos_version(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
     let root_storage_key: &[u8] = &[];
@@ -171,7 +172,6 @@ pub fn read_arbos_version(provider: &dyn StateProvider) -> Option<u64> {
     read_storage_u64_be(provider, addr, version_slot)
 }
 
-}
 pub fn read_l2_per_block_gas_limit(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
     let root_storage_key: &[u8] = &[];
