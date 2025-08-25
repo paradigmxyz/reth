@@ -23,12 +23,8 @@ reth-rpc-eth-types.workspace = true
 reth-errors.workspace = true
 reth-storage-api.workspace = true
 
-# revm
-revm-database = { workspace = true }
-
 # alloy
 alloy-eips = { workspace = true, features = ["serde"] }
-alloy-evm = { workspace = true }
 alloy-serde.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
