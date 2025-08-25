@@ -93,7 +93,7 @@ impl PoolError {
     ///
     /// Not all error variants are caused by the incorrect composition of the transaction (See also
     /// [`InvalidPoolTransactionError`]) and can be caused by the current state of the transaction
-    /// pool. For example the transaction pool is already full or the error was caused my an
+    /// pool. For example the transaction pool is already full or the error was caused by an
     /// internal error, such as database errors.
     ///
     /// This function returns true only if the transaction will never make it into the pool because
@@ -250,7 +250,7 @@ pub enum InvalidPoolTransactionError {
         /// Balance of account.
         balance: U256,
     },
-    /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
+    /// EIP-2681 error thrown if the nonce is higher or equal to `U64::max`
     /// `<https://eips.ethereum.org/EIPS/eip-2681>`
     #[error("nonce exceeds u64 limit")]
     Eip2681,
@@ -378,7 +378,7 @@ impl InvalidPoolTransactionError {
             }
             Self::Eip7702(eip7702_err) => match eip7702_err {
                 Eip7702PoolTransactionError::MissingEip7702AuthorizationList => {
-                    // as EIP-7702 specifies, 7702 transactions must have an non-empty authorization
+                    // as EIP-7702 specifies, 7702 transactions must have a non-empty authorization
                     // list so this is a malformed transaction and should not be
                     // sent over the network
                     true
@@ -417,7 +417,7 @@ impl InvalidPoolTransactionError {
         other.as_any().downcast_ref()
     }
 
-    /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
+    /// Returns true if this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
