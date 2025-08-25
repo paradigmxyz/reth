@@ -96,37 +96,49 @@ impl Config {
     }
 }
 
-/// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default))]
-pub struct StageConfig {
-    /// ERA stage configuration.
-    pub era: EraConfig,
-    /// Header stage configuration.
-    pub headers: HeadersConfig,
-    /// Body stage configuration.
-    pub bodies: BodiesConfig,
-    /// Sender Recovery stage configuration.
-    pub sender_recovery: SenderRecoveryConfig,
-    /// Execution stage configuration.
-    pub execution: ExecutionConfig,
-    /// Prune stage configuration.
-    pub prune: PruneStageConfig,
-    /// Account Hashing stage configuration.
-    pub account_hashing: HashingConfig,
-    /// Storage Hashing stage configuration.
-    pub storage_hashing: HashingConfig,
-    /// Merkle stage configuration.
-    pub merkle: MerkleConfig,
-    /// Transaction Lookup stage configuration.
-    pub transaction_lookup: TransactionLookupConfig,
-    /// Index Account History stage configuration.
-    pub index_account_history: IndexHistoryConfig,
-    /// Index Storage History stage configuration.
-    pub index_storage_history: IndexHistoryConfig,
-    /// Common ETL related configuration.
-    pub etl: EtlConfig,
+/// Macro to define stage configurations in a maintainable way.
+/// This ensures that when stages are added/removed from `StageId`,
+/// the configuration struct stays in sync automatically.
+macro_rules! define_stage_config {
+    ($(
+        $(#[$field_attr:meta])*
+        $field:ident: $config_type:ty, $doc:expr
+    ),* $(,)?) => {
+        /// Configuration for each stage in the pipeline.
+        ///
+        /// This struct is automatically generated from stage definitions.
+        /// When you add/remove stages, update the `define_stage_config!` macro below.
+        #[derive(Debug, Clone, Default, PartialEq, Eq)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[cfg_attr(feature = "serde", serde(default))]
+        pub struct StageConfig {
+            $(
+                #[doc = $doc]
+                $(#[$field_attr])*
+                pub $field: $config_type,
+            )*
+        }
+    };
+}
+
+// Define all stage configurations here. When you add/remove a stage:
+// 1. Add/remove the corresponding entry below
+// 2. Create the configuration type if it doesn't exist
+// 3. The StageConfig struct will be automatically updated
+define_stage_config! {
+    era: EraConfig, "ERA stage configuration.",
+    headers: HeadersConfig, "Header stage configuration.",
+    bodies: BodiesConfig, "Body stage configuration.",
+    sender_recovery: SenderRecoveryConfig, "Sender Recovery stage configuration.",
+    execution: ExecutionConfig, "Execution stage configuration.",
+    prune: PruneStageConfig, "Prune stage configuration.",
+    account_hashing: HashingConfig, "Account Hashing stage configuration.",
+    storage_hashing: HashingConfig, "Storage Hashing stage configuration.",
+    merkle: MerkleConfig, "Merkle stage configuration.",
+    transaction_lookup: TransactionLookupConfig, "Transaction Lookup stage configuration.",
+    index_account_history: IndexHistoryConfig, "Index Account History stage configuration.",
+    index_storage_history: IndexHistoryConfig, "Index Storage History stage configuration.",
+    etl: EtlConfig, "Common ETL related configuration.",
 }
 
 impl StageConfig {
