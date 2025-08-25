@@ -15,7 +15,11 @@ use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
 use reth_primitives_traits::RecoveredBlock;
 use revm::{
+    bytecode::opcode::OpCode,
+    context_interface::ContextTr,
     database::{states::bundle_state::BundleRetention, State},
+    inspector::Inspector,
+    interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
     state::EvmState,
 };
 use std::time::Instant;
@@ -24,6 +28,25 @@ use std::time::Instant;
 struct MeteredStateHook {
     metrics: ExecutorMetrics,
     inner_hook: Box<dyn OnStateHook>,
+}
+
+impl<CTX> Inspector<CTX, EthInterpreter> for MeteredStateHook
+where
+    CTX: ContextTr,
+{
+    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
+        if let Some(opcode) = OpCode::new(interp.bytecode.opcode()) {
+            match opcode {
+                OpCode::SLOAD => {
+                    self.metrics.opcode_sload_histogram.record(1.0);
+                }
+                OpCode::SSTORE => {
+                    self.metrics.opcode_sstore_histogram.record(1.0);
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 impl OnStateHook for MeteredStateHook {
@@ -43,7 +66,6 @@ impl OnStateHook for MeteredStateHook {
 }
 
 /// Executor metrics.
-// TODO(onbjerg): add sload/sstore
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.execution")]
 pub struct ExecutorMetrics {
@@ -72,6 +94,11 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for number of SLOAD operations performed when executing the latest block.
+    pub opcode_sload_histogram: Histogram,
+    /// The Histogram for number of SSTORE operations performed when executing the latest block.
+    pub opcode_sstore_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -348,5 +375,38 @@ mod tests {
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);
+    }
+
+    #[test]
+    fn test_sload_sstore_metrics_exist() {
+        let snapshotter = setup_test_recorder();
+        let metrics = ExecutorMetrics::default();
+
+        // Record some SLOAD and SSTORE operations
+        metrics.opcode_sload_histogram.record(1.0);
+        metrics.opcode_sstore_histogram.record(1.0);
+
+        let snapshot = snapshotter.snapshot().into_vec();
+
+        let mut found_sload = false;
+        let mut found_sstore = false;
+
+        for metric in snapshot {
+            let metric_name = metric.0.key().name();
+            if metric_name == "sync.execution.opcode_sload_histogram" {
+                found_sload = true;
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    assert!(vs.iter().any(|v| v.into_inner() > 0.0), "SLOAD metric not recorded");
+                }
+            } else if metric_name == "sync.execution.opcode_sstore_histogram" {
+                found_sstore = true;
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    assert!(vs.iter().any(|v| v.into_inner() > 0.0), "SSTORE metric not recorded");
+                }
+            }
+        }
+
+        assert!(found_sload, "SLOAD metric not found");
+        assert!(found_sstore, "SSTORE metric not found");
     }
 }
