@@ -857,11 +857,18 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
-        let mut spawned_proof_targets = MultiProofTargets::default();
+        let mut spawned_proof_targets_accounts: usize = 0;
+        let mut spawned_proof_targets_storages: usize = 0;
+
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             let proof_targets =
                 get_proof_targets(&chunk, &self.fetched_proof_targets, &multi_added_removed_keys);
-            spawned_proof_targets.extend_ref(&proof_targets);
+
+            self.fetched_proof_targets.extend_ref(&proof_targets);
+
+            spawned_proof_targets_accounts += proof_targets.len();
+            spawned_proof_targets_storages +=
+                proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
@@ -880,13 +887,11 @@ where
 
         self.metrics
             .state_update_proof_targets_accounts_histogram
-            .record(spawned_proof_targets.len() as f64);
+            .record(spawned_proof_targets_accounts as f64);
         self.metrics
             .state_update_proof_targets_storages_histogram
-            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(spawned_proof_targets_storages as f64);
         self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
-
-        self.fetched_proof_targets.extend(spawned_proof_targets);
 
         state_updates + chunks
     }
