@@ -1,7 +1,5 @@
 use alloy_consensus::Header;
-use alloy_primitives::{
-    private::derive_more, Address, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256,
-};
+use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256};
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::Compact;
 use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, BlockHeader, InMemorySize};

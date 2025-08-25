@@ -36,12 +36,12 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider, StateProviderFactory,
+    StateReader, StateRootProvider,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
+use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
@@ -178,7 +178,6 @@ where
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
-        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -669,7 +668,8 @@ where
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
-            executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+            // Only cache pure precompiles to avoid issues with stateful precompiles
+            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
                 let metrics = self
                     .precompile_cache_metrics
                     .entry(*address)
@@ -873,9 +873,10 @@ where
             debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
             HashedPostState::default()
         } else {
-            let revert_state = HashedPostState::from_reverts::<
-                <P::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)
+            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider.tx_ref(),
+                block_number + 1,
+            )
             .map_err(ProviderError::from)?;
             debug!(
                 target: "engine::tree",
@@ -918,7 +919,7 @@ pub trait EngineValidator<
     ///   > timestamp
     ///   > of a block referenced by forkchoiceState.headBlockHash.
     ///
-    /// See also: <https://github.com/ethereum/execution-apis/blob/647a677b7b97e09145b8d306c0eaf51c32dae256/src/engine/common.md#specification-1>
+    /// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#specification-1>
     fn validate_payload_attributes_against_header(
         &self,
         attr: &Types::PayloadAttributes,
@@ -959,7 +960,6 @@ where
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
-        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,

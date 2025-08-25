@@ -15,10 +15,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{
-    args::LogArgs,
-    version::{LONG_VERSION, SHORT_VERSION},
-};
+use reth_node_core::{args::LogArgs, version::version_metadata};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
@@ -29,7 +26,7 @@ use tracing::info;
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+#[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
 pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// The command to run
@@ -264,7 +261,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command<C>),
+    Db(Box<db::Command<C>>),
     /// Download public node snapshots
     #[command(name = "download")]
     Download(download::DownloadCommand<C>),
@@ -273,7 +270,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<C>),
+    P2P(Box<p2p::Command<C>>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]

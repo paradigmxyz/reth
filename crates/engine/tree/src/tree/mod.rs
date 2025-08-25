@@ -19,7 +19,7 @@ use reth_chain_state::{
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
+    BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
@@ -31,13 +31,13 @@ use reth_payload_primitives::{
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{HashedPostState, TrieInput};
-use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
+use reth_trie_db::DatabaseHashedPostState;
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -76,6 +76,7 @@ pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+use reth_trie::KeccakKeyHasher;
 
 pub mod state;
 
@@ -115,7 +116,7 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+    P: BlockReader + StateProviderFactory + StateReader + Clone,
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
@@ -292,7 +293,6 @@ where
         + BlockReader<Block = N::Block, Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
-        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -389,7 +389,7 @@ where
             evm_config,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
+        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
         (incoming, outgoing)
     }
 
@@ -518,7 +518,7 @@ where
             .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         let num_hash = payload.num_hash();
-        let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
+        let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = num_hash.hash;
@@ -614,6 +614,7 @@ where
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
             debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
+            self.metrics.engine.executed_new_block_cache_miss.increment(1);
             return Ok(None)
         };
 
@@ -782,6 +783,9 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
         self.metrics.engine.forkchoice_updated_messages.increment(1);
+        if attrs.is_some() {
+            self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
+        }
         self.canonical_in_memory_state.on_forkchoice_update_received();
 
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
@@ -1060,7 +1064,7 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -1081,7 +1085,7 @@ where
                                         .set_latest(state, res.outcome.forkchoice_status());
 
                                     // emit an event about the handled FCU
-                                    self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                                    self.emit_event(ConsensusEngineEvent::ForkchoiceUpdated(
                                         state,
                                         res.outcome.forkchoice_status(),
                                     ));
@@ -1622,7 +1626,7 @@ where
 
         // insert the head block into the invalid header cache
         self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
-        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head)));
+        self.emit_event(ConsensusEngineEvent::InvalidBlock(Box::new(head)));
 
         Ok(status)
     }
@@ -1903,7 +1907,7 @@ where
         self.canonical_in_memory_state.notify_canon_state(notification);
 
         // emit event
-        self.emit_event(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+        self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(
             Box::new(tip),
             start.elapsed(),
         ));
@@ -2151,9 +2155,9 @@ where
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if is_fork {
-            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2239,9 +2243,10 @@ where
             debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
             HashedPostState::default()
         } else {
-            let revert_state = HashedPostState::from_reverts::<
-                <P::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)
+            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider.tx_ref(),
+                block_number + 1,
+            )
             .map_err(ProviderError::from)?;
             debug!(
                 target: "engine::tree",
@@ -2292,7 +2297,7 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
-        self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+        self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
         Ok(PayloadStatus::new(
@@ -2543,7 +2548,7 @@ where
         hash: B256,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
     where
-        P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+        P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");

@@ -48,7 +48,7 @@ impl<T: PayloadTypes> BlockImport<NewBlock<BscBlock<T>>> for BscBlockImport<T> {
 impl<T: PayloadTypes> fmt::Debug for BscBlockImport<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BscBlockImport")
-            .field("engine_handle", &"BeaconConsensusEngineHandle")
+            .field("engine_handle", &"ConsensusEngineHandle")
             .field("service_handle", &"BscBlockImportHandle")
             .finish()
     }

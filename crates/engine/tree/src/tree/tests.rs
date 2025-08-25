@@ -301,7 +301,7 @@ impl TestHarness {
         // check for ForkchoiceUpdated event
         let event = self.from_tree_rx.recv().await.unwrap();
         match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+            EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::ForkchoiceUpdated(
                 state,
                 status,
             )) => {
@@ -381,7 +381,7 @@ async fn test_tree_persist_blocks() {
         .collect();
     let test_harness = TestHarness::new(chain_spec).with_blocks(blocks.clone());
     std::thread::Builder::new()
-        .name("Tree Task".to_string())
+        .name("Engine Task".to_string())
         .spawn(|| test_harness.tree.run())
         .unwrap();
 

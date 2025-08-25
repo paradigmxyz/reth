@@ -34,7 +34,7 @@ thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

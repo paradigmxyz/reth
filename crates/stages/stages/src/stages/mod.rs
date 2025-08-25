@@ -17,8 +17,6 @@ mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
 mod prune;
-/// The s3 download stage
-mod s3;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The transaction lookup stage
@@ -35,7 +33,6 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use prune::*;
-pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 

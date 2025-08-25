@@ -22,8 +22,8 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
-    StateProviderFactory, StateReader,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
+    StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
@@ -79,7 +79,7 @@ where
         parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
     >,
     /// Whether to use the parallel sparse trie.
-    use_parallel_sparse_trie: bool,
+    disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
 }
@@ -107,7 +107,7 @@ where
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
             trie_input: None,
-            use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
+            disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
         }
     }
 }
@@ -163,7 +163,6 @@ where
             + BlockReader
             + StateProviderFactory
             + StateReader
-            + StateCommitmentProvider
             + Clone
             + 'static,
     {
@@ -247,12 +246,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
-        P: BlockReader
-            + StateProviderFactory
-            + StateReader
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
@@ -298,12 +292,7 @@ where
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
-        P: BlockReader
-            + StateProviderFactory
-            + StateReader
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
@@ -374,10 +363,10 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let accounts_trie = if self.use_parallel_sparse_trie {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            } else {
+            let accounts_trie = if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
+            } else {
+                ConfiguredSparseTrie::Parallel(Default::default())
             };
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()

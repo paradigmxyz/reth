@@ -588,11 +588,11 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Returns the hash and block of the on disk block this state can be traced back to.
     pub fn anchor(&self) -> BlockNumHash {
-        if let Some(parent) = &self.parent {
-            parent.anchor()
-        } else {
-            self.block.recovered_block().parent_num_hash()
+        let mut current = self;
+        while let Some(parent) = &current.parent {
+            current = parent;
         }
+        current.block.recovered_block().parent_num_hash()
     }
 
     /// Returns the executed block that determines the state.
@@ -894,14 +894,14 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the length of the new chain.
-    pub fn new_block_count(&self) -> usize {
+    pub const fn new_block_count(&self) -> usize {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
         }
     }
 
     /// Returns the length of the reorged chain.
-    pub fn reorged_block_count(&self) -> usize {
+    pub const fn reorged_block_count(&self) -> usize {
         match self {
             Self::Commit { .. } => 0,
             Self::Reorg { old, .. } => old.len(),

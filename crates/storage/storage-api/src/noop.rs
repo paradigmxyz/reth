@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "db-api")]
-use crate::{DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
+use crate::{DBProvider, DatabaseProviderFactory};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -38,8 +38,6 @@ use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-#[cfg(feature = "db-api")]
-use reth_trie_db::MerklePatriciaTrie;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug)]
@@ -271,7 +269,7 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        todo!()
+        Ok(None)
     }
 
     fn transactions_by_block(
@@ -624,13 +622,6 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
-}
-
-#[cfg(feature = "db-api")]
-impl<ChainSpec: Send + Sync, N: NodePrimitives> StateCommitmentProvider
-    for NoopProvider<ChainSpec, N>
-{
-    type StateCommitment = MerklePatriciaTrie;
 }
 
 #[cfg(feature = "db-api")]
