@@ -412,8 +412,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
         let mut inspector = AccessListInspector::new(initial);
 
-        let (result, (evm_env, mut tx_env)) =
-            self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+        let result = self.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
         let access_list = inspector.into_access_list();
         tx_env.set_access_list(access_list.clone());
         match result.result {
