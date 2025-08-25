@@ -334,6 +334,7 @@ This chapter was packed with information, so let's do a quick review. The databa
 
 <br>
 
-# Next Chapter
+<!-- # Next Chapter
 
-[Next Chapter]()
+TODO: add link when chapter is ready  [Next Chapter]() -->
+
