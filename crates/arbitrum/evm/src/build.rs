@@ -59,6 +59,8 @@ pub struct ArbBlockExecutionCtx {
     pub parent_hash: B256,
     pub parent_beacon_block_root: Option<B256>,
     pub extra_data: alloy_primitives::bytes::Bytes,
+    pub delayed_messages_read: u64,
+    pub l1_block_number: u64,
 }
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {

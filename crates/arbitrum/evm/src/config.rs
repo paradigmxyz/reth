@@ -2,12 +2,12 @@
 #![allow(unused)]
 use alloc::sync::Arc;
 use alloy_consensus::{proofs, Block, BlockBody, Header, TxReceipt};
-use alloy_primitives::{logs_bloom, Address, B256, Bytes, U256};
+use alloy_primitives::{logs_bloom, Address, B256, B64, Bytes, U256};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{Receipt, SignedTransaction};
 use crate::ArbitrumChainSpec;
-use crate::header::{ArbHeaderInfo, derive_arb_header_info_from_state};
+use crate::header::{ArbHeaderInfo, derive_arb_header_info_from_state, compute_nitro_mixhash, read_arbos_version};
 
 pub struct ArbBlockAssembler<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
@@ -67,9 +67,23 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
+        header.difficulty = U256::from(1u64);
+        header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
         if let Some(info) = derive_arb_header_info_from_state(&input) {
             info.apply_to_header(&mut header);
+        if let Some(info) = derive_arb_header_info_from_state(&input) {
+            info.apply_to_header(&mut header);
+        } else {
+            let l1_bn = input.execution_ctx.l1_block_number;
+            if l1_bn != 0 {
+                if let Some(ver) = read_arbos_version(input.state_provider) {
+                    header.mix_hash = compute_nitro_mixhash(0, l1_bn, ver);
+                    header.extra_data = alloy_primitives::Bytes::from(vec![0u8; 32]);
+                }
+            }
+        }
+
         }
 
         Ok(alloy_consensus::Block::new(
@@ -115,6 +129,8 @@ pub struct ArbNextBlockEnvAttributes {
     pub extra_data: Bytes,
     pub max_fee_per_gas: Option<U256>,
     pub blob_gas_price: Option<u128>,
+    pub delayed_messages_read: u64,
+    pub l1_block_number: u64,
 }
 #[cfg(feature = "rpc")]
 impl<H: alloy_consensus::BlockHeader>
@@ -131,6 +147,8 @@ impl<H: alloy_consensus::BlockHeader>
             extra_data: alloy_primitives::Bytes::new(),
             max_fee_per_gas: None,
             blob_gas_price: None,
+            delayed_messages_read: 0,
+            l1_block_number: 0,
         }
     }
 }
@@ -161,6 +179,8 @@ where
             extra_data: alloy_primitives::Bytes::new(),
             max_fee_per_gas: None,
             blob_gas_price: None,
+            delayed_messages_read: 0,
+            l1_block_number: 0,
         })
     }
 }

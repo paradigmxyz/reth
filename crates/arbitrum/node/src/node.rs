@@ -226,6 +226,7 @@ where
         request_id: Option<alloy_primitives::B256>,
         kind: u8,
         l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
     ) -> eyre::Result<(
@@ -280,6 +281,9 @@ where
             evm_config.chain_spec().as_ref(),
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
+        next_env.delayed_messages_read = delayed_messages_read;
+        next_env.l1_block_number = l1_block_number;
+
 
         let chain_id = evm_config.chain_spec().chain().id();
         if chain_id == 421_614 {
@@ -825,6 +829,7 @@ where
         request_id: Option<alloy_primitives::B256>,
         kind: u8,
         l1_block_number: u64,
+        delayed_messages_read: u64,
         l1_base_fee: alloy_primitives::U256,
         batch_gas_cost: Option<u64>,
     ) -> core::pin::Pin<
@@ -853,6 +858,7 @@ where
                     request_id,
                     kind,
                     l1_block_number,
+                    delayed_messages_read,
                     l1_base_fee,
                     batch_gas_cost,
                 )?;
