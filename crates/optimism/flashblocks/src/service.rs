@@ -2,22 +2,20 @@ use crate::FlashBlock;
 use alloy_eips::BlockNumberOrTag;
 use alloy_evm::block::{BlockExecutionError, BlockValidationError};
 use alloy_primitives::private::alloy_rlp::Decodable;
-use eyre::OptionExt;
 use futures_util::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm, SpecFor,
+    ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SealedHeader,
-    SignerRecoverable,
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SignerRecoverable,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_api::helpers::pending_block::PendingEnvBuilder;
-use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{
     pin::Pin,
@@ -34,14 +32,14 @@ pub struct FlashBlockService<
     S,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
     Provider,
+    Builder,
 > {
     rx: S,
     current: Option<ExecutedBlock<N>>,
     blocks: Vec<FlashBlock>,
-    latest: Option<SealedHeader<HeaderTy<N>>>,
-    latest_env: Option<<EvmConfig as ConfigureEvm>::NextBlockEnvCtx>,
     evm_config: EvmConfig,
     provider: Provider,
+    builder: Builder,
 }
 
 impl<
@@ -55,7 +53,8 @@ impl<
                 Transaction = N::SignedTx,
                 Receipt = ReceiptTy<N>,
             >,
-    > FlashBlockService<N, S, EvmConfig, Provider>
+        Builder: PendingEnvBuilder<EvmConfig>,
+    > FlashBlockService<N, S, EvmConfig, Provider, Builder>
 {
     /// Adds the `block` into the collection.
     ///
@@ -107,16 +106,20 @@ impl<
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
     pub fn execute(&mut self) -> eyre::Result<ExecutedBlock<N>> {
-        let parent = self.latest.as_ref().ok_or_eyre("No latest block set")?;
-        let state_provider = self.provider.history_by_block_hash(parent.hash())?;
+        let latest = self
+            .provider
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+
+        let latest_attrs = self.builder.pending_env_attributes(&latest)?;
+
+        let state_provider = self.provider.history_by_block_hash(latest.hash())?;
         let state = StateProviderDatabase::new(&state_provider);
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
-        let latest_attrs =
-            self.latest_env.as_ref().expect("Should not be set withhout latest env").clone();
         let mut builder = self
             .evm_config
-            .builder_for_next_block(&mut db, parent, latest_attrs)
+            .builder_for_next_block(&mut db, &latest, latest_attrs)
             .map_err(RethError::other)?;
 
         builder.apply_pre_execution_changes()?;
@@ -159,56 +162,6 @@ impl<
             hashed_state: Arc::new(hashed_state),
         })
     }
-
-    /// Set `latest` as parent to the pending block, using `builder` to extract extra attributes.
-    pub fn next_block(
-        &mut self,
-        latest: SealedHeader<HeaderTy<N>>,
-        builder: &dyn PendingEnvBuilder<EvmConfig>,
-    ) -> eyre::Result<()>
-    where
-        EvmConfig: 'static,
-    {
-        self.latest_env.replace(builder.pending_env_attributes(&latest)?);
-        self.latest.replace(latest);
-        Ok(())
-    }
-
-    /// Configures the [`PendingBlockEnv`] for the pending block
-    ///
-    /// If no pending block is available, this will derive it from the `latest` block
-    #[expect(clippy::type_complexity)]
-    pub fn pending_block_env_and_cfg(
-        &self,
-    ) -> Result<PendingBlockEnv<BlockTy<N>, ReceiptTy<N>, SpecFor<EvmConfig>>, eyre::Error> {
-        if let Some(block) = self.provider.pending_block()? {
-            if let Some(receipts) = self.provider.receipts_by_block(block.hash().into())? {
-                // Note: for the PENDING block we assume it is past the known merge block and
-                // thus this will not fail when looking up the total
-                // difficulty value for the blockenv.
-                let evm_env = self.evm_config.evm_env(block.header());
-
-                return Ok(PendingBlockEnv::new(
-                    evm_env,
-                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
-                ));
-            }
-        }
-
-        // no pending block from the CL yet, so we use the latest block and modify the env
-        // values that we can
-        let latest = self
-            .provider
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
-
-        let evm_env = self
-            .evm_config
-            .next_evm_env(&latest, self.latest_env.as_ref().ok_or_eyre("No latest env set")?)
-            .map_err(RethError::other)?;
-
-        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
-    }
 }
 
 impl<
@@ -222,7 +175,8 @@ impl<
                 Transaction = N::SignedTx,
                 Receipt = ReceiptTy<N>,
             > + Unpin,
-    > Stream for FlashBlockService<N, S, EvmConfig, Provider>
+        Builder: PendingEnvBuilder<EvmConfig>,
+    > Stream for FlashBlockService<N, S, EvmConfig, Provider, Builder>
 {
     type Item = eyre::Result<ExecutedBlock<N>>;
 
