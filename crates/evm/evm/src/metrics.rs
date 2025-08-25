@@ -8,17 +8,22 @@ use alloy_evm::{
     block::{BlockExecutor, ExecutableTx, StateChangeSource},
     Evm,
 };
+use alloy_primitives::TxHash;
 use core::borrow::BorrowMut;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use revm::{
+    context::result::ResultAndState,
     database::{states::bundle_state::BundleRetention, State},
     state::EvmState,
 };
 use std::time::Instant;
+
+#[cfg(feature = "metrics")]
+use tracing::{debug, trace};
 
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
@@ -72,6 +77,24 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Counter for number of execution results cached hits when executing the latest block.
+    pub execution_results_cache_hits: Counter,
+    /// The Counter for number of execution results cached misses when executing the latest block.
+    pub execution_results_cache_misses: Counter,
+
+    /// The Counter for number of transactions skipped due to cache hits.
+    pub transactions_skipped: Counter,
+    /// The Counter for total gas skipped due to cache hits.
+    pub gas_skipped: Counter,
+    /// The Histogram for gas skipped per cached transaction.
+    pub gas_skipped_per_tx_histogram: Histogram,
+    /// The Histogram for cache hit rate per block.
+    pub cache_hit_rate_histogram: Histogram,
+    /// The Counter for cache validation failures.
+    pub cache_validation_failures: Counter,
+    /// The Histogram for cache validation time per transaction.
+    pub cache_validation_time_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -91,6 +114,15 @@ impl ExecutorMetrics {
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
+        #[cfg(feature = "metrics")]
+        trace!(
+            target: "reth::evm::metrics",
+            gas_used,
+            duration_secs = ?execution_duration,
+            gas_per_second = gas_used as f64 / execution_duration,
+            "Block execution metrics recorded"
+        );
+
         output
     }
 
@@ -101,15 +133,19 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<E, DB>(
+    pub fn execute_metered<E, DB, T: SignedTransaction>(
         &self,
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
+        get_cached_tx_result: impl Fn(
+            &mut <E::Evm as Evm>::DB,
+            TxHash,
+        ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
         DB: Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction = T>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -118,10 +154,50 @@ impl ExecutorMetrics {
 
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
+        // Track cache statistics for logging
+        let mut cache_hits_in_block = 0u64;
+        let mut cache_misses_in_block = 0u64;
+        let mut gas_skipped_in_block = 0u64;
+        let mut transactions_skipped_in_block = 0u64;
+
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx?)?;
+                let tx = tx?;
+                let tx_hash = *tx.tx().tx_hash();
+                if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
+                    cache_hits_in_block += 1;
+                    transactions_skipped_in_block += 1;
+                    self.execution_results_cache_hits.increment(1);
+                    self.transactions_skipped.increment(1);
+
+                    // Track gas skipped
+                    let gas_used = result.result.gas_used();
+                    gas_skipped_in_block += gas_used;
+                    self.gas_skipped.increment(gas_used);
+                    self.gas_skipped_per_tx_histogram.record(gas_used as f64);
+
+                    #[cfg(feature = "metrics")]
+                    debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        gas_skipped = gas_used,
+                        "Using cached transaction result"
+                    );
+                    executor.execute_transaction_with_cached_result(tx, result, |_| {
+                        alloy_evm::block::CommitChanges::Yes
+                    })?;
+                } else {
+                    cache_misses_in_block += 1;
+                    self.execution_results_cache_misses.increment(1);
+                    #[cfg(feature = "metrics")]
+                    debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        "Cache miss, executing transaction"
+                    );
+                    executor.execute_transaction(tx)?;
+                }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -132,6 +208,39 @@ impl ExecutorMetrics {
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
             (gas_used, res)
         })?;
+
+        // Log cache performance summary with enhanced metrics
+        #[cfg(feature = "metrics")]
+        {
+            let total_txs = cache_hits_in_block + cache_misses_in_block;
+            let hit_rate = if total_txs > 0 {
+                (cache_hits_in_block as f64 / total_txs as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            let cache_benefit = if result.gas_used + gas_skipped_in_block > 0 {
+                (gas_skipped_in_block as f64 / (gas_skipped_in_block + result.gas_used) as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            // Record hit rate in histogram
+            self.cache_hit_rate_histogram.record(hit_rate);
+
+            tracing::warn!(
+                target: "engine::cache::summary",
+                total_txs,
+                cache_hits = cache_hits_in_block,
+                cache_misses = cache_misses_in_block,
+                hit_rate_percent = hit_rate,
+                transactions_skipped = transactions_skipped_in_block,
+                gas_executed = result.gas_used,
+                gas_skipped = gas_skipped_in_block,
+                cache_benefit_percent = cache_benefit,
+                "BLOCK_CACHE_SUMMARY"
+            );
+        }
 
         // merge transactions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
@@ -213,6 +322,15 @@ mod tests {
         fn execute_transaction_with_commit_condition(
             &mut self,
             _tx: impl alloy_evm::block::ExecutableTx<Self>,
+            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+        ) -> Result<Option<u64>, BlockExecutionError> {
+            Ok(Some(0))
+        }
+
+        fn execute_transaction_with_cached_result(
+            &mut self,
+            _tx: impl alloy_evm::block::ExecutableTx<Self>,
+            _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,
             _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
         ) -> Result<Option<u64>, BlockExecutionError> {
             Ok(Some(0))
@@ -301,10 +419,11 @@ mod tests {
         };
         let executor = MockExecutor::new(state);
         let _result = metrics
-            .execute_metered::<_, EmptyDB>(
+            .execute_metered::<_, EmptyDB, _>(
                 executor,
                 input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
+                |_, _| None,
             )
             .unwrap();
 
@@ -339,10 +458,11 @@ mod tests {
 
         let executor = MockExecutor::new(state);
         let _result = metrics
-            .execute_metered::<_, EmptyDB>(
+            .execute_metered::<_, EmptyDB, _>(
                 executor,
                 input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
+                |_, _| None,
             )
             .unwrap();
 

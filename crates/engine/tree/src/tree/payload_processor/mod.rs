@@ -10,15 +10,16 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
-use alloy_primitives::B256;
+use alloy_primitives::{Address, TxHash, B256, U256};
+use dashmap::DashMap;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
-use prewarm::PrewarmMetrics;
+use prewarm::{AccessRecord, PrewarmMetrics};
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, HaltReasonFor, OnStateHook, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -35,6 +36,7 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
+use revm::context::result::ResultAndState;
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -50,6 +52,20 @@ pub mod prewarm;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
+
+/// Optional coinbase nonce/balance change from a transaction.
+///
+/// Tuple layout:
+/// - Address: the coinbase address
+/// - u64: nonce delta
+/// - U256: balance delta
+pub type CoinbaseDeltas = Option<(Address, u64, U256)>;
+
+/// Cache for transaction execution results and state access records.
+/// Maps transaction hashes to their execution results, access records, and optional created
+/// contract info.
+pub type TxCache<Evm> =
+    Arc<DashMap<TxHash, (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>, CoinbaseDeltas)>>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -157,7 +173,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> PayloadHandle<Evm, WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -202,8 +218,15 @@ where
 
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
 
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, to_multi_proof.clone());
+        let tx_cache = TxCache::<Evm>::default();
+
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            provider_builder,
+            to_multi_proof.clone(),
+            tx_cache.clone(),
+        );
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -233,6 +256,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            tx_cache,
         }
     }
 
@@ -244,17 +268,20 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> PayloadHandle<Evm, WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let tx_cache = TxCache::<Evm>::default();
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, None, tx_cache.clone());
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            tx_cache,
         }
     }
 
@@ -290,6 +317,7 @@ where
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
+        tx_cache: TxCache<Evm>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -319,6 +347,7 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
+            tx_cache,
         );
 
         // spawn pre-warm task
@@ -398,7 +427,7 @@ where
 
 /// Handle to all the spawned tasks.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err> {
+pub struct PayloadHandle<Evm: ConfigureEvm, Tx, Err> {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
@@ -407,9 +436,11 @@ pub struct PayloadHandle<Tx, Err> {
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Cache for transaction execution results and state access records
+    pub tx_cache: TxCache<Evm>,
 }
 
-impl<Tx, Err> PayloadHandle<Tx, Err> {
+impl<Evm: ConfigureEvm, Tx, Err> PayloadHandle<Evm, Tx, Err> {
     /// Awaits the state root
     ///
     /// # Panics

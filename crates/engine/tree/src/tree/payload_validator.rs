@@ -1,5 +1,9 @@
 //! Types and traits for validating blocks and payloads.
 
+/// Size of chunks for batch validation of cached transaction state accesses.
+/// Larger chunks reduce DB query overhead but increase memory usage.
+const CACHE_VALIDATION_CHUNK_SIZE: usize = 50;
+
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -43,8 +47,62 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::Database;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
+
+/// Helper to batch validate state accesses for improved performance.
+/// Groups accesses by type and validates in chunks to reduce DB query overhead.
+fn validate_cached_state_in_chunks<DB: revm::Database>(
+    db: &mut DB,
+    traces: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
+) -> Result<bool, DB::Error> {
+    use crate::tree::payload_processor::prewarm::AccessRecord;
+
+    // Separate account and storage accesses for batch processing
+    let mut account_accesses = Vec::new();
+    let mut storage_accesses = Vec::new();
+
+    for trace in traces {
+        match trace {
+            AccessRecord::Account { address, result } => {
+                // Skip coinbase validation if we have deltas (will be updated later)
+                if let Some((coinbase, _, _)) = coinbase_deltas {
+                    if address == coinbase {
+                        continue;
+                    }
+                }
+                account_accesses.push((address, result));
+            }
+            AccessRecord::Storage { address, index, result } => {
+                storage_accesses.push((address, index, result));
+            }
+        }
+    }
+
+    // Validate account accesses in chunks
+    for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, expected) in chunk {
+            let actual = db.basic(*address)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+
+    // Validate storage accesses in chunks
+    for chunk in storage_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, index, expected) in chunk {
+            let actual = db.storage(*address, *index)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
+}
 
 /// Context providing access to tree state during validation.
 ///
@@ -646,7 +704,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<Evm, impl ExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
     where
         S: StateProvider,
@@ -686,10 +744,132 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.executor.execute_metered(
+        let tx_cache = handle.tx_cache.clone();
+        let output = self.metrics.executor.execute_metered::<_, _, N::SignedTx>(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
+            |db, tx_hash| {
+                // Try to reuse cached execution result from prewarming.
+                // This validates that the state the transaction read during prewarming
+                // matches the current database state.
+                let cache_lookup_start = std::time::Instant::now();
+                // Use get() instead of remove() to reduce lock contention and allow reuse
+                let cache_result = tx_cache.get(&tx_hash).map(|entry| entry.clone());
+                let cache_lookup_time = cache_lookup_start.elapsed();
+
+                if cache_result.is_none() {
+                    tracing::info!(
+                        target: "engine::cache::metrics",
+                        ?tx_hash,
+                        cache_lookup_us = cache_lookup_time.as_micros(),
+                        cache_size = tx_cache.len(),
+                        "CACHE_MISS - No cached result"
+                    );
+                    return None;
+                }
+
+                tracing::info!(
+                    target: "engine::cache::metrics",
+                    ?tx_hash,
+                    cache_lookup_us = cache_lookup_time.as_micros(),
+                    "CACHE_HIT - Found cached result, starting validation"
+                );
+
+                cache_result.and_then(|(traces, mut result, coinbase_deltas)| {
+                    let validation_start = std::time::Instant::now();
+                    let trace_count = traces.len();
+
+                    tracing::trace!(
+                        target: "engine::cache",
+                        ?tx_hash,
+                        trace_count,
+                        has_coinbase_deltas = coinbase_deltas.is_some(),
+                        "Validating cached execution result with chunked validation"
+                    );
+
+                    // Use chunked validation for better performance
+                    let validation_result =
+                        validate_cached_state_in_chunks(db, traces, coinbase_deltas);
+
+                    match validation_result {
+                        Ok(true) => {
+                            // Validation passed, continue with coinbase delta application
+                            tracing::trace!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                trace_count,
+                                validation_time_us = validation_start.elapsed().as_micros(),
+                                "Cache validation successful with chunked approach"
+                            );
+                        }
+                        Ok(false) => {
+                            // Validation failed
+                            let validation_time = validation_start.elapsed();
+                            tracing::info!(
+                                target: "engine::cache::metrics",
+                                ?tx_hash,
+                                trace_count,
+                                validation_us = validation_time.as_micros(),
+                                "VALIDATION_FAILED - Cache invalidated (chunked validation)"
+                            );
+                            return None;
+                        }
+                        Err(err) => {
+                            // Database error during validation
+                            tracing::error!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                ?err,
+                                "Database error during cache validation"
+                            );
+                            return None;
+                        }
+                    }
+
+                    // Apply coinbase deltas to account for gas fees accumulated from previous
+                    // transactions. The cached result has the coinbase state
+                    // from prewarming (incomplete balance), so we update it to:
+                    // current_balance + this_transaction's_fees
+                    if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) =
+                        coinbase_deltas
+                    {
+                        if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
+                            if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
+                                // Current DB balance includes all fees from previous transactions
+                                // Add the delta (fees from this transaction) to get final state
+                                coinbase_account.info.nonce =
+                                    coinbase_db.nonce + coinbase_nonce_delta;
+                                coinbase_account.info.balance =
+                                    coinbase_db.balance + coinbase_balance_delta;
+
+                                let validation_time = validation_start.elapsed();
+                                tracing::info!(
+                                    target: "engine::cache::metrics",
+                                    ?tx_hash,
+                                    trace_count,
+                                    validation_us = validation_time.as_micros(),
+                                    "VALIDATION_SUCCESS - Cache entry valid (with coinbase)"
+                                );
+                                return Some(result)
+                            }
+                        }
+                    } else {
+                        // No coinbase deltas, but validation passed - return the cached result
+                        let validation_time = validation_start.elapsed();
+                        tracing::info!(
+                            target: "engine::cache::metrics",
+                            ?tx_hash,
+                            trace_count,
+                            validation_us = validation_time.as_micros(),
+                            "VALIDATION_SUCCESS - Cache entry valid"
+                        );
+                        return Some(result)
+                    }
+
+                    None
+                })
+            },
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
