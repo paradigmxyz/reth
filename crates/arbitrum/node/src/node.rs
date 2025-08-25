@@ -667,8 +667,31 @@ where
                 );
                 let mut enc = env.encode_typed();
                 let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?]
+                let submit_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
+                let ticket_id = submit_tx.tx_hash();
+
+                let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
+                    arb_alloy_consensus::tx::ArbRetryTx {
+                        chain_id: chain_id_u256,
+                        nonce: 0,
+                        from: poster,
+                        gas_fee_cap: max_fee_per_gas,
+                        gas,
+                        to: retry_to_opt,
+                        value: callvalue,
+                        data: alloy_primitives::Bytes::from(retry_data),
+                        ticket_id,
+                        refund_to: fee_refund_addr,
+                        max_refund: max_fee_per_gas.saturating_mul(alloy_primitives::U256::from(gas)),
+                        submission_fee_refund: max_submission_fee,
+                    },
+                );
+                let mut retry_enc = retry_env.encode_typed();
+                let mut rs = retry_enc.as_slice();
+                let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
+                    .map_err(|_| eyre::eyre!("decode retry failed"))?;
+                vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => Vec::new(),
