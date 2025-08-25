@@ -84,7 +84,6 @@ If you want to contribute, or follow along with contributor discussion, you can 
 
 <!--
 When updating this, also update:
-- clippy.toml
 - Cargo.toml
 - .github/workflows/lint.yml
 -->
