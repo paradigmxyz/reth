@@ -686,7 +686,7 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.executor.execute_metered(
+        let output = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
