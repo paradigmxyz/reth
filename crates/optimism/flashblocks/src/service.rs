@@ -1,4 +1,5 @@
 use crate::FlashBlock;
+use alloy_eips::BlockNumberOrTag;
 use alloy_evm::block::{BlockExecutionError, BlockValidationError};
 use alloy_primitives::private::alloy_rlp::Decodable;
 use eyre::OptionExt;
@@ -7,15 +8,17 @@ use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
+    ConfigureEvm, SpecFor,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
-    AlloyBlockHeader, HeaderTy, NodePrimitives, Recovered, SealedHeader, SignerRecoverable,
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SealedHeader,
+    SignerRecoverable,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_api::helpers::pending_block::PendingEnvBuilder;
-use reth_storage_api::StateProviderFactory;
+use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -45,7 +48,13 @@ impl<
         N: NodePrimitives,
         S,
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
-        Provider: StateProviderFactory,
+        Provider: StateProviderFactory
+            + BlockReaderIdExt<
+                Header = HeaderTy<N>,
+                Block = BlockTy<N>,
+                Transaction = N::SignedTx,
+                Receipt = ReceiptTy<N>,
+            >,
     > FlashBlockService<N, S, EvmConfig, Provider>
 {
     /// Adds the `block` into the collection.
@@ -164,13 +173,55 @@ impl<
         self.latest.replace(latest);
         Ok(())
     }
+
+    /// Configures the [`PendingBlockEnv`] for the pending block
+    ///
+    /// If no pending block is available, this will derive it from the `latest` block
+    #[expect(clippy::type_complexity)]
+    pub fn pending_block_env_and_cfg(
+        &self,
+    ) -> Result<PendingBlockEnv<BlockTy<N>, ReceiptTy<N>, SpecFor<EvmConfig>>, eyre::Error> {
+        if let Some(block) = self.provider.pending_block()? {
+            if let Some(receipts) = self.provider.receipts_by_block(block.hash().into())? {
+                // Note: for the PENDING block we assume it is past the known merge block and
+                // thus this will not fail when looking up the total
+                // difficulty value for the blockenv.
+                let evm_env = self.evm_config.evm_env(block.header());
+
+                return Ok(PendingBlockEnv::new(
+                    evm_env,
+                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
+                ));
+            }
+        }
+
+        // no pending block from the CL yet, so we use the latest block and modify the env
+        // values that we can
+        let latest = self
+            .provider
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+
+        let evm_env = self
+            .evm_config
+            .next_evm_env(&latest, self.latest_env.as_ref().ok_or_eyre("No latest env set")?)
+            .map_err(RethError::other)?;
+
+        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
+    }
 }
 
 impl<
         N: NodePrimitives,
         S: Stream<Item = FlashBlock> + Unpin,
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
-        Provider: StateProviderFactory + Unpin,
+        Provider: StateProviderFactory
+            + BlockReaderIdExt<
+                Header = HeaderTy<N>,
+                Block = BlockTy<N>,
+                Transaction = N::SignedTx,
+                Receipt = ReceiptTy<N>,
+            > + Unpin,
     > Stream for FlashBlockService<N, S, EvmConfig, Provider>
 {
     type Item = eyre::Result<ExecutedBlock<N>>;
