@@ -129,7 +129,7 @@ where
         let needs_precredit = {
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
-                Internal => false,
+                Internal => true,
                 Deposit => true,
                 _ => true,
             }
