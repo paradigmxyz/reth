@@ -82,7 +82,7 @@ pub struct ExecutorMetrics {
     pub execution_results_cache_hits: Counter,
     /// The Counter for number of execution results cached misses when executing the latest block.
     pub execution_results_cache_misses: Counter,
-    
+
     /// The Counter for number of transactions skipped due to cache hits.
     pub transactions_skipped: Counter,
     /// The Counter for total gas skipped due to cache hits.
@@ -170,13 +170,13 @@ impl ExecutorMetrics {
                     transactions_skipped_in_block += 1;
                     self.execution_results_cache_hits.increment(1);
                     self.transactions_skipped.increment(1);
-                    
+
                     // Track gas skipped
                     let gas_used = result.result.gas_used();
                     gas_skipped_in_block += gas_used;
                     self.gas_skipped.increment(gas_used);
                     self.gas_skipped_per_tx_histogram.record(gas_used as f64);
-                    
+
                     #[cfg(feature = "metrics")]
                     debug!(
                         target: "reth::evm::metrics",
@@ -218,10 +218,10 @@ impl ExecutorMetrics {
             } else {
                 0.0
             };
-            
+
             // Record hit rate in histogram
             self.cache_hit_rate_histogram.record(hit_rate);
-            
+
             info!(
                 target: "reth::evm::metrics",
                 cache_hits = cache_hits_in_block,
@@ -230,10 +230,10 @@ impl ExecutorMetrics {
                 transactions_skipped = transactions_skipped_in_block,
                 gas_skipped = gas_skipped_in_block,
                 gas_used = result.gas_used,
-                gas_saved_percent = format!("{:.2}%", if result.gas_used > 0 { 
-                    (gas_skipped_in_block as f64 / result.gas_used as f64) * 100.0 
-                } else { 
-                    0.0 
+                gas_saved_percent = format!("{:.2}%", if result.gas_used > 0 {
+                    (gas_skipped_in_block as f64 / result.gas_used as f64) * 100.0
+                } else {
+                    0.0
                 }),
                 "Block execution cache performance"
             );
