@@ -7,23 +7,23 @@
 //! Hence it is expected that the primary protocol is "eth" and the additional protocols are
 //! "dependent satellite" protocols.
 
-use std::sync::Arc;
 use std::{
     collections::VecDeque,
     fmt,
     future::Future,
     io,
     pin::{pin, Pin},
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 
-use crate::handshake::EthRlpxHandshake;
-use crate::HANDSHAKE_TIMEOUT;
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
+    HANDSHAKE_TIMEOUT,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
@@ -733,13 +733,13 @@ impl fmt::Debug for ProtocolStream {
     }
 }
 
-/// Helper to poll multiple protocol streams in a tokio::select! branch
+/// Helper to poll multiple protocol streams in a `tokio::select`! branch
 struct ProtocolsPoller<'a> {
     protocols: &'a mut Vec<ProtocolStream>,
 }
 
 impl<'a> ProtocolsPoller<'a> {
-    fn new(protocols: &'a mut Vec<ProtocolStream>) -> Self {
+    const fn new(protocols: &'a mut Vec<ProtocolStream>) -> Self {
         Self { protocols }
     }
 }
@@ -752,27 +752,22 @@ impl<'a> std::future::Future for ProtocolsPoller<'a> {
         for idx in (0..self.protocols.len()).rev() {
             let mut proto = self.protocols.swap_remove(idx);
 
-            // Drain this protocol completely
-            loop {
-                match proto.poll_next_unpin(cx) {
-                    Poll::Ready(Some(Err(_err))) => {
-                        // Protocol error, drop this protocol
-                        break;
-                    }
-                    Poll::Ready(Some(Ok(msg))) => {
-                        // Got a message, put protocol back and return the message
-                        self.protocols.push(proto);
-                        return Poll::Ready(Some(msg));
-                    }
-                    Poll::Ready(None) => {
-                        // Protocol ended, don't put it back
-                        break;
-                    }
-                    Poll::Pending => {
-                        // No more ready messages, put protocol back
-                        self.protocols.push(proto);
-                        break;
-                    }
+            // Poll once; if not ready, put back and continue
+            match proto.poll_next_unpin(cx) {
+                Poll::Ready(Some(Err(_err))) => {
+                    // Protocol error, drop this protocol
+                }
+                Poll::Ready(Some(Ok(msg))) => {
+                    // Got a message, put protocol back and return the message
+                    self.protocols.push(proto);
+                    return Poll::Ready(Some(msg));
+                }
+                Poll::Ready(None) => {
+                    // Protocol ended, don't put it back
+                }
+                Poll::Pending => {
+                    // No more ready messages, put protocol back
+                    self.protocols.push(proto);
                 }
             }
         }
