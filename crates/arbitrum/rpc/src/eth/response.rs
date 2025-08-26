@@ -1,3 +1,4 @@
+use alloy_primitives::{bytes, address, Address, B256, U256};
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -17,6 +18,47 @@ mod tests {
     fn signer() -> Address {
         address!("0xb8787d8f23e176a5d32135d746b69886e03313be")
     }
+#[cfg(test)]
+mod no_encoded_2718_field_in_rpc_json {
+    use super::*;
+    use alloy_serde::OtherFields;
+    use serde_json::to_string;
+
+    fn signer() -> Address {
+        address!("0x00000000000000000000000000000000000a4b05")
+    }
+
+    fn dummy_info() -> reth_rpc_convert::transaction::TransactionInfo {
+        reth_rpc_convert::transaction::TransactionInfo {
+            block_hash: Some(B256::ZERO),
+            block_number: Some(1),
+            transaction_index: Some(0),
+        }
+    }
+
+    #[test]
+    fn rpc_tx_json_has_no_transaction_encoded_2718() {
+        use reth_arbitrum_primitives::tx::{ArbInternalTx, ArbTypedTransaction, ArbTransactionSigned};
+
+        let sys = ArbInternalTx {
+            chain_id: U256::from(0x66eeeu64),
+            from: signer(),
+            to: address!("0x00000000000000000000000000000000000a4b05"),
+            data: bytes!("6bf6a42d"),
+            l1_block_number: 1,
+            l1_timestamp: 0,
+            l1_base_fee: U256::ZERO,
+        };
+        let tx = ArbTransactionSigned::from(ArbTypedTransaction::Internal(sys));
+
+        let resp: reth_rpc_types::WithOtherFields<
+            reth_rpc_types::EthTransaction<reth_arbitrum_primitives::tx::ArbTransactionSigned>
+        > = arb_tx_with_other_fields(&tx, signer(), dummy_info());
+
+        let json = to_string(&resp).unwrap();
+        assert!(!json.contains("transaction_encoded_2718"));
+    }
+}
 
     #[test]
     fn maps_submit_retryable_fields() {
