@@ -205,8 +205,7 @@ impl HelloMessageBuilder {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             protocols: protocols.unwrap_or_else(|| {
-                vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
-                // TODO: enable: EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect()
+                EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect()
             }),
             port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,
@@ -216,7 +215,10 @@ impl HelloMessageBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, ProtocolVersion};
+    use crate::{
+        p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
+        ProtocolVersion,
+    };
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
@@ -257,6 +259,20 @@ mod tests {
         hello.encode(&mut hello_encoded);
 
         assert_eq!(hello_encoded.len(), hello.length());
+    }
+
+    #[test]
+    fn test_default_protocols_include_eth69() {
+        // ensure that the default protocol list includes Eth69 as the latest version
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = HelloMessageWithProtocols::builder(id).build();
+
+        let has_eth69 = hello
+            .protocols
+            .iter()
+            .any(|p| p.cap.name == "eth" && p.cap.version == EthVersion::Eth69 as usize);
+        assert!(has_eth69, "Default protocols should include Eth69");
     }
 
     #[test]
