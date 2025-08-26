@@ -21,6 +21,7 @@ use reth_arbitrum_rpc::ArbNitroRpc;
 
 use reth_primitives_traits::Block as _;
 use reth_storage_api::BlockReader;
+use reth_primitives_traits::SignedTransaction;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
 use reth_node_builder::rpc::EngineValidatorAddOn;
@@ -669,7 +670,7 @@ where
                 let mut s = enc.as_slice();
                 let submit_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
-                let ticket_id = submit_tx.tx_hash();
+                let ticket_id = *submit_tx.tx_hash();
 
                 let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
                     arb_alloy_consensus::tx::ArbRetryTx {

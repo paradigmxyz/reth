@@ -22,11 +22,11 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use crate::error::ArbEthApiError;
 use reth_storage_api::{ProviderHeader, ProviderTx};
+pub mod response;
 pub mod txinfo;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use reth_tasks::TaskSpawner;
 use reth_arbitrum_primitives::ArbTransactionSigned;
-pub mod response;
 
 #[derive(Clone, Debug)]
 pub struct ArbRpcTypes;
@@ -43,6 +43,8 @@ pub mod block;
 pub mod call;
 pub mod pending_block;
 pub mod transaction;
+pub mod response;
+
 
 
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
