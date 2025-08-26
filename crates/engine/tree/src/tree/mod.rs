@@ -725,6 +725,196 @@ where
         Ok(Some(NewCanonicalChain::Reorg { new: new_chain, old: old_chain }))
     }
 
+    /// Updates the latest block state to the specified canonical ancestor.
+    ///
+    /// This method ensures that the latest block tracks the given canonical header by resetting
+    ///
+    /// # Arguments
+    /// * `canonical_header` - The canonical header to set as the new head
+    ///
+    /// # Returns
+    /// * `ProviderResult<()>` - Ok(()) on success, error if state update fails
+    ///
+    /// Caution: This unwinds the canonical chain
+    fn update_latest_block_to_canonical_ancestor(
+        &mut self,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<()> {
+        debug!(target: "engine::tree", head = ?canonical_header.num_hash(), "Update latest block to canonical ancestor");
+        let current_head_number = self.state.tree_state.canonical_block_number();
+        let new_head_number = canonical_header.number();
+        let new_head_hash = canonical_header.hash();
+
+        // Update tree state with the new canonical head
+        self.state.tree_state.set_canonical_head(canonical_header.num_hash());
+
+        // Handle the state update based on whether this is an unwind scenario
+        if new_head_number < current_head_number {
+            debug!(
+                target: "engine::tree",
+                current_head = current_head_number,
+                new_head = new_head_number,
+                new_head_hash = ?new_head_hash,
+                "FCU unwind detected: reverting to canonical ancestor"
+            );
+
+            self.handle_canonical_chain_unwind(current_head_number, canonical_header)
+        } else {
+            debug!(
+                target: "engine::tree",
+                previous_head = current_head_number,
+                new_head = new_head_number,
+                new_head_hash = ?new_head_hash,
+                "Advancing latest block to canonical ancestor"
+            );
+            self.handle_chain_advance_or_same_height(canonical_header)
+        }
+    }
+
+    /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
+    /// to the canonical header
+    fn handle_canonical_chain_unwind(
+        &self,
+        current_head_number: u64,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<()> {
+        let new_head_number = canonical_header.number();
+        debug!(
+            target: "engine::tree",
+            from = current_head_number,
+            to = new_head_number,
+            "Handling unwind: collecting blocks to remove from in-memory state"
+        );
+
+        // Collect blocks that need to be removed from memory
+        let old_blocks =
+            self.collect_blocks_for_canonical_unwind(new_head_number, current_head_number);
+
+        // Load and apply the canonical ancestor block
+        self.apply_canonical_ancestor_via_reorg(canonical_header, old_blocks)
+    }
+
+    /// Collects blocks from memory that need to be removed during an unwind to a canonical block.
+    fn collect_blocks_for_canonical_unwind(
+        &self,
+        new_head_number: u64,
+        current_head_number: u64,
+    ) -> Vec<ExecutedBlock<N>> {
+        let mut old_blocks = Vec::new();
+
+        for block_num in (new_head_number + 1)..=current_head_number {
+            if let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_num) {
+                let executed_block = block_state.block_ref().block.clone();
+                old_blocks.push(executed_block);
+                debug!(
+                    target: "engine::tree",
+                    block_number = block_num,
+                    "Collected block for removal from in-memory state"
+                );
+            }
+        }
+
+        if old_blocks.is_empty() {
+            debug!(
+                target: "engine::tree",
+                "No blocks found in memory to remove, will clear and reset state"
+            );
+        }
+
+        old_blocks
+    }
+
+    /// Applies the canonical ancestor block via a reorg operation.
+    fn apply_canonical_ancestor_via_reorg(
+        &self,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+        old_blocks: Vec<ExecutedBlock<N>>,
+    ) -> ProviderResult<()> {
+        let new_head_hash = canonical_header.hash();
+        let new_head_number = canonical_header.number();
+
+        // Try to load the canonical ancestor's block
+        match self.canonical_block_by_hash(new_head_hash)? {
+            Some(executed_block) => {
+                let block_with_trie = ExecutedBlockWithTrieUpdates {
+                    block: executed_block,
+                    trie: ExecutedTrieUpdates::Missing,
+                };
+
+                // Perform the reorg to properly handle the unwind
+                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
+                    new: vec![block_with_trie],
+                    old: old_blocks,
+                });
+
+                // CRITICAL: Update the canonical head after the reorg
+                // This ensures get_canonical_head() returns the correct block
+                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                debug!(
+                    target: "engine::tree",
+                    block_number = new_head_number,
+                    block_hash = ?new_head_hash,
+                    "Successfully loaded canonical ancestor into memory via reorg"
+                );
+            }
+            None => {
+                // Fallback: update header only if block cannot be found
+                warn!(
+                    target: "engine::tree",
+                    block_hash = ?new_head_hash,
+                    "Could not find canonical ancestor block, updating header only"
+                );
+                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handles chain advance or same height scenarios.
+    fn handle_chain_advance_or_same_height(
+        &self,
+        canonical_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<()> {
+        let new_head_number = canonical_header.number();
+        let new_head_hash = canonical_header.hash();
+
+        // Update the canonical head header
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+        // Load the block into memory if it's not already present
+        self.ensure_block_in_memory(new_head_number, new_head_hash)
+    }
+
+    /// Ensures a block is loaded into memory if not already present.
+    fn ensure_block_in_memory(&self, block_number: u64, block_hash: B256) -> ProviderResult<()> {
+        // Check if block is already in memory
+        if self.canonical_in_memory_state.state_by_number(block_number).is_some() {
+            return Ok(());
+        }
+
+        // Try to load the block from storage
+        if let Some(executed_block) = self.canonical_block_by_hash(block_hash)? {
+            let block_with_trie = ExecutedBlockWithTrieUpdates {
+                block: executed_block,
+                trie: ExecutedTrieUpdates::Missing,
+            };
+
+            self.canonical_in_memory_state
+                .update_chain(NewCanonicalChain::Commit { new: vec![block_with_trie] });
+
+            debug!(
+                target: "engine::tree",
+                block_number,
+                block_hash = ?block_hash,
+                "Added canonical block to in-memory state"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Determines if the given block is part of a fork by checking that these
     /// conditions are true:
     /// * walking back from the target hash to verify that the target hash is not part of an
@@ -868,9 +1058,8 @@ where
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
-            // For OpStack the proposers are allowed to reorg their own chain at will, so we need to
-            // always trigger a new payload job if requested.
-            // Also allow forcing this behavior via a config flag.
+            // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
+            // own chain at will, so we need to always trigger a new payload job if requested.
             if self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head()
             {
@@ -880,6 +1069,14 @@ where
                         self.process_payload_attributes(attr, &canonical_header, state, version);
                     return Ok(TreeOutcome::new(updated))
                 }
+
+                // At this point, no alternative block has been triggered, so we need effectively
+                // unwind the _canonical_ chain to the FCU's head, which is part of the canonical
+                // chain. We need to update the latest block state to reflect the
+                // canonical ancestor. This ensures that state providers and the
+                // transaction pool operate with the correct chain state after
+                // forkchoice update processing.
+                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
             }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
