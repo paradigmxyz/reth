@@ -21,6 +21,7 @@ use reth_arbitrum_rpc::ArbNitroRpc;
 
 use reth_primitives_traits::Block as _;
 use reth_storage_api::BlockReader;
+use reth_primitives_traits::SignedTransaction;
 use super::args::RollupArgs;
 use crate::follower::DynFollowerExecutor;
 use reth_node_builder::rpc::EngineValidatorAddOn;
@@ -662,13 +663,36 @@ where
                         beneficiary: callvalue_refund_addr,
                         max_submission_fee,
                         fee_refund_addr,
-                        retry_data: alloy_primitives::Bytes::from(retry_data),
+                        retry_data: alloy_primitives::Bytes::from(retry_data.clone()),
                     },
                 );
                 let mut enc = env.encode_typed();
                 let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?]
+                let submit_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
+                let ticket_id = *submit_tx.tx_hash();
+
+                let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
+                    arb_alloy_consensus::tx::ArbRetryTx {
+                        chain_id: chain_id_u256,
+                        nonce: 0,
+                        from: poster,
+                        gas_fee_cap: max_fee_per_gas,
+                        gas,
+                        to: retry_to_opt,
+                        value: callvalue,
+                        data: alloy_primitives::Bytes::from(retry_data),
+                        ticket_id,
+                        refund_to: fee_refund_addr,
+                        max_refund: max_fee_per_gas.saturating_mul(alloy_primitives::U256::from(gas)),
+                        submission_fee_refund: max_submission_fee,
+                    },
+                );
+                let mut retry_enc = retry_env.encode_typed();
+                let mut rs = retry_enc.as_slice();
+                let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
+                    .map_err(|_| eyre::eyre!("decode retry failed"))?;
+                vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => Vec::new(),
@@ -694,39 +718,7 @@ where
                     .map_err(|_| eyre::eyre!("decode deposit failed"))?]
             }
             13 => {
-                let mut cur = &l2_owned[..];
-                let batch_timestamp = read_u256_be32(&mut cur)?;
-                let batch_poster = read_address20(&mut cur)?;
-                let _data_hash = read_u256_be32(&mut cur)?;
-                let batch_num_u256 = read_u256_be32(&mut cur)?;
-                let l1bf = read_u256_be32(&mut cur)?;
-                let extra_gas = if cur.is_empty() { 0u64 } else { read_u64_be(&mut cur)? };
-                let batch_num = u256_to_u64_checked(&batch_num_u256, "batch number")?;
-                let base_gas = match batch_gas_cost {
-                    Some(v) => v,
-                    None => {
-                        reth_tracing::tracing::warn!(target: "arb-reth::follower", batch_num = batch_num, "batch_gas_cost missing; proceeding with 0");
-                        0
-                    }
-                };
-                let batch_data_gas = base_gas.saturating_add(extra_gas);
-                let report = encode_batch_posting_report_data(
-                    batch_timestamp,
-                    batch_poster,
-                    batch_num,
-                    batch_data_gas,
-                    l1bf,
-                );
-                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
-                    arb_alloy_consensus::tx::ArbInternalTx {
-                        chain_id: chain_id_u256,
-                        data: report,
-                    }
-                );
-                let mut enc = env.encode_typed();
-                let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode Internal failed"))?]
+                Vec::new()
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
