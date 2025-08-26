@@ -503,17 +503,13 @@ impl ChainSpec {
             }
         }
 
-        let timestamp_forks = self
-            .hardforks
-            .forks_iter()
-            .filter_map(|(_, cond)| cond.as_timestamp())
-            .filter(|time| time > &self.genesis.timestamp)
-            .collect::<Vec<_>>();
-
         // timestamp are ALWAYS applied after the merge.
         //
         // this filter ensures that no block-based forks are returned
-        for timestamp in timestamp_forks {
+        for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
+            // ensure we only get timestamp forks activated __after__ the genesis block
+            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
+        }) {
             if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
