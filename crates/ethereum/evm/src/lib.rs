@@ -320,6 +320,10 @@ where
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
+        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
+            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
+        }
+
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
         let blob_excess_gas_and_price =
