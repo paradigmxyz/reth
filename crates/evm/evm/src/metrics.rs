@@ -184,7 +184,7 @@ impl ExecutorMetrics {
                         gas_skipped = gas_used,
                         "Using cached transaction result"
                     );
-                    executor.execute_transaction_with_cached_result(tx, result, |_| {
+                    executor.commit_cached_execution(tx, result, |_| {
                         alloy_evm::block::CommitChanges::Yes
                     })?;
                 } else {
@@ -327,7 +327,7 @@ mod tests {
             Ok(Some(0))
         }
 
-        fn execute_transaction_with_cached_result(
+        fn commit_cached_execution(
             &mut self,
             _tx: impl alloy_evm::block::ExecutableTx<Self>,
             _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,

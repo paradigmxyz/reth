@@ -96,7 +96,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         Ok(Some(0))
     }
 
-    fn execute_transaction_with_cached_result(
+    fn commit_cached_execution(
         &mut self,
         _tx: impl alloy_evm::block::ExecutableTx<Self>,
         _result: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
