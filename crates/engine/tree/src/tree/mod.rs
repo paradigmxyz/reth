@@ -11,7 +11,7 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError};
+use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -2335,10 +2335,20 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
-        Ok(PayloadStatus::new(
-            PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
-            latest_valid_hash,
-        ))
+        // If the validation error is specifically an inclusion-list failure,
+        // return the dedicated `InclusionListUnsatisfied` payload status.
+        match validation_err {
+            InsertBlockValidationError::Validation(
+                reth_errors::BlockValidationError::InvalidInclusionList,
+            ) => Ok(PayloadStatus::new(
+                PayloadStatusEnum::InclusionListUnsatisfied,
+                latest_valid_hash,
+            )),
+            _ => Ok(PayloadStatus::new(
+                PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
+                latest_valid_hash,
+            )),
+        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
