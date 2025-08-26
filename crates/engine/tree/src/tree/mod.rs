@@ -7,6 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -23,7 +24,7 @@ use reth_engine_primitives::{
     ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
@@ -38,6 +39,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{HashedPostState, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
+use revm::state::EvmState;
 use state::TreeState;
 use std::{
     fmt::Debug,
@@ -208,6 +210,28 @@ pub enum TreeAction {
         /// The sync target head hash
         sync_target_head: B256,
     },
+}
+
+/// Wrapper struct that combines metrics and state hook
+struct MeteredStateHook {
+    metrics: reth_evm::metrics::ExecutorMetrics,
+    inner_hook: Box<dyn OnStateHook>,
+}
+
+impl OnStateHook for MeteredStateHook {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
+        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
+        let accounts = state.keys().len();
+        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+
+        self.metrics.accounts_loaded_histogram.record(accounts as f64);
+        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+
+        // Call the original state hook
+        self.inner_hook.on_state(source, state);
+    }
 }
 
 /// The engine API tree handler implementation.
