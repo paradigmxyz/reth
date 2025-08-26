@@ -84,12 +84,13 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
     ) -> ProviderResult<Vec<B256>> {
         let range = start..end;
         let mut earliest_block_number = None;
-        let mut in_memory_hashes = Vec::new();
+        let mut in_memory_hashes = Vec::with_capacity((end - start) as usize);
 
         for block in &self.in_memory {
-            if range.contains(&block.recovered_block().number()) {
+            let x = block.recovered_block().number();
+            if range.contains(&x) {
                 in_memory_hashes.push(block.recovered_block().hash());
-                earliest_block_number = Some(block.recovered_block().number());
+                earliest_block_number = Some(x);
             }
         }
 
