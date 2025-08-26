@@ -236,9 +236,9 @@ where
                     Err(EthSnapStreamError::InvalidMessage(self.eth_version, err.to_string()))
                 }
             }
-        } else if message_id > EthMessageID::max(self.eth_version)
-            && message_id
-                <= EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
+        } else if message_id > EthMessageID::max(self.eth_version) &&
+            message_id <=
+                EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
         {
             // Checks for multiplexed snap message IDs :
             // - message_id > EthMessageID::max() : ensures it's not an eth message
