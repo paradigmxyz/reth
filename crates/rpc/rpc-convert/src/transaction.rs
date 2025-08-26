@@ -16,7 +16,7 @@ use alloy_rpc_types_eth::{
 use core::error;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
-    ConfigureEvm, TxEnvFor,
+    ConfigureEvm, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
@@ -107,6 +107,9 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
+    /// The EVM specification identifier.
+    type Spec;
+
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
@@ -137,10 +140,10 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
 
     /// Creates a transaction environment for execution based on `request` with corresponding
     /// `cfg_env` and `block_env`.
-    fn tx_env<Spec>(
+    fn tx_env(
         &self,
         request: RpcTxReq<Self::Network>,
-        cfg_env: &CfgEnv<Spec>,
+        cfg_env: &CfgEnv<Self::Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
 
@@ -375,16 +378,25 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 /// * `TxReq` is a transaction request received from an RPC API
 /// * `TxEnv` is the corresponding transaction environment for execution
 ///
-/// The `TxEnvConverter` has a blanket implementation:
+/// The `TxEnvConverter` has two blanket implementations:
 /// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
-pub trait TxEnvConverter<TxReq, TxEnv>: Debug + Send + Sync + Unpin + Clone + 'static {
+/// * `Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
+///   [`RpcConverter::with_tx_env_converter`].
+///
+/// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
+/// implementation for free, thanks to the blanket implementation, unless the conversion requires
+/// more context. For example, some configuration parameters or access handles to database, network,
+/// etc.
+pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
+    Debug + Send + Sync + Unpin + Clone + 'static
+{
     /// An associated error that can occur during conversion.
     type Error;
 
     /// Converts a rpc transaction request into a transaction environment.
     ///
     /// See [`TxEnvConverter`] for more information.
-    fn convert_tx_env<Spec>(
+    fn convert_tx_env(
         &self,
         tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
@@ -392,19 +404,44 @@ pub trait TxEnvConverter<TxReq, TxEnv>: Debug + Send + Sync + Unpin + Clone + 's
     ) -> Result<TxEnv, Self::Error>;
 }
 
-impl<TxReq, TxEnv> TxEnvConverter<TxReq, TxEnv> for ()
+impl<TxReq, TxEnv, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for ()
 where
     TxReq: TryIntoTxEnv<TxEnv>,
 {
     type Error = TxReq::Err;
 
-    fn convert_tx_env<Spec>(
+    fn convert_tx_env(
         &self,
         tx_req: TxReq,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<TxEnv, Self::Error> {
         tx_req.try_into_tx_env(cfg_env, block_env)
+    }
+}
+
+/// Converts rpc transaction requests into transaction environment using a closure.
+impl<F, TxReq, TxEnv, E, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for F
+where
+    F: Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + 'static,
+    TxReq: Clone,
+    E: error::Error + Send + Sync + 'static,
+{
+    type Error = E;
+
+    fn convert_tx_env(
+        &self,
+        tx_req: TxReq,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error> {
+        self(tx_req, cfg_env, block_env)
     }
 }
 
@@ -824,12 +861,13 @@ where
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
     RpcTx:
         RpcTxConverter<TxTy<N>, Network::TransactionResponse, <Map as TxInfoMapper<TxTy<N>>>::Out>,
-    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>>,
+    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>, SpecFor<Evm>>,
 {
     type Primitives = N;
     type Network = Network;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Receipt::Error;
+    type Spec = SpecFor<Evm>;
 
     fn fill(
         &self,
@@ -852,10 +890,10 @@ where
             .map_err(|e| TransactionConversionError(e.to_string()))?)
     }
 
-    fn tx_env<Spec>(
+    fn tx_env(
         &self,
         request: RpcTxReq<Network>,
-        cfg_env: &CfgEnv<Spec>,
+        cfg_env: &CfgEnv<SpecFor<Evm>>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
         self.tx_env_converter.convert_tx_env(request, cfg_env, block_env).map_err(Into::into)
