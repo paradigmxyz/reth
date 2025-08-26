@@ -92,12 +92,9 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        let is_osaka_activated = self.is_osaka_active_at_timestamp(timestamp);
-        let params = if let Some(blob_param) =
-            self.blob_params.active_scheduled_params_at_timestamp(timestamp)
-        {
+        if let Some(blob_param) = self.blob_params.active_scheduled_params_at_timestamp(timestamp) {
             Some(*blob_param)
-        } else if is_osaka_activated {
+        } else if self.is_osaka_active_at_timestamp(timestamp) {
             Some(self.blob_params.osaka)
         } else if self.is_prague_active_at_timestamp(timestamp) {
             Some(self.blob_params.prague)
@@ -105,16 +102,6 @@ impl EthChainSpec for ChainSpec {
             Some(self.blob_params.cancun)
         } else {
             None
-        };
-
-        if is_osaka_activated {
-            params.map(|params| {
-                params
-                    .with_blob_base_cost(eip7840::BLOB_BASE_COST)
-                    .with_max_blobs_per_tx(eip7594::MAX_BLOBS_PER_TX_FUSAKA)
-            })
-        } else {
-            params
         }
     }
 
