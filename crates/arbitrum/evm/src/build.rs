@@ -201,9 +201,9 @@ where
 
         let mut tx_env = tx.to_tx_env();
         if is_internal {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0u128);
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         } else if is_deposit {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0u128);
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
         }
         if is_internal || is_deposit {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
