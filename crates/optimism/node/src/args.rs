@@ -3,6 +3,7 @@
 //! clap [Args](clap::Args) for optimism rollup configuration
 
 use op_alloy_consensus::interop::SafetyLevel;
+use reth_optimism_forks::OpHardfork;
 use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 
 /// Parameters for rollup configuration
@@ -66,6 +67,38 @@ pub struct RollupArgs {
     /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
     #[arg(long, default_value_t = 1_000_000)]
     pub min_suggested_priority_fee: u64,
+
+    /// Override Canyon OP hardfork activation timestamp
+    #[arg(long = "override.canyon", value_name = "TIMESTAMP")]
+    pub canyon: Option<u64>,
+
+    /// Override Ecotone OP hardfork activation timestamp
+    #[arg(long = "override.ecotone", value_name = "TIMESTAMP")]
+    pub ecotone: Option<u64>,
+
+    /// Override Fjord OP hardfork activation timestamp
+    #[arg(long = "override.fjord", value_name = "TIMESTAMP")]
+    pub fjord: Option<u64>,
+
+    /// Override Granite OP hardfork activation timestamp
+    #[arg(long = "override.granite", value_name = "TIMESTAMP")]
+    pub granite: Option<u64>,
+
+    /// Override Holocene OP hardfork activation timestamp
+    #[arg(long = "override.holocene", value_name = "TIMESTAMP")]
+    pub holocene: Option<u64>,
+
+    /// Override Isthmus OP hardfork activation timestamp
+    #[arg(long = "override.isthmus", value_name = "TIMESTAMP")]
+    pub isthmus: Option<u64>,
+
+    /// Override Jovian OP hardfork activation timestamp
+    #[arg(long = "override.jovian", value_name = "TIMESTAMP")]
+    pub jovian: Option<u64>,
+
+    /// Override Interop OP hardfork activation timestamp
+    #[arg(long = "override.interop", value_name = "TIMESTAMP")]
+    pub interop: Option<u64>,
 }
 
 impl Default for RollupArgs {
@@ -81,7 +114,49 @@ impl Default for RollupArgs {
             sequencer_headers: Vec::new(),
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
+            canyon: None,
+            ecotone: None,
+            fjord: None,
+            granite: None,
+            holocene: None,
+            isthmus: None,
+            jovian: None,
+            interop: None,
         }
+    }
+}
+
+impl RollupArgs {
+    /// Get the OP hardfork overrides as a vector of (hardfork, timestamp) pairs.
+    pub fn op_hardforks_as_vec(&self) -> Vec<(OpHardfork, u64)> {
+        let mut overrides = Vec::new();
+
+        if let Some(ts) = self.canyon {
+            overrides.push((OpHardfork::Canyon, ts));
+        }
+        if let Some(ts) = self.ecotone {
+            overrides.push((OpHardfork::Ecotone, ts));
+        }
+        if let Some(ts) = self.fjord {
+            overrides.push((OpHardfork::Fjord, ts));
+        }
+        if let Some(ts) = self.granite {
+            overrides.push((OpHardfork::Granite, ts));
+        }
+        if let Some(ts) = self.holocene {
+            overrides.push((OpHardfork::Holocene, ts));
+        }
+        if let Some(ts) = self.isthmus {
+            overrides.push((OpHardfork::Isthmus, ts));
+        }
+        if let Some(ts) = self.jovian {
+            overrides.push((OpHardfork::Jovian, ts));
+        }
+        if let Some(ts) = self.interop {
+            overrides.push((OpHardfork::Interop, ts));
+        }
+
+        overrides
     }
 }
 
@@ -167,6 +242,42 @@ mod tests {
             "--rollup.enable-tx-conditional",
             "--rollup.sequencer-http",
             "http://host:port",
+        ])
+        .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_hardfork_overrides() {
+        let expected_args = RollupArgs {
+            canyon: Some(1),
+            ecotone: Some(2),
+            fjord: Some(3),
+            granite: Some(4),
+            holocene: Some(5),
+            isthmus: Some(6),
+            jovian: Some(7),
+            interop: Some(8),
+            ..Default::default()
+        };
+        let args = CommandParser::<RollupArgs>::parse_from([
+            "reth",
+            "--override.canyon",
+            "1",
+            "--override.ecotone",
+            "2",
+            "--override.fjord",
+            "3",
+            "--override.granite",
+            "4",
+            "--override.holocene",
+            "5",
+            "--override.isthmus",
+            "6",
+            "--override.jovian",
+            "7",
+            "--override.interop",
+            "8",
         ])
         .args;
         assert_eq!(args, expected_args);
