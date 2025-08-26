@@ -2,7 +2,12 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
+use alloy_evm::{
+    eth::EthEvmContext,
+    precompiles::PrecompilesMap,
+    revm::precompile::{Precompile, PrecompileId},
+    EvmFactory,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
 use reth_ethereum::{
@@ -15,7 +20,7 @@ use reth_ethereum::{
             handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -99,13 +104,12 @@ pub fn prague_custom() -> &'static Precompiles {
     INSTANCE.get_or_init(|| {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
-        precompiles.extend([(
+        let precompile = Precompile::new(
+            PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| -> PrecompileResult {
-                PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
-            } as PrecompileFn,
-        )
-            .into()]);
+            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+        );
+        precompiles.extend([precompile]);
         precompiles
     })
 }

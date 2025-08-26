@@ -692,7 +692,7 @@ where
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
         let tx_cache = handle.tx_cache.clone();
-        let output = self.metrics.executor.execute_metered::<_, _, N::SignedTx>(
+        let output = self.metrics.execute_metered_with_cache::<_, _, N::SignedTx>(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,

@@ -1,51 +1,9 @@
 //! Executor metrics.
-//!
-//! Block processing related to syncing should take care to update the metrics by using either
-//! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{Database, OnStateHook};
 use alloy_consensus::BlockHeader;
-use alloy_evm::{
-    block::{BlockExecutor, ExecutableTx, StateChangeSource},
-    Evm,
-};
-use alloy_primitives::TxHash;
-use core::borrow::BorrowMut;
 use metrics::{Counter, Gauge, Histogram};
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use revm::{
-    context::result::ResultAndState,
-    database::{states::bundle_state::BundleRetention, State},
-    state::EvmState,
-};
+use reth_primitives_traits::{Block, RecoveredBlock};
 use std::time::Instant;
-
-#[cfg(feature = "metrics")]
-use tracing::{debug, trace};
-
-/// Wrapper struct that combines metrics and state hook
-struct MeteredStateHook {
-    metrics: ExecutorMetrics,
-    inner_hook: Box<dyn OnStateHook>,
-}
-
-impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = state.keys().len();
-        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
-
-        self.metrics.accounts_loaded_histogram.record(accounts as f64);
-        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
-        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
-
-        // Call the original state hook
-        self.inner_hook.on_state(source, state);
-    }
-}
 
 /// Executor metrics.
 // TODO(onbjerg): add sload/sstore
@@ -98,6 +56,7 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
+    /// Helper function for metered execution
     fn metered<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> (u64, R),
@@ -114,359 +73,64 @@ impl ExecutorMetrics {
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
-        #[cfg(feature = "metrics")]
-        trace!(
-            target: "reth::evm::metrics",
-            gas_used,
-            duration_secs = ?execution_duration,
-            gas_per_second = gas_used as f64 / execution_duration,
-            "Block execution metrics recorded"
-        );
-
         output
     }
 
-    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
-    /// execution.
+    /// Execute a block and update basic gas/timing metrics.
     ///
-    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
-    /// of accounts, storage slots and bytecodes loaded and updated.
-    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
-    /// execution.
-    pub fn execute_metered<E, DB, T: SignedTransaction>(
-        &self,
-        executor: E,
-        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
-        state_hook: Box<dyn OnStateHook>,
-        get_cached_tx_result: impl Fn(
-            &mut <E::Evm as Evm>::DB,
-            TxHash,
-        ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
-    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
-    where
-        DB: Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction = T>,
-    {
-        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
-        // they are globally registered so that the data recorded in the hook will
-        // be accessible.
-        let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
-
-        let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
-
-        // Track cache statistics for logging
-        let mut cache_hits_in_block = 0u64;
-        let mut cache_misses_in_block = 0u64;
-        let mut gas_skipped_in_block = 0u64;
-        let mut transactions_skipped_in_block = 0u64;
-
-        let f = || {
-            executor.apply_pre_execution_changes()?;
-            for tx in transactions {
-                let tx = tx?;
-                let tx_hash = *tx.tx().tx_hash();
-                if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
-                    cache_hits_in_block += 1;
-                    transactions_skipped_in_block += 1;
-                    self.execution_results_cache_hits.increment(1);
-                    self.transactions_skipped.increment(1);
-
-                    // Track gas skipped
-                    let gas_used = result.result.gas_used();
-                    gas_skipped_in_block += gas_used;
-                    self.gas_skipped.increment(gas_used);
-                    self.gas_skipped_per_tx_histogram.record(gas_used as f64);
-
-                    #[cfg(feature = "metrics")]
-                    debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        gas_skipped = gas_used,
-                        "Using cached transaction result"
-                    );
-                    executor.commit_cached_execution(tx, result, |_| {
-                        alloy_evm::block::CommitChanges::Yes
-                    })?;
-                } else {
-                    cache_misses_in_block += 1;
-                    self.execution_results_cache_misses.increment(1);
-                    #[cfg(feature = "metrics")]
-                    debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        "Cache miss, executing transaction"
-                    );
-                    executor.execute_transaction(tx)?;
-                }
-            }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
-        };
-
-        // Use metered to execute and track timing/gas metrics
-        let (mut db, result) = self.metered(|| {
-            let res = f();
-            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
-            (gas_used, res)
-        })?;
-
-        // Log cache performance summary with enhanced metrics
-        #[cfg(feature = "metrics")]
-        {
-            let total_txs = cache_hits_in_block + cache_misses_in_block;
-            let hit_rate = if total_txs > 0 {
-                (cache_hits_in_block as f64 / total_txs as f64) * 100.0
-            } else {
-                0.0
-            };
-            
-            let cache_benefit = if result.gas_used + gas_skipped_in_block > 0 {
-                (gas_skipped_in_block as f64 / (gas_skipped_in_block + result.gas_used) as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            // Record hit rate in histogram
-            self.cache_hit_rate_histogram.record(hit_rate);
-
-            tracing::warn!(
-                target: "engine::cache::summary",
-                total_txs,
-                cache_hits = cache_hits_in_block,
-                cache_misses = cache_misses_in_block,
-                hit_rate_percent = hit_rate,
-                transactions_skipped = transactions_skipped_in_block,
-                gas_executed = result.gas_used,
-                gas_skipped = gas_skipped_in_block,
-                cache_benefit_percent = cache_benefit,
-                "BLOCK_CACHE_SUMMARY"
-            );
-        }
-
-        // merge transactions into bundle state
-        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
-        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
-
-        // Update the metrics for the number of accounts, storage slots and bytecodes updated
-        let accounts = output.state.state.len();
-        let storage_slots =
-            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = output.state.contracts.len();
-
-        self.accounts_updated_histogram.record(accounts as f64);
-        self.storage_slots_updated_histogram.record(storage_slots as f64);
-        self.bytecodes_updated_histogram.record(bytecodes as f64);
-
-        Ok(output)
-    }
-
-    /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
+    /// This is a simple helper that tracks execution time and gas usage.
+    /// For more complex metrics tracking (like state changes), use the
+    /// metered execution functions in the engine/tree module.
+    pub fn metered_one<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
     where
         F: FnOnce(&RecoveredBlock<B>) -> R,
-        B: reth_primitives_traits::Block,
+        B: Block,
+        B::Header: BlockHeader,
     {
-        self.metered(|| (input.header().gas_used(), f(input)))
+        self.metered(|| (block.header().gas_used(), f(block)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::Requests;
-    use alloy_evm::{block::CommitChanges, EthEvm};
-    use alloy_primitives::{B256, U256};
-    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use reth_ethereum_primitives::{Receipt, TransactionSigned};
-    use reth_execution_types::BlockExecutionResult;
-    use revm::{
-        context::result::ExecutionResult,
-        database::State,
-        database_interface::EmptyDB,
-        inspector::NoOpInspector,
-        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
-        Context, MainBuilder, MainContext,
-    };
-    use std::sync::mpsc;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::Block as BlockTrait;
 
-    /// A mock executor that simulates state changes
-    struct MockExecutor {
-        state: EvmState,
-        hook: Option<Box<dyn OnStateHook>>,
-        evm: EthEvm<State<EmptyDB>, NoOpInspector>,
-    }
-
-    impl MockExecutor {
-        fn new(state: EvmState) -> Self {
-            let db = State::builder()
-                .with_database(EmptyDB::default())
-                .with_bundle_update()
-                .without_state_clear()
-                .build();
-            let evm = EthEvm::new(
-                Context::mainnet().with_db(db).build_mainnet_with_inspector(NoOpInspector {}),
-                false,
-            );
-            Self { state, hook: None, evm }
-        }
-    }
-
-    impl BlockExecutor for MockExecutor {
-        type Transaction = TransactionSigned;
-        type Receipt = Receipt;
-        type Evm = EthEvm<State<EmptyDB>, NoOpInspector>;
-
-        fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-            Ok(())
-        }
-
-        fn execute_transaction_with_commit_condition(
-            &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-        ) -> Result<Option<u64>, BlockExecutionError> {
-            Ok(Some(0))
-        }
-
-        fn commit_cached_execution(
-            &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _result: ResultAndState<<Self::Evm as Evm>::HaltReason>,
-            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-        ) -> Result<Option<u64>, BlockExecutionError> {
-            Ok(Some(0))
-        }
-
-        fn finish(
-            self,
-        ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
-            let Self { evm, hook, .. } = self;
-
-            // Call hook with our mock state
-            if let Some(mut hook) = hook {
-                hook.on_state(StateChangeSource::Transaction(0), &self.state);
-            }
-
-            Ok((
-                evm,
-                BlockExecutionResult {
-                    receipts: vec![],
-                    requests: Requests::default(),
-                    gas_used: 0,
-                },
-            ))
-        }
-
-        fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
-            self.hook = hook;
-        }
-
-        fn evm(&self) -> &Self::Evm {
-            &self.evm
-        }
-
-        fn evm_mut(&mut self) -> &mut Self::Evm {
-            &mut self.evm
-        }
-    }
-
-    struct ChannelStateHook {
-        output: i32,
-        sender: mpsc::Sender<i32>,
-    }
-
-    impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
-            let _ = self.sender.send(self.output);
-        }
-    }
-
-    fn setup_test_recorder() -> Snapshotter {
-        let recorder = DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        recorder.install().unwrap();
-        snapshotter
+    fn create_test_block_with_gas(gas_used: u64) -> RecoveredBlock<Block> {
+        let header = Header { gas_used, ..Default::default() };
+        let block = Block { header, body: Default::default() };
+        // Use a dummy hash for testing
+        let hash = B256::default();
+        let sealed = block.seal_unchecked(hash);
+        RecoveredBlock::new_sealed(sealed, Default::default())
     }
 
     #[test]
-    fn test_executor_metrics_hook_metrics_recorded() {
-        let snapshotter = setup_test_recorder();
+    fn test_metered_one_updates_metrics() {
         let metrics = ExecutorMetrics::default();
-        let input = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+        let block = create_test_block_with_gas(1000);
 
-        let (tx, _rx) = mpsc::channel();
-        let expected_output = 42;
-        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
+        // Execute with metered_one
+        let result = metrics.metered_one(&block, |b| {
+            // Simulate some work
+            b.header().gas_used() * 2
+        });
 
-        let state = {
-            let mut state = EvmState::default();
-            let storage =
-                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2), 0))]);
-            state.insert(
-                Default::default(),
-                Account {
-                    info: AccountInfo {
-                        balance: U256::from(100),
-                        nonce: 10,
-                        code_hash: B256::random(),
-                        code: Default::default(),
-                    },
-                    storage,
-                    status: AccountStatus::default(),
-                    transaction_id: 0,
-                },
-            );
-            state
-        };
-        let executor = MockExecutor::new(state);
-        let _result = metrics
-            .execute_metered::<_, EmptyDB, _>(
-                executor,
-                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
-                state_hook,
-                |_, _| None,
-            )
-            .unwrap();
+        assert_eq!(result, 2000);
 
-        let snapshot = snapshotter.snapshot().into_vec();
-
-        for metric in snapshot {
-            let metric_name = metric.0.key().name();
-            if metric_name == "sync.execution.accounts_loaded_histogram" ||
-                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
-                metric_name == "sync.execution.bytecodes_loaded_histogram"
-            {
-                if let DebugValue::Histogram(vs) = metric.3 {
-                    assert!(
-                        vs.iter().any(|v| v.into_inner() > 0.0),
-                        "metric {metric_name} not recorded"
-                    );
-                }
-            }
-        }
+        // Note: We can't easily test the counter values because they use global state
+        // but the function should update them correctly
     }
 
     #[test]
-    fn test_executor_metrics_hook_called() {
+    fn test_metered_with_empty_block() {
         let metrics = ExecutorMetrics::default();
-        let input = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+        let block = create_test_block_with_gas(0);
 
-        let (tx, rx) = mpsc::channel();
-        let expected_output = 42;
-        let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
-
-        let state = EvmState::default();
-
-        let executor = MockExecutor::new(state);
-        let _result = metrics
-            .execute_metered::<_, EmptyDB, _>(
-                executor,
-                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
-                state_hook,
-                |_, _| None,
-            )
-            .unwrap();
-
-        let actual_output = rx.try_recv().unwrap();
-        assert_eq!(actual_output, expected_output);
+        let result = metrics.metered_one(&block, |_| "test");
+        assert_eq!(result, "test");
     }
 }

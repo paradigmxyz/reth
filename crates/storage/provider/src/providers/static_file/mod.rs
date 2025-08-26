@@ -74,7 +74,7 @@ mod tests {
 
     fn assert_eyre<T: PartialEq + Debug>(got: T, expected: T, msg: &str) -> eyre::Result<()> {
         if got != expected {
-            eyre::bail!("{msg} | got: {got:?} expected: {expected:?})");
+            eyre::bail!("{msg} | got: {got:?} expected: {expected:?}");
         }
         Ok(())
     }
