@@ -7492,6 +7492,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-serde",
+ "arb-alloy-consensus",
  "arb-alloy-network",
  "async-trait",
  "eyre",
