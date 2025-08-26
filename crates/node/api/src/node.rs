@@ -204,11 +204,3 @@ pub trait NodeAddOns<N: FullNodeComponents>: Send {
         ctx: AddOnsContext<'_, N>,
     ) -> impl Future<Output = eyre::Result<Self::Handle>> + Send;
 }
-
-impl<N: FullNodeComponents> NodeAddOns<N> for () {
-    type Handle = ();
-
-    async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        Ok(())
-    }
-}

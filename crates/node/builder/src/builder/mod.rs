@@ -303,7 +303,7 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
+    ) -> NodeBuilderWithAddOns<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
@@ -368,7 +368,7 @@ where
         self,
         node: N,
     ) -> WithLaunchContext<
-        NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        NodeBuilderWithAddOns<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
@@ -386,7 +386,7 @@ where
         node: N,
     ) -> eyre::Result<
         <EngineNodeLauncher as LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            NodeBuilderWithAddOns<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >>::Node,
     >
     where
@@ -399,7 +399,7 @@ where
         >,
         N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            NodeBuilderWithAddOns<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
     {
         self.node(node).launch().await
@@ -411,7 +411,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB>>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -422,7 +422,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     }
 }
 
-impl<T, CB> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
+impl<T, CB> WithLaunchContext<NodeBuilderWithComponents<T, CB>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
@@ -432,7 +432,7 @@ where
     pub fn with_add_ons<AO>(
         self,
         add_ons: AO,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+    ) -> WithLaunchContext<NodeBuilderWithAddOns<T, CB, AO>>
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
@@ -443,7 +443,7 @@ where
     }
 }
 
-impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+impl<T, CB, AO> WithLaunchContext<NodeBuilderWithAddOns<T, CB, AO>>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
@@ -627,7 +627,7 @@ where
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
-        L: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+        L: LaunchNode<NodeBuilderWithAddOns<T, CB, AO>>,
     {
         launcher.launch_node(self.builder).await
     }
@@ -650,9 +650,9 @@ where
     /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithAddOns<T, CB, AO>>>::Node>
     where
-        EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+        EngineNodeLauncher: LaunchNode<NodeBuilderWithAddOns<T, CB, AO>>,
     {
         let launcher = self.engine_api_launcher();
         self.builder.launch_with(launcher).await
@@ -664,10 +664,10 @@ where
     /// if they are configured.
     pub async fn launch_with_debug_capabilities(
         self,
-    ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithAddOns<T, CB, AO>>>::Node>
     where
         T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
-        DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+        DebugNodeLauncher: LaunchNode<NodeBuilderWithAddOns<T, CB, AO>>,
     {
         let Self { builder, task_executor } = self;
 

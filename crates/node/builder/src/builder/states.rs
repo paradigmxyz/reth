@@ -37,18 +37,13 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
+    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB>
     where
         CB: NodeComponentsBuilder<T>,
     {
         let Self { config, adapter } = self;
 
-        NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
-        }
+        NodeBuilderWithComponents { config, adapter, components_builder }
     }
 }
 
@@ -138,10 +133,42 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
     }
 }
 
+/// A node builder that knows the node types and components.
+pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
+    /// All settings for how the node should be configured.
+    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
+    /// Adapter for the underlying node types and database
+    pub adapter: NodeTypesAdapter<T>,
+    /// container for type specific components
+    pub components_builder: CB,
+}
+
+impl<T, CB> NodeBuilderWithComponents<T, CB>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+{
+    /// Advances the state of the node builder to the next state where all customizable
+    /// [`NodeAddOns`] types are configured.
+    pub fn with_add_ons<AO>(self, add_ons: AO) -> NodeBuilderWithAddOns<T, CB, AO>
+    where
+        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    {
+        let Self { config, adapter, components_builder } = self;
+
+        NodeBuilderWithAddOns {
+            config,
+            adapter,
+            components_builder,
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+        }
+    }
+}
+
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<
+pub struct NodeBuilderWithAddOns<
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
@@ -156,29 +183,7 @@ pub struct NodeBuilderWithComponents<
     pub add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
 }
 
-impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
-where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-{
-    /// Advances the state of the node builder to the next state where all customizable
-    /// [`NodeAddOns`] types are configured.
-    pub fn with_add_ons<AO>(self, add_ons: AO) -> NodeBuilderWithComponents<T, CB, AO>
-    where
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    {
-        let Self { config, adapter, components_builder, .. } = self;
-
-        NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
-        }
-    }
-}
-
-impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+impl<T, CB, AO> NodeBuilderWithAddOns<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
@@ -244,7 +249,7 @@ where
     }
 }
 
-impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+impl<T, CB, AO> NodeBuilderWithAddOns<T, CB, AO>
 where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,

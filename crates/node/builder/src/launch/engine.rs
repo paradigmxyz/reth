@@ -6,9 +6,10 @@ use crate::{
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+    NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
+use crate::NodeBuilderWithAddOns;
 use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
@@ -63,7 +64,7 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithAddOns<T, CB, AO>> for EngineNodeLauncher
 where
     Types: NodeTypesForProvider + NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -80,10 +81,10 @@ where
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<T, CB, AO>,
+        target: NodeBuilderWithAddOns<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx, engine_tree_config } = self;
-        let NodeBuilderWithComponents {
+        let NodeBuilderWithAddOns {
             adapter: NodeTypesAdapter { database },
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
