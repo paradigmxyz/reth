@@ -236,14 +236,14 @@ where
                     Err(EthSnapStreamError::InvalidMessage(self.eth_version, err.to_string()))
                 }
             }
-        } else if message_id > EthMessageID::max(self.eth_version) &&
-            message_id <=
-                EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
+        } else if message_id > EthMessageID::max(self.eth_version)
+            && message_id
+                <= EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
         {
             // Checks for multiplexed snap message IDs :
             // - message_id > EthMessageID::max() : ensures it's not an eth message
-            // - message_id <= EthMessageID::message_count() + snap_max : ensures it's within valid snap
-            //   range
+            // - message_id <= EthMessageID::message_count() + snap_max : ensures it's within valid
+            //   snap range
             // Message IDs are assigned lexicographically during capability negotiation
             // So real_snap_id = multiplexed_id - num_eth_messages
             let adjusted_message_id = message_id - EthMessageID::message_count(self.eth_version);
