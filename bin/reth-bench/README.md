@@ -92,6 +92,20 @@ This should NOT be the node that is being used for the benchmark. The node behin
 the benchmark. The node being benchmarked will not have these blocks.
 Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8551`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
 
+#### Using the `--advance` argument
+
+The `--advance` argument allows you to benchmark a relative number of blocks from the current head, without manually specifying `--from` and `--to`.
+
+```bash
+# Benchmark the next 10 blocks from the current head
+reth-bench new-payload-fcu --advance 10 --jwt-secret <jwt_file_path> --rpc-url <rpc-url>
+
+# Benchmark the next 50 blocks with a different subcommand
+reth-bench new-payload-only --advance 50 --jwt-secret <jwt_file_path> --rpc-url <rpc-url>
+
+
+
+
 ### Observe Outputs
 
 After running the command, `reth-bench` will output benchmark results, showing processing speeds and gas usage, which are useful metrics for analyzing the node's performance.

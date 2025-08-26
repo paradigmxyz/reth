@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, TxHash, B256};
+use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -764,6 +764,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
+    }
+
+    /// Returns a [`BlockNumber`] of the block.
+    #[inline]
+    pub fn block_number(&self) -> BlockNumber {
+        self.recovered_block.header().number()
     }
 }
 
