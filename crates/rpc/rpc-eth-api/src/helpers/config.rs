@@ -1,7 +1,7 @@
 //! Loads chain configuration.
 
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip7910::{EthBaseForkConfig, EthConfig, EthForkConfig, SystemContract};
+use alloy_eips::eip7910::{EthConfig, EthForkConfig, SystemContract};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -44,18 +44,40 @@ where
         Self { provider, evm_config }
     }
 
-    /// Returns base fork config for specific timestamp.
+    /// Returns fork config for specific timestamp.
     /// Returns [`None`] if no blob params were found for this fork.
-    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+    fn build_fork_config_at(
+        &self,
+        timestamp: u64,
+        precompiles: BTreeMap<String, Address>,
+    ) -> Option<EthForkConfig> {
         let chain_spec = self.provider.chain_spec();
 
+        let mut system_contracts = BTreeMap::<SystemContract, Address>::default();
+
+        if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            system_contracts.extend(SystemContract::cancun());
+        }
+
+        if chain_spec.is_prague_active_at_timestamp(timestamp) {
+            system_contracts
+                .extend(SystemContract::prague(chain_spec.deposit_contract().map(|c| c.address)));
+        }
+
         // Fork config only exists for timestamp-based hardforks.
-        let head = Head { timestamp, number: u64::MAX, ..Default::default() };
-        Some(EthBaseForkConfig {
-            chain_id: alloy_primitives::U64::from(chain_spec.chain().id()),
+        let fork_id = chain_spec
+            .fork_id(&Head { timestamp, number: u64::MAX, ..Default::default() })
+            .hash
+            .0
+            .into();
+
+        Some(EthForkConfig {
             activation_time: timestamp,
             blob_schedule: chain_spec.blob_params_at_timestamp(timestamp)?,
-            fork_id: chain_spec.fork_id(&head).hash.0.into(),
+            chain_id: chain_spec.chain().id(),
+            fork_id,
+            precompiles,
+            system_contracts,
         })
     }
 
@@ -87,43 +109,38 @@ where
             .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
             .ok_or_else(|| RethError::msg("no active timestamp fork found"))?;
 
-        let current_base_config = self
-            .fork_config_at_timestamp(current_fork_timestamp)
-            .ok_or_else(|| RethError::msg("no base config for current fork"))?;
-        let current = base_to_fork_config(&chain_spec, current_base_config, current_precompiles);
+        let current = self
+            .build_fork_config_at(current_fork_timestamp, current_precompiles)
+            .ok_or_else(|| RethError::msg("no fork config for current fork"))?;
 
         let mut config = EthConfig { current, next: None, last: None };
 
         if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
             if let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied() {
-                if let Some(last_base_config) = self.fork_config_at_timestamp(last_fork_timestamp) {
-                    let fake_header = {
-                        let mut header = latest.clone();
-                        header.timestamp = last_fork_timestamp;
-                        header
-                    };
-                    let last_precompiles = evm_to_precompiles_map(
-                        self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
-                    );
-                    let last = base_to_fork_config(&chain_spec, last_base_config, last_precompiles);
-                    config.last = Some(last);
-                }
+                let fake_header = {
+                    let mut header = latest.clone();
+                    header.timestamp = last_fork_timestamp;
+                    header
+                };
+                let last_precompiles = evm_to_precompiles_map(
+                    self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+                );
+
+                config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
             }
         }
 
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
-            if let Some(next_base_config) = self.fork_config_at_timestamp(next_fork_timestamp) {
-                let fake_header = {
-                    let mut header = latest;
-                    header.timestamp = next_fork_timestamp;
-                    header
-                };
-                let next_precompiles = evm_to_precompiles_map(
-                    self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
-                );
-                let next = base_to_fork_config(&chain_spec, next_base_config, next_precompiles);
-                config.next = Some(next);
-            }
+            let fake_header = {
+                let mut header = latest;
+                header.timestamp = next_fork_timestamp;
+                header
+            };
+            let next_precompiles = evm_to_precompiles_map(
+                self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+            );
+
+            config.next = self.build_fork_config_at(next_fork_timestamp, next_precompiles);
         }
 
         Ok(config)
@@ -152,33 +169,6 @@ fn evm_to_precompiles_map(
             Some((precompile_to_str(precompiles.get(address)?.precompile_id()), *address))
         })
         .collect()
-}
-
-// TODO: move
-fn base_to_fork_config<ChainSpec: EthChainSpec + EthereumHardforks>(
-    chain_spec: &ChainSpec,
-    config: EthBaseForkConfig,
-    precompiles: BTreeMap<String, Address>,
-) -> EthForkConfig {
-    let mut system_contracts = BTreeMap::<SystemContract, Address>::default();
-
-    if chain_spec.is_cancun_active_at_timestamp(config.activation_time) {
-        system_contracts.extend(SystemContract::cancun());
-    }
-
-    if chain_spec.is_prague_active_at_timestamp(config.activation_time) {
-        system_contracts
-            .extend(SystemContract::prague(chain_spec.deposit_contract().map(|c| c.address)));
-    }
-
-    EthForkConfig {
-        activation_time: config.activation_time,
-        blob_schedule: config.blob_schedule,
-        chain_id: config.chain_id,
-        fork_id: config.fork_id,
-        precompiles,
-        system_contracts,
-    }
 }
 
 // TODO: move
