@@ -51,59 +51,6 @@ use revm::Database;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
-/// Helper to batch validate state accesses for improved performance.
-/// Groups accesses by type and validates in chunks to reduce DB query overhead.
-fn validate_cached_state_in_chunks<DB: revm::Database>(
-    db: &mut DB,
-    traces: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
-    coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
-) -> Result<bool, DB::Error> {
-    use crate::tree::payload_processor::prewarm::AccessRecord;
-
-    // Separate account and storage accesses for batch processing
-    let mut account_accesses = Vec::new();
-    let mut storage_accesses = Vec::new();
-
-    for trace in traces {
-        match trace {
-            AccessRecord::Account { address, result } => {
-                // Skip coinbase validation if we have deltas (will be updated later)
-                if let Some((coinbase, _, _)) = coinbase_deltas {
-                    if address == coinbase {
-                        continue;
-                    }
-                }
-                account_accesses.push((address, result));
-            }
-            AccessRecord::Storage { address, index, result } => {
-                storage_accesses.push((address, index, result));
-            }
-        }
-    }
-
-    // Validate account accesses in chunks
-    for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
-        for (address, expected) in chunk {
-            let actual = db.basic(*address)?;
-            if actual != *expected {
-                return Ok(false);
-            }
-        }
-    }
-
-    // Validate storage accesses in chunks
-    for chunk in storage_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
-        for (address, index, expected) in chunk {
-            let actual = db.storage(*address, *index)?;
-            if actual != *expected {
-                return Ok(false);
-            }
-        }
-    }
-
-    Ok(true)
-}
-
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -1077,6 +1024,59 @@ where
 
         Ok(input)
     }
+}
+
+/// Helper to batch validate state accesses for improved performance.
+/// Groups accesses by type and validates in chunks to reduce DB query overhead.
+fn validate_cached_state_in_chunks<DB: revm::Database>(
+    db: &mut DB,
+    traces: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
+) -> Result<bool, DB::Error> {
+    use crate::tree::payload_processor::prewarm::AccessRecord;
+
+    // Separate account and storage accesses for batch processing
+    let mut account_accesses = Vec::new();
+    let mut storage_accesses = Vec::new();
+
+    for trace in traces {
+        match trace {
+            AccessRecord::Account { address, result } => {
+                // Skip coinbase validation if we have deltas (will be updated later)
+                if let Some((coinbase, _, _)) = coinbase_deltas {
+                    if address == coinbase {
+                        continue;
+                    }
+                }
+                account_accesses.push((address, result));
+            }
+            AccessRecord::Storage { address, index, result } => {
+                storage_accesses.push((address, index, result));
+            }
+        }
+    }
+
+    // Validate account accesses in chunks
+    for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, expected) in chunk {
+            let actual = db.basic(*address)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+
+    // Validate storage accesses in chunks
+    for chunk in storage_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
+        for (address, index, expected) in chunk {
+            let actual = db.storage(*address, *index)?;
+            if actual != *expected {
+                return Ok(false);
+            }
+        }
+    }
+
+    Ok(true)
 }
 
 /// Output of block or payload validation.
