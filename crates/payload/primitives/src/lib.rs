@@ -145,7 +145,7 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    // let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
     // TODO: Select timestamp for Amsterdam for now turn v5 on by default
     if version.is_v5() && !is_prague {
         // From the Engine API spec:

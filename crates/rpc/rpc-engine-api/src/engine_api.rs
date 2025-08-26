@@ -1,6 +1,8 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    capabilities::EngineCapabilities, error::UNKNOWN_PARENT_CODE, metrics::EngineApiMetrics,
+    EngineApiError, EngineApiResult,
 };
+
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip2718::Encodable2718,
@@ -25,7 +27,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
     PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -42,6 +44,9 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
+
+/// The upper limit for Inclusion List size
+const MAX_BYTES_PER_IL: usize = 8192;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -1182,47 +1187,48 @@ where
         Ok(self.get_blobs_v2_metered(versioned_hashes)?)
     }
 
-    async fn get_inclusion_list_v1(&self, _parent_hash: B256) -> RpcResult<Vec<Bytes>> {
+    async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>> {
         info!(target: "rpc::engine", "Serving engine_getInclusionListV1");
 
-        // TODO
-        //
-        // Use _parent_hash
+        let mut il = Vec::new();
+        let mut il_size = 0usize;
 
-        // TODO
-        //
-        // configure maximum elsewhere (e.g. global config)
-        const MAX_BYTES_PER_IL: usize = 8192;
+        // Try to resolve the parent header. If available, use the parent's base fee to request
+        // the best transactions from the pool; otherwise return an UNKNOWN_PARENT error or an
+        // internal error if the provider call failed.
+        match self.inner.provider.header(&parent_hash) {
+            Ok(Some(parent_header)) => {
+                // Read the real base fee from the parent header; if absent, fall back to 0.
+                let base_fee = parent_header.base_fee_per_gas().unwrap_or_default();
+                let attrs = reth_transaction_pool::BestTransactionsAttributes::new(base_fee, None);
 
-        // NOTE
-        //
-        // we may not be able to constrain the transactions that we can fetch from the transaction
-        // pool by parent hash (for now)
-        let txs = self.inner.tx_pool.all_transactions();
-        let mut il = Vec::with_capacity(16);
-        let mut il_size = 0;
+                let mut best_txs = self.inner.tx_pool.best_transactions_with_attributes(attrs);
 
-        // sort the transactions from earliest timestamp to latest timestamp
-        let mut pending = txs.pending;
-        pending.sort_by_key(|tx| tx.timestamp);
-        let mut queued = txs.queued;
-        queued.sort_by_key(|tx| tx.timestamp);
+                while let Some(pool_tx) = best_txs.next() {
+                    let tx = pool_tx.to_consensus().into_inner();
+                    let tx_len = tx.encode_2718_len();
 
-        for tx in pending.iter().chain(queued.iter()) {
-            let tx = tx.to_consensus().into_inner();
-            let tx_len = tx.encode_2718_len();
+                    if il_size + tx_len > MAX_BYTES_PER_IL {
+                        continue;
+                    }
 
-            // if the transaction would cause the IL to exceed its maximum allowable size, then skip
-            // to the next transaction.
-            if il_size + tx_len > MAX_BYTES_PER_IL {
-                continue;
+                    il.push(tx.encoded_2718().into());
+                    il_size += tx_len;
+                }
             }
-
-            // encode the transaction and append it to the IL
-            let encoded = tx.encoded_2718();
-            il.push(encoded.into());
-
-            il_size += tx_len;
+            Ok(None) => {
+                // Parent is unknown -> return Engine API error for unknown parent with formatted
+                // data
+                return Err(EngineApiError::other(jsonrpsee_types::error::ErrorObject::owned(
+                    UNKNOWN_PARENT_CODE,
+                    "Parent hash unknown, Parent Hash: ",
+                    Some(parent_hash.to_string()),
+                ))
+                .into());
+            }
+            Err(err) => {
+                return Err(EngineApiError::Internal(Box::new(err)).into());
+            }
         }
 
         Ok(il)

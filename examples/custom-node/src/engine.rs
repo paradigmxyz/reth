@@ -21,7 +21,7 @@ use reth_ethereum::{
     TransactionSigned,
 };
 use reth_node_builder::{
-    rpc::{EngineValidatorBuilder, PayloadValidatorBuilder},
+    rpc::PayloadValidatorBuilder,
     InvalidPayloadAttributesError,
 };
 use reth_op::{
@@ -30,7 +30,6 @@ use reth_op::{
         OpPayloadAttributes, OpPayloadBuilderAttributes,
     },
     primitives::Recovered,
-    OpTransactionSigned,
 };
 use revm_primitives::{Bytes, U256};
 use serde::{Deserialize, Serialize};
