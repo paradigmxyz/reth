@@ -117,6 +117,32 @@ mod no_encoded_2718_field_in_rpc_json {
             },
         ));
 
+    #[test]
+    fn maps_retry_fields() {
+        use reth_arbitrum_primitives::tx::{ArbRetryTx, ArbTypedTransaction, ArbTransactionSigned};
+        let retry = ArbRetryTx {
+            chain_id: U256::from(0x66eeeu64),
+            from: signer(),
+            to: address!("0x3fab184622dc19b6109349b94811493bf2a45362"),
+            data: bytes!(""),
+            l1_block_number: 1,
+            l1_timestamp: 0,
+            l1_base_fee: U256::from_str_radix("5f5e100", 16).unwrap(),
+            ticket_id: B256::from_slice(&[0x13, 0xcb, 0x79, 0xb0, 0x86, 0xa4, 0x27, 0xf3, 0xdb, 0x7e, 0xbe, 0x6e, 0xc2, 0xbb, 0x90, 0xa8, 0x06, 0xa3, 0xb0, 0x36, 0x8e, 0xce, 0xe6, 0x02, 0x01, 0x44, 0xf3, 0x52, 0xe3, 0x7d, 0xbd, 0xf6]),
+            max_refund: U256::from_str_radix("b0e85efeab8", 16).unwrap(),
+            submission_fee_refund: U256::from_str_radix("1f6377d4ab8", 16).unwrap(),
+            refund_to: address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"),
+            value: U256::from_str_radix("2386f26fc10000", 16).unwrap(),
+        };
+        let tx = ArbTransactionSigned::from(ArbTypedTransaction::Retry(retry));
+        let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
+            arb_tx_with_other_fields(&tx, signer(), dummy_info());
+        let other = resp.other;
+        assert_eq!(other.get_deserialized::<B256>("ticketId").unwrap().unwrap(), B256::from_slice(&[0x13, 0xcb, 0x79, 0xb0, 0x86, 0xa4, 0x27, 0xf3, 0xdb, 0x7e, 0xbe, 0x6e, 0xc2, 0xbb, 0x90, 0xa8, 0x06, 0xa3, 0xb0, 0x36, 0x8e, 0xce, 0xe6, 0x02, 0x01, 0x44, 0xf3, 0x52, 0xe3, 0x7d, 0xbd, 0xf6]));
+        assert_eq!(other.get_deserialized::<U256>("maxRefund").unwrap().unwrap(), U256::from_str_radix("b0e85efeab8", 16).unwrap());
+        assert_eq!(other.get_deserialized::<U256>("submissionFeeRefund").unwrap().unwrap(), U256::from_str_radix("1f6377d4ab8", 16).unwrap());
+        assert_eq!(other.get_deserialized::<Address>("refundTo").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
+    }
         let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
             arb_tx_with_other_fields(&tx, signer(), dummy_info());
 
