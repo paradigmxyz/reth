@@ -62,6 +62,7 @@ mod tests {
     fn internal_tx_has_zero_gas_and_gas_price_in_rpc() {
         use arb_alloy_consensus::tx::ArbInternalTx;
         use alloy_primitives::Signature;
+        use serde_json::Value;
         let sys = ArbInternalTx {
             chain_id: U256::from(0x66eeeu64),
             data: bytes!("6bf6a42d"),
@@ -69,8 +70,10 @@ mod tests {
         let tx = ArbTransactionSigned::new_unhashed(ArbTypedTransaction::Internal(sys), Signature::new(U256::ZERO, U256::ZERO, false));
         let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
             arb_tx_with_other_fields(&tx, signer(), dummy_info());
-        assert_eq!(resp.gas, Some(0u128));
-        assert_eq!(resp.gas_price, Some(0u128));
+        let json = serde_json::to_value(&resp).unwrap();
+        let obj = json.as_object().unwrap();
+        assert_eq!(obj.get("gas").unwrap(), "0x0");
+        assert_eq!(obj.get("gasPrice").unwrap(), "0x0");
     }
 
 
@@ -190,6 +193,10 @@ pub fn arb_tx_with_other_fields(
     let mut out = WithOtherFields::new(inner);
 
     match &**tx {
+        ArbTypedTransaction::Internal(_) => {
+            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+        }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("requestId".to_string(), s.request_id);
             let _ = out.other.insert_value("refundTo".to_string(), s.fee_refund_addr);
