@@ -21,8 +21,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
-    PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
+    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, PayloadOrAttributes,
+    PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -118,15 +118,12 @@ where
         Ok(vec![self.inner.client.clone()])
     }
 
-    /// Fetches the attributes for the payload with the given id.
-    async fn get_payload_attributes(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<PayloadT::PayloadBuilderAttributes> {
+    /// Fetches the timestamp of the payload with the given id.
+    async fn get_payload_timestamp(&self, payload_id: PayloadId) -> EngineApiResult<u64> {
         Ok(self
             .inner
             .payload_store
-            .payload_attributes(payload_id)
+            .payload_timestamp(payload_id)
             .await
             .ok_or(EngineApiError::UnknownPayload)??)
     }
@@ -399,11 +396,9 @@ where
     where
         EngineT::BuiltPayload: TryInto<R>,
     {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
         // validate timestamp according to engine rules
-        validate_payload_timestamp(&self.inner.chain_spec, version, attributes.timestamp())?;
+        let timestamp = self.get_payload_timestamp(payload_id).await?;
+        validate_payload_timestamp(&self.inner.chain_spec, version, timestamp)?;
 
         // Now resolve the payload
         self.get_built_payload(payload_id).await?.try_into().map_err(|_| {
