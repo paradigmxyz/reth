@@ -1035,7 +1035,6 @@ where
 /// Coinbase handling:
 /// - If `coinbase_deltas` is `Some`, the coinbase account is excluded from validation because its
 ///   nonce and balance will be adjusted after validation using the provided deltas.
-///
 fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
     prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
