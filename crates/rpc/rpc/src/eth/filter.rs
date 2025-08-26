@@ -1040,19 +1040,11 @@ impl<
 
             // Try to get a completed task result if there are pending tasks
             if let Some(task_result) = self.pending_tasks.next().await {
-                let chunk_results = task_result?;
-                if !chunk_results.is_empty() {
-                    // Add all results to buffer, first one will be returned in next loop iteration
-                    self.next.extend(chunk_results);
-                    // Continue loop to return the first result from buffer
-                    continue;
-                }
-                // Task completed with empty results, continue to check for more work
-                trace!(target: "rpc::eth::filter", "Parallel task completed with no receipt results");
+                self.next.extend(task_result?);
                 continue;
             }
 
-            // No pending tasks - try to generate new work
+            // No pending tasks - try to generate more work
             let Some(next_header) = self.iter.next() else {
                 // No more headers to process
                 return Ok(None);
@@ -1181,7 +1173,7 @@ impl<
                         }
                     }
 
-                    Ok::<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>(chunk_results)
+                    Ok(chunk_results)
                 });
 
                 // Await the blocking task and handle the result
