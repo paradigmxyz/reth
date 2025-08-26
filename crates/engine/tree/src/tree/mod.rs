@@ -703,83 +703,58 @@ where
 
     /// Updates the latest block state to the specified canonical ancestor.
     ///
-    /// This method ensures that state providers and the transaction pool operate with
-    /// the correct chain state after forkchoice update processing. It detects unwind
-    /// scenarios and provides appropriate logging for debugging purposes.
+    /// This method ensures that the latest block tracks the given canonical header by resetting
     ///
     /// # Arguments
     /// * `canonical_header` - The canonical header to set as the new head
     ///
     /// # Returns
     /// * `ProviderResult<()>` - Ok(()) on success, error if state update fails
+    ///
+    /// Caution: This unwinds the canonical chain
     fn update_latest_block_to_canonical_ancestor(
         &mut self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
+        debug!(target: "engine::tree", head = ?canonical_header.num_hash(), "Update latest block to canonical ancestor");
         let current_head_number = self.state.tree_state.canonical_block_number();
         let new_head_number = canonical_header.number();
         let new_head_hash = canonical_header.hash();
-
-        // Log the type of chain state update being performed
-        self.log_chain_update_type(current_head_number, new_head_number, new_head_hash);
 
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
 
         // Handle the state update based on whether this is an unwind scenario
         if new_head_number < current_head_number {
-            self.handle_chain_unwind(current_head_number, canonical_header)
+            debug!(
+                target: "engine::tree",
+                current_head = current_head_number,
+                new_head = new_head_number,
+                new_head_hash = ?new_head_hash,
+                "FCU unwind detected: reverting to canonical ancestor"
+            );
+
+            self.handle_canonical_chain_unwind(current_head_number, canonical_header)
         } else {
+            debug!(
+                target: "engine::tree",
+                previous_head = current_head_number,
+                new_head = new_head_number,
+                new_head_hash = ?new_head_hash,
+                "Advancing latest block to canonical ancestor"
+            );
             self.handle_chain_advance_or_same_height(canonical_header)
         }
     }
 
-    /// Logs the type of chain state update being performed.
-    fn log_chain_update_type(
+    /// Handles chain unwind scenarios by collecting blocks to remove and performing an unwind back
+    /// to the canonical header
+    fn handle_canonical_chain_unwind(
         &self,
-        current_head_number: u64,
-        new_head_number: u64,
-        new_head_hash: B256,
-    ) {
-        match new_head_number.cmp(&current_head_number) {
-            std::cmp::Ordering::Less => {
-                debug!(
-                    target: "engine::tree",
-                    current_head = current_head_number,
-                    new_head = new_head_number,
-                    new_head_hash = ?new_head_hash,
-                    "FCU unwind detected: reverting to canonical ancestor"
-                );
-            }
-            std::cmp::Ordering::Greater => {
-                debug!(
-                    target: "engine::tree",
-                    previous_head = current_head_number,
-                    new_head = new_head_number,
-                    new_head_hash = ?new_head_hash,
-                    "Advancing latest block to canonical ancestor"
-                );
-            }
-            std::cmp::Ordering::Equal => {
-                debug!(
-                    target: "engine::tree",
-                    head_number = new_head_number,
-                    new_head_hash = ?new_head_hash,
-                    "Updating latest block to canonical ancestor at same height"
-                );
-            }
-        }
-    }
-
-    /// Handles chain unwind scenarios by collecting blocks to remove and performing a reorg.
-    fn handle_chain_unwind(
-        &mut self,
         current_head_number: u64,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
         let new_head_number = canonical_header.number();
-        let new_head_hash = canonical_header.hash();
-
         debug!(
             target: "engine::tree",
             from = current_head_number,
@@ -788,14 +763,15 @@ where
         );
 
         // Collect blocks that need to be removed from memory
-        let old_blocks = self.collect_blocks_for_removal(new_head_number, current_head_number);
+        let old_blocks =
+            self.collect_blocks_for_canonical_unwind(new_head_number, current_head_number);
 
         // Load and apply the canonical ancestor block
         self.apply_canonical_ancestor_via_reorg(canonical_header, old_blocks)
     }
 
-    /// Collects blocks from memory that need to be removed during an unwind.
-    fn collect_blocks_for_removal(
+    /// Collects blocks from memory that need to be removed during an unwind to a canonical block.
+    fn collect_blocks_for_canonical_unwind(
         &self,
         new_head_number: u64,
         current_head_number: u64,
@@ -826,7 +802,7 @@ where
 
     /// Applies the canonical ancestor block via a reorg operation.
     fn apply_canonical_ancestor_via_reorg(
-        &mut self,
+        &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
         old_blocks: Vec<ExecutedBlock<N>>,
     ) -> ProviderResult<()> {
@@ -874,7 +850,7 @@ where
 
     /// Handles chain advance or same height scenarios.
     fn handle_chain_advance_or_same_height(
-        &mut self,
+        &self,
         canonical_header: &SealedHeader<N::BlockHeader>,
     ) -> ProviderResult<()> {
         let new_head_number = canonical_header.number();
@@ -888,11 +864,7 @@ where
     }
 
     /// Ensures a block is loaded into memory if not already present.
-    fn ensure_block_in_memory(
-        &mut self,
-        block_number: u64,
-        block_hash: B256,
-    ) -> ProviderResult<()> {
+    fn ensure_block_in_memory(&self, block_number: u64, block_hash: B256) -> ProviderResult<()> {
         // Check if block is already in memory
         if self.canonical_in_memory_state.state_by_number(block_number).is_some() {
             return Ok(());
@@ -905,9 +877,8 @@ where
                 trie: ExecutedTrieUpdates::Missing,
             };
 
-            self.canonical_in_memory_state.update_chain(NewCanonicalChain::Commit {
-                new: vec![block_with_trie],
-            });
+            self.canonical_in_memory_state
+                .update_chain(NewCanonicalChain::Commit { new: vec![block_with_trie] });
 
             debug!(
                 target: "engine::tree",
@@ -1063,9 +1034,8 @@ where
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
-            // For OpStack the proposers are allowed to reorg their own chain at will, so we need to
-            // always trigger a new payload job if requested.
-            // Also allow forcing this behavior via a config flag.
+            // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
+            // own chain at will, so we need to always trigger a new payload job if requested.
             if self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head()
             {
@@ -1076,11 +1046,13 @@ where
                     return Ok(TreeOutcome::new(updated))
                 }
 
-                // Update the latest block state to reflect the canonical ancestor.
-                // This ensures that state providers and the transaction pool operate with
-                // the correct chain state after forkchoice update processing.
+                // At this point, no alternative block has been triggered, so we need effectively
+                // unwind the _canonical_ chain to the FCU's head, which is part of the canonical
+                // chain. We need to update the latest block state to reflect the
+                // canonical ancestor. This ensures that state providers and the
+                // transaction pool operate with the correct chain state after
+                // forkchoice update processing.
                 self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
-
             }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
