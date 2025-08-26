@@ -579,12 +579,8 @@ impl serde::Serialize for ArbTransactionSigned {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("ArbTransactionSigned", 3)?;
+        let mut state = serializer.serialize_struct("ArbTransactionSigned", 2)?;
         state.serialize_field("signature", &self.signature)?;
-        let mut buf = alloc::vec::Vec::with_capacity(self.length());
-        self.encode_2718(&mut buf);
-        let bytes = alloy_primitives::Bytes::from(buf);
-        state.serialize_field("transaction_encoded_2718", &bytes)?;
         state.serialize_field("hash", self.tx_hash())?;
         state.end()
     }
