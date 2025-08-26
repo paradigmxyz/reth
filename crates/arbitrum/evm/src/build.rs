@@ -241,6 +241,17 @@ where
             increments.insert(sender, needed_fee.to::<u128>());
             let _ = balance_increment_state(&increments, state);
 
+            if let Some(entry) = state.bundle_state.state.get_mut(&sender) {
+                if entry.info.is_none() {
+                    entry.info = Some(revm::state::AccountInfo {
+                        balance: alloy_primitives::U256::from(needed_fee),
+                        nonce: current_nonce,
+                        code_hash: alloy_consensus::constants::KECCAK_EMPTY,
+                        code: None,
+                    });
+                }
+            }
+
             let overlay_bal = state
                 .bundle_state
                 .state
