@@ -85,6 +85,29 @@ mod tests {
         assert_eq!(other.get_deserialized::<Address>("refundTo").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
     }
 }
+use reth_rpc_convert::transaction::RpcTxConverter;
+use core::convert::Infallible;
+
+#[derive(Debug, Clone)]
+pub struct ArbRpcTxConverter;
+
+impl RpcTxConverter<
+    ArbTransactionSigned,
+    WithOtherFields<EthTransaction<ArbTransactionSigned>>,
+    TransactionInfo
+> for ArbRpcTxConverter {
+    type Err = Infallible;
+
+    fn convert_rpc_tx(
+        &self,
+        tx: ArbTransactionSigned,
+        signer: Address,
+        tx_info: TransactionInfo
+    ) -> Result<WithOtherFields<EthTransaction<ArbTransactionSigned>>, Self::Err> {
+        Ok(arb_tx_with_other_fields(&tx, signer, tx_info))
+    }
+}
+
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Transaction as EthTransaction, TransactionInfo};
