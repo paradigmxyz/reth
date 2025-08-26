@@ -737,7 +737,7 @@ where
 
                     // Use chunked validation for better performance
                     let validation_result =
-                        validate_cached_state_in_chunks(db, traces, coinbase_deltas);
+                        validate_prewarm_accesses_against_db(db, traces, coinbase_deltas);
 
                     match validation_result {
                         Ok(true) => {
@@ -1026,11 +1026,19 @@ where
     }
 }
 
-/// Helper to batch validate state accesses for improved performance.
-/// Groups accesses by type and validates in chunks to reduce DB query overhead.
-fn validate_cached_state_in_chunks<DB: revm::Database>(
+/// Validates that the state read during prewarm is still consistent with the current database.
+///
+/// This checks the read set recorded during prewarming (accounts and storage slots) against fresh
+/// lookups from `db`. Accesses are grouped by type and validated in chunks (size
+/// `CACHE_VALIDATION_CHUNK_SIZE`) to reduce database call overhead.
+///
+/// Coinbase handling:
+/// - If `coinbase_deltas` is `Some`, the coinbase account is excluded from validation because its
+///   nonce and balance will be adjusted after validation using the provided deltas.
+///
+fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
-    traces: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<bool, DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
@@ -1039,8 +1047,8 @@ fn validate_cached_state_in_chunks<DB: revm::Database>(
     let mut account_accesses = Vec::new();
     let mut storage_accesses = Vec::new();
 
-    for trace in traces {
-        match trace {
+    for access in prewarm_accesses {
+        match access {
             AccessRecord::Account { address, result } => {
                 // Skip coinbase validation if we have deltas (will be updated later)
                 if let Some((coinbase, _, _)) = coinbase_deltas {
