@@ -34,7 +34,7 @@ pub struct ArbRpcTypes;
 impl reth_rpc_eth_api::RpcTypes for ArbRpcTypes {
     type Header = alloy_rpc_types_eth::Header<alloy_consensus::Header>;
     type Receipt = alloy_rpc_types_eth::TransactionReceipt;
-    type TransactionResponse = alloy_rpc_types_eth::Transaction<ArbTransactionSigned>;
+    type TransactionResponse = crate::eth::response::ArbTransactionResponse;
     type TransactionRequest = crate::eth::transaction::ArbTransactionRequest;
 }
 
@@ -43,7 +43,6 @@ pub mod block;
 pub mod call;
 pub mod pending_block;
 pub mod transaction;
-pub mod response;
 
 
 
