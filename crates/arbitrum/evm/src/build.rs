@@ -236,17 +236,10 @@ where
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
 
+            let _ = state.load_cache_account(sender);
             let mut increments = HashMap::default();
             increments.insert(sender, needed_fee.to::<u128>());
             let _ = balance_increment_state(&increments, state);
-
-            let existing = match state.basic(sender) {
-                Ok(Some(info)) => info,
-                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: current_nonce, code_hash: KECCAK_EMPTY, code: None },
-            };
-            let mut updated = existing;
-            updated.balance = updated.balance.saturating_add(needed_fee);
-            state.insert_account(sender, updated);
 
             let overlay_bal = state
                 .bundle_state
