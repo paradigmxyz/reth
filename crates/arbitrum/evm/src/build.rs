@@ -145,13 +145,7 @@ where
                 _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
-        let upfront_gas_price = {
-            use reth_arbitrum_primitives::ArbTxType::*;
-            match tx.tx().tx_type() {
-                Deposit | Internal => alloy_primitives::U256::ZERO,
-                _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
-            }
-        };
+        let upfront_gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
 
         let start_ctx = ArbStartTxContext {
             sender,
@@ -218,11 +212,7 @@ where
             if (is_internal || is_deposit) && gas_limit == 0 {
                 effective_gas_limit = 1_000_000;
             }
-            let effective_gas_price = if is_internal || is_deposit {
-                alloy_primitives::U256::ZERO
-            } else {
-                upfront_gas_price
-            };
+            let effective_gas_price = upfront_gas_price;
             let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
