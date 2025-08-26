@@ -83,6 +83,7 @@ use serde::{Deserialize, Serialize};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Transaction as EthTransaction, TransactionInfo};
 use reth_rpc_convert::transaction::FromConsensusTx;
+use reth_primitives_traits::Recovered;
 
 use reth_arbitrum_primitives::{ArbTransactionSigned, ArbTypedTransaction};
 
@@ -136,7 +137,7 @@ impl FromConsensusTx<ArbTransactionSigned> for ArbTransactionResponse {
         signer: Address,
         tx_info: Self::TxInfo,
     ) -> Self {
-        let inner = EthTransaction::from_transaction(reth_rpc_convert::transaction::Recovered::new_unchecked(tx.clone(), signer), tx_info);
+        let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
 
         let mut out = ArbTransactionResponse {
             inner,

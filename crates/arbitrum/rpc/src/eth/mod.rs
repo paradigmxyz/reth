@@ -22,8 +22,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use crate::error::ArbEthApiError;
 use reth_storage_api::{ProviderHeader, ProviderTx};
-pub mod response;
 pub mod txinfo;
+pub mod response;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use reth_tasks::TaskSpawner;
 use reth_arbitrum_primitives::ArbTransactionSigned;
@@ -34,7 +34,7 @@ pub struct ArbRpcTypes;
 impl reth_rpc_eth_api::RpcTypes for ArbRpcTypes {
     type Header = alloy_rpc_types_eth::Header<alloy_consensus::Header>;
     type Receipt = alloy_rpc_types_eth::TransactionReceipt;
-    type TransactionResponse = crate::eth::response::ArbTransactionResponse;
+    type TransactionResponse = alloy_rpc_types_eth::Transaction<ArbTransactionSigned>;
     type TransactionRequest = crate::eth::transaction::ArbTransactionRequest;
 }
 
