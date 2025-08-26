@@ -18,7 +18,7 @@ use alloy_primitives::{
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
@@ -782,8 +782,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             if segment.is_receipts() &&
-                (provider.chain_spec().chain_id() == 100 ||
-                    provider.chain_spec().chain_id() == 10200)
+                (NamedChain::Gnosis == provider.chain_spec().chain_id() ||
+                    NamedChain::Chiado == provider.chain_spec().chain_id())
             {
                 // Gnosis and Chiado's historical import is broken and does not work with this
                 // check. They are importing receipts along with importing
