@@ -2,8 +2,8 @@
 mod tests {
     use super::*;
     use alloy_primitives::{address, b256, bytes, Address, B256, Bytes, U256};
+    use alloy_serde::WithOtherFields;
     use reth_arbitrum_primitives::ArbTypedTransaction;
-    use reth_rpc_convert::transaction::FromConsensusTx as _;
 
     fn dummy_info() -> alloy_rpc_types_eth::TransactionInfo {
         alloy_rpc_types_eth::TransactionInfo {
@@ -38,16 +38,21 @@ mod tests {
             },
         ));
 
-        let resp = ArbTransactionResponse::from_consensus_tx(tx, signer(), dummy_info());
-        assert_eq!(resp.requestId, Some(b256!("0x01")));
-        assert_eq!(resp.refundTo, Some(address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8")));
-        assert_eq!(resp.l1BaseFee, Some(U256::from(0x5bd57bd9u64)));
-        assert_eq!(resp.depositValue, Some(U256::from_str_radix("23e3dbb7b88ab8", 16).unwrap()));
-        assert_eq!(resp.retryTo, Some(address!("0x3fab184622dc19b6109349b94811493bf2a45362")));
-        assert_eq!(resp.retryValue, Some(U256::from_str_radix("2386f26fc10000", 16).unwrap()));
-        assert_eq!(resp.retryData, Some(Bytes::default()));
-        assert_eq!(resp.beneficiary, Some(address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8")));
-        assert_eq!(resp.maxSubmissionFee, Some(U256::from_str_radix("1f6377d4ab8", 16).unwrap()));
+        let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
+            arb_tx_with_other_fields(&tx, signer(), dummy_info());
+
+        use alloy_serde::OtherFields;
+        let other = &resp.other;
+        assert_eq!(other.get_deserialized::<B256>("requestId").unwrap().unwrap(), b256!("0x01"));
+        assert_eq!(other.get_deserialized::<Address>("refundTo").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
+        assert_eq!(other.get_deserialized::<U256>("l1BaseFee").unwrap().unwrap(), U256::from(0x5bd57bd9u64));
+        assert_eq!(other.get_deserialized::<U256>("depositValue").unwrap().unwrap(), U256::from_str_radix("23e3dbb7b88ab8", 16).unwrap());
+        assert_eq!(other.get_deserialized::<Address>("retryTo").unwrap().unwrap(), address!("0x3fab184622dc19b6109349b94811493bf2a45362"));
+        assert_eq!(other.get_deserialized::<U256>("retryValue").unwrap().unwrap(), U256::from_str_radix("2386f26fc10000", 16).unwrap());
+        let retry_data: Bytes = other.get_deserialized("retryData").unwrap().unwrap();
+        assert_eq!(retry_data, Bytes::default());
+        assert_eq!(other.get_deserialized::<Address>("beneficiary").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
+        assert_eq!(other.get_deserialized::<U256>("maxSubmissionFee").unwrap().unwrap(), U256::from_str_radix("1f6377d4ab8", 16).unwrap());
     }
 
     #[test]
@@ -70,187 +75,54 @@ mod tests {
             },
         ));
 
-        let resp = ArbTransactionResponse::from_consensus_tx(tx, signer(), dummy_info());
-        assert_eq!(resp.ticketId, Some(ticket));
-        assert_eq!(resp.maxRefund, Some(U256::from_str_radix("b0e85efeab8", 16).unwrap()));
-        assert_eq!(resp.submissionFeeRefund, Some(U256::from_str_radix("1f6377d4ab8", 16).unwrap()));
-        assert_eq!(resp.refundTo, Some(address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8")));
+        let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
+            arb_tx_with_other_fields(&tx, signer(), dummy_info());
+
+        let other = &resp.other;
+        assert_eq!(other.get_deserialized::<B256>("ticketId").unwrap().unwrap(), ticket);
+        assert_eq!(other.get_deserialized::<U256>("maxRefund").unwrap().unwrap(), U256::from_str_radix("b0e85efeab8", 16).unwrap());
+        assert_eq!(other.get_deserialized::<U256>("submissionFeeRefund").unwrap().unwrap(), U256::from_str_radix("1f6377d4ab8", 16).unwrap());
+        assert_eq!(other.get_deserialized::<Address>("refundTo").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
     }
 }
-
-use serde::{Deserialize, Serialize};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Transaction as EthTransaction, TransactionInfo};
-use reth_rpc_convert::transaction::FromConsensusTx;
-use reth_primitives_traits::Recovered;
-
+use alloy_serde::{OtherFields, WithOtherFields};
 use reth_arbitrum_primitives::{ArbTransactionSigned, ArbTypedTransaction};
+use reth_primitives_traits::Recovered;
+use reth_rpc_convert::transaction::FromConsensusTx;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ArbTransactionResponse {
-    #[serde(flatten)]
-    pub inner: EthTransaction<ArbTransactionSigned>,
+pub fn arb_tx_with_other_fields(
+    tx: &ArbTransactionSigned,
+    signer: Address,
+    tx_info: TransactionInfo,
+) -> WithOtherFields<EthTransaction<ArbTransactionSigned>> {
+    let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
+    let mut out = WithOtherFields::new(inner);
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requestId: Option<B256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refundTo: Option<Address>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub l1BaseFee: Option<U256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub depositValue: Option<U256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retryTo: Option<Address>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retryValue: Option<U256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retryData: Option<Bytes>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub beneficiary: Option<Address>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub maxSubmissionFee: Option<U256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ticketId: Option<B256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub maxRefund: Option<U256>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub submissionFeeRefund: Option<U256>,
-}
-
-impl FromConsensusTx<ArbTransactionSigned> for ArbTransactionResponse {
-    type TxInfo = TransactionInfo;
-
-    fn from_consensus_tx(
-        tx: ArbTransactionSigned,
-        signer: Address,
-        tx_info: Self::TxInfo,
-    ) -> Self {
-        let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
-
-        let mut out = ArbTransactionResponse {
-            inner,
-            requestId: None,
-            refundTo: None,
-            l1BaseFee: None,
-            depositValue: None,
-            retryTo: None,
-            retryValue: None,
-            retryData: None,
-            beneficiary: None,
-            maxSubmissionFee: None,
-            ticketId: None,
-            maxRefund: None,
-            submissionFeeRefund: None,
-        };
-
-        match &*tx {
-            ArbTypedTransaction::SubmitRetryable(s) => {
-                out.requestId = Some(s.request_id);
-                out.refundTo = Some(s.fee_refund_addr);
-                out.l1BaseFee = Some(s.l1_base_fee);
-                out.depositValue = Some(s.deposit_value);
-                out.retryTo = s.retry_to;
-                out.retryValue = Some(s.retry_value);
-                out.retryData = Some(s.retry_data.clone());
-                out.beneficiary = Some(s.beneficiary);
-                out.maxSubmissionFee = Some(s.max_submission_fee);
+    match &**tx {
+        ArbTypedTransaction::SubmitRetryable(s) => {
+            let _ = out.other.insert_value("requestId".to_string(), s.request_id);
+            let _ = out.other.insert_value("refundTo".to_string(), s.fee_refund_addr);
+            let _ = out.other.insert_value("l1BaseFee".to_string(), s.l1_base_fee);
+            let _ = out.other.insert_value("depositValue".to_string(), s.deposit_value);
+            if let Some(to) = s.retry_to {
+                let _ = out.other.insert_value("retryTo".to_string(), to);
             }
-            ArbTypedTransaction::Retry(r) => {
-                out.ticketId = Some(r.ticket_id);
-                out.maxRefund = Some(r.max_refund);
-                out.submissionFeeRefund = Some(r.submission_fee_refund);
-                out.refundTo = Some(r.refund_to);
-            }
-            _ => {}
+            let _ = out.other.insert_value("retryValue".to_string(), s.retry_value);
+            let _ = out.other.insert_value("retryData".to_string(), s.retry_data.clone());
+            let _ = out.other.insert_value("beneficiary".to_string(), s.beneficiary);
+            let _ = out.other.insert_value("maxSubmissionFee".to_string(), s.max_submission_fee);
         }
+        ArbTypedTransaction::Retry(r) => {
+            let _ = out.other.insert_value("ticketId".to_string(), r.ticket_id);
+            let _ = out.other.insert_value("maxRefund".to_string(), r.max_refund);
+            let _ = out.other.insert_value("submissionFeeRefund".to_string(), r.submission_fee_refund);
+            let _ = out.other.insert_value("refundTo".to_string(), r.refund_to);
+        }
+        _ => {}
+    }
 
-        out
-    }
-}
-
-use alloy_consensus::Transaction as ConsensusTransaction;
-use alloy_network_primitives::traits::TransactionResponse as NetworkTransactionResponse;
-
-impl ConsensusTransaction for ArbTransactionResponse {
-    fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
-        ConsensusTransaction::chain_id(&self.inner)
-    }
-    fn nonce(&self) -> u64 {
-        ConsensusTransaction::nonce(&self.inner)
-    }
-    fn gas_limit(&self) -> u64 {
-        ConsensusTransaction::gas_limit(&self.inner)
-    }
-    fn gas_price(&self) -> Option<u128> {
-        ConsensusTransaction::gas_price(&self.inner)
-    }
-    fn max_fee_per_gas(&self) -> u128 {
-        ConsensusTransaction::max_fee_per_gas(&self.inner)
-    }
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        ConsensusTransaction::max_priority_fee_per_gas(&self.inner)
-    }
-    fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        ConsensusTransaction::max_fee_per_blob_gas(&self.inner)
-    }
-    fn priority_fee_or_price(&self) -> u128 {
-        ConsensusTransaction::priority_fee_or_price(&self.inner)
-    }
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        ConsensusTransaction::effective_gas_price(&self.inner, base_fee)
-    }
-    fn is_dynamic_fee(&self) -> bool {
-        ConsensusTransaction::is_dynamic_fee(&self.inner)
-    }
-    fn kind(&self) -> alloy_primitives::TxKind {
-        ConsensusTransaction::kind(&self.inner)
-    }
-    fn is_create(&self) -> bool {
-        ConsensusTransaction::is_create(&self.inner)
-    }
-    fn value(&self) -> alloy_primitives::U256 {
-        ConsensusTransaction::value(&self.inner)
-    }
-    fn input(&self) -> &alloy_primitives::Bytes {
-        ConsensusTransaction::input(&self.inner)
-    }
-    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
-        ConsensusTransaction::access_list(&self.inner)
-    }
-    fn blob_versioned_hashes(&self) -> Option<&[alloy_primitives::B256]> {
-        ConsensusTransaction::blob_versioned_hashes(&self.inner)
-    }
-    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
-        ConsensusTransaction::authorization_list(&self.inner)
-    }
-}
-
-impl NetworkTransactionResponse for ArbTransactionResponse {
-    fn tx_hash(&self) -> alloy_primitives::TxHash {
-        NetworkTransactionResponse::tx_hash(&self.inner)
-    }
-    fn block_hash(&self) -> Option<alloy_primitives::BlockHash> {
-        NetworkTransactionResponse::block_hash(&self.inner)
-    }
-    fn block_number(&self) -> Option<u64> {
-        NetworkTransactionResponse::block_number(&self.inner)
-    }
-    fn transaction_index(&self) -> Option<u64> {
-        NetworkTransactionResponse::transaction_index(&self.inner)
-    }
-    fn from(&self) -> alloy_primitives::Address {
-        NetworkTransactionResponse::from(&self.inner)
-    }
+    out
 }
