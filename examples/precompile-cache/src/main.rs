@@ -5,7 +5,7 @@
 use alloy_evm::{
     eth::EthEvmContext,
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
-    revm::precompile::{PrecompileId, PrecompileSpecId, Precompiles},
+    revm::{handler::EthPrecompiles, precompile::PrecompileId},
     Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -79,7 +79,7 @@ impl EvmFactory for MyEvmFactory {
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
             .build_mainnet_with_inspector(NoOpInspector {})
-            .with_precompiles(self.create_precompiles(SpecId::default()));
+            .with_precompiles(PrecompilesMap::from_static(EthPrecompiles::default().precompiles));
 
         let mut evm = EthEvm::new(evm, false);
 
@@ -97,10 +97,6 @@ impl EvmFactory for MyEvmFactory {
         inspector: I,
     ) -> Self::Evm<DB, I> {
         EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
-    }
-
-    fn create_precompiles(&self, spec_id: Self::Spec) -> PrecompilesMap {
-        PrecompilesMap::from_static(Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)))
     }
 }
 

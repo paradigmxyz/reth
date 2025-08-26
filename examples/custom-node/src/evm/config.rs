@@ -80,8 +80,4 @@ impl ConfigureEvm for CustomEvmConfig {
             extra_data: attributes.extra_data,
         }
     }
-
-    fn precompiles_for_timestamp(&self, timestamp: u64) -> alloy_evm::precompiles::PrecompilesMap {
-        self.inner.precompiles_for_timestamp(timestamp)
-    }
 }

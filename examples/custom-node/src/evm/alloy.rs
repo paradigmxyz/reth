@@ -121,8 +121,4 @@ impl EvmFactory for CustomEvmFactory {
     ) -> Self::Evm<DB, I> {
         CustomEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
     }
-
-    fn create_precompiles(&self, spec_id: Self::Spec) -> PrecompilesMap {
-        self.0.create_precompiles(spec_id)
-    }
 }

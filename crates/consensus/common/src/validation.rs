@@ -349,7 +349,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     let parent_base_fee_per_gas = parent.base_fee_per_gas().unwrap_or(0);
-    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas(
+    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
         parent_excess_blob_gas,
         parent_blob_gas_used,
         parent_base_fee_per_gas,

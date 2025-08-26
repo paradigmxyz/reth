@@ -16,10 +16,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
-    eip7910::EthBaseForkConfig,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, Bytes, B256, U256};
+use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
 use derive_more::From;
@@ -330,19 +329,6 @@ impl ChainSpec {
         self.chain
     }
 
-    /// Returns base fork config for specific timestamp.
-    /// Returns [`None`] if no blob params were found for this fork.
-    pub fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
-        // Fork config only exists for timestamp-based hardforks.
-        let head = Head { timestamp, number: u64::MAX, ..Default::default() };
-        Some(EthBaseForkConfig {
-            chain_id: alloy_primitives::U64::from(self.chain.id()),
-            activation_time: timestamp,
-            blob_schedule: self.blob_params_at_timestamp(timestamp)?,
-            fork_id: Bytes::from(self.fork_id(&head).hash.0),
-        })
-    }
-
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
     pub const fn is_ethereum(&self) -> bool {
@@ -487,28 +473,16 @@ impl ChainSpec {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self
-            .hardforks
-            .forks_iter()
-            .filter_map(|(_, condition)| {
-                // We filter out TTD-based forks w/o a pre-known block since those do not show up in
-                // the fork filter.
-                Some(match condition {
-                    ForkCondition::Block(block) |
-                    ForkCondition::TTD { fork_block: Some(block), .. } => {
-                        ForkFilterKey::Block(block)
-                    }
-                    ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                    _ => return None,
-                })
+        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+            // the fork filter.
+            Some(match condition {
+                ForkCondition::Block(block) |
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                _ => return None,
             })
-            // also need to include BPOs as orkFilterKey::Time(
-            .chain(
-                self.blob_params
-                    .scheduled
-                    .iter()
-                    .map(|(activation, _)| ForkFilterKey::Time(*activation)),
-            );
+        });
 
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
@@ -548,17 +522,12 @@ impl ChainSpec {
             }
         }
 
-        let bpo_forks = self.blob_params.scheduled.iter().map(|(activation, _)| *activation);
-
-        let mut timestamp_forks = self
+        let timestamp_forks = self
             .hardforks
             .forks_iter()
             .filter_map(|(_, cond)| cond.as_timestamp())
-            .chain(bpo_forks)
             .filter(|time| time > &self.genesis.timestamp)
             .collect::<Vec<_>>();
-        // sort because bpo can happen in between
-        timestamp_forks.sort();
 
         // timestamp are ALWAYS applied after the merge.
         //
@@ -724,6 +693,11 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Bpo1.boxed(), genesis.config.bpo1_time),
+            (EthereumHardfork::Bpo2.boxed(), genesis.config.bpo2_time),
+            (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
+            (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
+            (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -782,19 +756,6 @@ impl Hardforks for ChainSpec {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.hardforks.forks_iter()
-    }
-
-    fn fork_timestamps(&self) -> Vec<u64> {
-        let mut timestamp_forks = self
-            .hardforks
-            .forks_iter()
-            .filter_map(|(_, cond)| cond.as_timestamp())
-            .chain(self.blob_params.scheduled.iter().map(|(activation, _)| *activation))
-            .collect::<Vec<_>>();
-        // sort because bpo can happen in-between
-        timestamp_forks.sort();
-        timestamp_forks.dedup();
-        timestamp_forks
     }
 
     fn fork_id(&self, head: &Head) -> ForkId {
@@ -990,10 +951,22 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at the given timestamp.
+    pub fn with_prague_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Enable Osaka at genesis.
     pub fn osaka_activated(mut self) -> Self {
         self = self.prague_activated();
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at the given timestamp.
+    pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         self
     }
 

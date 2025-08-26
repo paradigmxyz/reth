@@ -479,7 +479,7 @@ alloy-sol-macro = "1.3.0"
 alloy-sol-types = { version = "1.3.0", default-features = false }
 alloy-trie = { version = "0.9.0", default-features = false }
 
-alloy-hardforks = "0.2.7"
+alloy-hardforks = "0.2.13"
 
 alloy-consensus = { version = "1.0.23", default-features = false }
 alloy-contract = { version = "1.0.23", default-features = false }
@@ -511,7 +511,7 @@ alloy-transport-ws = { version = "1.0.23", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.15", default-features = false }
-alloy-op-hardforks = "0.2.2"
+alloy-op-hardforks = "0.2.13"
 op-alloy-rpc-types = { version = "0.18.12", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.12", default-features = false }
 op-alloy-network = { version = "0.18.12", default-features = false }
@@ -714,37 +714,36 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
-alloy-eip2124 = { git = "https://github.com/alloy-rs/eips", branch = "rkrasiuk/fork-hash-from-bytes-arr" }
 alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "fusaka-devnet-3" }
 alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "fusaka-devnet-3" }
 
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
-alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "b4e4497" }
 
 revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
@@ -758,6 +757,9 @@ revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "
 revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
 revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
 op-revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+
+alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "aa485f5" }
+alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "aa485f5" }
 
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }

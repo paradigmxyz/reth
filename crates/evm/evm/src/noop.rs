@@ -1,7 +1,6 @@
 //! Helpers for testing.
 
 use crate::{ConfigureEvm, EvmEnvFor};
-use alloy_evm::precompiles::PrecompilesMap;
 use reth_primitives_traits::{BlockTy, HeaderTy, SealedBlock, SealedHeader};
 
 /// A no-op EVM config that panics on any call. Used as a typesystem hack to satisfy
@@ -69,9 +68,5 @@ where
         attributes: Self::NextBlockEnvCtx,
     ) -> crate::ExecutionCtxFor<'_, Self> {
         self.inner().context_for_next_block(parent, attributes)
-    }
-
-    fn precompiles_for_timestamp(&self, timestamp: u64) -> PrecompilesMap {
-        self.inner().precompiles_for_timestamp(timestamp)
     }
 }
