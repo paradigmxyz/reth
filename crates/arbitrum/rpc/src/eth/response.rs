@@ -58,6 +58,21 @@ mod tests {
             assert!(!json.contains("transaction_encoded_2718"));
         }
     }
+    #[test]
+    fn internal_tx_has_zero_gas_and_gas_price_in_rpc() {
+        use arb_alloy_consensus::tx::ArbInternalTx;
+        use alloy_primitives::Signature;
+        let sys = ArbInternalTx {
+            chain_id: U256::from(0x66eeeu64),
+            data: bytes!("6bf6a42d"),
+        };
+        let tx = ArbTransactionSigned::new_unhashed(ArbTypedTransaction::Internal(sys), Signature::new(U256::ZERO, U256::ZERO, false));
+        let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
+            arb_tx_with_other_fields(&tx, signer(), dummy_info());
+        assert_eq!(resp.gas, Some(0u128));
+        assert_eq!(resp.gas_price, Some(0u128));
+    }
+
 
     #[test]
     fn maps_submit_retryable_fields() {
