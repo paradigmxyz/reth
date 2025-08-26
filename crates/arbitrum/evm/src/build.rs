@@ -141,11 +141,17 @@ where
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
                 Legacy => block_basefee,
-                Deposit | Internal => block_basefee,
+                Deposit | Internal => alloy_primitives::U256::ZERO,
                 _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
-        let upfront_gas_price = alloy_primitives::U256::from(tx.tx().max_fee_per_gas());
+        let upfront_gas_price = {
+            use reth_arbitrum_primitives::ArbTxType::*;
+            match tx.tx().tx_type() {
+                Deposit | Internal => alloy_primitives::U256::ZERO,
+                _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
+            }
+        };
 
         let start_ctx = ArbStartTxContext {
             sender,
@@ -195,9 +201,9 @@ where
 
         let mut tx_env = tx.to_tx_env();
         if is_internal {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0u128);
         } else if is_deposit {
-            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
+            reth_evm::TransactionEnv::set_gas_price(&mut tx_env, 0u128);
         }
         if is_internal || is_deposit {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
@@ -213,7 +219,7 @@ where
                 effective_gas_limit = 1_000_000;
             }
             let effective_gas_price = if is_internal || is_deposit {
-                block_basefee
+                alloy_primitives::U256::ZERO
             } else {
                 upfront_gas_price
             };
