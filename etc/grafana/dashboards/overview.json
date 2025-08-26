@@ -4437,14 +4437,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "Storage {{quantile}} percentile",
+          "legendFormat": "Account {{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
       ],
-      "title": "Redundant multiproof storage nodes",
+      "title": "Total multiproof account nodes",
       "type": "timeseries"
     },
     {
@@ -4536,14 +4536,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "Account {{quantile}} percentile",
+          "legendFormat": "Storage {{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
       ],
-      "title": "Redundant multiproof account nodes",
+      "title": "Total multiproof storage nodes",
       "type": "timeseries"
     },
     {
@@ -4906,32 +4906,7 @@
           },
           "unit": "s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "State Root Duration p0.95"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
