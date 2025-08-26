@@ -209,6 +209,8 @@ pub type ArbRpcConvert<N, NetworkT> = RpcConverter<
     receipt::ArbReceiptConverter<<N as FullNodeTypes>::Provider>,
     (),
     txinfo::ArbTxInfoMapper<<N as FullNodeTypes>::Provider>,
+    (),
+    response::ArbRpcTxConverter,
 >;
 
 #[derive(Debug)]
@@ -238,7 +240,8 @@ where
         let rpc_converter = RpcConverter::new(receipt::ArbReceiptConverter::new(
             ctx.components.provider().clone(),
         ))
-        .with_mapper(txinfo::ArbTxInfoMapper::new(ctx.components.provider().clone()));
+        .with_mapper(txinfo::ArbTxInfoMapper::new(ctx.components.provider().clone()))
+        .with_rpc_tx_converter(response::ArbRpcTxConverter);
         let eth_api = ctx.eth_api_builder().with_rpc_converter(rpc_converter).build_inner();
         Ok(ArbEthApi::new(eth_api))
     }
