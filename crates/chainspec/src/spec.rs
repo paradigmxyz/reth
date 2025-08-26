@@ -455,8 +455,8 @@ impl ChainSpec {
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+            // the fork filter.
             Some(match condition {
                 ForkCondition::Block(block) |
                 ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
@@ -670,6 +670,11 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Bpo1.boxed(), genesis.config.bpo1_time),
+            (EthereumHardfork::Bpo2.boxed(), genesis.config.bpo2_time),
+            (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
+            (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
+            (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -923,10 +928,22 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at the given timestamp.
+    pub fn with_prague_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Enable Osaka at genesis.
     pub fn osaka_activated(mut self) -> Self {
         self = self.prague_activated();
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at the given timestamp.
+    pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         self
     }
 
@@ -2509,6 +2526,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             prague: BlobParams {
                 target_blob_count: 3,
@@ -2516,6 +2534,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             ..Default::default()
         };

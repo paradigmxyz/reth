@@ -5,7 +5,10 @@
 use alloy_evm::{
     eth::EthEvmContext,
     precompiles::PrecompilesMap,
-    revm::precompile::{Precompile, PrecompileId},
+    revm::{
+        handler::EthPrecompiles,
+        precompile::{Precompile, PrecompileId},
+    },
     EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -17,7 +20,6 @@ use reth_ethereum::{
         revm::{
             context::{Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
-            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::{PrecompileOutput, PrecompileResult, Precompiles},

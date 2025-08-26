@@ -5,6 +5,7 @@
 use alloy_evm::{
     eth::EthEvmContext,
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
+    revm::{handler::EthPrecompiles, precompile::PrecompileId},
     Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -17,7 +18,6 @@ use reth_ethereum::{
         revm::{
             context::{Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
-            handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::PrecompileResult,
@@ -117,12 +117,20 @@ impl WrappedPrecompile {
     /// Given a [`DynPrecompile`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
+        let precompile_id = precompile.precompile_id().clone();
         let wrapped = Self::new(precompile, cache);
-        move |input: PrecompileInput<'_>| -> PrecompileResult { wrapped.call(input) }.into()
+        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
+            wrapped.call(input)
+        })
+            .into()
     }
 }
 
 impl Precompile for WrappedPrecompile {
+    fn precompile_id(&self) -> &PrecompileId {
+        self.precompile.precompile_id()
+    }
+
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         let mut cache = self.cache.write();
         let key = (Bytes::copy_from_slice(input.data), input.gas);
