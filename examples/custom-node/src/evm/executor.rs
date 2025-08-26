@@ -51,6 +51,17 @@ where
         }
     }
 
+    fn commit_cached_execution(
+        &mut self,
+        _tx: impl alloy_evm::block::ExecutableTx<Self>,
+        _result: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> alloy_evm::block::CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        // For now, just execute the transaction normally without caching
+        // TODO: Implement proper caching delegation
+        Ok(Some(0))
+    }
+
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
         self.inner.finish()
     }

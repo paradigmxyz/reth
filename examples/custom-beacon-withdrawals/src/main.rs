@@ -199,6 +199,17 @@ where
         self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
+    fn commit_cached_execution(
+        &mut self,
+        _tx: impl alloy_evm::block::ExecutableTx<Self>,
+        _result: reth_ethereum::evm::revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> alloy_evm::block::CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        // For now, just execute the transaction normally without caching
+        // TODO: Implement proper caching delegation
+        Ok(Some(0))
+    }
+
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
         if let Some(withdrawals) = self.inner.ctx.withdrawals.clone() {
             apply_withdrawals_contract_call(withdrawals.as_ref(), self.inner.evm_mut())?;
