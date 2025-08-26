@@ -83,6 +83,26 @@ mod tests {
         assert_eq!(other.get_deserialized::<U256>("maxRefund").unwrap().unwrap(), U256::from_str_radix("b0e85efeab8", 16).unwrap());
         assert_eq!(other.get_deserialized::<U256>("submissionFeeRefund").unwrap().unwrap(), U256::from_str_radix("1f6377d4ab8", 16).unwrap());
         assert_eq!(other.get_deserialized::<Address>("refundTo").unwrap().unwrap(), address!("0x11155ca9bbf7be58e27f3309e629c847996b43c8"));
+    #[test]
+    fn maps_internal_system_tx_gas_fields() {
+        use reth_arbitrum_primitives::tx::ArbInternalTx;
+        let sys = ArbInternalTx {
+            chain_id: U256::from(0x66eeeu64),
+            from: signer(),
+            to: address!("0x00000000000000000000000000000000000a4b05"),
+            data: bytes!("6bf6a42d"),
+            l1_block_number: 1,
+            l1_timestamp: 0,
+            l1_base_fee: U256::ZERO,
+        };
+        let tx = ArbTransactionSigned::from(ArbTypedTransaction::Internal(sys));
+        let resp: WithOtherFields<EthTransaction<ArbTransactionSigned>> =
+            arb_tx_with_other_fields(&tx, signer(), dummy_info());
+        assert_eq!(resp.inner.gas_price, Some(U256::ZERO));
+        assert_eq!(resp.inner.gas, Some(0u64));
+        assert_eq!(resp.inner.r#type, Some(0x6a));
+    }
+
     }
 }
 use reth_rpc_convert::transaction::RpcTxConverter;
@@ -121,7 +141,16 @@ pub fn arb_tx_with_other_fields(
     signer: Address,
     tx_info: TransactionInfo,
 ) -> WithOtherFields<EthTransaction<ArbTransactionSigned>> {
-    let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
+    let mut inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
+
+    match &**tx {
+        ArbTypedTransaction::Internal(_) => {
+            inner.gas_price = Some(U256::ZERO);
+            inner.gas = Some(0u64);
+        }
+        _ => {}
+    }
+
     let mut out = WithOtherFields::new(inner);
 
     match &**tx {
