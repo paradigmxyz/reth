@@ -178,6 +178,8 @@ impl FromConsensusTx<ArbTransactionSigned> for ArbTransactionResponse {
 
         out
     }
+}
+
 use alloy_consensus::Transaction as ConsensusTransaction;
 use alloy_network_primitives::traits::TransactionResponse as NetworkTransactionResponse;
 
