@@ -254,5 +254,3 @@ impl NetworkTransactionResponse for ArbTransactionResponse {
         NetworkTransactionResponse::from(&self.inner)
     }
 }
-
-}
