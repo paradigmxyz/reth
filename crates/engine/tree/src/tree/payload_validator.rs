@@ -737,7 +737,7 @@ where
 
                     // Use chunked validation for better performance
                     let validation_result =
-                        validate_prewarm_accesses_against_db(db, traces, coinbase_deltas);
+                        validate_prewarm_accesses_against_db(db, &traces, coinbase_deltas);
 
                     match validation_result {
                         Ok(true) => {
@@ -1035,12 +1035,19 @@ where
 /// Coinbase handling:
 /// - If `coinbase_deltas` is `Some`, the coinbase account is excluded from validation because its
 ///   nonce and balance will be adjusted after validation using the provided deltas.
+///
+/// Performance optimizations:
+/// - Takes traces by reference to avoid unnecessary cloning
+/// - Early extraction of coinbase address for fast-path comparison
 fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
-    prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    prewarm_accesses: &[crate::tree::payload_processor::prewarm::AccessRecord],
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<bool, DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
+
+    // Fast path: extract coinbase address once if we have deltas
+    let coinbase_addr = coinbase_deltas.map(|(addr, _, _)| addr);
 
     // Separate account and storage accesses for batch processing
     let mut account_accesses = Vec::new();
@@ -1050,15 +1057,14 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         match access {
             AccessRecord::Account { address, result } => {
                 // Skip coinbase validation if we have deltas (will be updated later)
-                if let Some((coinbase, _, _)) = coinbase_deltas {
-                    if address == coinbase {
-                        continue;
-                    }
+                // Fast comparison using pre-extracted coinbase address
+                if Some(*address) == coinbase_addr {
+                    continue;
                 }
-                account_accesses.push((address, result));
+                account_accesses.push((*address, result));
             }
             AccessRecord::Storage { address, index, result } => {
-                storage_accesses.push((address, index, result));
+                storage_accesses.push((*address, *index, *result));
             }
         }
     }
@@ -1067,7 +1073,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     for chunk in account_accesses.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
         for (address, expected) in chunk {
             let actual = db.basic(*address)?;
-            if actual != *expected {
+            if actual != **expected {
                 return Ok(false);
             }
         }
