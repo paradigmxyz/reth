@@ -79,8 +79,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
 /// ## RPC Consensus Client
 ///
 /// When `--debug.rpc-consensus-ws <URL>` is provided, the launcher will:
-/// - Connect to an external RPC `WebSocket` endpoint
-/// - Fetch blocks from that endpoint
+/// - Connect to an external RPC endpoint (`WebSocket` or HTTP)
+/// - Fetch blocks from that endpoint (using subscriptions for `WebSocket`, polling for HTTP)
 /// - Submit them to the local engine for execution
 /// - Useful for testing engine behavior with real network data
 ///
@@ -117,7 +117,12 @@ where
 
         let config = &handle.node.config;
         if let Some(ws_url) = config.debug.rpc_consensus_ws.clone() {
-            info!(target: "reth::cli", "Using RPC WebSocket consensus client: {}", ws_url);
+            let con_type = if ws_url.starts_with("ws://") || ws_url.starts_with("wss://") {
+                "WebSocket"
+            } else {
+                "HTTP"
+            };
+            info!(target: "reth::cli", "Using RPC {} consensus client: {}", con_type, ws_url);
 
             let block_provider =
                 RpcBlockProvider::<AnyNetwork, _>::new(ws_url.as_str(), |block_response| {
