@@ -31,4 +31,7 @@ pub use reth_ethereum_primitives::{Transaction, TransactionSigned};
 
 /// Type alias kept for backward compatibility.
 #[deprecated(note = "Use `Recovered` instead")]
-pub type TransactionSignedEcRecovered<T = TransactionSigned> = Recovered<T>;
+pub type TransactionSignedEcRecovered<T> = Recovered<T>; // generic param added
+
+#[cfg(test)]
+mod test_debug;

@@ -3,3 +3,6 @@ pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
 
 /// Receipt containing result of transaction execution.
 pub use reth_ethereum_primitives::Receipt;
+
+#[cfg(test)]
+mod test_debug;

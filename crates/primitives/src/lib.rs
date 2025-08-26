@@ -7,7 +7,7 @@
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 //! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
-//!   types.
+//! types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -22,6 +22,7 @@ mod block;
 mod receipt;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
+
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{Block, BlockBody, SealedBlock};
