@@ -1,8 +1,8 @@
 use std::fmt;
 
-use reth_node_api::{FullNodeComponents, NodeAddOns};
+use reth_node_api::FullNodeComponents;
 
-use crate::node::FullNode;
+use crate::{node::FullNode, rpc::RpcHooks, NodeAddOns};
 
 /// Container for all the configurable hook functions.
 pub struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
@@ -10,7 +10,8 @@ pub struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     /// Hook to run once the node is started.
     pub on_node_started: Box<dyn OnNodeStartedHook<Node, AddOns>>,
-    _marker: std::marker::PhantomData<Node>,
+    /// Rpc hooks passed to the add-ons.
+    pub rpc: RpcHooks<Node, AddOns::EthApi>,
 }
 
 impl<Node, AddOns> NodeHooks<Node, AddOns>
@@ -23,7 +24,7 @@ where
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),
-            _marker: Default::default(),
+            rpc: RpcHooks::default(),
         }
     }
 

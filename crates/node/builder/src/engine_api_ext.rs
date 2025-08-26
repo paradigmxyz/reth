@@ -2,9 +2,9 @@
 //!
 //! Wraps an `EngineApiBuilder` to provide access to the built Engine API instance.
 
-use crate::rpc::EngineApiBuilder;
+use crate::{rpc::EngineApiBuilder, AddOnsContext};
 use eyre::Result;
-use reth_node_api::{AddOnsContext, FullNodeComponents};
+use reth_node_api::FullNodeComponents;
 use reth_rpc_api::IntoEngineApiRpcModule;
 
 /// Provides access to an `EngineApi` instance with a callback

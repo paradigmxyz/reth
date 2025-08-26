@@ -8816,22 +8816,18 @@ dependencies = [
 name = "reth-node-api"
 version = "1.6.0"
 dependencies = [
- "alloy-rpc-types-engine",
- "eyre",
  "reth-basic-payload-builder",
  "reth-consensus",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
  "reth-network-api",
- "reth-node-core",
  "reth-node-types",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-provider",
  "reth-tasks",
- "reth-tokio-util",
  "reth-transaction-pool",
 ]
 

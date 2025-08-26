@@ -5,11 +5,10 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter, NodeBuilderWithAddOns,
     NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use crate::NodeBuilderWithAddOns;
 use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
@@ -90,7 +89,7 @@ where
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
         } = target;
-        let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+        let NodeHooks { on_component_initialized, on_node_started, rpc: rpc_hooks } = hooks;
 
         // setup the launch context
         let ctx = ctx
@@ -253,7 +252,7 @@ where
         );
 
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
-            add_ons.launch_add_ons(add_ons_ctx).await?;
+            add_ons.launch_add_ons(add_ons_ctx, rpc_hooks).await?;
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;

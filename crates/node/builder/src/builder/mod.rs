@@ -7,7 +7,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
+    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node, NodeAddOns,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -21,8 +21,7 @@ use reth_network::{
     NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
-    NodeTypesWithDBAdapter,
+    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},

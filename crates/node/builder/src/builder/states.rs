@@ -9,12 +9,13 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
+    rpc::{RethRpcServerHandles, RpcContext},
     AddOns, ComponentsFor, FullNode,
 };
 
+use crate::NodeAddOns;
 use reth_exex::ExExContext;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
@@ -247,14 +248,7 @@ where
         self.add_ons.add_ons = f(self.add_ons.add_ons);
         self
     }
-}
 
-impl<T, CB, AO> NodeBuilderWithAddOns<T, CB, AO>
-where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
-{
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
@@ -264,7 +258,7 @@ where
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(
                 RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
@@ -273,23 +267,19 @@ where
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_on_rpc_started(hook);
-            add_ons
-        })
+        self.add_ons.hooks.rpc.set_on_rpc_started(hook);
+        self
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
-            add_ons.hooks_mut().set_extend_rpc_modules(hook);
-            add_ons
-        })
+        self.add_ons.hooks.rpc.set_extend_rpc_modules(hook);
+        self
     }
 }
 
