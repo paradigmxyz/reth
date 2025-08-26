@@ -55,3 +55,5 @@ tracing = { workspace = true }
 async-trait = "0.1"
 eyre = { workspace = true }
 tokio = { workspace = true }
+[dev-dependencies]
+arb-alloy-consensus = "0.1.2"
