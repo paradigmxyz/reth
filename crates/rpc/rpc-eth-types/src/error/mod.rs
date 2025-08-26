@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
-use reth_errors::{BlockExecutionError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -24,6 +24,7 @@ use revm::context_interface::result::{
 };
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
+use tokio::sync::oneshot::error::RecvError;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -166,6 +167,12 @@ pub enum EthApiError {
         /// Duration that was waited before timing out
         duration: Duration,
     },
+    /// Error thrown when batch tx response channel fails
+    #[error(transparent)]
+    BatchTxRecvError(#[from] RecvError),
+    /// Error thrown when batch tx send channel fails
+    #[error("Batch transaction sender channel closed")]
+    BatchTxSendError,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -285,6 +292,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxSendError => {
+                internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
         }
     }
 }
@@ -377,7 +388,30 @@ impl From<RethError> for EthApiError {
 
 impl From<BlockExecutionError> for EthApiError {
     fn from(error: BlockExecutionError) -> Self {
-        Self::Internal(error.into())
+        match error {
+            BlockExecutionError::Validation(validation_error) => match validation_error {
+                BlockValidationError::InvalidTx { error, .. } => {
+                    if let Some(invalid_tx) = error.as_invalid_tx_err() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::other(
+                            rpc_error_with_code(
+                                EthRpcErrorCode::TransactionRejected.code(),
+                                error.to_string(),
+                            ),
+                        ))
+                    }
+                }
+                _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                    validation_error,
+                ))),
+            },
+            BlockExecutionError::Internal(internal_error) => {
+                Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
+            }
+        }
     }
 }
 

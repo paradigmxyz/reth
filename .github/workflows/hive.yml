@@ -27,9 +27,9 @@ jobs:
     runs-on:
       group: Reth
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Checkout hive tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ethereum/hive
           path: hivetests
@@ -151,18 +151,18 @@ jobs:
     permissions:
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: artifacts
           path: /tmp
@@ -176,7 +176,7 @@ jobs:
           chmod +x /usr/local/bin/hive
 
       - name: Checkout hive tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ethereum/hive
           ref: master
@@ -200,7 +200,7 @@ jobs:
 
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml --ignored .github/assets/hive/ignored_tests.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}

@@ -12,8 +12,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
         PayloadTypes, VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
-    PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineApiValidator, EngineTypes,
+    NodePrimitives, PayloadValidator,
 };
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
@@ -112,18 +112,18 @@ where
     }
 }
 
-impl<P, Tx, ChainSpec> PayloadValidator for OpEngineValidator<P, Tx, ChainSpec>
+impl<P, Tx, ChainSpec, Types> PayloadValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
 where
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
+    Types: PayloadTypes<ExecutionData = OpExecutionData>,
 {
     type Block = alloy_consensus::Block<Tx>;
-    type ExecutionData = OpExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: OpExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block =
             self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)?;
@@ -161,11 +161,11 @@ where
     }
 }
 
-impl<Types, P, Tx, ChainSpec> EngineValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
+impl<Types, P, Tx, ChainSpec> EngineApiValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
 where
     Types: PayloadTypes<
         PayloadAttributes = OpPayloadAttributes,
-        ExecutionData = <Self as PayloadValidator>::ExecutionData,
+        ExecutionData = OpExecutionData,
         BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
     >,
     P: StateProviderFactory + Unpin + 'static,
@@ -205,7 +205,7 @@ where
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, OpPayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<OpExecutionData, OpPayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )?;
@@ -290,7 +290,6 @@ mod test {
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_chainspec::ChainSpec;
-    use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
     use reth_provider::noop::NoopProvider;
     use reth_trie_common::KeccakKeyHasher;
@@ -334,7 +333,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(None, 1732633199);
 
-        let result = <engine::OpEngineValidator<_, _, _> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes,
@@ -348,7 +347,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(None, 1732633200);
 
-        let result = <engine::OpEngineValidator<_, _, _> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes,
@@ -362,7 +361,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_, _, _> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes,
@@ -376,7 +375,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_, _, _> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes,
@@ -390,7 +389,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_, _, _> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes,

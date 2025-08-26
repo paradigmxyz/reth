@@ -103,6 +103,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
+            .pending_block_kind(self.rpc_pending_block)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -174,6 +175,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
             .max_connections(self.rpc_max_connections.get())
+            .set_ipc_socket_permissions(self.ipc_socket_permissions.clone())
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {

@@ -14,7 +14,7 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult, StateCommitmentProvider,
+    ProviderResult,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -24,7 +24,10 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
-use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
+use reth_trie_common::{
+    added_removed_keys::MultiAddedRemovedKeys,
+    prefix_set::{PrefixSet, PrefixSetMut},
+};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -38,6 +41,9 @@ use std::{
 };
 use tokio::runtime::Handle;
 use tracing::debug;
+
+#[cfg(feature = "metrics")]
+use crate::proof_task_metrics::ProofTaskMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
@@ -70,6 +76,9 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
     /// [`ProofTaskManagerHandle::drop`].
     active_handles: Arc<AtomicUsize>,
+    /// Metrics tracking blinded node fetches.
+    #[cfg(feature = "metrics")]
+    metrics: ProofTaskMetrics,
 }
 
 impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
@@ -95,6 +104,8 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             proof_task_rx,
             tx_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "metrics")]
+            metrics: ProofTaskMetrics::default(),
         }
     }
 
@@ -106,7 +117,7 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
 
 impl<Factory> ProofTaskManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
     /// Inserts the task into the pending tasks queue.
     pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
@@ -125,7 +136,7 @@ where
             let provider_ro = self.view.provider_ro()?;
             let tx = provider_ro.into_tx();
             self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone())));
+            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
         }
 
         Ok(None)
@@ -167,6 +178,17 @@ where
             match self.proof_task_rx.recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::QueueTask(task) => {
+                        // Track metrics for blinded node requests
+                        #[cfg(feature = "metrics")]
+                        match &task {
+                            ProofTaskKind::BlindedAccountNode(_, _) => {
+                                self.metrics.account_nodes += 1;
+                            }
+                            ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                                self.metrics.storage_nodes += 1;
+                            }
+                            _ => {}
+                        }
                         // queue the task
                         self.queue_proof_task(task)
                     }
@@ -174,7 +196,12 @@ where
                         // return the transaction to the pool
                         self.proof_task_txs.push(tx);
                     }
-                    ProofTaskMessage::Terminate => return Ok(()),
+                    ProofTaskMessage::Terminate => {
+                        // Record metrics before terminating
+                        #[cfg(feature = "metrics")]
+                        self.metrics.record();
+                        return Ok(())
+                    }
                 },
                 // All senders are disconnected, so we can terminate
                 // However this should never happen, as this struct stores a sender
@@ -195,12 +222,17 @@ pub struct ProofTaskTx<Tx> {
 
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
+
+    /// Identifier for the tx within the context of a single [`ProofTaskManager`], used only for
+    /// tracing.
+    id: usize,
 }
 
 impl<Tx> ProofTaskTx<Tx> {
-    /// Initializes a [`ProofTaskTx`] using the given transaction anda[`ProofTaskCtx`].
-    const fn new(tx: Tx, task_ctx: ProofTaskCtx) -> Self {
-        Self { tx, task_ctx }
+    /// Initializes a [`ProofTaskTx`] using the given transaction and a [`ProofTaskCtx`]. The id is
+    /// used only for tracing.
+    const fn new(tx: Tx, task_ctx: ProofTaskCtx, id: usize) -> Self {
+        Self { tx, task_ctx, id }
     }
 }
 
@@ -241,9 +273,24 @@ where
         );
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
+        let multi_added_removed_keys = input
+            .multi_added_removed_keys
+            .unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
+        let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
+
+        let span = tracing::trace_span!(
+            target: "trie::proof_task",
+            "Storage proof calculation",
+            hashed_address=?input.hashed_address,
+            // Add a unique id because we often have parallel storage proof calculations for the
+            // same hashed address, and we want to differentiate them during trace analysis.
+            span_id=self.id,
+        );
+        let span_guard = span.enter();
 
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
+
         let raw_proof_result = StorageProof::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
@@ -251,8 +298,11 @@ where
         )
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
+        .with_added_removed_keys(added_removed_keys)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+        drop(span_guard);
 
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
             raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
@@ -389,6 +439,8 @@ pub struct StorageProofInput {
     target_slots: B256Set,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl StorageProofInput {
@@ -399,8 +451,15 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
-        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
+        Self {
+            hashed_address,
+            prefix_set,
+            target_slots,
+            with_branch_node_masks,
+            multi_added_removed_keys,
+        }
     }
 }
 

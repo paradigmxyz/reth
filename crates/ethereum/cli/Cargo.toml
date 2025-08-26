@@ -24,18 +24,12 @@ reth-node-metrics.workspace = true
 reth-tracing.workspace = true
 reth-node-api.workspace = true
 
-# alloy
-alloy-consensus.workspace = true
-
 # misc
 clap.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-# reth
-reth-cli-commands.workspace = true
-
 # fs
 tempfile.workspace = true
 

@@ -1,12 +1,11 @@
 //! CLI definition and entrypoint to executable
 
 use crate::chainspec::EthereumChainSpecParser;
-use alloy_consensus::Header;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliNodeTypes},
+    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
@@ -14,12 +13,9 @@ use reth_cli_commands::{
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_api::{NodePrimitives, NodeTypes};
+use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{
-    args::LogArgs,
-    version::{LONG_VERSION, SHORT_VERSION},
-};
+use reth_node_core::{args::LogArgs, version::version_metadata};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
@@ -30,7 +26,7 @@ use tracing::info;
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+#[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
 pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// The command to run
@@ -125,10 +121,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
-            ChainSpec: Hardforks,
-        >,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
@@ -182,9 +175,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
-        <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader: From<Header>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
@@ -246,7 +238,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
@@ -270,7 +261,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
     #[command(name = "db")]
-    Db(db::Command<C>),
+    Db(Box<db::Command<C>>),
     /// Download public node snapshots
     #[command(name = "download")]
     Download(download::DownloadCommand<C>),
@@ -279,7 +270,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Stage(stage::Command<C>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<C>),
+    P2P(Box<p2p::Command<C>>),
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]

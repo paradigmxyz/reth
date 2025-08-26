@@ -216,6 +216,17 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
 
+/// Trait for block headers that can be modified through CLI operations.
+pub trait CliHeader {
+    fn set_number(&mut self, number: u64);
+}
+
+impl CliHeader for alloy_consensus::Header {
+    fn set_number(&mut self, number: u64) {
+        self.number = number;
+    }
+}
+
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: NodeTypesForProvider {

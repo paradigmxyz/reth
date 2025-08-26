@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
@@ -13,7 +13,7 @@ use reth_provider::{
 };
 use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    StageCheckpoint, StageError, StageId, StorageRootMerkleCheckpoint, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use reth_trie_db::DatabaseStateRoot;
@@ -50,7 +50,7 @@ pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
-/// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
+/// [`StorageHashingStage`][crate::stages::StorageHashingStage] to calculate intermediate hashes
 /// and state roots.
 ///
 /// This stage should be run with the above two stages, otherwise it is a no-op.
@@ -248,12 +248,35 @@ where
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(&updates)?;
 
-                    let checkpoint = MerkleCheckpoint::new(
+                    let mut checkpoint = MerkleCheckpoint::new(
                         to_block,
-                        state.last_account_key,
-                        state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
-                        state.hash_builder.into(),
+                        state.account_root_state.last_hashed_key,
+                        state
+                            .account_root_state
+                            .walker_stack
+                            .into_iter()
+                            .map(StoredSubNode::from)
+                            .collect(),
+                        state.account_root_state.hash_builder.into(),
                     );
+
+                    // Save storage root state if present
+                    if let Some(storage_state) = state.storage_root_state {
+                        checkpoint.storage_root_checkpoint =
+                            Some(StorageRootMerkleCheckpoint::new(
+                                storage_state.state.last_hashed_key,
+                                storage_state
+                                    .state
+                                    .walker_stack
+                                    .into_iter()
+                                    .map(StoredSubNode::from)
+                                    .collect(),
+                                storage_state.state.hash_builder.into(),
+                                storage_state.account.nonce,
+                                storage_state.account.balance,
+                                storage_state.account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                            ));
+                    }
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;

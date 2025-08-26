@@ -31,12 +31,12 @@ Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
 
-          [default: terminal]
-
           Possible values:
           - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
           - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
           - terminal: Represents terminal-friendly formatting for logs
+
+          [default: terminal]
 
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
@@ -46,12 +46,12 @@ Logging:
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
 
-          [default: terminal]
-
           Possible values:
           - json:     Represents JSON formatting for logs. This format outputs log records as JSON objects, making it suitable for structured logging
           - log-fmt:  Represents logfmt (key=value) formatting for logs. This format is concise and human-readable, typically used in command-line applications
           - terminal: Represents terminal-friendly formatting for logs
+
+          [default: terminal]
 
       --log.file.filter <FILTER>
           The filter to use for logs written to the log file
@@ -62,6 +62,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
@@ -84,12 +89,12 @@ Logging:
       --color <COLOR>
           Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
 
-          [default: always]
-
           Possible values:
           - always: Colors on
           - auto:   Colors on
           - never:  Colors off
+
+          [default: always]
 
 Display:
   -v, --verbosity...

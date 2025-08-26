@@ -10,6 +10,7 @@ use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
     era1_file::{Era1File, Era1Reader},
+    era_file_ops::FileReader,
 };
 use reth_era_downloader::EraClient;
 use std::{
@@ -32,18 +33,20 @@ const fn main() {}
 const MAINNET: &str = "mainnet";
 /// Default mainnet url
 /// for downloading mainnet `.era1` files
-const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/index.html";
+const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
 
 /// Succinct list of mainnet files we want to download
 /// from <https://era.ithaca.xyz/era1/>
 /// for testing purposes
-const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
+const ERA1_MAINNET_FILES_NAMES: [&str; 8] = [
     "mainnet-00000-5ec1ffb8.era1",
     "mainnet-00003-d8b8a40b.era1",
     "mainnet-00151-e322efe1.era1",
     "mainnet-00293-0d6c5812.era1",
     "mainnet-00443-ea71b6f9.era1",
     "mainnet-01367-d7efc68f.era1",
+    "mainnet-01610-99fdde4b.era1",
+    "mainnet-01895-3f81607c.era1",
 ];
 
 /// Sepolia network name
@@ -56,8 +59,12 @@ const SEPOLIA_URL: &str = "https://era.ithaca.xyz/sepolia-era1/";
 /// Succinct list of sepolia files we want to download
 /// from <https://era.ithaca.xyz/sepolia-era1/>
 /// for testing purposes
-const ERA1_SEPOLIA_FILES_NAMES: [&str; 3] =
-    ["sepolia-00000-643a00f7.era1", "sepolia-00074-0e81003c.era1", "sepolia-00173-b6924da5.era1"];
+const ERA1_SEPOLIA_FILES_NAMES: [&str; 4] = [
+    "sepolia-00000-643a00f7.era1",
+    "sepolia-00074-0e81003c.era1",
+    "sepolia-00173-b6924da5.era1",
+    "sepolia-00182-a4f0a8a1.era1 ",
+];
 
 /// Utility for downloading `.era1` files for tests
 /// in a temporary directory

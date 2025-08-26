@@ -61,8 +61,8 @@ pub struct PruningArgs {
     pub receipts_before: Option<BlockNumber>,
     // Receipts Log Filter
     /// Configure receipts log filter. Format:
-    /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
-    /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+    /// <`address`>:<`prune_mode`>... where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or
+    /// 'before:<`block_number`>'
     #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_distance",  "receipts_before"], value_parser = parse_receipts_log_filter)]
     pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 

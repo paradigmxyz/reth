@@ -156,9 +156,9 @@ impl PruneModes {
 /// left in database after the pruning.
 ///
 /// 1. For [`PruneMode::Full`], it fails if `MIN_BLOCKS > 0`.
-/// 2. For [`PruneMode::Distance(distance`)], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is
-///    needed because `PruneMode::Distance(0)` means that we leave zero blocks from the latest,
-///    meaning we have one block in the database.
+/// 2. For [`PruneMode::Distance`], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is needed because
+///    `PruneMode::Distance(0)` means that we leave zero blocks from the latest, meaning we have one
+///    block in the database.
 #[cfg(any(test, feature = "serde"))]
 fn deserialize_opt_prune_mode_with_min_blocks<
     'de,

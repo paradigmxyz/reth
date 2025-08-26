@@ -15,6 +15,12 @@ pub struct BenchmarkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub to: Option<u64>,
 
+    /// Number of blocks to advance from the current head block.
+    /// When specified, automatically sets --from to current head + 1 and --to to current head +
+    /// advance. Cannot be used together with explicit --from and --to arguments.
+    #[arg(long, conflicts_with_all = &["from", "to"], verbatim_doc_comment)]
+    pub advance: Option<u64>,
+
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
     /// This will perform JWT authentication for all requests to the given engine RPC url.

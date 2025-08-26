@@ -808,9 +808,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// 1. Any account with a deployed delegation or an in-flight authorization to deploy a
     ///    delegation will only be allowed a single transaction slot instead of the standard limit.
     ///    This is due to the possibility of the account being sweeped by an unrelated account.
-    /// 2. In case the pool is tracking a pending / queued transaction from a specific account, it
-    ///    will reject new transactions with delegations from that account with standard in-flight
-    ///    transactions.
+    /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
+    ///    most one in-flight transaction is allowed; any additional delegated transactions from
+    ///    that account will be rejected.
     fn validate_auth(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -823,7 +823,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
-                if self.all_transactions.txs_iter(*sender_id).next().is_some() {
+                if self.all_transactions.txs_iter(*sender_id).nth(1).is_some() {
                     return Err(PoolError::new(
                         *transaction.hash(),
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
@@ -863,8 +863,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
             }
         }
-
-        self.update_size_metrics();
 
         outcome
     }
@@ -1582,7 +1580,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
-        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
@@ -1647,8 +1644,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
 
         self.remove_auths(&internal);
-
-        self.update_size_metrics();
 
         result
     }
@@ -3781,5 +3776,65 @@ mod tests {
         assert_eq!(best_txs.len(), 10); // 8 - 2 + 4 = 10
 
         assert_eq!(pool.pending_pool.independent().len(), 1);
+    }
+
+    #[test]
+    fn test_insertion_disorder() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = address!("1234567890123456789012345678901234567890");
+        let tx0 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(0).with_gas_price(10),
+        );
+        let tx1 = f.validated_arc(
+            MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(1)
+                .with_gas_limit(1000)
+                .with_gas_price(10),
+        );
+        let tx2 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(2).with_gas_price(10),
+        );
+        let tx3 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(3).with_gas_price(10),
+        );
+
+        // tx0 should be put in the pending subpool
+        pool.add_transaction((*tx0).clone(), U256::from(1000), 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        // tx1 should be put in the queued subpool due to insufficient sender balance
+        pool.add_transaction((*tx1).clone(), U256::from(1000), 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert!(best.next().is_none());
+
+        // tx2 should be put in the pending subpool, and tx1 should be promoted to pending
+        pool.add_transaction((*tx2).clone(), U256::MAX, 0, None).unwrap();
+
+        let mut best = pool.best_transactions();
+
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        let t1 = best.next().expect("tx1 should be put in the pending subpool");
+        let t2 = best.next().expect("tx2 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert_eq!(t1.id(), tx1.id());
+        assert_eq!(t2.id(), tx2.id());
+
+        // tx3 should be put in the pending subpool,
+        pool.add_transaction((*tx3).clone(), U256::MAX, 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        let t1 = best.next().expect("tx1 should be put in the pending subpool");
+        let t2 = best.next().expect("tx2 should be put in the pending subpool");
+        let t3 = best.next().expect("tx3 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert_eq!(t1.id(), tx1.id());
+        assert_eq!(t2.id(), tx2.id());
+        assert_eq!(t3.id(), tx3.id());
     }
 }

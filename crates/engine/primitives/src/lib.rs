@@ -22,6 +22,7 @@ use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
+pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
 pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
@@ -30,14 +31,16 @@ pub use error::*;
 mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
+#[cfg(feature = "std")]
 mod message;
+#[cfg(feature = "std")]
 pub use message::*;
 
 mod event;
 pub use event::*;
 
 mod invalid_block_hook;
-pub use invalid_block_hook::InvalidBlockHook;
+pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 
 pub mod config;
 pub use config::*;
@@ -104,14 +107,29 @@ pub trait EngineTypes:
         + 'static;
 }
 
+/// Type that validates the payloads processed by the engine API.
+pub trait EngineApiValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, Types::PayloadAttributes>,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &Types::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError>;
+}
+
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: Send + Sync + Unpin + 'static {
+pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
-
-    /// The execution payload type used by the engine.
-    type ExecutionData;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -123,7 +141,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// engine-API specification.
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
@@ -135,30 +153,6 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
         // method not used by l1
         Ok(())
     }
-}
-
-/// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: PayloadTypes>:
-    PayloadValidator<ExecutionData = Types::ExecutionData>
-{
-    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
-    /// and the message version.
-    fn validate_version_specific_fields(
-        &self,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<
-            '_,
-            Types::ExecutionData,
-            <Types as PayloadTypes>::PayloadAttributes,
-        >,
-    ) -> Result<(), EngineObjectValidationError>;
-
-    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        version: EngineApiMessageVersion,
-        attributes: &<Types as PayloadTypes>::PayloadAttributes,
-    ) -> Result<(), EngineObjectValidationError>;
 
     /// Validates the payload attributes with respect to the header.
     ///
@@ -168,10 +162,10 @@ pub trait EngineValidator<Types: PayloadTypes>:
     ///   > timestamp
     ///   > of a block referenced by forkchoiceState.headBlockHash.
     ///
-    /// See also [engine api spec](https://github.com/ethereum/execution-apis/tree/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine)
+    /// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#specification-1>
     fn validate_payload_attributes_against_header(
         &self,
-        attr: &<Types as PayloadTypes>::PayloadAttributes,
+        attr: &Types::PayloadAttributes,
         header: &<Self::Block as Block>::Header,
     ) -> Result<(), InvalidPayloadAttributesError> {
         if attr.timestamp() <= header.timestamp() {

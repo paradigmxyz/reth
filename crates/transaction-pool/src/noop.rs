@@ -31,12 +31,12 @@ use tokio::sync::{mpsc, mpsc::Receiver};
 /// This type will never hold any transactions and is only useful for wiring components together.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct NoopTransactionPool<T: EthPoolTransaction = EthPooledTransaction> {
+pub struct NoopTransactionPool<T = EthPooledTransaction> {
     /// Type marker
     _marker: PhantomData<T>,
 }
 
-impl<T: EthPoolTransaction> NoopTransactionPool<T> {
+impl<T> NoopTransactionPool<T> {
     /// Creates a new [`NoopTransactionPool`].
     pub fn new() -> Self {
         Self { _marker: Default::default() }
@@ -92,6 +92,19 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         transactions
             .into_iter()
             .map(|transaction| {
+                let hash = *transaction.hash();
+                Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
+            })
+            .collect()
+    }
+
+    async fn add_transactions_with_origins(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
+        transactions
+            .into_iter()
+            .map(|(_, transaction)| {
                 let hash = *transaction.hash();
                 Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
             })
@@ -196,6 +209,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
 
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         AllPoolTransactions::default()
+    }
+
+    fn all_transaction_hashes(&self) -> Vec<TxHash> {
+        vec![]
     }
 
     fn remove_transactions(

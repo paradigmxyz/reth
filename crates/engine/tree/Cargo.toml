@@ -18,6 +18,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
+reth-execution-types.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
@@ -51,6 +52,7 @@ futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 mini-moka = { workspace = true, features = ["sync"] }
+smallvec.workspace = true
 
 # metrics
 metrics.workspace = true
@@ -62,7 +64,6 @@ rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
-itertools.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -77,23 +78,21 @@ reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-chainspec.workspace = true
 reth-db-common.workspace = true
 reth-ethereum-consensus.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
 reth-ethereum-engine-primitives.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true
-reth-prune.workspace = true
 reth-rpc-convert.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
-reth-trie-db.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
 
 # alloy
-alloy-rlp.workspace = true
 revm-state.workspace = true
 
 assert_matches.workspace = true

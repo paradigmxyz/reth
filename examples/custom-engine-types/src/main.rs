@@ -34,13 +34,13 @@ use reth_ethereum::{
     node::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-            validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+            validate_version_specific_fields, AddOnsContext, EngineApiValidator, EngineTypes,
             FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
             NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
-            rpc::{EngineValidatorBuilder, RpcAddOns},
+            rpc::{PayloadValidatorBuilder, RpcAddOns},
             BuilderContext, Node, NodeAdapter, NodeBuilder,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
@@ -51,16 +51,15 @@ use reth_ethereum::{
         EthEvmConfig, EthereumEthApiBuilder,
     },
     pool::{PoolTransaction, TransactionPool},
-    primitives::{RecoveredBlock, SealedBlock},
+    primitives::{Block, RecoveredBlock, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
-    Block, EthPrimitives, TransactionSigned,
+    EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
-use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
@@ -191,9 +190,8 @@ impl CustomEngineValidator {
     }
 }
 
-impl PayloadValidator for CustomEngineValidator {
-    type Block = Block;
-    type ExecutionData = ExecutionData;
+impl PayloadValidator<CustomEngineTypes> for CustomEngineValidator {
+    type Block = reth_ethereum::Block;
 
     fn ensure_well_formed_payload(
         &self,
@@ -202,16 +200,22 @@ impl PayloadValidator for CustomEngineValidator {
         let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
+
+    fn validate_payload_attributes_against_header(
+        &self,
+        _attr: &CustomPayloadAttributes,
+        _header: &<Self::Block as Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        // skip default timestamp validation
+        Ok(())
+    }
 }
 
-impl<T> EngineValidator<T> for CustomEngineValidator
-where
-    T: PayloadTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
-{
+impl EngineApiValidator<CustomEngineTypes> for CustomEngineValidator {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, ExecutionData, CustomPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
@@ -219,12 +223,12 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &T::PayloadAttributes,
+        attributes: &CustomPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<ExecutionData, CustomPayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )?;
@@ -238,15 +242,6 @@ where
 
         Ok(())
     }
-
-    fn validate_payload_attributes_against_header(
-        &self,
-        _attr: &<T as PayloadTypes>::PayloadAttributes,
-        _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
-    ) -> Result<(), InvalidPayloadAttributesError> {
-        // skip default timestamp validation
-        Ok(())
-    }
 }
 
 /// Custom engine validator builder
@@ -254,15 +249,9 @@ where
 #[non_exhaustive]
 pub struct CustomEngineValidatorBuilder;
 
-impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
+impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-        >,
-    >,
+    N: FullNodeComponents<Types = MyCustomNode, Evm = EthEvmConfig>,
 {
     type Validator = CustomEngineValidator;
 
@@ -279,7 +268,6 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = CustomEngineTypes;
 }

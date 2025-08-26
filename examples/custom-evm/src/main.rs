@@ -22,7 +22,7 @@ use reth_ethereum::{
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+            precompile::{PrecompileOutput, PrecompileResult, Precompiles},
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
@@ -39,7 +39,7 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
-use std::{borrow::Cow, sync::OnceLock};
+use std::sync::OnceLock;
 
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
@@ -106,13 +106,12 @@ pub fn prague_custom() -> &'static Precompiles {
     INSTANCE.get_or_init(|| {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
-        precompiles.extend([Precompile::new(
-            PrecompileId::Custom(Cow::Borrowed("custom-precompile")),
+        let precompile = Precompile::new(
+            PrecompileId::custom("custom"),
             address!("0x0000000000000000000000000000000000000999"),
-            |_, _| -> PrecompileResult {
-                PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
-            } as PrecompileFn,
-        )]);
+            |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+        );
+        precompiles.extend([precompile]);
         precompiles
     })
 }

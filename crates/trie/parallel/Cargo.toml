@@ -34,7 +34,7 @@ thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -48,7 +48,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-rayon.workspace = true
 criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true

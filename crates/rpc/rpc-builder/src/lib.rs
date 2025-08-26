@@ -503,7 +503,7 @@ pub struct RpcRegistryInner<
     executor: Box<dyn TaskSpawner + 'static>,
     evm_config: EvmConfig,
     consensus: Consensus,
-    /// Holds a all `eth_` namespace handlers
+    /// Holds all `eth_` namespace handlers
     eth: EthHandlers<EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
@@ -1188,6 +1188,23 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configures the JWT secret for authentication.
     pub const fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
         self.jwt_secret = secret;
+        self
+    }
+
+    /// Configures a custom tokio runtime for the rpc server.
+    pub fn with_tokio_runtime(mut self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        let Some(tokio_runtime) = tokio_runtime else { return self };
+        if let Some(http_server_config) = self.http_server_config {
+            self.http_server_config =
+                Some(http_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ws_server_config) = self.ws_server_config {
+            self.ws_server_config =
+                Some(ws_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ipc_server_config) = self.ipc_server_config {
+            self.ipc_server_config = Some(ipc_server_config.custom_tokio_runtime(tokio_runtime));
+        }
         self
     }
 
