@@ -178,4 +178,79 @@ impl FromConsensusTx<ArbTransactionSigned> for ArbTransactionResponse {
 
         out
     }
+use alloy_consensus::Transaction as ConsensusTransaction;
+use alloy_network_primitives::traits::TransactionResponse as NetworkTransactionResponse;
+
+impl ConsensusTransaction for ArbTransactionResponse {
+    fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
+        ConsensusTransaction::chain_id(&self.inner)
+    }
+    fn nonce(&self) -> u64 {
+        ConsensusTransaction::nonce(&self.inner)
+    }
+    fn gas_limit(&self) -> u64 {
+        ConsensusTransaction::gas_limit(&self.inner)
+    }
+    fn gas_price(&self) -> Option<u128> {
+        ConsensusTransaction::gas_price(&self.inner)
+    }
+    fn max_fee_per_gas(&self) -> u128 {
+        ConsensusTransaction::max_fee_per_gas(&self.inner)
+    }
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        ConsensusTransaction::max_priority_fee_per_gas(&self.inner)
+    }
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        ConsensusTransaction::max_fee_per_blob_gas(&self.inner)
+    }
+    fn priority_fee_or_price(&self) -> u128 {
+        ConsensusTransaction::priority_fee_or_price(&self.inner)
+    }
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        ConsensusTransaction::effective_gas_price(&self.inner, base_fee)
+    }
+    fn is_dynamic_fee(&self) -> bool {
+        ConsensusTransaction::is_dynamic_fee(&self.inner)
+    }
+    fn kind(&self) -> alloy_primitives::TxKind {
+        ConsensusTransaction::kind(&self.inner)
+    }
+    fn is_create(&self) -> bool {
+        ConsensusTransaction::is_create(&self.inner)
+    }
+    fn value(&self) -> alloy_primitives::U256 {
+        ConsensusTransaction::value(&self.inner)
+    }
+    fn input(&self) -> &alloy_primitives::Bytes {
+        ConsensusTransaction::input(&self.inner)
+    }
+    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
+        ConsensusTransaction::access_list(&self.inner)
+    }
+    fn blob_versioned_hashes(&self) -> Option<&[alloy_primitives::B256]> {
+        ConsensusTransaction::blob_versioned_hashes(&self.inner)
+    }
+    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
+        ConsensusTransaction::authorization_list(&self.inner)
+    }
+}
+
+impl NetworkTransactionResponse for ArbTransactionResponse {
+    fn tx_hash(&self) -> alloy_primitives::TxHash {
+        NetworkTransactionResponse::tx_hash(&self.inner)
+    }
+    fn block_hash(&self) -> Option<alloy_primitives::BlockHash> {
+        NetworkTransactionResponse::block_hash(&self.inner)
+    }
+    fn block_number(&self) -> Option<u64> {
+        NetworkTransactionResponse::block_number(&self.inner)
+    }
+    fn transaction_index(&self) -> Option<u64> {
+        NetworkTransactionResponse::transaction_index(&self.inner)
+    }
+    fn from(&self) -> alloy_primitives::Address {
+        NetworkTransactionResponse::from(&self.inner)
+    }
+}
+
 }
