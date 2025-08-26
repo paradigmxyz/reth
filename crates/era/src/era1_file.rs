@@ -9,6 +9,7 @@ use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version},
     era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
+    era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
         TotalDifficulty, MAX_BLOCKS_PER_ERA1,
@@ -19,7 +20,6 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{Read, Seek, Write},
-    path::Path,
 };
 
 /// Era1 file interface
@@ -35,12 +35,29 @@ pub struct Era1File {
     pub id: Era1Id,
 }
 
-impl Era1File {
+impl EraFileFormat for Era1File {
+    type EraGroup = Era1Group;
+    type Id = Era1Id;
+
     /// Create a new [`Era1File`]
-    pub const fn new(group: Era1Group, id: Era1Id) -> Self {
+    fn new(group: Era1Group, id: Era1Id) -> Self {
         Self { version: Version, group, id }
     }
 
+    fn version(&self) -> &Version {
+        &self.version
+    }
+
+    fn group(&self) -> &Self::EraGroup {
+        &self.group
+    }
+
+    fn id(&self) -> &Self::Id {
+        &self.id
+    }
+}
+
+impl Era1File {
     /// Get a block by its number, if present in this file
     pub fn get_block_by_number(&self, number: BlockNumber) -> Option<&BlockTuple> {
         let index = (number - self.group.block_index.starting_number()) as usize;
@@ -155,20 +172,29 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
     }
 }
 
-impl<R: Read + Seek> Era1Reader<R> {
+impl<R: Read + Seek> StreamReader<R> for Era1Reader<R> {
+    type File = Era1File;
+    type Iterator = BlockTupleIterator<R>;
+
     /// Create a new [`Era1Reader`]
-    pub fn new(reader: R) -> Self {
+    fn new(reader: R) -> Self {
         Self { reader: E2StoreReader::new(reader) }
     }
 
     /// Returns an iterator of [`BlockTuple`] streaming from `reader`.
-    pub fn iter(self) -> BlockTupleIterator<R> {
+    fn iter(self) -> BlockTupleIterator<R> {
         BlockTupleIterator::new(self.reader)
     }
 
+    fn read(self, network_name: String) -> Result<Self::File, E2sError> {
+        self.read_and_assemble(network_name)
+    }
+}
+
+impl<R: Read + Seek> Era1Reader<R> {
     /// Reads and parses an Era1 file from the underlying reader, assembling all components
     /// into a complete [`Era1File`] with an [`Era1Id`] that includes the provided network name.
-    pub fn read(mut self, network_name: String) -> Result<Era1File, E2sError> {
+    pub fn read_and_assemble(mut self, network_name: String) -> Result<Era1File, E2sError> {
         // Validate version entry
         let _version_entry = match self.reader.read_version()? {
             Some(entry) if entry.is_version() => entry,
@@ -224,17 +250,7 @@ impl<R: Read + Seek> Era1Reader<R> {
     }
 }
 
-impl Era1Reader<File> {
-    /// Opens and reads an Era1 file from the given path
-    pub fn open<P: AsRef<Path>>(
-        path: P,
-        network_name: impl Into<String>,
-    ) -> Result<Era1File, E2sError> {
-        let file = File::open(path).map_err(E2sError::Io)?;
-        let reader = Self::new(file);
-        reader.read(network_name.into())
-    }
-}
+impl FileReader for Era1Reader<File> {}
 
 /// Writer for Era1 files that builds on top of [`E2StoreWriter`]
 #[derive(Debug)]
@@ -246,9 +262,11 @@ pub struct Era1Writer<W: Write> {
     has_written_block_index: bool,
 }
 
-impl<W: Write> Era1Writer<W> {
+impl<W: Write> StreamWriter<W> for Era1Writer<W> {
+    type File = Era1File;
+
     /// Create a new [`Era1Writer`]
-    pub fn new(writer: W) -> Self {
+    fn new(writer: W) -> Self {
         Self {
             writer: E2StoreWriter::new(writer),
             has_written_version: false,
@@ -259,7 +277,7 @@ impl<W: Write> Era1Writer<W> {
     }
 
     /// Write the version entry
-    pub fn write_version(&mut self) -> Result<(), E2sError> {
+    fn write_version(&mut self) -> Result<(), E2sError> {
         if self.has_written_version {
             return Ok(());
         }
@@ -270,7 +288,7 @@ impl<W: Write> Era1Writer<W> {
     }
 
     /// Write a complete [`Era1File`] to the underlying writer
-    pub fn write_era1_file(&mut self, era1_file: &Era1File) -> Result<(), E2sError> {
+    fn write_file(&mut self, era1_file: &Era1File) -> Result<(), E2sError> {
         // Write version
         self.write_version()?;
 
@@ -301,6 +319,13 @@ impl<W: Write> Era1Writer<W> {
         Ok(())
     }
 
+    /// Flush any buffered data to the underlying writer
+    fn flush(&mut self) -> Result<(), E2sError> {
+        self.writer.flush()
+    }
+}
+
+impl<W: Write> Era1Writer<W> {
     /// Write a single block tuple
     pub fn write_block(
         &mut self,
@@ -337,27 +362,6 @@ impl<W: Write> Era1Writer<W> {
         Ok(())
     }
 
-    /// Write the accumulator
-    pub fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError> {
-        if !self.has_written_version {
-            self.write_version()?;
-        }
-
-        if self.has_written_accumulator {
-            return Err(E2sError::Ssz("Accumulator already written".to_string()));
-        }
-
-        if self.has_written_block_index {
-            return Err(E2sError::Ssz("Cannot write accumulator after block index".to_string()));
-        }
-
-        let accumulator_entry = accumulator.to_entry();
-        self.writer.write_entry(&accumulator_entry)?;
-        self.has_written_accumulator = true;
-
-        Ok(())
-    }
-
     /// Write the block index
     pub fn write_block_index(&mut self, block_index: &BlockIndex) -> Result<(), E2sError> {
         if !self.has_written_version {
@@ -375,39 +379,36 @@ impl<W: Write> Era1Writer<W> {
         Ok(())
     }
 
-    /// Flush any buffered data to the underlying writer
-    pub fn flush(&mut self) -> Result<(), E2sError> {
-        self.writer.flush()
-    }
-}
+    /// Write the accumulator
+    pub fn write_accumulator(&mut self, accumulator: &Accumulator) -> Result<(), E2sError> {
+        if !self.has_written_version {
+            self.write_version()?;
+        }
 
-impl Era1Writer<File> {
-    /// Creates a new file at the specified path and writes the [`Era1File`] to it
-    pub fn create<P: AsRef<Path>>(path: P, era1_file: &Era1File) -> Result<(), E2sError> {
-        let file = File::create(path).map_err(E2sError::Io)?;
-        let mut writer = Self::new(file);
-        writer.write_era1_file(era1_file)?;
+        if self.has_written_accumulator {
+            return Err(E2sError::Ssz("Accumulator already written".to_string()));
+        }
+
+        if self.has_written_block_index {
+            return Err(E2sError::Ssz("Cannot write accumulator after block index".to_string()));
+        }
+
+        let accumulator_entry = accumulator.to_entry();
+        self.writer.write_entry(&accumulator_entry)?;
+        self.has_written_accumulator = true;
         Ok(())
-    }
-
-    /// Creates a new file in the specified directory with a filename derived from the
-    /// [`Era1File`]'s ID using the standardized Era1 file naming convention
-    pub fn create_with_id<P: AsRef<Path>>(
-        directory: P,
-        era1_file: &Era1File,
-    ) -> Result<(), E2sError> {
-        let filename = era1_file.id.to_file_name();
-        let path = directory.as_ref().join(filename);
-        Self::create(path, era1_file)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_types::{
-        Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty,
+    use crate::{
+        era_file_ops::FileWriter,
+        execution_types::{
+            Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+            TotalDifficulty,
+        },
     };
     use alloy_primitives::{B256, U256};
     use std::io::Cursor;
@@ -465,7 +466,7 @@ mod tests {
         let mut buffer = Vec::new();
         {
             let mut writer = Era1Writer::new(&mut buffer);
-            writer.write_era1_file(&era1_file)?;
+            writer.write_file(&era1_file)?;
         }
 
         // Read back from memory buffer

@@ -5,20 +5,18 @@ use crate::{
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
-use reth_storage_api::{
-    BytecodeReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
-};
+use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    StateRoot, StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseTrieWitness,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -60,9 +58,7 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
     }
 }
 
-impl<Provider: DBProvider + StateCommitmentProvider> StateRootProvider
-    for LatestStateProviderRef<'_, Provider>
-{
+impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'_, Provider> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.tx(), hashed_state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -90,9 +86,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateRootProvider
     }
 }
 
-impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
-    for LatestStateProviderRef<'_, Provider>
-{
+impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef<'_, Provider> {
     fn storage_root(
         &self,
         address: Address,
@@ -123,9 +117,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
     }
 }
 
-impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
-    for LatestStateProviderRef<'_, Provider>
-{
+impl<Provider: DBProvider + Sync> StateProofProvider for LatestStateProviderRef<'_, Provider> {
     fn proof(
         &self,
         input: TrieInput,
@@ -150,17 +142,13 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     }
 }
 
-impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
-    for LatestStateProviderRef<'_, Provider>
-{
+impl<Provider: DBProvider + Sync> HashedPostStateProvider for LatestStateProviderRef<'_, Provider> {
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<
-            <Provider::StateCommitment as StateCommitment>::KeyHasher,
-        >(bundle_state.state())
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
+impl<Provider: DBProvider + BlockHashReader> StateProvider
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get storage.
@@ -179,7 +167,7 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeReader
+impl<Provider: DBProvider + BlockHashReader> BytecodeReader
     for LatestStateProviderRef<'_, Provider>
 {
     /// Get account code by its hash
@@ -188,17 +176,11 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeR
     }
 }
 
-impl<Provider: StateCommitmentProvider> StateCommitmentProvider
-    for LatestStateProviderRef<'_, Provider>
-{
-    type StateCommitment = Provider::StateCommitment;
-}
-
 /// State provider for the latest state.
 #[derive(Debug)]
 pub struct LatestStateProvider<Provider>(Provider);
 
-impl<Provider: DBProvider + StateCommitmentProvider> LatestStateProvider<Provider> {
+impl<Provider: DBProvider> LatestStateProvider<Provider> {
     /// Create new state provider
     pub const fn new(db: Provider) -> Self {
         Self(db)
@@ -211,12 +193,8 @@ impl<Provider: DBProvider + StateCommitmentProvider> LatestStateProvider<Provide
     }
 }
 
-impl<Provider: StateCommitmentProvider> StateCommitmentProvider for LatestStateProvider<Provider> {
-    type StateCommitment = Provider::StateCommitment;
-}
-
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader + StateCommitmentProvider]);
+delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader ]);
 
 #[cfg(test)]
 mod tests {
@@ -224,9 +202,7 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
-    const fn assert_latest_state_provider<
-        T: DBProvider + BlockHashReader + StateCommitmentProvider,
-    >() {
+    const fn assert_latest_state_provider<T: DBProvider + BlockHashReader>() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }

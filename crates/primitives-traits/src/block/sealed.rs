@@ -308,7 +308,8 @@ impl<B: Block> Deref for SealedBlock<B> {
 
 impl<B: Block> Encodable for SealedBlock<B> {
     fn encode(&self, out: &mut dyn BufMut) {
-        self.body.encode(out);
+        // TODO: https://github.com/paradigmxyz/reth/issues/18002
+        self.clone().into_block().encode(out);
     }
 }
 
@@ -467,5 +468,86 @@ pub(super) mod serde_bincode_compat {
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             repr.into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_rlp::{Decodable, Encodable};
+
+    #[test]
+    fn test_sealed_block_rlp_roundtrip() {
+        // Create a sample block using alloy_consensus::Block
+        let header = alloy_consensus::Header {
+            parent_hash: B256::ZERO,
+            ommers_hash: B256::ZERO,
+            beneficiary: Address::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            difficulty: Default::default(),
+            number: 42,
+            gas_limit: 30_000_000,
+            gas_used: 21_000,
+            timestamp: 1_000_000,
+            extra_data: Default::default(),
+            mix_hash: B256::ZERO,
+            nonce: Default::default(),
+            base_fee_per_gas: Some(1_000_000_000),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        // Create a simple transaction
+        let tx = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000_000_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: alloy_primitives::U256::from(100),
+            input: alloy_primitives::Bytes::default(),
+        };
+
+        let tx_signed =
+            alloy_consensus::TxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
+                tx,
+                alloy_primitives::Signature::test_signature(),
+                B256::ZERO,
+            ));
+
+        // Create block body with the transaction
+        let body = alloy_consensus::BlockBody {
+            transactions: vec![tx_signed],
+            ommers: vec![],
+            withdrawals: Some(Default::default()),
+        };
+
+        // Create the block
+        let block = alloy_consensus::Block::new(header, body);
+
+        // Create a sealed block
+        let sealed_block = SealedBlock::seal_slow(block);
+
+        // Encode the sealed block
+        let mut encoded = Vec::new();
+        sealed_block.encode(&mut encoded);
+
+        // Decode the sealed block
+        let decoded = SealedBlock::<
+            alloy_consensus::Block<alloy_consensus::TxEnvelope, alloy_consensus::Header>,
+        >::decode(&mut encoded.as_slice())
+        .expect("Failed to decode sealed block");
+
+        // Verify the roundtrip
+        assert_eq!(sealed_block.hash(), decoded.hash());
+        assert_eq!(sealed_block.header().number, decoded.header().number);
+        assert_eq!(sealed_block.header().state_root, decoded.header().state_root);
+        assert_eq!(sealed_block.body().transactions.len(), decoded.body().transactions.len());
     }
 }

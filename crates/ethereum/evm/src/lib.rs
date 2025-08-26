@@ -313,16 +313,14 @@ where
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
         let blob_excess_gas_and_price =
-            payload.payload.as_v3().map(|v3| v3.excess_blob_gas).zip(blob_params).map(
-                |(excess_blob_gas, params)| {
-                    let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
-                    BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
-                },
-            );
+            payload.payload.excess_blob_gas().zip(blob_params).map(|(excess_blob_gas, params)| {
+                let blob_gasprice = params.calc_blob_fee(excess_blob_gas);
+                BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
+            });
 
         let block_env = BlockEnv {
             number: U256::from(block_number),
-            beneficiary: payload.payload.as_v1().fee_recipient,
+            beneficiary: payload.payload.fee_recipient(),
             timestamp: U256::from(timestamp),
             difficulty: if spec >= SpecId::MERGE {
                 U256::ZERO
@@ -330,8 +328,8 @@ where
                 payload.payload.as_v1().prev_randao.into()
             },
             prevrandao: (spec >= SpecId::MERGE).then(|| payload.payload.as_v1().prev_randao),
-            gas_limit: payload.payload.as_v1().gas_limit,
-            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
+            gas_limit: payload.payload.gas_limit(),
+            basefee: payload.payload.saturated_base_fee_per_gas(),
             blob_excess_gas_and_price,
         };
 
@@ -343,10 +341,7 @@ where
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
-            withdrawals: payload
-                .payload
-                .as_v2()
-                .map(|v2| Cow::Owned(v2.withdrawals.clone().into())),
+            withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
         }
     }
 

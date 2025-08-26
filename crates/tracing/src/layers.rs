@@ -18,8 +18,6 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-const RETH_LOG_FILE_NAME: &str = "reth.log";
-
 /// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
 /// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
@@ -140,8 +138,13 @@ pub struct FileInfo {
 
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
-    pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
-        Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
+    pub const fn new(
+        dir: PathBuf,
+        file_name: String,
+        max_size_bytes: u64,
+        max_files: usize,
+    ) -> Self {
+        Self { dir, file_name, max_size_bytes, max_files }
     }
 
     /// Creates the log directory if it doesn't exist.

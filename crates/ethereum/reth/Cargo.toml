@@ -130,6 +130,7 @@ node = [
     "dep:reth-engine-local",
     "rpc",
     "trie-db",
+    "pool",
 ]
 pool = ["dep:reth-transaction-pool"]
 rpc = [

@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, TxHash, B256};
+use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -588,11 +588,11 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Returns the hash and block of the on disk block this state can be traced back to.
     pub fn anchor(&self) -> BlockNumHash {
-        if let Some(parent) = &self.parent {
-            parent.anchor()
-        } else {
-            self.block.recovered_block().parent_num_hash()
+        let mut current = self;
+        while let Some(parent) = &current.parent {
+            current = parent;
         }
+        current.block.recovered_block().parent_num_hash()
     }
 
     /// Returns the executed block that determines the state.
@@ -764,6 +764,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
+    }
+
+    /// Returns a [`BlockNumber`] of the block.
+    #[inline]
+    pub fn block_number(&self) -> BlockNumber {
+        self.recovered_block.header().number()
     }
 }
 
