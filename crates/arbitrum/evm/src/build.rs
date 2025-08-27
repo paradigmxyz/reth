@@ -240,19 +240,6 @@ where
 
 
 
-            use revm::state::AccountInfo;
-            use alloy_consensus::constants::KECCAK_EMPTY;
-            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-            let existing = match state.basic(sender) {
-                Ok(Some(info)) => info,
-                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: current_nonce, code_hash: KECCAK_EMPTY, code: None },
-            };
-            let mut updated = existing;
-            updated.balance = updated.balance.saturating_add(needed_fee);
-            state.insert_account(sender, updated);
-
-
 
         if let Some(pre_nonce) = used_pre_nonce {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
