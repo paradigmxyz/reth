@@ -30,8 +30,7 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
     GotExpected, SealedBlock,
 };
-use reth_provider::BytecodeReader;
-use reth_storage_api::{AccountInfoReader, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     error::Error,
