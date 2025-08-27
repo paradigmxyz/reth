@@ -975,9 +975,9 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         requests: RequestsOrHash,
-        il: Vec<Bytes>,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus> {
-        info!(target: "rpc::engine", il = %il.len(), "Serving engine_newPayloadV5");
+        info!(target: "rpc::engine", il = %inclusion_list_transactions.len(), "Serving engine_newPayloadV5");
 
         // Accept requests as a hash only if it is explicitly allowed
         if requests.is_hash() && !self.inner.accept_execution_requests_hash {
@@ -989,7 +989,7 @@ where
             sidecar: ExecutionPayloadSidecar::v5(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests },
-                AmsterdamPayloadFields { il },
+                AmsterdamPayloadFields { il: inclusion_list_transactions },
             ),
         };
 
@@ -1237,16 +1237,16 @@ where
     async fn update_payload_with_inclusion_list_v1(
         &self,
         payload_id: PayloadId,
-        inclusion_list: Vec<Bytes>,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<Option<PayloadId>> {
-        info!(target: "rpc::engine", len = %inclusion_list.len(), "Serving engine_updatePayloadWithInclusionListV1");
-        let len = inclusion_list.len();
+        info!(target: "rpc::engine", len = %inclusion_list_transactions.len(), "Serving engine_updatePayloadWithInclusionListV1");
+        let len = inclusion_list_transactions.len();
         tracing::info!(target: "engine::api", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
 
         let payload_id = self
             .inner
             .beacon_consensus
-            .update_payload_with_inclusion_list(payload_id, inclusion_list)
+            .update_payload_with_inclusion_list(payload_id, inclusion_list_transactions)
             .await
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 

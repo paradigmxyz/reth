@@ -77,6 +77,9 @@ pub trait EngineApi<Engine: EngineTypes> {
     ///
     /// TODO: Update Link
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    ///
+    /// Note: the additional parameter here represents the inclusion list of transactions
+    /// and is named `inclusion_list_transactions` to match EIP-7805 terminology.
     #[method(name = "newPayloadV5")]
     async fn new_payload_v5(
         &self,
@@ -84,7 +87,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
-        il: Vec<Bytes>,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
@@ -259,12 +262,12 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "getInclusionListV1")]
     async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
 
-    /// Update the given payload with the given inclusion list (IL).
+    /// Update the given payload with the given inclusion list transactions (IL).
     #[method(name = "updatePayloadWithInclusionListV1")]
     async fn update_payload_with_inclusion_list_v1(
         &self,
         payload_id: PayloadId,
-        inclusion_list: Vec<Bytes>,
+        inclusion_list_transactions: Vec<Bytes>,
     ) -> RpcResult<Option<PayloadId>>;
 }
 
