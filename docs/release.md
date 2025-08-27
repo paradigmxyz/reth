@@ -15,7 +15,7 @@ It is assumed that the commit that is being considered for release has been mark
 - [ ] Create a new branch (e.g. `release/vx.y.z`) and open a pull request for it
 - [ ] Ensure *all* tests and lints pass for the chosen commit
 - [ ] Version bump
-  - [ ] Update the version in *all* `Cargo.toml`'s
+  - [ ] Update the version in *all* `Cargo.toml` files
 - [ ] Commit the changes
   - The message format should be `release: vx.y.z`, substituting `x.y.z` for the semver.
 - [ ] The PR should be reviewed to see if anything was missed
