@@ -120,6 +120,12 @@ impl<N: NodePrimitives> PendingBlock<N> {
     pub fn into_block_and_receipts(self) -> PendingBlockAndReceipts<N> {
         (self.executed_block.recovered_block, self.receipts)
     }
+
+    /// Returns a pair of [`RecoveredBlock`] and a vector of  [`NodePrimitives::Receipt`]s by
+    /// cloning from borrowed self.
+    pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
+        (self.executed_block.recovered_block.clone(), self.receipts.clone())
+    }
 }
 
 impl<N: NodePrimitives> From<PendingBlock<N>> for BlockState<N> {

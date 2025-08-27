@@ -118,6 +118,7 @@
           packages = nativeBuildInputs ++ [
             rustNightly.rust-analyzer
             rustNightly.rustfmt
+            pkgs.cargo-nextest
           ];
         } overrides);
       }
