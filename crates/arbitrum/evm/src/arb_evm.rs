@@ -264,6 +264,6 @@ where
     I: revm::inspector::Inspector<EthEvmContext<DB>>,
 {
     fn cfg_mut(&mut self) -> &mut revm::context::CfgEnv<revm::primitives::hardfork::SpecId> {
-        &mut self.inner.env.cfg
+        &mut self.inner.cfg
     }
 }
