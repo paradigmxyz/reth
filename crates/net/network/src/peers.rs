@@ -259,7 +259,7 @@ impl PeersManager {
             // are allowed (max_inbound == 0), in which case we still need to allow new pending
             // incoming connections until all trusted peers are connected.
             let num_idle_trusted_peers = self.num_idle_trusted_peers();
-            if num_idle_trusted_peers <= self.trusted_peer_ids.len() {
+            if num_idle_trusted_peers > 0 {
                 // we still want to limit concurrent pending connections
                 let max_inbound =
                     self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
