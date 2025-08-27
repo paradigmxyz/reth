@@ -9324,6 +9324,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
+ "reth-optimism-evm",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-revm",
