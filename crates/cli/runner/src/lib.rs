@@ -15,91 +15,6 @@ use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tokio::runtime::{Handle, Runtime};
 use tracing::{debug, error, trace};
 
-/// A tokio runtime or handle.
-#[derive(Debug)]
-enum RuntimeOrHandle {
-    /// Owned runtime that can be used for blocking operations
-    Runtime(Runtime),
-    /// Handle to an existing runtime
-    Handle(Handle),
-}
-
-impl RuntimeOrHandle {
-    /// Returns a reference to the inner tokio runtime handle.
-    fn handle(&self) -> &Handle {
-        match self {
-            Self::Runtime(rt) => rt.handle(),
-            Self::Handle(handle) => handle,
-        }
-    }
-
-    /// Attempts to extract the runtime, returning an error if only a handle is available.
-    fn into_runtime(self, operation: &str) -> Result<Runtime, std::io::Error> {
-        let (rt, _handle) = self.into_runtime_or_handle();
-        rt.ok_or_else(|| {
-            std::io::Error::other(
-                format!("A tokio runtime is required to run {}. Please create a CliRunner with an owned runtime.", operation)
-            )
-        })
-    }
-
-    /// Chooses to return the owned runtime if it exists, otherwise returns `None` and the handle.
-    fn into_runtime_or_handle(self) -> (Option<Runtime>, Handle) {
-        match self {
-            Self::Runtime(runtime) => {
-                let handle = runtime.handle().clone();
-                (Some(runtime), handle)
-            }
-            Self::Handle(handle) => (None, handle),
-        }
-    }
-
-    /// Block on a future, handling both `Runtime` and `Handle` cases.
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Safe: Called from outside async context
-    /// std::thread::spawn(move || {
-    ///     let result = handle.block_on(async { "ok" });
-    /// });
-    ///
-    /// // Unsafe: Would panic if called directly in async context
-    /// // async fn bad() {
-    /// //     handle.block_on(async { "panic!" }); // Don't do this!
-    /// // }
-    /// ```
-    fn block_on<F>(&self, fut: F) -> Result<F::Output, std::io::Error>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        match self {
-            Self::Runtime(rt) => Ok(rt.block_on(fut)),
-            Self::Handle(handle) => {
-                // Check if we're in an async context to spawn a thread to avoid panic
-                if Handle::try_current().is_ok() {
-                    let handle = handle.clone();
-                    std::thread::spawn(move || handle.block_on(fut))
-                        .join()
-                        .map_err(|_| std::io::Error::other("Failed to join blocking thread"))
-                } else {
-                    Ok(handle.block_on(fut))
-                }
-            }
-        }
-    }
-
-    /// Spawn a blocking task that runs a future
-    fn spawn_blocking_task<F>(&self, fut: F) -> tokio::task::JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        let handle = self.handle().clone();
-        self.handle().spawn_blocking(move || handle.block_on(fut))
-    }
-}
-
 /// Executes CLI commands.
 ///
 /// Provides utilities for running a cli command to completion.
@@ -353,6 +268,91 @@ where
     }
 
     Ok(())
+}
+
+/// A tokio runtime or handle.
+#[derive(Debug)]
+enum RuntimeOrHandle {
+    /// Owned runtime that can be used for blocking operations
+    Runtime(Runtime),
+    /// Handle to an existing runtime
+    Handle(Handle),
+}
+
+impl RuntimeOrHandle {
+    /// Returns a reference to the inner tokio runtime handle.
+    fn handle(&self) -> &Handle {
+        match self {
+            Self::Runtime(rt) => rt.handle(),
+            Self::Handle(handle) => handle,
+        }
+    }
+
+    /// Attempts to extract the runtime, returning an error if only a handle is available.
+    fn into_runtime(self, operation: &str) -> Result<Runtime, std::io::Error> {
+        let (rt, _handle) = self.into_runtime_or_handle();
+        rt.ok_or_else(|| {
+            std::io::Error::other(
+                format!("A tokio runtime is required to run {}. Please create a CliRunner with an owned runtime.", operation)
+            )
+        })
+    }
+
+    /// Chooses to return the owned runtime if it exists, otherwise returns `None` and the handle.
+    fn into_runtime_or_handle(self) -> (Option<Runtime>, Handle) {
+        match self {
+            Self::Runtime(runtime) => {
+                let handle = runtime.handle().clone();
+                (Some(runtime), handle)
+            }
+            Self::Handle(handle) => (None, handle),
+        }
+    }
+
+    /// Block on a future, handling both `Runtime` and `Handle` cases.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Safe: Called from outside async context
+    /// std::thread::spawn(move || {
+    ///     let result = handle.block_on(async { "ok" });
+    /// });
+    ///
+    /// // Unsafe: Would panic if called directly in async context
+    /// // async fn bad() {
+    /// //     handle.block_on(async { "panic!" }); // Don't do this!
+    /// // }
+    /// ```
+    fn block_on<F>(&self, fut: F) -> Result<F::Output, std::io::Error>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        match self {
+            Self::Runtime(rt) => Ok(rt.block_on(fut)),
+            Self::Handle(handle) => {
+                // Check if we're in an async context to spawn a thread to avoid panic
+                if Handle::try_current().is_ok() {
+                    let handle = handle.clone();
+                    std::thread::spawn(move || handle.block_on(fut))
+                        .join()
+                        .map_err(|_| std::io::Error::other("Failed to join blocking thread"))
+                } else {
+                    Ok(handle.block_on(fut))
+                }
+            }
+        }
+    }
+
+    /// Spawn a blocking task that runs a future
+    fn spawn_blocking_task<F>(&self, fut: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let handle = self.handle().clone();
+        self.handle().spawn_blocking(move || handle.block_on(fut))
+    }
 }
 
 #[cfg(test)]
