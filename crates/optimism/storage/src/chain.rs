@@ -96,22 +96,15 @@ where
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
         let chain_spec = provider.chain_spec();
 
-        let mut bodies = Vec::with_capacity(inputs.len());
-
-        for (header, transactions) in inputs {
-            let mut withdrawals = None;
-            if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
-                // after shanghai the body should have an empty withdrawals list
-                withdrawals.replace(vec![].into());
-            }
-
-            bodies.push(alloy_consensus::BlockBody::<T, H> {
+        Ok(inputs
+            .into_iter()
+            .map(|(header, transactions)| alloy_consensus::BlockBody::<T, H> {
                 transactions,
                 ommers: vec![],
-                withdrawals,
-            });
-        }
-
-        Ok(bodies)
+                withdrawals: chain_spec
+                    .is_shanghai_active_at_timestamp(header.timestamp())
+                    .then(|| vec![].into()),
+            })
+            .collect())
     }
 }
