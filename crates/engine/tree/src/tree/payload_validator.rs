@@ -4,6 +4,15 @@
 /// Larger chunks reduce DB query overhead but increase memory usage.
 const CACHE_VALIDATION_CHUNK_SIZE: usize = 50;
 
+/// Reasons why cache validation might fail
+#[derive(Debug, Clone)]
+enum ValidationFailureReason {
+    StateChanged(alloy_primitives::Address),
+    NonceChanged(alloy_primitives::Address),
+    BalanceChanged(alloy_primitives::Address),
+    StorageChanged(alloy_primitives::Address, alloy_primitives::U256),
+}
+
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -706,6 +715,10 @@ where
                 let cache_lookup_time = cache_lookup_start.elapsed();
 
                 if cache_result.is_none() {
+                    // Track cache miss
+                    metrics::counter!("tx_cache.validation_attempts").increment(1);
+                    metrics::counter!("tx_cache.cache_misses").increment(1);
+                    
                     tracing::info!(
                         target: "engine::cache::metrics",
                         ?tx_hash,
@@ -716,6 +729,10 @@ where
                     return None;
                 }
 
+                // Track cache hit and validation attempt
+                metrics::counter!("tx_cache.validation_attempts").increment(1);
+                metrics::counter!("tx_cache.cache_hits").increment(1);
+                
                 tracing::info!(
                     target: "engine::cache::metrics",
                     ?tx_hash,
@@ -740,7 +757,7 @@ where
                         validate_prewarm_accesses_against_db(db, traces, coinbase_deltas);
 
                     match validation_result {
-                        Ok(true) => {
+                        Ok(Ok(())) => {
                             // Validation passed, continue with coinbase delta application
                             tracing::trace!(
                                 target: "engine::cache",
@@ -750,16 +767,39 @@ where
                                 "Cache validation successful with chunked approach"
                             );
                         }
-                        Ok(false) => {
-                            // Validation failed
+                        Ok(Err(reason)) => {
+                            // Validation failed with specific reason
                             let validation_time = validation_start.elapsed();
+                            
+                            // Track validation failure with reason
+                            metrics::counter!("tx_cache.validation_failures").increment(1);
+                            
+                            // Track specific failure reason
+                            let reason_label = match &reason {
+                                ValidationFailureReason::StateChanged(_) => "state_changed",
+                                ValidationFailureReason::NonceChanged(_) => "nonce_changed",
+                                ValidationFailureReason::BalanceChanged(_) => "balance_changed",
+                                ValidationFailureReason::StorageChanged(_, _) => "storage_changed",
+                            };
+                            metrics::counter!("tx_cache.validation_failure_reason", "reason" => reason_label)
+                                .increment(1);
+                            
                             tracing::info!(
                                 target: "engine::cache::metrics",
                                 ?tx_hash,
+                                ?reason,
                                 trace_count,
                                 validation_us = validation_time.as_micros(),
-                                "VALIDATION_FAILED - Cache invalidated (chunked validation)"
+                                "VALIDATION_FAILED - Cache invalidated"
                             );
+                            
+                            tracing::debug!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                ?reason,
+                                "Cache validation failed"
+                            );
+                            
                             return None;
                         }
                         Err(err) => {
@@ -791,11 +831,21 @@ where
                                     coinbase_db.balance + coinbase_balance_delta;
 
                                 let validation_time = validation_start.elapsed();
+                                
+                                // Track validation success and time saved
+                                metrics::counter!("tx_cache.validation_successes").increment(1);
+                                // Estimate time saved (validation time is typically much less than execution time)
+                                // A rough estimate: execution takes ~500-2000 microseconds vs validation ~50-200 microseconds
+                                let estimated_execution_time_us: u64 = 1000; // Conservative estimate
+                                let time_saved_us = estimated_execution_time_us.saturating_sub(validation_time.as_micros() as u64);
+                                metrics::histogram!("tx_cache.time_saved_us").record(time_saved_us as f64);
+                                
                                 tracing::info!(
                                     target: "engine::cache::metrics",
                                     ?tx_hash,
                                     trace_count,
                                     validation_us = validation_time.as_micros(),
+                                    estimated_time_saved_us = time_saved_us,
                                     "VALIDATION_SUCCESS - Cache entry valid (with coinbase)"
                                 );
                                 return Some(result)
@@ -804,11 +854,19 @@ where
                     } else {
                         // No coinbase deltas, but validation passed - return the cached result
                         let validation_time = validation_start.elapsed();
+                        
+                        // Track validation success and time saved
+                        metrics::counter!("tx_cache.validation_successes").increment(1);
+                        let estimated_execution_time_us: u64 = 1000; // Conservative estimate
+                        let time_saved_us = estimated_execution_time_us.saturating_sub(validation_time.as_micros() as u64);
+                        metrics::histogram!("tx_cache.time_saved_us").record(time_saved_us as f64);
+                        
                         tracing::info!(
                             target: "engine::cache::metrics",
                             ?tx_hash,
                             trace_count,
                             validation_us = validation_time.as_micros(),
+                            estimated_time_saved_us = time_saved_us,
                             "VALIDATION_SUCCESS - Cache entry valid"
                         );
                         return Some(result)
@@ -1039,7 +1097,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
     prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
-) -> Result<bool, DB::Error> {
+) -> Result<Result<(), ValidationFailureReason>, DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
 
     // Separate account and storage accesses for batch processing
@@ -1068,7 +1126,19 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         for (address, expected) in chunk {
             let actual = db.basic(*address)?;
             if actual != *expected {
-                return Ok(false);
+                // Determine what changed
+                let reason = if let (Some(actual_info), Some(expected_info)) = (&actual, expected) {
+                    if actual_info.nonce != expected_info.nonce {
+                        ValidationFailureReason::NonceChanged(*address)
+                    } else if actual_info.balance != expected_info.balance {
+                        ValidationFailureReason::BalanceChanged(*address)
+                    } else {
+                        ValidationFailureReason::StateChanged(*address)
+                    }
+                } else {
+                    ValidationFailureReason::StateChanged(*address)
+                };
+                return Ok(Err(reason));
             }
         }
     }
@@ -1078,12 +1148,12 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         for (address, index, expected) in chunk {
             let actual = db.storage(*address, *index)?;
             if actual != *expected {
-                return Ok(false);
+                return Ok(Err(ValidationFailureReason::StorageChanged(*address, *index)));
             }
         }
     }
 
-    Ok(true)
+    Ok(Ok(()))
 }
 
 /// Output of block or payload validation.

@@ -8,6 +8,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
+use alloy_consensus::Transaction;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
@@ -40,6 +41,55 @@ use std::{
 use tracing::{debug, trace};
 
 use super::TxCache;
+
+/// Classifies a transaction based on its characteristics
+fn classify_transaction<T, E>(tx: &T) -> &'static str 
+where
+    T: ExecutableTxFor<E>,
+    E: ConfigureEvm
+{
+    let tx_inner = tx.tx();
+    
+    // Check if it's a contract creation (to address is None)
+    if tx_inner.to().is_none() {
+        return "contract_creation"
+    }
+    
+    // Check if it's a simple transfer (no input data)
+    if tx_inner.input().is_empty() || tx_inner.input().len() == 0 {
+        return "simple_transfer"
+    }
+    
+    // Check for common ERC-20 token transfer pattern
+    // ERC-20 transfer method selector is 0xa9059cbb (first 4 bytes)
+    if tx_inner.input().len() >= 4 {
+        let selector = &tx_inner.input()[..4];
+        
+        // Common token operations
+        if selector == [0xa9, 0x05, 0x9c, 0xbb] {  // transfer
+            return "token_transfer"
+        }
+        if selector == [0x23, 0xb8, 0x72, 0xdd] {  // transferFrom
+            return "token_transfer"
+        }
+        if selector == [0x09, 0x5e, 0xa7, 0xb3] {  // approve
+            return "token_approval"
+        }
+        
+        // Common DEX operations (Uniswap, etc)
+        // swapExactTokensForTokens: 0x38ed1739
+        // swapExactETHForTokens: 0x7ff36ab5
+        // swapTokensForExactETH: 0x4a25d94a
+        if selector == [0x38, 0xed, 0x17, 0x39] || 
+           selector == [0x7f, 0xf3, 0x6a, 0xb5] ||
+           selector == [0x4a, 0x25, 0xd9, 0x4a] {
+            return "dex_swap"
+        }
+    }
+    
+    // Default to other for any contract interaction
+    "other"
+}
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -105,7 +155,14 @@ where
         let max_concurrency = self.max_concurrency;
 
         let tx_cache = self.tx_cache.clone();
+        
+        // Track thread spawn time
+        let spawn_start = Instant::now();
+        
         self.executor.spawn_blocking(move || {
+            let spawn_time = spawn_start.elapsed();
+            metrics::histogram!("prewarm.thread_spawn_ms").record(spawn_time.as_millis() as f64);
+            metrics::gauge!("prewarm.worker_count").set(max_concurrency as f64);
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
@@ -338,6 +395,10 @@ where
 
         while let Ok(tx) = txs.recv() {
             let tx_hash = *tx.tx().tx_hash();
+            
+            // Classify transaction type
+            let tx_type = classify_transaction::<_, Evm>(&tx);
+            metrics::counter!("tx.type", "type" => tx_type).increment(1);
 
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
@@ -365,7 +426,21 @@ where
                     return
                 }
             };
-            metrics.execution_duration.record(start.elapsed());
+            let execution_time = start.elapsed();
+            metrics.execution_duration.record(execution_time);
+            
+            // Track execution time in prewarming metrics
+            metrics::histogram!("prewarm.execution_ms").record(execution_time.as_millis() as f64);
+            
+            // Add transaction execution time metrics
+            metrics::histogram!("tx.execution_time_us").record(execution_time.as_micros() as f64);
+            
+            // Calculate gas per second if gas was used
+            let gas_used = res.result.gas_used();
+            if gas_used > 0 && !execution_time.is_zero() {
+                let gas_per_second = gas_used as f64 / execution_time.as_secs_f64();
+                metrics::histogram!("tx.gas_per_second").record(gas_per_second);
+            }
 
             let (targets, storage_targets) = multiproof_targets_from_state(&res.state);
             metrics.prefetch_storage_targets.record(storage_targets as f64);
