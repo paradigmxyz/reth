@@ -415,10 +415,11 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_fails_without_handle_support() {
+    fn test_handle_fails_with_run_until_ctrl_c() {
         let rt = tokio_runtime().unwrap();
         let runner = CliRunner::from_handle(rt.handle().clone());
 
+        // This should fail because `run_until_ctrl_c` needs an owned runtime
         let result = runner.run_until_ctrl_c(async { Ok::<(), std::io::Error>(()) });
 
         assert!(result.is_err());
