@@ -673,7 +673,11 @@ where
                         submission_fee_refund: max_submission_fee,
                     },
                 );
-                vec![submit_tx]
+                let mut retry_enc = retry_env.encode_typed();
+                let mut rs = retry_enc.as_slice();
+                let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
+                    .map_err(|_| eyre::eyre!("decode retry failed"))?;
+                vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => {
