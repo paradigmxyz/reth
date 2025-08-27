@@ -47,7 +47,7 @@ pub enum BlobTransactionEvent {
     Reorged(ReorgedBlob),
 }
 
-/// SideCarError Handles Errors from both EL and CL
+/// SideCarError handles errors from both EL and CL
 #[derive(Debug, Error)]
 pub enum SideCarError {
     #[error("Reqwest encountered an error: {0}")]
@@ -81,7 +81,7 @@ type SidecarsFuture =
 /// A Stream that processes CanonStateNotifications and retrieves BlobTransactions from the beacon
 /// client.
 ///
-/// First checks if the blob sidecar for a given EIP4844 is stored locally, if not attempts to
+/// First checks if the blob sidecar for a given EIP-4844 is stored locally, if not attempts to
 /// retrieve it from the CL
 #[must_use = "streams do nothing unless polled"]
 pub struct MinedSidecarStream<St, P> {
@@ -120,7 +120,7 @@ where
                     if let PooledTransactionVariant::Eip4844(transaction) = tx
                         .clone()
                         .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
-                        .expect("should not fail to convert blob tx if it is already eip4844")
+                        .expect("should not fail to convert blob tx if it is already EIP-4844")
                     {
                         let block_metadata = BlockMetadata {
                             block_hash: block.hash(),
@@ -241,7 +241,7 @@ async fn fetch_blobs_for_block(
     if !response.status().is_success() {
         return match response.status() {
             StatusCode::BAD_REQUEST => {
-                Err(SideCarError::InvalidBlockID("Invalid request to server.".to_string()))
+                Err(SideCarError::InvalidBlockID("Invalid block ID in request.".to_string()))
             }
             StatusCode::NOT_FOUND => {
                 Err(SideCarError::BlockNotFound("Requested block not found.".to_string()))
