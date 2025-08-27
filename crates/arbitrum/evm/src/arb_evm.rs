@@ -218,9 +218,9 @@ where
     ) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
         self.inner.components_mut()
     }
+}
 pub trait ArbEvmExt {
     fn cfg_mut(&mut self) -> &mut revm::context::CfgEnv<revm::primitives::hardfork::SpecId>;
-}
 }
 #[derive(Default, Debug, Clone, Copy)]
 pub struct ArbEvmFactory(pub alloy_evm::EthEvmFactory);
