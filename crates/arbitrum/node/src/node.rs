@@ -798,7 +798,7 @@ where
         let sealed_block0 = outcome.block.sealed_block().clone();
         let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
         header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
-        let sealed_block = reth_primitives::SealedBlock::seal_parts(header_unsealed, body_unsealed);
+        let sealed_block = reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
 
         let header = sealed_block.header();
         reth_tracing::tracing::info!(target: "arb-reth::follower", header_beneficiary = %header.beneficiary, header_nonce = ?header.nonce, "follower: sealed header fields");
