@@ -30,9 +30,11 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
     GotExpected, SealedBlock,
 };
+use reth_provider::BytecodeReader;
 use reth_storage_api::{AccountInfoReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
+    error::Error,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, AtomicU64},
@@ -570,29 +572,29 @@ where
         };
 
         // check for bytecode
-        if let Err(err) = self.validate_account_bytecode(&transaction, &account, &state) {
-            return err
-        }
+        match self.validate_sender_bytecode(&transaction, &account, &state) {
+            Err(outcome) => return outcome,
+            Ok(Err(err)) => return TransactionValidationOutcome::Invalid(transaction, err),
+            _ => {}
+        };
 
         // Checks for nonce
-        match self.validate_nonce(&transaction, &account) {
-            Ok(_) => {}
-            Err(err) => return TransactionValidationOutcome::Invalid(transaction, err.into()),
+        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+            return TransactionValidationOutcome::Invalid(transaction, err.into())
         }
 
         // checks for max cost not exceedng account_balance
-        match self.validate_account_balance(&transaction, &account) {
-            Ok(_) => {}
-            Err(err) => return TransactionValidationOutcome::Invalid(transaction, err.into()),
+        if let Err(err) = self.validate_sender_balance(&transaction, &account) {
+            return TransactionValidationOutcome::Invalid(transaction, err.into())
         }
 
         // heavy blob tx validation
-        let maybe_blob_sidecar = match self.validate_eip4844_blob(&mut transaction) {
+        let maybe_blob_sidecar = match self.validate_eip4844(&mut transaction) {
             Err(err) => return err,
             Ok(sidecar) => sidecar,
         };
 
-        let authorities = self.transaction_authorities(&transaction);
+        let authorities = self.recover_authorities(&transaction);
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -612,14 +614,14 @@ where
     }
 
     /// Validates that the sender’s account has valid or no bytecode.
-    fn validate_account_bytecode<P>(
+    pub fn validate_sender_bytecode<P>(
         &self,
         transaction: &Tx,
-        account: &Account,
+        sender: &Account,
         state: P,
-    ) -> Result<(), TransactionValidationOutcome<Tx>>
+    ) -> Result<Result<(), InvalidTransactionError>, TransactionValidationOutcome<Tx>>
     where
-        P: AccountInfoReader,
+        P: BytecodeReader,
     {
         // Unless Prague is active, the signer account shouldn't have bytecode.
         //
@@ -627,8 +629,7 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-
-        if let Some(code_hash) = &account.bytecode_hash {
+        if let Some(code_hash) = &sender.bytecode_hash {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
                 match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
@@ -643,58 +644,54 @@ where
                 false
             };
 
-            if is_eip7702 {
-                return Ok(())
+            if !is_eip7702 {
+                return Ok(Err(InvalidTransactionError::SignerAccountHasBytecode.into()))
             }
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                InvalidTransactionError::SignerAccountHasBytecode.into(),
-            ))
         }
-        Ok(())
+        Ok(Ok(()))
     }
 
     /// Checks if the transaction nonce is valid.
-    fn validate_nonce(
+    pub fn validate_sender_nonce(
         &self,
         transaction: &Tx,
-        account: &Account,
+        sender: &Account,
     ) -> Result<(), InvalidTransactionError> {
         let tx_nonce = transaction.nonce();
 
         // Checks for nonce
-        if tx_nonce < account.nonce {
+        if tx_nonce < sender.nonce {
             return Err(InvalidTransactionError::NonceNotConsistent {
                 tx: tx_nonce,
-                state: account.nonce,
+                state: sender.nonce,
             })
         }
         Ok(())
     }
 
     /// Ensures the sender has sufficient account balance.
-    fn validate_account_balance(
+    pub fn validate_sender_balance(
         &self,
         transaction: &Tx,
-        account: &Account,
+        sender: &Account,
     ) -> Result<(), InvalidTransactionError> {
         let cost = transaction.cost();
 
         // Checks for max cost
-        if cost > &account.balance {
+        if cost > &sender.balance {
             let expected = *cost;
             return Err(InvalidTransactionError::InsufficientFunds(
-                GotExpected { got: account.balance, expected }.into(),
+                GotExpected { got: sender.balance, expected }.into(),
             ))
         }
         Ok(())
     }
 
-    /// Validates EIP-4844 blob sidecar data.
-    fn validate_eip4844_blob(
+    /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
+    pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, TransactionValidationOutcome<Tx>> {
+    ) -> Result<Option<BlobTransactionSidecarVariant>, Box<dyn Error + Send + Sync>> {
         let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
@@ -703,25 +700,20 @@ where
             match transaction.take_blob() {
                 EthBlobTransactionSidecar::None => {
                     // this should not happen
-                    return Err(TransactionValidationOutcome::Invalid(
-                        transaction.clone(),
-                        InvalidTransactionError::TxTypeNotSupported.into(),
-                    ))
+                    return Err(InvalidTransactionError::TxTypeNotSupported.into())
                 }
                 EthBlobTransactionSidecar::Missing => {
                     // This can happen for re-injected blob transactions (on re-org), since the blob
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if matches!(self.blob_store.contains(*transaction.hash()), Ok(true)) {
+                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
                         // validated transaction is already in the store
                     } else {
-                        return Err(TransactionValidationOutcome::Invalid(
-                            transaction.clone(),
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                            ),
-                        ))
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                        )
+                        .into())
                     }
                 }
                 EthBlobTransactionSidecar::Present(sidecar) => {
@@ -729,30 +721,24 @@ where
 
                     if self.fork_tracker.is_osaka_activated() {
                         if sidecar.is_eip4844() {
-                            return Err(TransactionValidationOutcome::Invalid(
-                                transaction.clone(),
-                                InvalidPoolTransactionError::Eip4844(
-                                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
-                                ),
-                            ))
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                            )
+                            .into())
                         }
                     } else if sidecar.is_eip7594() {
-                        return Err(TransactionValidationOutcome::Invalid(
-                            transaction.clone(),
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
-                            ),
-                        ))
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
+                        )
+                        .into())
                     }
 
                     // validate the blob
                     if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
-                        return Err(TransactionValidationOutcome::Invalid(
-                            transaction.clone(),
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                            ),
-                        ))
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                        )
+                        .into())
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
@@ -765,11 +751,10 @@ where
     }
 
     /// Returns the recovered authorities for the given transaction
-    fn transaction_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
-        let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
-        });
-        authorities
+    pub fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
+        transaction
+            .authorization_list()
+            .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
     }
 
     /// Validates all given transactions.
