@@ -112,6 +112,11 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     pub fn max_tx_input_bytes(&self) -> usize {
         self.inner.max_tx_input_bytes
     }
+
+    /// Returns whether balance checks are disabled for this validator.
+    pub fn disable_balance_check(&self) -> bool {
+        self.inner.disable_balance_check
+    }
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
@@ -233,6 +238,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     max_tx_input_bytes: usize,
     /// Maximum gas limit for individual transactions
     max_tx_gas_limit: Option<u64>,
+    /// Disable balance checks during transaction validation
+    disable_balance_check: bool,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
@@ -610,7 +617,7 @@ where
         let cost = transaction.cost();
 
         // Checks for max cost
-        if cost > &account.balance {
+        if !self.disable_balance_check && cost > &account.balance {
             let expected = *cost;
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -809,6 +816,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     max_tx_input_bytes: usize,
     /// Maximum gas limit for individual transactions
     max_tx_gas_limit: Option<u64>,
+    /// Disable balance checks during transaction validation
+    disable_balance_check: bool,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
@@ -852,6 +861,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
+
+            // balance checks are enabled by default
+            disable_balance_check: false,
         }
     }
 
@@ -1007,6 +1019,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Disables balance checks during transaction validation
+    pub const fn disable_balance_check(mut self) -> Self {
+        self.disable_balance_check = true;
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -1029,6 +1047,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config,
             max_tx_input_bytes,
             max_tx_gas_limit,
+            disable_balance_check,
             ..
         } = self;
 
@@ -1061,6 +1080,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config,
             max_tx_input_bytes,
             max_tx_gas_limit,
+            disable_balance_check,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
         };
