@@ -43,8 +43,9 @@ pub(crate) struct InMemoryStateMetrics {
 ///
 /// # Locking behavior on state updates
 ///
-/// All update calls must be atomic, meaning that they must acquire all locks at once, before
-/// modifying the state. This is to ensure that the internal state is always consistent.
+/// All update calls must acquire all locks at once before modifying state to ensure the internal
+/// state remains consistent. This prevents readers from observing partially updated state where
+/// the numbers and blocks maps are out of sync.
 /// Update functions ensure that the numbers write lock is always acquired first, because lookup by
 /// numbers first read the numbers map and then the blocks map.
 /// By acquiring the numbers lock first, we ensure that read-only lookups don't deadlock updates.
