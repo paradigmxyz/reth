@@ -23,6 +23,7 @@ use std::{
     str::FromStr,
     sync::mpsc::{channel, Sender},
 };
+use tokio::sync::oneshot;
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -866,4 +867,85 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
         }
         _ => panic!("Unexpected event: {event:#?}"),
     }
+}
+
+#[tokio::test]
+async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
+    // Test for issue where FCU with canonical ancestor doesn't update Latest block state
+    // This was causing "nonce too low" errors when discard_reorged_transactions is enabled
+
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+
+    // Create test harness
+    let mut test_harness = TestHarness::new(chain_spec.clone());
+
+    // Set engine kind to OpStack to ensure the fix is triggered
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+
+    // Create a chain of blocks
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    // Set block 4 as the current canonical head
+    let current_head = blocks[3].recovered_block().clone(); // Block 4 (0-indexed as blocks[3])
+    let current_head_sealed = current_head.clone_sealed_header();
+    test_harness.tree.state.tree_state.set_canonical_head(current_head.num_hash());
+    test_harness.tree.canonical_in_memory_state.set_canonical_head(current_head_sealed);
+
+    // Verify the current head is set correctly
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_number(), current_head.number());
+    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+
+    // Now perform FCU to a canonical ancestor (block 2)
+    let ancestor_block = blocks[1].recovered_block().clone(); // Block 2 (0-indexed as blocks[1])
+
+    // Send FCU to the canonical ancestor
+    let (tx, rx) = oneshot::channel();
+    test_harness
+        .tree
+        .on_engine_message(FromEngine::Request(
+            BeaconEngineMessage::ForkchoiceUpdated {
+                state: ForkchoiceState {
+                    head_block_hash: ancestor_block.hash(),
+                    safe_block_hash: B256::ZERO,
+                    finalized_block_hash: B256::ZERO,
+                },
+                payload_attrs: None,
+                tx,
+                version: EngineApiMessageVersion::default(),
+            }
+            .into(),
+        ))
+        .unwrap();
+
+    // Verify FCU succeeds
+    let response = rx.await.unwrap().unwrap().await.unwrap();
+    assert!(response.payload_status.is_valid());
+
+    // The critical test: verify that Latest block has been updated to the canonical ancestor
+    // Check tree state
+    assert_eq!(
+        test_harness.tree.state.tree_state.canonical_block_number(),
+        ancestor_block.number(),
+        "Tree state: Latest block number should be updated to canonical ancestor"
+    );
+    assert_eq!(
+        test_harness.tree.state.tree_state.canonical_block_hash(),
+        ancestor_block.hash(),
+        "Tree state: Latest block hash should be updated to canonical ancestor"
+    );
+
+    // Also verify canonical in-memory state is synchronized
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().number,
+        ancestor_block.number(),
+        "In-memory state: Latest block number should be updated to canonical ancestor"
+    );
+    assert_eq!(
+        test_harness.tree.canonical_in_memory_state.get_canonical_head().hash(),
+        ancestor_block.hash(),
+        "In-memory state: Latest block hash should be updated to canonical ancestor"
+    );
 }

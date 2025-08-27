@@ -1,5 +1,6 @@
-use crate::FlashBlock;
+use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
+use eyre::OptionExt;
 use futures_util::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
@@ -12,17 +13,17 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_eth_api::helpers::pending_block::PendingEnvBuilder;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 use tracing::{debug, error, info};
 
-/// The `FlashBlockService` maintains an in-memory [`ExecutedBlock`] built out of a sequence of
+/// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
@@ -30,20 +31,18 @@ pub struct FlashBlockService<
     S,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
     Provider,
-    Builder,
 > {
     rx: S,
-    current: Option<ExecutedBlock<N>>,
+    current: Option<PendingBlock<N>>,
     blocks: Vec<FlashBlock>,
     evm_config: EvmConfig,
     provider: Provider,
-    builder: Builder,
 }
 
 impl<
         N: NodePrimitives,
         S,
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
+        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
         Provider: StateProviderFactory
             + BlockReaderIdExt<
                 Header = HeaderTy<N>,
@@ -51,9 +50,13 @@ impl<
                 Transaction = N::SignedTx,
                 Receipt = ReceiptTy<N>,
             >,
-        Builder: PendingEnvBuilder<EvmConfig>,
-    > FlashBlockService<N, S, EvmConfig, Provider, Builder>
+    > FlashBlockService<N, S, EvmConfig, Provider>
 {
+    /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
+    pub const fn new(rx: S, evm_config: EvmConfig, provider: Provider) -> Self {
+        Self { rx, current: None, blocks: Vec::new(), evm_config, provider }
+    }
+
     /// Adds the `block` into the collection.
     ///
     /// Depending on its index and associated block number, it may:
@@ -74,16 +77,16 @@ impl<
         // Flash block at a different index is ignored
         else if let Some(pending_block) = self.current.as_ref() {
             // Delete built block if it corresponds to a different height
-            if pending_block.block_number() == flashblock.metadata.block_number {
+            if pending_block.block().header().number() == flashblock.metadata.block_number {
                 info!(
                     message = "None sequential Flashblocks, keeping cache",
-                    curr_block = %pending_block.block_number(),
+                    curr_block = %pending_block.block().header().number(),
                     new_block = %flashblock.metadata.block_number,
                 );
             } else {
                 error!(
                     message = "Received Flashblock for new block, zeroing Flashblocks until we receive a base Flashblock",
-                    curr_block = %pending_block.recovered_block().header().number(),
+                    curr_block = %pending_block.block().header().number(),
                     new_block = %flashblock.metadata.block_number,
                 );
 
@@ -103,13 +106,17 @@ impl<
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
-    pub fn execute(&mut self) -> eyre::Result<ExecutedBlock<N>> {
+    pub fn execute(&mut self) -> eyre::Result<PendingBlock<N>> {
         let latest = self
             .provider
             .latest_header()?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-        let latest_attrs = self.builder.pending_env_attributes(&latest)?;
+        let attrs = self
+            .blocks
+            .iter()
+            .find_map(|v| v.base.clone())
+            .ok_or_eyre("Missing base flashblock")?;
 
         let state_provider = self.provider.history_by_block_hash(latest.hash())?;
         let state = StateProviderDatabase::new(&state_provider);
@@ -117,7 +124,7 @@ impl<
 
         let mut builder = self
             .evm_config
-            .builder_for_next_block(&mut db, &latest, latest_attrs)
+            .builder_for_next_block(&mut db, &latest, attrs.into())
             .map_err(RethError::other)?;
 
         builder.apply_pre_execution_changes()?;
@@ -141,18 +148,21 @@ impl<
             vec![execution_result.requests],
         );
 
-        Ok(ExecutedBlock {
-            recovered_block: block.into(),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-        })
+        Ok(PendingBlock::with_executed_block(
+            Instant::now() + Duration::from_secs(1),
+            ExecutedBlock {
+                recovered_block: block.into(),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(hashed_state),
+            },
+        ))
     }
 }
 
 impl<
         N: NodePrimitives,
-        S: Stream<Item = FlashBlock> + Unpin,
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
+        S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
+        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
         Provider: StateProviderFactory
             + BlockReaderIdExt<
                 Header = HeaderTy<N>,
@@ -160,16 +170,16 @@ impl<
                 Transaction = N::SignedTx,
                 Receipt = ReceiptTy<N>,
             > + Unpin,
-        Builder: PendingEnvBuilder<EvmConfig>,
-    > Stream for FlashBlockService<N, S, EvmConfig, Provider, Builder>
+    > Stream for FlashBlockService<N, S, EvmConfig, Provider>
 {
-    type Item = eyre::Result<ExecutedBlock<N>>;
+    type Item = eyre::Result<PendingBlock<N>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
             match this.rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(flashblock)) => this.add_flash_block(flashblock),
+                Poll::Ready(Some(Ok(flashblock))) => this.add_flash_block(flashblock),
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => return Poll::Ready(Some(this.execute())),
             }

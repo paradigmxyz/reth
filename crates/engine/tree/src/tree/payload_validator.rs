@@ -429,12 +429,11 @@ where
             handle.cache_metrics(),
         );
 
-        let (output, execution_finish) = if self.config.state_provider_metrics() {
+        let output = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
+            let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
             state_provider.record_total_latency();
-            (output, execution_finish)
+            output
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
@@ -495,7 +494,7 @@ where
                 debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
-                        let elapsed = execution_finish.elapsed();
+                        let elapsed = root_time.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
@@ -647,7 +646,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
-    ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
+    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
     where
         S: StateProvider,
         Err: core::error::Error + Send + Sync + 'static,
@@ -686,7 +685,7 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.executor.execute_metered(
+        let output = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
@@ -694,7 +693,7 @@ where
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
-        Ok((output, execution_finish))
+        Ok(output)
     }
 
     /// Compute state root for the given hashed post state in parallel.
