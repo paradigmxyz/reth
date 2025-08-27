@@ -68,7 +68,6 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             requests_hash: None,
         };
         header.difficulty = U256::from(1u64);
-        header.beneficiary = alloy_primitives::address!("a4b000000000000000000073657175656e636572");
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
         if let Some(info) = derive_arb_header_info_from_state(&input) {
