@@ -272,39 +272,38 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let decoded_storage_multiproof = match storage_proof_receivers
-                        .remove(&hashed_address)
-                    {
-                        Some(rx) => rx.recv().map_err(|e| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}: {e}"
-                                )),
-                            ))
-                        })??,
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
-                        None => {
-                            tracker.inc_missed_leaves();
-
-                            let raw_fallback_proof = StorageProof::new_hashed(
-                                trie_cursor_factory.clone(),
-                                hashed_cursor_factory.clone(),
-                                hashed_address,
-                            )
-                            .with_prefix_set_mut(Default::default())
-                            .storage_multiproof(
-                                targets.get(&hashed_address).cloned().unwrap_or_default(),
-                            )
-                            .map_err(|e| {
+                    let decoded_storage_multiproof =
+                        match storage_proof_receivers.remove(&hashed_address) {
+                            Some(rx) => rx.recv().map_err(|e| {
                                 ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                    DatabaseError::Other(e.to_string()),
+                                    DatabaseError::Other(format!(
+                                        "channel closed for {hashed_address}: {e}"
+                                    )),
                                 ))
-                            })?;
+                            })??,
+                            // Since we do not store all intermediate nodes in the database, there might
+                            // be a possibility of re-adding a non-modified leaf to the hash builder.
+                            None => {
+                                tracker.inc_missed_leaves();
 
-                            raw_fallback_proof.try_into()?
-                        }
-                    };
+                                let raw_fallback_proof = StorageProof::new_hashed(
+                                    trie_cursor_factory.clone(),
+                                    hashed_cursor_factory.clone(),
+                                    hashed_address,
+                                )
+                                .with_prefix_set_mut(Default::default())
+                                .storage_multiproof(
+                                    targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                )
+                                .map_err(|e| {
+                                    ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                        DatabaseError::Other(e.to_string()),
+                                    ))
+                                })?;
+
+                                raw_fallback_proof.try_into()?
+                            }
+                        };
 
                     // Encode account
                     account_rlp.clear();

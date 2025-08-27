@@ -146,7 +146,7 @@ where
     /// Returns the [`SealedBlock`] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock<Client::Block>> {
         if self.header.is_none() || self.body.is_none() {
-            return None
+            return None;
         }
 
         let header = self.header.take().unwrap();
@@ -161,7 +161,7 @@ where
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
-                    return None
+                    return None;
                 }
                 Some(SealedBlock::from_sealed_parts(header, resp.into_data()))
             }
@@ -173,10 +173,10 @@ where
             if let Err(err) = self.consensus.validate_body_against_header(resp.data(), header) {
                 debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
-                return
+                return;
             }
             self.body = Some(BodyResponse::Validated(resp.into_data()));
-            return
+            return;
         }
         self.body = Some(BodyResponse::PendingValidation(resp));
     }
@@ -240,7 +240,7 @@ where
             }
 
             if let Some(res) = this.take_block() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
 
             // ensure we still have enough budget for another iteration
@@ -248,7 +248,7 @@ where
             if budget == 0 {
                 // make sure we're woken up again
                 cx.waker().wake_by_ref();
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }
@@ -283,14 +283,14 @@ where
         if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.header = None;
-                return Poll::Ready(ResponseResult::Header(res))
+                return Poll::Ready(ResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.body = None;
-                return Poll::Ready(ResponseResult::Body(res))
+                return Poll::Ready(ResponseResult::Body(res));
             }
         }
 
@@ -395,7 +395,7 @@ where
     fn take_blocks(&mut self) -> Option<Vec<SealedBlock<Client::Block>>> {
         if !self.is_bodies_complete() {
             // not done with bodies yet
-            return None
+            return None;
         }
 
         let headers = self.headers.take()?;
@@ -418,7 +418,7 @@ where
                             // get body that doesn't match, put back into vecdeque, and retry it
                             self.pending_headers.push_back(header.clone());
                             needs_retry = true;
-                            continue
+                            continue;
                         }
 
                         resp.into_data()
@@ -444,7 +444,7 @@ where
             // create response for failing bodies
             let hashes = self.remaining_bodies_hashes();
             self.request.bodies = Some(self.client.get_block_bodies(hashes));
-            return None
+            return None;
         }
 
         Some(valid_responses)
@@ -596,7 +596,7 @@ where
             }
 
             if let Some(res) = this.take_blocks() {
-                return Poll::Ready(res)
+                return Poll::Ready(res);
             }
         }
     }
@@ -624,14 +624,14 @@ where
         if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.headers = None;
-                return Poll::Ready(RangeResponseResult::Header(res))
+                return Poll::Ready(RangeResponseResult::Header(res));
             }
         }
 
         if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 self.bodies = None;
-                return Poll::Ready(RangeResponseResult::Body(res))
+                return Poll::Ready(RangeResponseResult::Body(res));
             }
         }
 

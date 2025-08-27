@@ -81,7 +81,7 @@ impl Future for MiningMode {
             }
             Self::Interval(interval) => {
                 if interval.poll_tick(cx).is_ready() {
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             }

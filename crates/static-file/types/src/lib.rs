@@ -101,8 +101,8 @@ impl StaticFileTargets {
         .iter()
         .all(|(target_block_range, highest_static_file_block)| {
             target_block_range.is_none_or(|target_block_range| {
-                *target_block_range.start() ==
-                    highest_static_file_block
+                *target_block_range.start()
+                    == highest_static_file_block
                         .map_or(0, |highest_static_file_block| highest_static_file_block + 1)
             })
         })

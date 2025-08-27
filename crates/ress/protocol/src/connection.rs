@@ -264,12 +264,12 @@ where
         let this = self.get_mut();
 
         if this.terminated {
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
 
         if !this.node_type_sent {
             this.node_type_sent = true;
-            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()))
+            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()));
         }
 
         'conn: loop {

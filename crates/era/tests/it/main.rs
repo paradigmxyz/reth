@@ -97,8 +97,8 @@ impl Era1TestDownloader {
         }
 
         // check if the filename is supported
-        if !ERA1_MAINNET_FILES_NAMES.contains(&filename) &&
-            !ERA1_SEPOLIA_FILES_NAMES.contains(&filename)
+        if !ERA1_MAINNET_FILES_NAMES.contains(&filename)
+            && !ERA1_SEPOLIA_FILES_NAMES.contains(&filename)
         {
             return Err(eyre!(
                 "Unknown file: {}. Only the following files are supported: {:?} or {:?}",

@@ -101,8 +101,8 @@ pub async fn maintain_pending_state<P>(
 {
     while let Some(event) = events.next().await {
         match event {
-            ConsensusEngineEvent::CanonicalBlockAdded(block, _) |
-            ConsensusEngineEvent::ForkBlockAdded(block, _) => {
+            ConsensusEngineEvent::CanonicalBlockAdded(block, _)
+            | ConsensusEngineEvent::ForkBlockAdded(block, _) => {
                 trace!(target: "reth::ress_provider", block = ? block.recovered_block().num_hash(), "Insert block into pending state");
                 pending_state.insert_block(block);
             }
@@ -122,9 +122,9 @@ pub async fn maintain_pending_state<P>(
                 }
             }
             // ignore
-            ConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            ConsensusEngineEvent::BlockReceived(_) |
-            ConsensusEngineEvent::LiveSyncProgress(_) => (),
+            ConsensusEngineEvent::CanonicalChainCommitted(_, _)
+            | ConsensusEngineEvent::BlockReceived(_)
+            | ConsensusEngineEvent::LiveSyncProgress(_) => (),
         }
     }
 }

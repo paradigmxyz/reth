@@ -39,28 +39,28 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
     if is_cancun_active {
         if block.blob_gas_used().is_none() {
             // cancun active but blob gas used not present
-            return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
+            return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed);
         }
         if block.excess_blob_gas().is_none() {
             // cancun active but excess blob gas not present
-            return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
+            return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas);
         }
         if cancun_sidecar_fields.is_none() {
             // cancun active but cancun fields not present
-            return Err(PayloadError::PostCancunWithoutCancunFields)
+            return Err(PayloadError::PostCancunWithoutCancunFields);
         }
     } else {
         if block.blob_gas_used().is_some() {
             // cancun not active but blob gas used present
-            return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
+            return Err(PayloadError::PreCancunBlockWithBlobGasUsed);
         }
         if block.excess_blob_gas().is_some() {
             // cancun not active but excess blob gas present
-            return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
+            return Err(PayloadError::PreCancunBlockWithExcessBlobGas);
         }
         if cancun_sidecar_fields.is_some() {
             // cancun not active but cancun fields present
-            return Err(PayloadError::PreCancunWithCancunFields)
+            return Err(PayloadError::PreCancunWithCancunFields);
         }
     }
 
@@ -81,7 +81,7 @@ pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed
     if is_cancun_active {
         ensure_matching_blob_versioned_hashes(block_body, cancun_sidecar_fields)?
     } else if block_body.has_eip4844_transactions() {
-        return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+        return Err(PayloadError::PreCancunBlockWithBlobTransactions);
     }
 
     Ok(())
@@ -99,20 +99,20 @@ pub fn ensure_matching_blob_versioned_hashes<T: Transaction + Typed2718, H>(
     if let Some(versioned_hashes) = cancun_sidecar_fields.map(|fields| &fields.versioned_hashes) {
         if num_blob_versioned_hashes != versioned_hashes.len() {
             // Number of blob versioned hashes does not match
-            return Err(PayloadError::InvalidVersionedHashes)
+            return Err(PayloadError::InvalidVersionedHashes);
         }
         // we can use `zip` safely here because we already compared their length
         for (payload_versioned_hash, block_versioned_hash) in
             versioned_hashes.iter().zip(block_body.blob_versioned_hashes_iter())
         {
             if payload_versioned_hash != block_versioned_hash {
-                return Err(PayloadError::InvalidVersionedHashes)
+                return Err(PayloadError::InvalidVersionedHashes);
             }
         }
     } else {
         // No Cancun fields, if block includes any blobs, this is an error
         if num_blob_versioned_hashes > 0 {
-            return Err(PayloadError::InvalidVersionedHashes)
+            return Err(PayloadError::InvalidVersionedHashes);
         }
     }
 

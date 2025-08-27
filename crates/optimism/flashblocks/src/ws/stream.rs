@@ -54,7 +54,7 @@ impl Stream for FlashBlockWsStream {
                 Err(err) => {
                     self.state = State::Initial;
 
-                    return Poll::Ready(Some(Err(err.into())))
+                    return Poll::Ready(Some(Err(err.into())));
                 }
             }
         }

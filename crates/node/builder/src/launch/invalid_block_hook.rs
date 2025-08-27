@@ -83,7 +83,7 @@ where
     use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 
     let Some(ref hook) = config.debug.invalid_block_hook else {
-        return Ok(Box::new(NoopInvalidBlockHook::default()))
+        return Ok(Box::new(NoopInvalidBlockHook::default()));
     };
 
     let healthy_node_rpc_client = get_healthy_node_client(config, chain_id).await?;

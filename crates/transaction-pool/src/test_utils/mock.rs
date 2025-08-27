@@ -57,11 +57,11 @@ macro_rules! set_value {
     ($this:ident => $field:ident) => {
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { ref mut $field, .. } |
-            MockTransaction::Eip1559 { ref mut $field, .. } |
-            MockTransaction::Eip4844 { ref mut $field, .. } |
-            MockTransaction::Eip2930 { ref mut $field, .. } |
-            MockTransaction::Eip7702 { ref mut $field, .. } => {
+            MockTransaction::Legacy { ref mut $field, .. }
+            | MockTransaction::Eip1559 { ref mut $field, .. }
+            | MockTransaction::Eip4844 { ref mut $field, .. }
+            | MockTransaction::Eip2930 { ref mut $field, .. }
+            | MockTransaction::Eip7702 { ref mut $field, .. } => {
                 *$field = new_value;
             }
         }
@@ -74,11 +74,11 @@ macro_rules! set_value {
 macro_rules! get_value {
     ($this:tt => $field:ident) => {
         match $this {
-            MockTransaction::Legacy { $field, .. } |
-            MockTransaction::Eip1559 { $field, .. } |
-            MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } |
-            MockTransaction::Eip7702 { $field, .. } => $field,
+            MockTransaction::Legacy { $field, .. }
+            | MockTransaction::Eip1559 { $field, .. }
+            | MockTransaction::Eip4844 { $field, .. }
+            | MockTransaction::Eip2930 { $field, .. }
+            | MockTransaction::Eip7702 { $field, .. } => $field,
         }
     };
 }
@@ -414,8 +414,8 @@ impl MockTransaction {
 
     /// Sets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn set_priority_fee(&mut self, val: u128) -> &mut Self {
-        if let Self::Eip1559 { max_priority_fee_per_gas, .. } |
-        Self::Eip4844 { max_priority_fee_per_gas, .. } = self
+        if let Self::Eip1559 { max_priority_fee_per_gas, .. }
+        | Self::Eip4844 { max_priority_fee_per_gas, .. } = self
         {
             *max_priority_fee_per_gas = val;
         }
@@ -431,18 +431,18 @@ impl MockTransaction {
     /// Gets the priority fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn get_priority_fee(&self) -> Option<u128> {
         match self {
-            Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } |
-            Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
+            Self::Eip1559 { max_priority_fee_per_gas, .. }
+            | Self::Eip4844 { max_priority_fee_per_gas, .. }
+            | Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
             _ => None,
         }
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let Self::Eip1559 { max_fee_per_gas, .. } |
-        Self::Eip4844 { max_fee_per_gas, .. } |
-        Self::Eip7702 { max_fee_per_gas, .. } = self
+        if let Self::Eip1559 { max_fee_per_gas, .. }
+        | Self::Eip4844 { max_fee_per_gas, .. }
+        | Self::Eip7702 { max_fee_per_gas, .. } = self
         {
             *max_fee_per_gas = val;
         }
@@ -458,9 +458,9 @@ impl MockTransaction {
     /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn get_max_fee(&self) -> Option<u128> {
         match self {
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } |
-            Self::Eip7702 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
+            Self::Eip1559 { max_fee_per_gas, .. }
+            | Self::Eip4844 { max_fee_per_gas, .. }
+            | Self::Eip7702 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
             _ => None,
         }
     }
@@ -469,10 +469,10 @@ impl MockTransaction {
     pub fn set_accesslist(&mut self, list: AccessList) -> &mut Self {
         match self {
             Self::Legacy { .. } => {}
-            Self::Eip1559 { access_list: accesslist, .. } |
-            Self::Eip4844 { access_list: accesslist, .. } |
-            Self::Eip2930 { access_list: accesslist, .. } |
-            Self::Eip7702 { access_list: accesslist, .. } => {
+            Self::Eip1559 { access_list: accesslist, .. }
+            | Self::Eip4844 { access_list: accesslist, .. }
+            | Self::Eip2930 { access_list: accesslist, .. }
+            | Self::Eip7702 { access_list: accesslist, .. } => {
                 *accesslist = list;
             }
         }
@@ -494,9 +494,9 @@ impl MockTransaction {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => {
                 *gas_price = val;
             }
-            Self::Eip1559 { max_fee_per_gas, max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, max_priority_fee_per_gas, .. } |
-            Self::Eip7702 { max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            Self::Eip1559 { max_fee_per_gas, max_priority_fee_per_gas, .. }
+            | Self::Eip4844 { max_fee_per_gas, max_priority_fee_per_gas, .. }
+            | Self::Eip7702 { max_fee_per_gas, max_priority_fee_per_gas, .. } => {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
@@ -510,9 +510,9 @@ impl MockTransaction {
             Self::Legacy { ref mut gas_price, .. } | Self::Eip2930 { ref mut gas_price, .. } => {
                 *gas_price = val;
             }
-            Self::Eip1559 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } |
-            Self::Eip7702 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } => {
+            Self::Eip1559 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. }
+            | Self::Eip4844 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. }
+            | Self::Eip7702 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } => {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
@@ -524,9 +524,9 @@ impl MockTransaction {
     pub const fn get_gas_price(&self) -> u128 {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } |
-            Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            Self::Eip1559 { max_fee_per_gas, .. }
+            | Self::Eip4844 { max_fee_per_gas, .. }
+            | Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
@@ -660,13 +660,13 @@ impl MockTransaction {
 
     fn update_cost(&mut self) {
         match self {
-            Self::Legacy { cost, gas_limit, gas_price, value, .. } |
-            Self::Eip2930 { cost, gas_limit, gas_price, value, .. } => {
+            Self::Legacy { cost, gas_limit, gas_price, value, .. }
+            | Self::Eip2930 { cost, gas_limit, gas_price, value, .. } => {
                 *cost = U256::from(*gas_limit) * U256::from(*gas_price) + *value
             }
-            Self::Eip1559 { cost, gas_limit, max_fee_per_gas, value, .. } |
-            Self::Eip4844 { cost, gas_limit, max_fee_per_gas, value, .. } |
-            Self::Eip7702 { cost, gas_limit, max_fee_per_gas, value, .. } => {
+            Self::Eip1559 { cost, gas_limit, max_fee_per_gas, value, .. }
+            | Self::Eip4844 { cost, gas_limit, max_fee_per_gas, value, .. }
+            | Self::Eip7702 { cost, gas_limit, max_fee_per_gas, value, .. } => {
                 *cost = U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
         };
@@ -706,11 +706,11 @@ impl PoolTransaction for MockTransaction {
     // not to be manually set.
     fn cost(&self) -> &U256 {
         match self {
-            Self::Legacy { cost, .. } |
-            Self::Eip2930 { cost, .. } |
-            Self::Eip1559 { cost, .. } |
-            Self::Eip4844 { cost, .. } |
-            Self::Eip7702 { cost, .. } => cost,
+            Self::Legacy { cost, .. }
+            | Self::Eip2930 { cost, .. }
+            | Self::Eip1559 { cost, .. }
+            | Self::Eip4844 { cost, .. }
+            | Self::Eip7702 { cost, .. } => cost,
         }
     }
 
@@ -742,10 +742,10 @@ impl alloy_consensus::Transaction for MockTransaction {
     fn chain_id(&self) -> Option<u64> {
         match self {
             Self::Legacy { chain_id, .. } => *chain_id,
-            Self::Eip1559 { chain_id, .. } |
-            Self::Eip4844 { chain_id, .. } |
-            Self::Eip2930 { chain_id, .. } |
-            Self::Eip7702 { chain_id, .. } => Some(*chain_id),
+            Self::Eip1559 { chain_id, .. }
+            | Self::Eip4844 { chain_id, .. }
+            | Self::Eip2930 { chain_id, .. }
+            | Self::Eip7702 { chain_id, .. } => Some(*chain_id),
         }
     }
 
@@ -767,18 +767,18 @@ impl alloy_consensus::Transaction for MockTransaction {
     fn max_fee_per_gas(&self) -> u128 {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } |
-            Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            Self::Eip1559 { max_fee_per_gas, .. }
+            | Self::Eip4844 { max_fee_per_gas, .. }
+            | Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Self::Legacy { .. } | Self::Eip2930 { .. } => None,
-            Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } |
-            Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
+            Self::Eip1559 { max_priority_fee_per_gas, .. }
+            | Self::Eip4844 { max_priority_fee_per_gas, .. }
+            | Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
         }
     }
 
@@ -792,9 +792,9 @@ impl alloy_consensus::Transaction for MockTransaction {
     fn priority_fee_or_price(&self) -> u128 {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } |
-            Self::Eip7702 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
+            Self::Eip1559 { max_priority_fee_per_gas, .. }
+            | Self::Eip4844 { max_priority_fee_per_gas, .. }
+            | Self::Eip7702 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
         }
     }
 
@@ -841,11 +841,11 @@ impl alloy_consensus::Transaction for MockTransaction {
 
     fn value(&self) -> U256 {
         match self {
-            Self::Legacy { value, .. } |
-            Self::Eip1559 { value, .. } |
-            Self::Eip2930 { value, .. } |
-            Self::Eip4844 { value, .. } |
-            Self::Eip7702 { value, .. } => *value,
+            Self::Legacy { value, .. }
+            | Self::Eip1559 { value, .. }
+            | Self::Eip2930 { value, .. }
+            | Self::Eip4844 { value, .. }
+            | Self::Eip7702 { value, .. } => *value,
         }
     }
 
@@ -856,10 +856,10 @@ impl alloy_consensus::Transaction for MockTransaction {
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy { .. } => None,
-            Self::Eip1559 { access_list: accesslist, .. } |
-            Self::Eip4844 { access_list: accesslist, .. } |
-            Self::Eip2930 { access_list: accesslist, .. } |
-            Self::Eip7702 { access_list: accesslist, .. } => Some(accesslist),
+            Self::Eip1559 { access_list: accesslist, .. }
+            | Self::Eip4844 { access_list: accesslist, .. }
+            | Self::Eip2930 { access_list: accesslist, .. }
+            | Self::Eip7702 { access_list: accesslist, .. } => Some(accesslist),
         }
     }
 

@@ -37,7 +37,7 @@ fn main() {
                 // extend the rpc modules with our custom `TxpoolExt` endpoints
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     // here we get the configured pool.

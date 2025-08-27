@@ -177,7 +177,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     #[inline]
     pub(crate) fn discarded_many(&mut self, discarded: &[Arc<ValidPoolTransaction<T>>]) {
         if self.is_empty() {
-            return
+            return;
         }
         for tx in discarded {
             self.discarded(tx.hash());

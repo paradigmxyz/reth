@@ -137,7 +137,7 @@ where
         Box::pin(async move {
             // Check if request should be forwarded to historical endpoint
             if let Some(response) = historical.maybe_forward_request(&req).await {
-                return response
+                return response;
             }
 
             // Handle the request with the inner service
@@ -180,7 +180,7 @@ where
         };
 
         if should_forward {
-            return self.forward_to_historical(req).await
+            return self.forward_to_historical(req).await;
         }
 
         None
@@ -292,17 +292,17 @@ enum ParseError {
 /// Extracts the block ID from request parameters based on the method name
 fn extract_block_id_for_method(method: &str, params: &Params<'_>) -> Option<BlockId> {
     match method {
-        "eth_getBlockByNumber" |
-        "eth_getBlockByHash" |
-        "debug_traceBlockByNumber" |
-        "debug_traceBlockByHash" => parse_block_id_from_params(params, 0),
-        "eth_getBalance" |
-        "eth_getCode" |
-        "eth_getTransactionCount" |
-        "eth_call" |
-        "eth_estimateGas" |
-        "eth_createAccessList" |
-        "debug_traceCall" => parse_block_id_from_params(params, 1),
+        "eth_getBlockByNumber"
+        | "eth_getBlockByHash"
+        | "debug_traceBlockByNumber"
+        | "debug_traceBlockByHash" => parse_block_id_from_params(params, 0),
+        "eth_getBalance"
+        | "eth_getCode"
+        | "eth_getTransactionCount"
+        | "eth_call"
+        | "eth_estimateGas"
+        | "eth_createAccessList"
+        | "debug_traceCall" => parse_block_id_from_params(params, 1),
         "eth_getStorageAt" | "eth_getProof" => parse_block_id_from_params(params, 2),
         _ => None,
     }

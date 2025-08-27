@@ -161,8 +161,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
-            timestamp: number +
-                EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
+            timestamp: number
+                + EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
             withdrawals_root: Some(calculate_withdrawals_root(&[])),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
