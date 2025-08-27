@@ -161,6 +161,7 @@ members = [
     "examples/network-txpool/",
     "examples/network/",
     "examples/network-proxy/",
+    "examples/node-builder-api/",
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
     "examples/op-db-access/",
