@@ -20,7 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_network::Ethereum;
+use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -2089,6 +2089,21 @@ impl RpcServerHandle {
         self.new_http_provider_for()
     }
 
+    /// Returns a new [`alloy_network::Ethereum`] http provider with its recommended fillers and
+    /// installed wallet.
+    pub fn eth_http_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.http_url()?;
+        let provider =
+            ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse().expect("valid url"));
+        Some(provider)
+    }
+
     /// Returns an http provider from the rpc server handle for the
     /// specified [`alloy_network::Network`].
     ///
@@ -2109,6 +2124,24 @@ impl RpcServerHandle {
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
         self.new_ws_provider_for().await
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] ws provider with its recommended fillers and
+    /// installed wallet.
+    pub async fn eth_ws_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.ws_url()?;
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect(&rpc_url)
+            .await
+            .expect("failed to create ws client");
+        Some(provider)
     }
 
     /// Returns an ws provider from the rpc server handle for the
