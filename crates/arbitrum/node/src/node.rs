@@ -335,24 +335,7 @@ where
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
-        let sugg = attrs.suggested_fee_recipient;
-        if sugg != alloy_primitives::Address::ZERO {
-            next_env.suggested_fee_recipient = sugg;
-        }
-        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO && kind == 13 {
-            let mut cur = &l2_owned[..];
-            if cur.len() >= 32 + 20 {
-                cur = &cur[32..];
-                let mut poster_bytes = [0u8; 20];
-                poster_bytes.copy_from_slice(&cur[..20]);
-                let batch_poster_addr = alloy_primitives::Address::from(poster_bytes);
-                reth_tracing::tracing::info!(target: "arb-reth::follower", beneficiary = %batch_poster_addr, "setting beneficiary from BatchPostingReport");
-                next_env.suggested_fee_recipient = batch_poster_addr;
-            }
-        }
-        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO {
-            next_env.suggested_fee_recipient = poster;
-        }
+        next_env.suggested_fee_recipient = poster;
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
