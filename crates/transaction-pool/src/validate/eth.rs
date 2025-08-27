@@ -9,9 +9,11 @@ use crate::{
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
-    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
+    Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
+    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
+    TransactionValidator,
 };
+
 use alloy_consensus::{
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
@@ -25,10 +27,10 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
+    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{AccountInfoReader, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -153,6 +155,47 @@ where
         state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
+    }
+
+    /// Validates that the sender’s account has valid or no bytecode.
+    pub fn validate_sender_bytecode(
+        &self,
+        transaction: &Tx,
+        account: &Account,
+        state: &dyn AccountInfoReader,
+    ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
+        self.inner.validate_sender_bytecode(transaction, account, state)
+    }
+
+    /// Checks if the transaction nonce is valid.
+    pub fn validate_sender_nonce(
+        &self,
+        transaction: &Tx,
+        account: &Account,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        self.inner.validate_sender_nonce(transaction, account)
+    }
+
+    /// Ensures the sender has sufficient account balance.
+    pub fn validate_sender_balance(
+        &self,
+        transaction: &Tx,
+        account: &Account,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        self.inner.validate_sender_balance(transaction, account)
+    }
+
+    /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
+    pub fn validate_eip4844(
+        &self,
+        transaction: &mut Tx,
+    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+        self.inner.validate_eip4844(transaction)
+    }
+
+    /// Returns the recovered authorities for the given transaction
+    pub fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
+        self.inner.recover_authorities(transaction)
     }
 }
 
@@ -574,130 +617,30 @@ where
             }
         };
 
-        // Unless Prague is active, the signer account shouldn't have bytecode.
-        //
-        // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
-        //
-        // Any other case means that the account is not an EOA, and should not be able to send
-        // transactions.
-        if let Some(code_hash) = &account.bytecode_hash {
-            let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match state.bytecode_by_hash(code_hash) {
-                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
-                    Err(err) => {
-                        return TransactionValidationOutcome::Error(
-                            *transaction.hash(),
-                            Box::new(err),
-                        )
-                    }
-                }
-            } else {
-                false
-            };
-
-            if !is_eip7702 {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidTransactionError::SignerAccountHasBytecode.into(),
-                )
-            }
-        }
-
-        let tx_nonce = transaction.nonce();
+        // check for bytecode
+        match self.validate_sender_bytecode(&transaction, &account, &state) {
+            Err(outcome) => return outcome,
+            Ok(Err(err)) => return TransactionValidationOutcome::Invalid(transaction, err),
+            _ => {}
+        };
 
         // Checks for nonce
-        if tx_nonce < account.nonce {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::NonceNotConsistent { tx: tx_nonce, state: account.nonce }
-                    .into(),
-            )
+        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+            return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
-        let cost = transaction.cost();
-
-        // Checks for max cost
-        if !self.disable_balance_check && cost > &account.balance {
-            let expected = *cost;
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::InsufficientFunds(
-                    GotExpected { got: account.balance, expected }.into(),
-                )
-                .into(),
-            )
+        // checks for max cost not exceedng account_balance
+        if let Err(err) = self.validate_sender_balance(&transaction, &account) {
+            return TransactionValidationOutcome::Invalid(transaction, err)
         }
-
-        let mut maybe_blob_sidecar = None;
 
         // heavy blob tx validation
-        if transaction.is_eip4844() {
-            // extract the blob from the transaction
-            match transaction.take_blob() {
-                EthBlobTransactionSidecar::None => {
-                    // this should not happen
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidTransactionError::TxTypeNotSupported.into(),
-                    )
-                }
-                EthBlobTransactionSidecar::Missing => {
-                    // This can happen for re-injected blob transactions (on re-org), since the blob
-                    // is stripped from the transaction and not included in a block.
-                    // check if the blob is in the store, if it's included we previously validated
-                    // it and inserted it
-                    if matches!(self.blob_store.contains(*transaction.hash()), Ok(true)) {
-                        // validated transaction is already in the store
-                    } else {
-                        return TransactionValidationOutcome::Invalid(
-                            transaction,
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                            ),
-                        )
-                    }
-                }
-                EthBlobTransactionSidecar::Present(sidecar) => {
-                    let now = Instant::now();
+        let maybe_blob_sidecar = match self.validate_eip4844(&mut transaction) {
+            Err(err) => return TransactionValidationOutcome::Invalid(transaction, err),
+            Ok(sidecar) => sidecar,
+        };
 
-                    if self.fork_tracker.is_osaka_activated() {
-                        if sidecar.is_eip4844() {
-                            return TransactionValidationOutcome::Invalid(
-                                transaction,
-                                InvalidPoolTransactionError::Eip4844(
-                                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
-                                ),
-                            )
-                        }
-                    } else if sidecar.is_eip7594() {
-                        return TransactionValidationOutcome::Invalid(
-                            transaction,
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
-                            ),
-                        )
-                    }
-
-                    // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
-                        return TransactionValidationOutcome::Invalid(
-                            transaction,
-                            InvalidPoolTransactionError::Eip4844(
-                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                            ),
-                        )
-                    }
-                    // Record the duration of successful blob validation as histogram
-                    self.validation_metrics.blob_validation_duration.record(now.elapsed());
-                    // store the extracted blob
-                    maybe_blob_sidecar = Some(sidecar);
-                }
-            }
-        }
-
-        let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
-        });
+        let authorities = self.recover_authorities(&transaction);
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -714,6 +657,143 @@ where
             },
             authorities,
         }
+    }
+
+    /// Validates that the sender’s account has valid or no bytecode.
+    fn validate_sender_bytecode(
+        &self,
+        transaction: &Tx,
+        sender: &Account,
+        state: impl BytecodeReader,
+    ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
+        // Unless Prague is active, the signer account shouldn't have bytecode.
+        //
+        // If Prague is active, only EIP-7702 bytecode is allowed for the sender.
+        //
+        // Any other case means that the account is not an EOA, and should not be able to send
+        // transactions.
+        if let Some(code_hash) = &sender.bytecode_hash {
+            let is_eip7702 = if self.fork_tracker.is_prague_activated() {
+                match state.bytecode_by_hash(code_hash) {
+                    Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
+                    Err(err) => {
+                        return Err(TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        ))
+                    }
+                }
+            } else {
+                false
+            };
+
+            if !is_eip7702 {
+                return Ok(Err(InvalidTransactionError::SignerAccountHasBytecode.into()))
+            }
+        }
+        Ok(Ok(()))
+    }
+
+    /// Checks if the transaction nonce is valid.
+    fn validate_sender_nonce(
+        &self,
+        transaction: &Tx,
+        sender: &Account,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        let tx_nonce = transaction.nonce();
+
+        if tx_nonce < sender.nonce {
+            return Err(InvalidTransactionError::NonceNotConsistent {
+                tx: tx_nonce,
+                state: sender.nonce,
+            }
+            .into())
+        }
+        Ok(())
+    }
+
+    /// Ensures the sender has sufficient account balance.
+    fn validate_sender_balance(
+        &self,
+        transaction: &Tx,
+        sender: &Account,
+    ) -> Result<(), InvalidPoolTransactionError> {
+        let cost = transaction.cost();
+
+        if !self.disable_balance_check && cost > &sender.balance {
+            let expected = *cost;
+            return Err(InvalidTransactionError::InsufficientFunds(
+                GotExpected { got: sender.balance, expected }.into(),
+            )
+            .into())
+        }
+        Ok(())
+    }
+
+    /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
+    fn validate_eip4844(
+        &self,
+        transaction: &mut Tx,
+    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
+        let mut maybe_blob_sidecar = None;
+
+        // heavy blob tx validation
+        if transaction.is_eip4844() {
+            // extract the blob from the transaction
+            match transaction.take_blob() {
+                EthBlobTransactionSidecar::None => {
+                    // this should not happen
+                    return Err(InvalidTransactionError::TxTypeNotSupported.into())
+                }
+                EthBlobTransactionSidecar::Missing => {
+                    // This can happen for re-injected blob transactions (on re-org), since the blob
+                    // is stripped from the transaction and not included in a block.
+                    // check if the blob is in the store, if it's included we previously validated
+                    // it and inserted it
+                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
+                        // validated transaction is already in the store
+                    } else {
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
+                        ))
+                    }
+                }
+                EthBlobTransactionSidecar::Present(sidecar) => {
+                    let now = Instant::now();
+
+                    if self.fork_tracker.is_osaka_activated() {
+                        if sidecar.is_eip4844() {
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                            ))
+                        }
+                    } else if sidecar.is_eip7594() {
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
+                        ))
+                    }
+
+                    // validate the blob
+                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                        return Err(InvalidPoolTransactionError::Eip4844(
+                            Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                        ))
+                    }
+                    // Record the duration of successful blob validation as histogram
+                    self.validation_metrics.blob_validation_duration.record(now.elapsed());
+                    // store the extracted blob
+                    maybe_blob_sidecar = Some(sidecar);
+                }
+            }
+        }
+        Ok(maybe_blob_sidecar)
+    }
+
+    /// Returns the recovered authorities for the given transaction
+    fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
+        transaction
+            .authorization_list()
+            .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
     }
 
     /// Validates all given transactions.
