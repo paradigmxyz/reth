@@ -10,7 +10,7 @@
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.
 //!
-//! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
+//! **NOTE**: This expects that the CL client is running an HTTP server on `localhost:5052` and is
 //! configured to emit payload attributes events.
 //!
 //! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api_bn.html#beacon-node-api>
@@ -43,16 +43,16 @@ fn main() {
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, clap::Parser)]
 struct BeaconEventsConfig {
-    /// Beacon Node http server address
+    /// Beacon Node HTTP server address
     #[arg(long = "cl.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub cl_addr: IpAddr,
-    /// Beacon Node http server port to listen on
+    /// Beacon Node HTTP server port to listen on
     #[arg(long = "cl.port", default_value_t = 5052)]
     pub cl_port: u16,
 }
 
 impl BeaconEventsConfig {
-    /// Returns the http url of the beacon node
+    /// Returns the HTTP url of the beacon node
     pub fn http_base_url(&self) -> String {
         format!("http://{}:{}", self.cl_addr, self.cl_port)
     }
