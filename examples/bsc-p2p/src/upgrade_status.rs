@@ -6,7 +6,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 /// The message id for the upgrade status message, used in the BSC handshake.
 const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
 
-/// UpdateStatus packet introduced in BSC to notify peers whether to broadcast transaction or not.
+/// UpdateStatus packet introduced in BSC to notify peers whether to broadcast transactions or not.
 /// It is used during the p2p handshake.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
