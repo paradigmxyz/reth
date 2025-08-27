@@ -80,9 +80,8 @@ let factory = EthereumNode::provider_factory_builder()
 Reth buffers new blocks in memory before persisting them to disk for performance optimization. If your external process needs immediate access to the latest blocks, configure the node to persist blocks immediately:
 
 - `--engine.persistence-threshold 0` - Persists new canonical blocks to disk immediately
-- `--engine.memory-block-buffer-target 0` - Disables in-memory block buffering
 
-Use both flags together to ensure external processes can read new blocks without delay.
+Using this flag ensures external processes can read new blocks without delay.
 
 As soon as the reth process has persisted the block data, the external reader can read it from the database.
 

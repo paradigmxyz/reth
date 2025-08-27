@@ -36,6 +36,14 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// Returns the payload attributes for the payload being built.
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;
 
+    /// Returns the payload timestamp for the payload being built.
+    /// The default implementation allocates full attributes only to
+    /// extract the timestamp. Provide your own implementation if you
+    /// need performance here.
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.payload_attributes()?.timestamp())
+    }
+
     /// Called when the payload is requested by the CL.
     ///
     /// This is invoked on [`engine_getPayloadV2`](https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2) and [`engine_getPayloadV1`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1).
