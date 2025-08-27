@@ -312,7 +312,7 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
         &self.attachment.right
     }
 
-    /// Get a mutable reference to the right value.
+    /// Get a mutable reference to the left value.
     pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
@@ -1116,9 +1116,9 @@ impl<L, R> Attached<L, R> {
         &self.right
     }
 
-    /// Get a mutable reference to the right value.
-    pub const fn left_mut(&mut self) -> &mut R {
-        &mut self.right
+    /// Get a mutable reference to the left value.
+    pub const fn left_mut(&mut self) -> &mut L {
+        &mut self.left
     }
 
     /// Get a mutable reference to the right value.

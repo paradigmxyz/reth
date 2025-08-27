@@ -465,7 +465,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Spec = SpecFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,

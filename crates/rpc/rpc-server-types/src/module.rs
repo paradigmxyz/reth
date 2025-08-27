@@ -98,6 +98,11 @@ impl RpcModuleSelection {
         }
     }
 
+    /// Returns true if all modules are selected
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
     /// Returns an iterator over all configured [`RethRpcModule`]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
@@ -147,6 +152,64 @@ impl RpcModuleSelection {
             Self::All => true,
             Self::Standard => Self::STANDARD_MODULES.contains(module),
             Self::Selection(s) => s.contains(module),
+        }
+    }
+
+    /// Adds a module to the selection.
+    ///
+    /// If the selection is `All`, this is a no-op.
+    /// Otherwise, converts to a `Selection` and adds the module.
+    pub fn push(&mut self, module: RethRpcModule) {
+        if !self.is_all() {
+            let mut modules = self.to_selection();
+            modules.insert(module);
+            *self = Self::Selection(modules);
+        }
+    }
+
+    /// Returns a new selection with the given module added.
+    ///
+    /// If the selection is `All`, returns `All`.
+    /// Otherwise, converts to a `Selection` and adds the module.
+    pub fn append(self, module: RethRpcModule) -> Self {
+        if self.is_all() {
+            Self::All
+        } else {
+            let mut modules = self.into_selection();
+            modules.insert(module);
+            Self::Selection(modules)
+        }
+    }
+
+    /// Extends the selection with modules from an iterator.
+    ///
+    /// If the selection is `All`, this is a no-op.
+    /// Otherwise, converts to a `Selection` and adds the modules.
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = RethRpcModule>,
+    {
+        if !self.is_all() {
+            let mut modules = self.to_selection();
+            modules.extend(iter);
+            *self = Self::Selection(modules);
+        }
+    }
+
+    /// Returns a new selection with modules from an iterator added.
+    ///
+    /// If the selection is `All`, returns `All`.
+    /// Otherwise, converts to a `Selection` and adds the modules.
+    pub fn extended<I>(self, iter: I) -> Self
+    where
+        I: IntoIterator<Item = RethRpcModule>,
+    {
+        if self.is_all() {
+            Self::All
+        } else {
+            let mut modules = self.into_selection();
+            modules.extend(iter);
+            Self::Selection(modules)
         }
     }
 }
@@ -512,6 +575,52 @@ mod test {
         let non_matching_standard =
             RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Net]);
         assert!(!RpcModuleSelection::are_identical(Some(&standard), Some(&non_matching_standard)));
+    }
+
+    #[test]
+    fn test_rpc_module_selection_append() {
+        // Test append on Standard selection
+        let selection = RpcModuleSelection::Standard;
+        let new_selection = selection.append(RethRpcModule::Admin);
+        assert!(new_selection.contains(&RethRpcModule::Eth));
+        assert!(new_selection.contains(&RethRpcModule::Net));
+        assert!(new_selection.contains(&RethRpcModule::Web3));
+        assert!(new_selection.contains(&RethRpcModule::Admin));
+
+        // Test append on empty Selection
+        let selection = RpcModuleSelection::Selection(HashSet::new());
+        let new_selection = selection.append(RethRpcModule::Eth);
+        assert!(new_selection.contains(&RethRpcModule::Eth));
+        assert_eq!(new_selection.len(), 1);
+
+        // Test append on All (should return All)
+        let selection = RpcModuleSelection::All;
+        let new_selection = selection.append(RethRpcModule::Eth);
+        assert_eq!(new_selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn test_rpc_module_selection_extend() {
+        // Test extend on Standard selection
+        let mut selection = RpcModuleSelection::Standard;
+        selection.extend(vec![RethRpcModule::Admin, RethRpcModule::Debug]);
+        assert!(selection.contains(&RethRpcModule::Eth));
+        assert!(selection.contains(&RethRpcModule::Net));
+        assert!(selection.contains(&RethRpcModule::Web3));
+        assert!(selection.contains(&RethRpcModule::Admin));
+        assert!(selection.contains(&RethRpcModule::Debug));
+
+        // Test extend on empty Selection
+        let mut selection = RpcModuleSelection::Selection(HashSet::new());
+        selection.extend(vec![RethRpcModule::Eth, RethRpcModule::Admin]);
+        assert!(selection.contains(&RethRpcModule::Eth));
+        assert!(selection.contains(&RethRpcModule::Admin));
+        assert_eq!(selection.len(), 2);
+
+        // Test extend on All (should be no-op)
+        let mut selection = RpcModuleSelection::All;
+        selection.extend(vec![RethRpcModule::Eth, RethRpcModule::Admin]);
+        assert_eq!(selection, RpcModuleSelection::All);
     }
 
     #[test]
