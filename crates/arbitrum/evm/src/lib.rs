@@ -126,7 +126,8 @@ where
     fn evm_env(&self, header: &<N as NodePrimitives>::BlockHeader) -> EvmEnv<SpecId> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(header.timestamp());
-        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        cfg_env.disable_balance_check = true;
         let block_env = BlockEnv {
             number: U256::from(header.number()),
             beneficiary: header.beneficiary(),
@@ -147,7 +148,8 @@ where
     ) -> Result<EvmEnv<SpecId>, Self::Error> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(attributes.timestamp);
-        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        cfg_env.disable_balance_check = true;
         let next_number = parent.number().saturating_add(1);
         let block_env = BlockEnv {
             number: U256::from(next_number),
@@ -203,7 +205,8 @@ where
     ) -> EvmEnvFor<Self> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(payload.payload.timestamp());
-        let cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
+        cfg_env.disable_balance_check = true;
         let block_env = BlockEnv {
             number: U256::from(payload.payload.block_number()),
             beneficiary: payload.payload.as_v1().fee_recipient,

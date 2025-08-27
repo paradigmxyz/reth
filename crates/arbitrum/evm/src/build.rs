@@ -289,11 +289,7 @@ where
         if let Some(pre_nonce) = used_pre_nonce {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
-        let evm = self.inner.evm_mut();
-
-        let prev_disable_balance = evm.cfg.disable_balance_check;
         let wrapped = WithTxEnv { tx_env, tx };
-        evm.cfg.disable_balance_check = is_internal || is_deposit;
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
 
         if used_pre_nonce.is_some() {
@@ -309,13 +305,7 @@ where
                 }
             }
         }
-        {
-
-            let evm = self.inner.evm_mut();
         let res = result;
-            evm.cfg.disable_balance_check = prev_disable_balance;
-
-        }
         let end_ctx = ArbEndTxContext {
             success: res.is_ok(),
             gas_left: 0,
