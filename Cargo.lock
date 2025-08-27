@@ -9499,6 +9499,7 @@ dependencies = [
  "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
+ "reth-optimism-flashblocks",
  "reth-optimism-forks",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
