@@ -193,10 +193,7 @@ pub fn arb_tx_with_other_fields(
     let mut out = WithOtherFields::new(inner);
 
     match &**tx {
-        ArbTypedTransaction::Internal(_) => {
-            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
-            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
-        }
+        ArbTypedTransaction::Internal(_) => {}
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("requestId".to_string(), s.request_id);
             let _ = out.other.insert_value("refundTo".to_string(), s.fee_refund_addr);
