@@ -1630,4 +1630,40 @@ mod tests {
         let invalid = outcome.as_invalid().unwrap();
         assert!(invalid.is_oversized());
     }
+
+    #[tokio::test]
+    async fn valid_with_disabled_balance_check() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+
+        // Set account with 0 balance
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::ZERO),
+        );
+
+        // Valdiate with balance check enabled
+        let validator = EthTransactionValidatorBuilder::new(provider.clone())
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let expected_cost = *transaction.cost();
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+                err,
+                InvalidPoolTransactionError::Consensus(InvalidTransactionError::InsufficientFunds(ref funds_err))
+                if funds_err.got == alloy_primitives::U256::ZERO && funds_err.expected == expected_cost
+            ));
+        } else {
+            panic!("Expected Invalid outcome with InsufficientFunds error");
+        }
+
+        // Valdiate with balance check disabled
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .disable_balance_check() // This should allow the transaction through despite zero balance
+            .build(InMemoryBlobStore::default());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid()); // Should be valid because balance check is disabled
+    }
 }
