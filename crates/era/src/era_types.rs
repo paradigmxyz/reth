@@ -79,12 +79,12 @@ pub struct SlotIndex {
 
     /// Offsets to data at each slot
     /// 0 indicates no data for that slot
-    pub offsets: Vec<u64>,
+    pub offsets: Vec<i64>,
 }
 
 impl SlotIndex {
     /// Create a new slot index
-    pub const fn new(starting_slot: u64, offsets: Vec<u64>) -> Self {
+    pub const fn new(starting_slot: u64, offsets: Vec<i64>) -> Self {
         Self { starting_slot, offsets }
     }
 
@@ -94,7 +94,7 @@ impl SlotIndex {
     }
 
     /// Get the offset for a specific slot
-    pub fn get_offset(&self, slot_index: usize) -> Option<u64> {
+    pub fn get_offset(&self, slot_index: usize) -> Option<i64> {
         self.offsets.get(slot_index).copied()
     }
 
@@ -105,7 +105,7 @@ impl SlotIndex {
 }
 
 impl IndexEntry for SlotIndex {
-    fn new(starting_number: u64, offsets: Vec<u64>) -> Self {
+    fn new(starting_number: u64, offsets: Vec<i64>) -> Self {
         Self { starting_slot: starting_number, offsets }
     }
 
@@ -117,7 +117,7 @@ impl IndexEntry for SlotIndex {
         self.starting_slot
     }
 
-    fn offsets(&self) -> &[u64] {
+    fn offsets(&self) -> &[i64] {
         &self.offsets
     }
 }
@@ -271,5 +271,19 @@ mod tests {
         assert_eq!(era_group.other_entries[0].data, vec![1, 2, 3, 4]);
         assert_eq!(era_group.other_entries[1].entry_type, [0x02, 0x02]);
         assert_eq!(era_group.other_entries[1].data, vec![5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn test_index_with_negative_offset() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&(-1024i64).to_le_bytes());
+        data.extend_from_slice(&0i64.to_le_bytes());
+        data.extend_from_slice(&2i64.to_le_bytes());
+
+        let entry = Entry::new(SLOT_INDEX, data);
+        let index = SlotIndex::from_entry(&entry).unwrap();
+        let parsed_offset = index.offsets[0];
+        assert_eq!(parsed_offset, -1024);
     }
 }
