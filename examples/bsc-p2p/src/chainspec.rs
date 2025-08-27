@@ -10,7 +10,7 @@ use reth_primitives::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 
 hardfork!(
-    /// The name of a bsc hardfork.
+    /// The name of a BSC hardfork.
     ///
     /// When building a list of hardforks for a chain, it's still expected to mix with [`EthereumHardfork`].
     BscHardfork {
@@ -154,9 +154,9 @@ mod tests {
     fn can_create_forkid() {
         let b = hex::decode("ce18f5d3").unwrap();
         let expected = [b[0], b[1], b[2], b[3]];
-        let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
+        let expected_fork_id = ForkId { hash: ForkHash(expected), next: 0 };
 
         let fork_id = bsc_chain_spec().fork_id(&head());
-        assert_eq!(fork_id, expected_f_id);
+        assert_eq!(fork_id, expected_fork_id);
     }
 }
