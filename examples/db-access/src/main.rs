@@ -7,7 +7,7 @@ use reth_ethereum::{
     primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionsProvider,
+        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
     rpc::eth::primitives::Filter,
     TransactionSigned,
@@ -57,7 +57,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
-    // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
+    // We can convert a header to a sealed header which contains the hash w/o needing to recompute
     // it every time.
     let sealed_header = SealedHeader::seal_slow(header);
 
@@ -126,7 +126,9 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     // Can query a block with its senders, this is useful when you'd want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let _recovered_block = provider
+        .sealed_block_with_senders(number.into(), TransactionVariant::WithHash)?
+        .ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
     let sealed_block = SealedBlock::seal_slow(block.clone());
@@ -178,7 +180,7 @@ fn receipts_provider_example<
         .receipts_by_block(100.into())?
         .ok_or(eyre::eyre!("no receipts found for block"))?;
 
-    // Can check if a address/topic filter is present in a header, if it is we query the block and
+    // Can check if an address/topic filter is present in a header, if it is we query the block and
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();

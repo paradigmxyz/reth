@@ -116,11 +116,8 @@ fn main() -> io::Result<()> {
     }
 
     // Generate SUMMARY.mdx.
-    let summary: String = output
-        .iter()
-        .map(|(cmd, _)| cmd_summary(cmd, 0))
-        .chain(once("\n".to_string()))
-        .collect();
+    let summary: String =
+        output.iter().map(|(cmd, _)| cmd_summary(cmd, 0)).chain(once("\n".to_string())).collect();
 
     println!("Writing SUMMARY.mdx to \"{}\"", out_dir.to_string_lossy());
     write_file(&out_dir.clone().join("SUMMARY.mdx"), &summary)?;
@@ -136,10 +133,8 @@ fn main() -> io::Result<()> {
 
     // Generate root SUMMARY.mdx.
     if args.root_summary {
-        let root_summary: String = output
-            .iter()
-            .map(|(cmd, _)| cmd_summary(cmd, args.root_indentation))
-            .collect();
+        let root_summary: String =
+            output.iter().map(|(cmd, _)| cmd_summary(cmd, args.root_indentation)).collect();
 
         let path = Path::new(args.root_dir.as_str());
         if args.verbose {

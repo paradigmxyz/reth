@@ -113,7 +113,7 @@ impl<T> ExecutionOutcome<T> {
                 )
             }),
             reverts.into_iter().map(|(_, reverts)| {
-                // does not needs to be sorted, it is done when taking reverts.
+                // does not need to be sorted, it is done when taking reverts.
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
@@ -214,7 +214,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
@@ -558,7 +558,7 @@ mod tests {
     use alloy_primitives::{bytes, Address, LogData, B256};
 
     #[test]
-    fn test_initialisation() {
+    fn test_initialization() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
             vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],

@@ -5,7 +5,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::BeaconConsensusEngineHandle;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
@@ -95,7 +95,7 @@ pub struct LocalMiner<T: PayloadTypes, B> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
-    to_engine: BeaconConsensusEngineHandle<T>,
+    to_engine: ConsensusEngineHandle<T>,
     /// The mining mode for the engine
     mode: MiningMode,
     /// The payload builder for the engine
@@ -115,7 +115,7 @@ where
     pub fn new(
         provider: impl BlockReader,
         payload_attributes_builder: B,
-        to_engine: BeaconConsensusEngineHandle<T>,
+        to_engine: ConsensusEngineHandle<T>,
         mode: MiningMode,
         payload_builder: PayloadBuilderHandle<T>,
     ) -> Self {
