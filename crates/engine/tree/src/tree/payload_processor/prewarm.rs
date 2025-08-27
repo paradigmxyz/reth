@@ -31,6 +31,7 @@ use revm::{
 };
 use revm_primitives::{Address, U256};
 use std::{
+    collections::HashSet,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, channel, Receiver, Sender},
@@ -486,18 +487,31 @@ where
                 (coinbase, nonce_delta, balance_delta)
             });
 
+            // Deduplicate traces before caching
+            let original_trace_count = execution_trace.len();
+            let execution_trace = deduplicate_traces(execution_trace);
+            let dedup_trace_count = execution_trace.len();
+            
             tracing::debug!(
                 target: "engine::cache",
                 ?tx_hash,
-                trace_count = execution_trace.len(),
+                original_trace_count,
+                dedup_trace_count,
+                dedup_savings = original_trace_count.saturating_sub(dedup_trace_count),
                 accounts_accessed = execution_trace.iter().filter(|t| matches!(t, AccessRecord::Account { .. })).count(),
                 storage_accessed = execution_trace.iter().filter(|t| matches!(t, AccessRecord::Storage { .. })).count(),
                 has_coinbase_deltas = coinbase_deltas.is_some(),
                 gas_used = res.result.gas_used(),
-                "Caching prewarmed execution result"
+                "Caching prewarmed execution result with deduplication"
             );
 
-            tx_cache.insert(tx_hash, (execution_trace, res, coinbase_deltas));
+            // Create cached transaction with Arc-wrapped data
+            let cached_tx = super::CachedTransaction {
+                traces: execution_trace.into_boxed_slice().into(),
+                result: Arc::new(res),
+                coinbase_deltas,
+            };
+            tx_cache.insert(tx_hash, cached_tx);
         }
 
         // send a message to the main task to flag that we're done
@@ -582,6 +596,29 @@ pub enum AccessRecord {
         /// The value stored at the specified storage slot
         result: U256,
     },
+}
+
+/// Deduplicates access records while preserving the order of first occurrence.
+/// This significantly reduces validation overhead for transactions with loops or repeated checks.
+/// 
+/// Returns a deduplicated vector of access records.
+fn deduplicate_traces(traces: Vec<AccessRecord>) -> Vec<AccessRecord> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::with_capacity(traces.len().min(32)); // Cap initial capacity
+    
+    for record in traces {
+        let key = match &record {
+            AccessRecord::Account { address, .. } => (*address, None),
+            AccessRecord::Storage { address, index, .. } => (*address, Some(*index)),
+        };
+        
+        if seen.insert(key) {
+            unique.push(record); // Keep first occurrence
+        }
+    }
+    
+    unique.shrink_to_fit();
+    unique
 }
 
 /// revm database wrapper that records state access to validate state diffs

@@ -61,11 +61,23 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 /// - U256: balance delta
 pub type CoinbaseDeltas = Option<(Address, u64, U256)>;
 
+/// Cached transaction execution entry with Arc-wrapped data to avoid cloning.
+#[derive(Clone, Debug)]
+pub struct CachedTransaction<Evm> 
+where
+    Evm: ConfigureEvm,
+{
+    /// Shared immutable traces
+    pub traces: Arc<[AccessRecord]>,
+    /// Shared execution result
+    pub result: Arc<ResultAndState<HaltReasonFor<Evm>>>,
+    /// Coinbase deltas (small, can copy)
+    pub coinbase_deltas: CoinbaseDeltas,
+}
+
 /// Cache for transaction execution results and state access records.
-/// Maps transaction hashes to their execution results, access records, and optional created
-/// contract info.
-pub type TxCache<Evm> =
-    Arc<DashMap<TxHash, (Vec<AccessRecord>, ResultAndState<HaltReasonFor<Evm>>, CoinbaseDeltas)>>;
+/// Maps transaction hashes to their cached execution data.
+pub type TxCache<Evm> = Arc<DashMap<TxHash, CachedTransaction<Evm>>>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
