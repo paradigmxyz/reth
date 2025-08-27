@@ -54,20 +54,21 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             withdrawals_root: None,
             logs_bloom,
             timestamp: input.evm_env.block_env.timestamp.saturating_to(),
-            mix_hash: input.parent.mix_hash().unwrap_or_default(),
+            mix_hash: input.parent.mix_hash,
             nonce: alloy_eips::merge::BEACON_NONCE.into(),
             base_fee_per_gas: Some(input.evm_env.block_env.basefee),
             number: input.evm_env.block_env.number.saturating_to(),
             gas_limit: input.evm_env.block_env.gas_limit,
             difficulty: input.evm_env.block_env.difficulty,
             gas_used: *gas_used,
-            extra_data: alloy_primitives::Bytes(input.parent.extra_data().to_vec()),
+            extra_data: alloy_primitives::Bytes::from(input.parent.extra_data.clone()),
             parent_beacon_block_root: input.execution_ctx.parent_beacon_block_root,
             blob_gas_used: None,
             excess_blob_gas: None,
             requests_hash: None,
         };
         header.difficulty = U256::from(1u64);
+        header.beneficiary = alloy_primitives::address!("a4b000000000000000000073657175656e636572");
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
         if let Some(info) = derive_arb_header_info_from_state(&input) {
