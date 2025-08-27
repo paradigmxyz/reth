@@ -688,11 +688,7 @@ where
                         submission_fee_refund: max_submission_fee,
                     },
                 );
-                let mut retry_enc = retry_env.encode_typed();
-                let mut rs = retry_enc.as_slice();
-                let retry_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut rs)
-                    .map_err(|_| eyre::eyre!("decode retry failed"))?;
-                vec![submit_tx, retry_tx]
+                vec![submit_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => {
@@ -706,7 +702,7 @@ where
 
                 let batch_data_gas = match batch_gas_cost {
                     Some(g) => g.saturating_add(extra_gas),
-                    None => return Err(eyre::eyre!("cannot compute batch gas cost")),
+                    None => extra_gas,
                 };
 
                 let data = encode_batch_posting_report_data(
