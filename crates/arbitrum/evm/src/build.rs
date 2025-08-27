@@ -141,7 +141,7 @@ where
             use reth_arbitrum_primitives::ArbTxType::*;
             match tx.tx().tx_type() {
                 Legacy => block_basefee,
-                Deposit | Internal => alloy_primitives::U256::ZERO,
+                Deposit | Internal => block_basefee,
                 _ => alloy_primitives::U256::from(tx.tx().max_fee_per_gas()),
             }
         };
@@ -229,56 +229,6 @@ where
                 "pre-crediting sender for upfront funds"
             );
 
-            use alloy_primitives::map::HashMap;
-            use alloy_evm::block::state_changes::balance_increment_state;
-            use revm::state::AccountInfo;
-            use alloy_consensus::constants::KECCAK_EMPTY;
-            let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-
-            let _ = state.load_cache_account(sender);
-            let mut increments = HashMap::default();
-            increments.insert(sender, needed_fee.to::<u128>());
-            let _ = balance_increment_state(&increments, state);
-
-            if let Some(entry) = state.bundle_state.state.get_mut(&sender) {
-                if let Some(info) = entry.info.as_mut() {
-                    info.balance = info.balance.saturating_add(needed_fee);
-                    if info.nonce == 0 {
-                        info.nonce = current_nonce;
-                    }
-                } else {
-                    entry.info = Some(revm::state::AccountInfo {
-                        balance: alloy_primitives::U256::from(needed_fee),
-                        nonce: current_nonce,
-                        code_hash: alloy_consensus::constants::KECCAK_EMPTY,
-                        code: None,
-                    });
-                }
-            } else {
-                state.bundle_state.state.insert(
-                    sender,
-                    revm::database::BundleAccount {
-                        info: Some(revm::state::AccountInfo {
-                            balance: alloy_primitives::U256::from(needed_fee),
-                            nonce: current_nonce,
-                            code_hash: alloy_consensus::constants::KECCAK_EMPTY,
-                            code: None,
-                        }),
-                        storage: Default::default(),
-                        original_info: Default::default(),
-                        status: Default::default(),
-                    },
-                );
-            }
-
-            let overlay_bal = state
-                .bundle_state
-                .state
-                .get(&sender)
-                .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
-                .unwrap_or_default();
-            tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
         }
 
 
@@ -290,6 +240,7 @@ where
         if let Some(pre_nonce) = used_pre_nonce {
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
+
         let wrapped = WithTxEnv { tx_env, tx };
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
 
@@ -305,11 +256,10 @@ where
                     }
                 }
             }
-
         }
-        let res = result;
+
         let end_ctx = ArbEndTxContext {
-            success: res.is_ok(),
+            success: result.is_ok(),
             gas_left: 0,
             gas_limit,
             basefee: block_basefee,
@@ -323,7 +273,7 @@ where
             self.tx_state = state;
         }
 
-        res
+        result
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
