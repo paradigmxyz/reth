@@ -82,7 +82,7 @@ type SidecarsFuture =
 /// client.
 ///
 /// First checks if the blob sidecar for a given EIP4844 is stored locally, if not attempts to
-/// retrieve it from the CL Layer
+/// retrieve it from the CL
 #[must_use = "streams do nothing unless polled"]
 pub struct MinedSidecarStream<St, P> {
     pub events: St,
@@ -139,7 +139,7 @@ where
             }
         };
 
-        // if any blob is missing we must instead query the consensus layer.
+        // if any blob is missing we must instead query the CL.
         if all_blobs_available {
             self.queued_actions.extend(actions_to_queue);
         } else {
