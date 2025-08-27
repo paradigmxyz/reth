@@ -1,9 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use crate::tree::payload_processor::{
-    executor::WorkloadExecutor,
-    multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
-};
+use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
@@ -27,9 +24,6 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
-    /// Executor used to spawn subtasks.
-    #[expect(unused)] // TODO use this for spawning trie tasks
-    pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
     /// `SparseStateTrie` used for computing the state root.
@@ -49,19 +43,12 @@ where
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
-        executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
         sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
-        Self {
-            executor,
-            updates,
-            metrics,
-            trie: sparse_state_trie.into_inner(),
-            blinded_provider_factory,
-        }
+        Self { updates, metrics, trie: sparse_state_trie.into_inner(), blinded_provider_factory }
     }
 
     /// Runs the sparse trie task to completion.

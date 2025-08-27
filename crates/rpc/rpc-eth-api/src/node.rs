@@ -1,7 +1,7 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
@@ -31,7 +31,9 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
             Header = HeaderTy<Self::Primitives>,
             Transaction = TxTy<Self::Primitives>,
         > + ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>> + EthereumHardforks,
+            ChainSpec: EthChainSpec<Header = HeaderTy<Self::Primitives>>
+                           + Hardforks
+                           + EthereumHardforks,
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
@@ -64,7 +66,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
 impl<T> RpcNodeCore for T
 where
     T: FullNodeComponents<
-        Provider: StorageReader + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Provider: StorageReader + ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>,
     >,
 {
     type Primitives = PrimitivesTy<T::Types>;
@@ -125,7 +127,9 @@ where
             Header = HeaderTy<Evm::Primitives>,
             Transaction = TxTy<Evm::Primitives>,
         > + ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>> + EthereumHardforks,
+            ChainSpec: EthChainSpec<Header = HeaderTy<Evm::Primitives>>
+                           + Hardforks
+                           + EthereumHardforks,
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
