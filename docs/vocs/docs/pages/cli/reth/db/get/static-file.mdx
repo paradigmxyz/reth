@@ -14,7 +14,6 @@ Arguments:
           - headers:      Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
           - transactions: Static File segment responsible for the `Transactions` table
           - receipts:     Static File segment responsible for the `Receipts` table
-          - block-meta:   Static File segment responsible for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals` tables
 
   <KEY>
           The key to get content for
@@ -71,6 +70,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

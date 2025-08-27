@@ -267,7 +267,7 @@ impl<'a, T> Permit<'a, T> {
 /// A wrapper type around [Receiver](mpsc::Receiver) that updates metrics on receive.
 #[derive(Debug)]
 pub struct MeteredReceiver<T> {
-    /// The [Sender](mpsc::Sender) that this wraps around
+    /// The [Receiver](mpsc::Receiver) that this wraps around
     receiver: mpsc::Receiver<T>,
     /// Holds metrics for this type
     metrics: MeteredReceiverMetrics,

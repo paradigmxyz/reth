@@ -25,8 +25,8 @@ impl reth_codecs::Compact for StorageTrieEntry {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 33);
-        let (node, buf) = BranchNodeCompact::from_compact(buf, len - 33);
+        let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 65);
+        let (node, buf) = BranchNodeCompact::from_compact(buf, len - 65);
         let this = Self { nibbles, node };
         (this, buf)
     }

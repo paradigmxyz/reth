@@ -108,12 +108,14 @@ node = [
     "provider",
     "consensus",
     "evm",
+    "network",
     "node-api",
     "dep:reth-optimism-node",
     "dep:reth-node-builder",
     "dep:reth-engine-local",
     "rpc",
     "trie-db",
+    "pool",
 ]
 rpc = [
     "tasks",

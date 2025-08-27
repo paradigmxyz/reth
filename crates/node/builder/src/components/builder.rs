@@ -493,6 +493,13 @@ impl<Tx> Default for NoopTransactionPoolBuilder<Tx> {
 #[derive(Debug, Clone)]
 pub struct NoopNetworkBuilder<Net = EthNetworkPrimitives>(PhantomData<Net>);
 
+impl NoopNetworkBuilder {
+    /// Returns the instance with ethereum types.
+    pub fn eth() -> Self {
+        Self::default()
+    }
+}
+
 impl<N, Pool, Net> NetworkBuilder<N, Pool> for NoopNetworkBuilder<Net>
 where
     N: FullNodeTypes,
