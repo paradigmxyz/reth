@@ -681,6 +681,30 @@ where
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
             11 => {
+                Vec::new()
+            }
+            12 => {
+                let mut cur = &l2_owned[..];
+                let to = read_address20(&mut cur)?;
+                let balance = read_u256_be32(&mut cur)?;
+                let req = request_id.ok_or_else(|| {
+                    eyre::eyre!("cannot issue deposit tx without L1 request id")
+                })?;
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Deposit(
+                    arb_alloy_consensus::tx::ArbDepositTx {
+                        chain_id: chain_id_u256,
+                        l1_request_id: req,
+                        from: poster,
+                        to,
+                        value: balance,
+                    },
+                );
+                let mut enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode deposit failed"))?]
+            }
+            13 => {
                 let mut cur = &l2_owned[..];
                 let batch_timestamp = read_u256_be32(&mut cur)?;
                 let batch_poster = read_address20(&mut cur)?;
@@ -712,30 +736,6 @@ where
                 let mut s = enc.as_slice();
                 vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
-            }
-            12 => {
-                let mut cur = &l2_owned[..];
-                let to = read_address20(&mut cur)?;
-                let balance = read_u256_be32(&mut cur)?;
-                let req = request_id.ok_or_else(|| {
-                    eyre::eyre!("cannot issue deposit tx without L1 request id")
-                })?;
-                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Deposit(
-                    arb_alloy_consensus::tx::ArbDepositTx {
-                        chain_id: chain_id_u256,
-                        l1_request_id: req,
-                        from: poster,
-                        to,
-                        value: balance,
-                    },
-                );
-                let mut enc = env.encode_typed();
-                let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode deposit failed"))?]
-            }
-            13 => {
-                Vec::new()
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
