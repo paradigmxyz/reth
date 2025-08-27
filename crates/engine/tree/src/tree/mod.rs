@@ -2165,8 +2165,7 @@ where
         self.metrics
             .engine
             .block_insert_total_duration
-            .record(elapsed.as_secs_f64());
-
+            .record(block_insert_start.elapsed().as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
