@@ -38,6 +38,18 @@ impl CliRunner {
         Self { executor: RuntimeOrHandle::Runtime(tokio_runtime) }
     }
 
+    /// Create a new [`CliRunner`] from the current tokio runtime handle.
+    /// Panics if not called from a tokio runtime context.
+    pub fn current() -> Self {
+        Self { executor: RuntimeOrHandle::Handle(Handle::current()) }
+    }
+
+    /// Try to create a new [`CliRunner`] from the current tokio runtime handle.
+    /// It does not panic if not called from a tokio runtime context.
+    pub fn try_current() -> Option<Self> {
+        Handle::try_current().ok().map(|handle| Self { executor: RuntimeOrHandle::Handle(handle) })
+    }
+
     /// Create a new [`CliRunner`] from a tokio [`Handle`].
     ///
     /// # Warning
