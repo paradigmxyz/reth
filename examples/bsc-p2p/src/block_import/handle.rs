@@ -13,11 +13,11 @@ use super::service::{BlockMsg, ImportEvent, IncomingBlock, Outcome};
 /// This handle provides a bidirectional communication channel with the
 /// [`super::service::ImportService`]:
 /// - Blocks can be sent to the service for import via [`send_block`](ImportHandle::send_block)
-/// - Import outcomes can be received via [`poll_outcome`](ImportHandle::poll_outcome)`
+/// - Import outcomes can be received via [`poll_outcome`](ImportHandle::poll_outcome)
 pub struct ImportHandle<T: PayloadTypes> {
     /// Send the new block to the service
     to_import: UnboundedSender<IncomingBlock<T>>,
-    /// Receive the event(Announcement/Outcome) of the import
+    /// Receive the event (Announcement/Outcome) of the import
     import_outcome: UnboundedReceiver<ImportEvent<T>>,
 }
 
