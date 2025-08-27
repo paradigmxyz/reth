@@ -218,6 +218,9 @@ where
     ) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
         self.inner.components_mut()
     }
+pub trait ArbEvmExt {
+    fn cfg_mut(&mut self) -> &mut revm::context::CfgEnv<revm::primitives::hardfork::SpecId>;
+}
 }
 #[derive(Default, Debug, Clone, Copy)]
 pub struct ArbEvmFactory(pub alloy_evm::EthEvmFactory);
@@ -253,5 +256,14 @@ impl EvmFactory for ArbEvmFactory {
         inspector: I,
     ) -> Self::Evm<DB, I> {
         ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
+    }
+}
+impl<DB, I> ArbEvmExt for ArbEvm<DB, I>
+where
+    DB: alloy_evm::Database + core::fmt::Debug,
+    I: revm::inspector::Inspector<EthEvmContext<DB>>,
+{
+    fn cfg_mut(&mut self) -> &mut revm::context::CfgEnv<revm::primitives::hardfork::SpecId> {
+        &mut self.inner.env.cfg
     }
 }

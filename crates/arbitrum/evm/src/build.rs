@@ -21,6 +21,7 @@ use reth_evm::{OnStateHook, TransactionEnv};
 use alloy_evm::Database;
 use revm::Database as RevmDatabase;
 use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx, BlockExecutor as AlloyBlockExecutor};
+use crate::arb_evm::ArbEvmExt;
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
 use alloy_evm::ToTxEnv;
 use revm::context::result::ExecutionResult;
@@ -91,7 +92,7 @@ where
     RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
     D: RevmDatabase + core::fmt::Debug + 'a,
     <D as RevmDatabase>::Error: Send + Sync + 'static,
-    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>>,
+    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>> + crate::arb_evm::ArbEvmExt,
     E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
     for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
     <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
@@ -241,8 +242,19 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
 
-        let wrapped = WithTxEnv { tx_env, tx };
-        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let result = {
+            let evm = self.inner.evm_mut();
+            let prev_disable = evm.cfg_mut().disable_balance_check;
+            evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
+
+            let wrapped = WithTxEnv { tx_env, tx };
+            let res = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+
+            let evm = self.inner.evm_mut();
+            evm.cfg_mut().disable_balance_check = prev_disable;
+
+            res
+        };
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
