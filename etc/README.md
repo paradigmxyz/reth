@@ -45,7 +45,7 @@ To set up a new metric in Reth and its Grafana dashboard (this assumes running R
 1. Save and arrange:
 
     - Click `Apply` to save the panel
-    - Drag the panel to desired position on the dashboard
+    - Drag the panel to the desired position on the dashboard
 
 1. Export the dashboard:
 
@@ -70,7 +70,7 @@ If you are running Reth and Grafana outside of docker, and wish to import new Gr
 1. Drag the JSON dashboard file to import it
 
 1. If updating an existing dashboard, you will need to change the name and UID of the imported dashboard in order to
-   avoid conflict
+   avoid a conflict
 
 1. Delete the old dashboard
 
