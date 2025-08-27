@@ -30,7 +30,7 @@ reth-ethereum-forks.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "optional-balance-check"]
 std = [
     "reth-primitives-traits/std",
     "alloy-primitives/std",

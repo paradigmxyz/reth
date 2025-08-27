@@ -212,7 +212,11 @@ where
             if (is_internal || is_deposit) && gas_limit == 0 {
                 effective_gas_limit = 1_000_000;
             }
-            let effective_gas_price = upfront_gas_price;
+            let effective_gas_price = if is_internal || is_deposit {
+                block_basefee
+            } else {
+                upfront_gas_price
+            };
             let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
                 target: "arb-reth::executor",
@@ -238,7 +242,12 @@ where
             let _ = balance_increment_state(&increments, state);
 
             if let Some(entry) = state.bundle_state.state.get_mut(&sender) {
-                if entry.info.is_none() {
+                if let Some(info) = entry.info.as_mut() {
+                    info.balance = info.balance.saturating_add(needed_fee);
+                    if info.nonce == 0 {
+                        info.nonce = current_nonce;
+                    }
+                } else {
                     entry.info = Some(revm::state::AccountInfo {
                         balance: alloy_primitives::U256::from(needed_fee),
                         nonce: current_nonce,
@@ -246,6 +255,21 @@ where
                         code: None,
                     });
                 }
+            } else {
+                state.bundle_state.state.insert(
+                    sender,
+                    revm::database::BundleAccount {
+                        info: Some(revm::state::AccountInfo {
+                            balance: alloy_primitives::U256::from(needed_fee),
+                            nonce: current_nonce,
+                            code_hash: alloy_consensus::constants::KECCAK_EMPTY,
+                            code: None,
+                        }),
+                        storage: Default::default(),
+                        original_info: Default::default(),
+                        status: Default::default(),
+                    },
+                );
             }
 
             let overlay_bal = state
