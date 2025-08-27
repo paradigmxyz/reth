@@ -161,7 +161,7 @@ where
     ) -> Result<Self, reth_payload_primitives::PayloadBuilderError> {
         let attrs: reth_payload_builder::EthPayloadBuilderAttributes = attrs.clone().into();
         let mut ts = attrs.timestamp;
-        let min_ts = parent.timestamp().saturating_add(1);
+        let min_ts = parent.timestamp();
         if ts < min_ts {
             ts = min_ts;
         }

@@ -335,6 +335,8 @@ where
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
+        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, "follower: setting suggested_fee_recipient to poster");
+
         next_env.suggested_fee_recipient = poster;
 
         let mut builder = evm_config
@@ -762,6 +764,8 @@ where
             txs.insert(0, start_tx);
         }
 
+        reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
+
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable};
         for tx in &txs {
@@ -787,9 +791,16 @@ where
             .finish(&state_provider)
             .map_err(|e| eyre::eyre!("finish error: {e}"))?;
 
-        let sealed_block = outcome.block.sealed_block().clone();
+        let mut sealed_block = outcome.block.sealed_block().clone();
+
+        {
+            let hdr_mut = sealed_block.header_mut();
+            hdr_mut.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
+        }
 
         let header = sealed_block.header();
+        reth_tracing::tracing::info!(target: "arb-reth::follower", header_beneficiary = %header.beneficiary, header_nonce = ?header.nonce, "follower: sealed header fields");
+
         reth_tracing::tracing::info!(target: "arb-reth::follower", assembled_gas_limit = header.gas_limit, "follower: assembled block gas limit before import");
 
         let new_block_hash = sealed_block.hash();
