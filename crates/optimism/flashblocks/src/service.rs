@@ -171,6 +171,12 @@ impl<
 
     /// Compares tip from the last notification of [`CanonStateSubscriptions`] with last computed
     /// pending block and verifies that the tip is the parent of the pending block.
+    ///
+    /// Returns:
+    /// * `Ok(Some(true))` if tip == parent
+    /// * `Ok(Some(false))` if tip != parent
+    /// * `Ok(None)` if there weren't any new notifications or the pending block is not built
+    /// * `Err` if the cannon state receiver returned an error
     fn verify_pending_block_integrity(
         &mut self,
         cx: &mut Context<'_>,
