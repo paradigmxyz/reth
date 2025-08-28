@@ -47,7 +47,10 @@ where
                 Recovered::new_unchecked(op_tx, *tx.signer()),
                 f,
             ),
-            CustomTransaction::Payment(..) => todo!(),
+            CustomTransaction::Payment(payment_tx) => self.inner.execute_transaction_with_commit_condition(
+                Recovered::new_unchecked(payment_tx.tx(), *tx.signer()),
+                f,
+            ),
         }
     }
 
