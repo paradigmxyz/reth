@@ -38,9 +38,12 @@ pub struct OpDAConfig {
 impl OpDAConfig {
     /// Creates a new Data Availability configuration with the given maximum sizes.
     pub fn new(max_da_tx_size: u64, max_da_block_size: u64) -> Self {
-        let this = Self::default();
-        this.set_max_da_size(max_da_tx_size, max_da_block_size);
-        this
+        Self {
+            inner: Arc::new(OpDAConfigInner {
+                max_da_tx_size: AtomicU64::new(max_da_tx_size),
+                max_da_block_size: AtomicU64::new(max_da_block_size),
+            }),
+        }
     }
 
     /// Returns whether the configuration is empty.
