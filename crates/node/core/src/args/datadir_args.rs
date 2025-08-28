@@ -16,7 +16,7 @@ pub struct DatadirArgs {
     /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
     pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The absolute path to store static files in.
