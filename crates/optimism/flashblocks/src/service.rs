@@ -178,10 +178,13 @@ impl<
         let this = self.get_mut();
         loop {
             match this.rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(flashblock))) => this.add_flash_block(flashblock),
+                Poll::Ready(Some(Ok(flashblock))) => {
+                    this.add_flash_block(flashblock);
+                    return Poll::Ready(Some(this.execute()));
+                }
                 Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
                 Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Ready(Some(this.execute())),
+                Poll::Pending => return Poll::Pending,
             }
         }
     }
