@@ -195,6 +195,8 @@ pub fn arb_tx_with_other_fields(
     match &**tx {
         ArbTypedTransaction::Internal(_) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x6a]));
+            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
