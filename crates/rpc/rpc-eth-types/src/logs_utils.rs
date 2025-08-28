@@ -171,6 +171,9 @@ pub fn get_filter_block_range(
     if let Some(filter_to_block) = to_block {
         to_block_number = info.best_number.min(filter_to_block);
     }
+    if from_block_number > to_block_number {
+        return (0, 0);
+    }
 
     (from_block_number, to_block_number)
 }
