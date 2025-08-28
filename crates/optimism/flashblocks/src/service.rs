@@ -217,19 +217,29 @@ impl<
         }
 
         // Execute block if there are flashblocks but no last pending block
-        if this.current.is_none() && !this.blocks.is_empty() {
+        let changed = if this.current.is_none() && !this.blocks.is_empty() {
             match this.execute() {
                 Ok(block) => this.current = Some(block),
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
-        }
+
+            true
+        } else {
+            false
+        };
 
         // Verify that pending block is following up to the canonical state
         match this.verify_pending_block_integrity(cx) {
             // Integrity check failed: erase last block
             Ok(Some(false)) => Poll::Ready(Some(Ok(None))),
             // Integrity check is OK or skipped: output last block
-            Ok(Some(true) | None) => Poll::Ready(Some(Ok(this.current.clone()))),
+            Ok(Some(true) | None) => {
+                if changed {
+                    Poll::Ready(Some(Ok(this.current.clone())))
+                } else {
+                    Poll::Pending
+                }
+            }
             // Cannot check integrity: error occurred
             Err(err) => Poll::Ready(Some(Err(err))),
         }
