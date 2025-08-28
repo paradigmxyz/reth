@@ -256,7 +256,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: Self::NextBlockEnvCtx,
     ) -> ExecutionCtxFor<'_, Self>;
 
-    /// Returns a [`TxEnv`] from a transaction and [`Address`].
+    /// Returns a [`TxEnv`] derived from the provided transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
