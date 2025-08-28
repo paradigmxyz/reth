@@ -500,12 +500,20 @@ where
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
+                if let Some(f) = from {
+                    if f > info.best_number {
+                        return Ok(Vec::new());
+                    }
+                }
+
+                if let (Some(f), Some(t)) = (from, to) {
+                    if f > t {
+                        return Ok(Vec::new());
+                    }
+                }
+
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                // if function signaled empty range:
-                if from_block_number == 0 && to_block_number == 0 {
-                    return Ok(Vec::new()); // returns empty log set, not an error
-                }
 
                 self.get_logs_in_block_range(filter, from_block_number, to_block_number, limits)
                     .await
