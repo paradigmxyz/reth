@@ -32,7 +32,7 @@ use tracing::{debug, trace};
 /// Based on empirical performance analysis across 200 blocks, the first 11 transactions
 /// in each block consistently fail to benefit from prewarming due to timing conflicts
 /// with the main execution thread.
-const SKIP_PREWARM_TRANSACTIONS: usize = 8;
+const SKIP_PREWARM_TRANSACTIONS: usize = 18;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
