@@ -338,6 +338,7 @@ where
         reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, "follower: setting suggested_fee_recipient to poster");
 
         next_env.suggested_fee_recipient = poster;
+        reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
@@ -622,9 +623,7 @@ where
                 let callvalue_refund_addr = read_address_from_256(&mut cur)?;
                 let gas_limit = read_u256_be32(&mut cur)?;
                 let gas = u256_to_u64_checked(&gas_limit, "retryable gas limit")?;
-                let max_fee_per_gas = read_u256_be32(&mut cur)?;
-                let min_bf = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
-                let max_fee_per_gas = if max_fee_per_gas < min_bf { min_bf } else { max_fee_per_gas };
+                let max_fee_per_gas_submit = read_u256_be32(&mut cur)?;
                 let data_len = read_u256_be32(&mut cur)?;
                 let data_len_u64 = u256_to_u64_checked(&data_len, "retryable data length")?;
                 if data_len_u64 as usize > cur.len() {
@@ -641,7 +640,7 @@ where
                         from: poster,
                         l1_base_fee,
                         deposit_value,
-                        gas_fee_cap: max_fee_per_gas,
+                        gas_fee_cap: max_fee_per_gas_submit,
                         gas,
                         retry_to: retry_to_opt,
                         retry_value: callvalue,
@@ -657,19 +656,24 @@ where
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
                 let ticket_id = *submit_tx.tx_hash();
 
+                let retry_gas_price = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
+                let max_refund = retry_gas_price
+                    .saturating_mul(alloy_primitives::U256::from(gas))
+                    .saturating_add(max_submission_fee);
+
                 let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
                     arb_alloy_consensus::tx::ArbRetryTx {
                         chain_id: chain_id_u256,
                         nonce: 0,
                         from: poster,
-                        gas_fee_cap: max_fee_per_gas,
+                        gas_fee_cap: retry_gas_price,
                         gas,
                         to: retry_to_opt,
                         value: callvalue,
                         data: alloy_primitives::Bytes::from(retry_data),
                         ticket_id,
                         refund_to: fee_refund_addr,
-                        max_refund: max_fee_per_gas.saturating_mul(alloy_primitives::U256::from(gas)),
+                        max_refund,
                         submission_fee_refund: max_submission_fee,
                     },
                 );
