@@ -159,7 +159,11 @@ pub fn get_filter_block_range(
     // the start block if the converted value is larger than the start block, since `from_block`
     // can't be a future block: `min(head, from_block)`
     if let Some(filter_from_block) = from_block {
-        from_block_number = start_block.min(filter_from_block)
+        if filter_from_block > start_block {
+            return (0, 0);
+        }
+
+        from_block_number = filter_from_block;
     }
 
     // upper end of the range is the converted `to_block` argument, restricted by the best block:
