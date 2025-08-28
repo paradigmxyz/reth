@@ -774,14 +774,17 @@ impl<'a> Future for ProtocolsPoller<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::{
-        connect_passthrough, eth_handshake, eth_hello,
-        proto::{test_hello, TestProtoMessage},
-    }, UnauthedEthStream, UnauthedP2PStream};
+    use crate::{
+        handshake::EthHandshake,
+        test_utils::{
+            connect_passthrough, eth_handshake, eth_hello,
+            proto::{test_hello, TestProtoMessage},
+        },
+        UnauthedEthStream, UnauthedP2PStream,
+    };
     use reth_eth_wire_types::EthNetworkPrimitives;
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
-    use crate::handshake::EthHandshake;
 
     #[tokio::test]
     async fn eth_satellite() {
