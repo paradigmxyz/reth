@@ -155,7 +155,7 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-
+        
         // Count what we're saving
         let accounts_in_cache = state.state.len();
         let storage_slots_in_cache: usize =
@@ -493,8 +493,12 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) accounts_loaded: Counter,
     /// Number of storage slots loaded by prewarm (populated into cache)
     pub(crate) storage_loaded: Counter,
-    /// Average execution time per transaction WITHOUT prewarm cache (baseline in ms)
-    pub(crate) baseline_exec_time_ms: Gauge,
-    /// Average execution time per transaction WITH prewarm cache (ms)
-    pub(crate) cached_exec_time_ms: Gauge,
+    
+    // Cache effectiveness metrics (these track how effective the prewarm was)
+    /// Total cache hits from prewarmed state during main execution
+    pub(crate) prewarm_cache_hits: Counter,
+    /// Total cache misses despite prewarming during main execution
+    pub(crate) prewarm_cache_misses: Counter,
+    /// Time spent on I/O that was avoided due to prewarm cache hits (microseconds)
+    pub(crate) prewarm_io_time_saved_us: Histogram,
 }

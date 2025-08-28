@@ -35,14 +35,6 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
-
-    // Prewarm cache effectiveness metrics
-    /// Total cache hits from prewarmed state
-    pub prewarm_cache_hits: Counter,
-    /// Total cache misses despite prewarming  
-    pub prewarm_cache_misses: Counter,
-    /// Time spent on I/O that was avoided due to prewarm cache hits (microseconds)
-    pub prewarm_io_time_saved_us: Histogram,
 }
 
 impl ExecutorMetrics {
