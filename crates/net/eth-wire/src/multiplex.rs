@@ -169,10 +169,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         // complete
         loop {
             tokio::select! {
-                // Poll all subprotocols for new messages
-                msg = ProtocolsPoller::new(&mut self.inner.protocols) => {
-                    self.inner.conn.send(msg.map_err(Into::into)?).await.map_err(Into::into)?;
-                }
+                biased;
                 Some(Ok(msg)) = self.inner.conn.next() => {
                     // Ensure the message belongs to the primary protocol
                     let Some(offset) = msg.first().copied()
@@ -193,6 +190,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 }
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
+                }
+                // Poll all subprotocols for new messages
+                msg = ProtocolsPoller::new(&mut self.inner.protocols) => {
+                     self.inner.conn.send(msg.map_err(Into::into)?).await.map_err(Into::into)?;
                 }
                 res = &mut f => {
                     let (st, extra) = res?;
@@ -747,20 +748,18 @@ impl<'a> Future for ProtocolsPoller<'a> {
         // Process protocols in reverse order, like the existing pattern
         for idx in (0..self.protocols.len()).rev() {
             let mut proto = self.protocols.swap_remove(idx);
-
-            // Poll once; if not ready, put back and continue
             match proto.poll_next_unpin(cx) {
-                Poll::Ready(Some(Err(err))) => return Poll::Ready(Err(P2PStreamError::from(err))),
+                Poll::Ready(Some(Err(err))) => {
+                    self.protocols.push(proto);
+                    return Poll::Ready(Err(P2PStreamError::from(err)))
+                }
                 Poll::Ready(Some(Ok(msg))) => {
                     // Got a message, put protocol back and return the message
                     self.protocols.push(proto);
                     return Poll::Ready(Ok(msg));
                 }
-                Poll::Ready(None) => {
-                    // Protocol ended, don't put it back
-                }
-                Poll::Pending => {
-                    // No more ready messages, put protocol back
+                _ => {
+                    // push it back because we still want to complete the handshake first
                     self.protocols.push(proto);
                 }
             }
