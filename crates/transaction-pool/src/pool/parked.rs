@@ -245,6 +245,14 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id.get(id)
     }
 
+    /// Clears all transactions from the pool.
+    pub(crate) fn clear(&mut self) {
+        self.by_id.clear();
+        self.last_sender_submission.clear();
+        self.sender_transaction_count.clear();
+        self.size_of = Default::default();
+    }
+    
     /// Asserts that all subpool invariants
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {

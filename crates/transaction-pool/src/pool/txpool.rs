@@ -1148,6 +1148,24 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub(crate) fn is_empty(&self) -> bool {
         self.all_transactions.is_empty()
     }
+    
+    /// Clears all transactions from the pool
+    pub(crate) fn clear_all(&mut self) {
+        // Clear all sub-pools
+        self.pending_pool.clear();
+        self.basefee_pool.clear();
+        self.queued_pool.clear();
+        self.blob_pool.clear();
+        
+        // Clear all transactions
+        self.all_transactions.clear();
+        
+        // Clear sender info
+        self.sender_info.clear();
+        
+        // Update metrics
+        self.update_size_metrics();
+    }
 
     /// Asserts all invariants of the  pool's:
     ///
@@ -2003,6 +2021,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
         self.txs.is_empty()
+    }
+    
+    /// Clears all transactions from the pool
+    pub(crate) fn clear(&mut self) {
+        self.txs.clear();
+        self.by_hash.clear();
+        self.tx_counter.clear();
+        self.auths.clear();
     }
 
     /// Asserts that the bijection between `by_hash` and `txs` is valid.

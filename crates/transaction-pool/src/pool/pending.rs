@@ -548,6 +548,14 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self.independent_transactions
     }
 
+    /// Clears all transactions from the pool.
+    pub(crate) fn clear(&mut self) {
+        self.by_id.clear();
+        self.independent_transactions.clear();
+        self.highest_nonces.clear();
+        self.size_of = Default::default();
+    }
+    
     /// Asserts that the bijection between `by_id` and `all` is valid.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {

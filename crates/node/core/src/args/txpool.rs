@@ -136,6 +136,11 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = 1)]
     pub max_batch_size: usize,
+
+    /// Clear mempool after each canonical state change (for sequenced mode).
+    /// This ensures no transactions remain in the pool after block production.
+    #[arg(long = "txpool.clear-on-canonical-state-change")]
+    pub clear_on_canonical_state_change: bool,
 }
 
 impl TxPoolArgs {
@@ -188,6 +193,7 @@ impl Default for TxPoolArgs {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
+            clear_on_canonical_state_change: false,
         }
     }
 }
@@ -230,6 +236,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
+            clear_on_canonical_state_change: self.clear_on_canonical_state_change,
         }
     }
 

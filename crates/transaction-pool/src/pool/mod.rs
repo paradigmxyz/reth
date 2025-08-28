@@ -397,7 +397,7 @@ where
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 
-        // update the pool
+        // Always process the canonical state change first (removes mined transactions, updates the pool)
         let outcome = self.pool.write().on_canonical_state_change(
             block_info,
             mined_transactions,
@@ -405,8 +405,19 @@ where
             update_kind,
         );
 
-        // This will discard outdated transactions based on the account's nonce
-        self.delete_discarded_blobs(outcome.discarded.iter());
+        // Check if we should clear the pool after canonical state change (sequenced mode)
+        if self.config.clear_on_canonical_state_change {
+            // Clear all remaining transactions from the pool
+            self.pool.write().clear_all();
+
+            trace!(target: "txpool", "cleared pool after canonical state change (sequenced mode)");
+            
+            // Note: blob store doesn't have a clear method, but clearing the pool
+            // effectively removes all transaction references
+        } else {
+            // Normal operation: discard outdated blobs only when not clearing
+            self.delete_discarded_blobs(outcome.discarded.iter());
+        }
 
         // notify listeners about updates
         self.notify_on_new_state(outcome);

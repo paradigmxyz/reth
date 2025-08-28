@@ -65,6 +65,8 @@ pub struct PoolConfig {
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
     pub max_queued_lifetime: Duration,
+    /// Clear mempool after canonical state change (for sequenced mode)
+    pub clear_on_canonical_state_change: bool,
 }
 
 impl PoolConfig {
@@ -112,6 +114,7 @@ impl Default for PoolConfig {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            clear_on_canonical_state_change: false,
         }
     }
 }
