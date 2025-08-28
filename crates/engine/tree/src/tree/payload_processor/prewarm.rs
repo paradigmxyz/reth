@@ -10,7 +10,7 @@ use crate::tree::{
 };
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
@@ -98,12 +98,16 @@ where
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
+            let mut skipped = 0;
+            let mut prewarmed = 0;
+
             while let Ok(executable) = pending.recv() {
                 // Skip the first transactions to avoid cache contention with main thread.
                 // These transactions are executed by the main thread before prewarm threads
                 // can complete their work, resulting in wasted computational resources.
                 if executing < SKIP_PREWARM_TRANSACTIONS {
                     executing += 1;
+                    skipped += 1;
                     continue;
                 }
 
@@ -125,6 +129,7 @@ where
                 let _ = handles[task_idx].send(executable);
 
                 executing += 1;
+                prewarmed += 1;
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
@@ -132,8 +137,11 @@ where
             drop(handles);
             while done_rx.recv().is_ok() {}
 
-            let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
+            let _ = actions_tx.send(PrewarmTaskEvent::FinishedTxExecution {
+                executed_transactions: executing,
+                skipped_transactions: skipped,
+                prewarmed_transactions: prewarmed,
+            });
         });
     }
 
@@ -147,6 +155,13 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
+        
+        // Count what we're saving
+        let accounts_in_cache = state.state.len();
+        let storage_slots_in_cache: usize = state.state.values()
+            .map(|account| account.storage.len())
+            .sum();
+        
         let cache = SavedCache::new(
             self.ctx.env.hash,
             self.ctx.cache.clone(),
@@ -158,7 +173,13 @@ where
 
         cache.update_metrics();
 
-        debug!(target: "engine::caching", "Updated state caches");
+        debug!(
+            target: "engine::caching", 
+            accounts_cached = accounts_in_cache,
+            storage_slots_cached = storage_slots_in_cache,
+            duration_ms = start.elapsed().as_millis(),
+            "Updated state caches with prewarm results"
+        );
 
         // update the cache for the executed block
         self.execution_cache.save_cache(cache);
@@ -197,9 +218,20 @@ where
                         break
                     }
                 }
-                PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                PrewarmTaskEvent::FinishedTxExecution {
+                    executed_transactions,
+                    skipped_transactions,
+                    prewarmed_transactions,
+                } => {
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
+
+                    // Update skip and prewarm metrics
+                    self.ctx.metrics.transactions_skipped.set(skipped_transactions as f64);
+                    self.ctx
+                        .metrics
+                        .transactions_prewarmed
+                        .increment(prewarmed_transactions as u64);
 
                     finished_execution = true;
 
@@ -343,6 +375,27 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
+            // Track what we're populating into the cache
+            let accounts_touched = res.state.len();
+            let storage_touched: usize = res.state.values()
+                .map(|account| account.storage.len())
+                .sum();
+            
+            metrics.accounts_loaded.increment(accounts_touched as u64);
+            metrics.storage_loaded.increment(storage_touched as u64);
+            
+            // Log cache population for analysis
+            if accounts_touched > 0 || storage_touched > 0 {
+                trace!(
+                    target: "prewarm::cache",
+                    tx_hash=%tx.tx().tx_hash(),
+                    accounts_loaded = accounts_touched,
+                    storage_slots_loaded = storage_touched,
+                    execution_ms = start.elapsed().as_millis(),
+                    "Populated cache with state"
+                );
+            }
+
             let (targets, storage_targets) = multiproof_targets_from_state(res.state);
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(start.elapsed());
@@ -409,6 +462,10 @@ pub(super) enum PrewarmTaskEvent {
     FinishedTxExecution {
         /// Number of transactions executed
         executed_transactions: usize,
+        /// Number of transactions skipped
+        skipped_transactions: usize,
+        /// Number of transactions prewarmed
+        prewarmed_transactions: usize,
     },
 }
 
@@ -428,4 +485,18 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+
+    // Essential metrics to understand prewarm effectiveness
+    /// Number of transactions skipped (not prewarmed) - using SKIP_PREWARM_TRANSACTIONS constant
+    pub(crate) transactions_skipped: Gauge,
+    /// Number of transactions actually prewarmed
+    pub(crate) transactions_prewarmed: Counter,
+    /// Number of accounts touched by prewarm (populated into cache)
+    pub(crate) accounts_loaded: Counter,
+    /// Number of storage slots loaded by prewarm (populated into cache)
+    pub(crate) storage_loaded: Counter,
+    /// Average execution time per transaction WITHOUT prewarm cache (baseline in ms)
+    pub(crate) baseline_exec_time_ms: Gauge,
+    /// Average execution time per transaction WITH prewarm cache (ms)
+    pub(crate) cached_exec_time_ms: Gauge,
 }
