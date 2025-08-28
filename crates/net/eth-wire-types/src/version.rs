@@ -36,19 +36,6 @@ impl EthVersion {
     /// All known eth versions
     pub const ALL_VERSIONS: &'static [Self] = &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
 
-    /// Returns the total number of messages the protocol version supports.
-    pub const fn total_messages(&self) -> u8 {
-        match self {
-            Self::Eth66 => 15,
-            Self::Eth67 | Self::Eth68 => {
-                // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
-                13
-            }
-            // eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock + BlockRangeUpdate
-            Self::Eth69 => 12,
-        }
-    }
-
     /// Returns true if the version is eth/66
     pub const fn is_eth66(&self) -> bool {
         matches!(self, Self::Eth66)
@@ -261,13 +248,5 @@ mod tests {
             let result = EthVersion::decode(&mut slice);
             assert_eq!(result, expected);
         }
-    }
-
-    #[test]
-    fn test_eth_version_total_messages() {
-        assert_eq!(EthVersion::Eth66.total_messages(), 15);
-        assert_eq!(EthVersion::Eth67.total_messages(), 13);
-        assert_eq!(EthVersion::Eth68.total_messages(), 13);
-        assert_eq!(EthVersion::Eth69.total_messages(), 12);
     }
 }
