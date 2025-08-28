@@ -129,7 +129,7 @@ impl<
             .find_map(|v| v.base.clone())
             .ok_or_eyre("Missing base flashblock")?;
 
-        if attrs.parent_hash == latest.hash() {
+        if attrs.parent_hash != latest.hash() {
             return Err(eyre!("The base flashblock is old"));
         }
 
