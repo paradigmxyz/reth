@@ -1315,7 +1315,7 @@ impl ParallelSparseTrie {
     ) -> (Vec<ChangedSubtrie>, PrefixSetMut) {
         // Fast-path: If the prefix set is empty then no subtries can have been changed. Just return
         // empty values.
-        if prefix_set.is_empty() {
+        if prefix_set.is_empty() && !prefix_set.all() {
             return Default::default();
         }
 
