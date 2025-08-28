@@ -17,6 +17,7 @@ use rand::Rng;
 use reth_cli_util::parse_ether_value;
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+use url::Url;
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
@@ -227,6 +228,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
     pub rpc_pending_block: PendingBlockKind,
 
+    /// Endpoint to forward transactions to.
+    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
+    pub rpc_forwarder: Option<Url>,
+
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
     #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
@@ -396,6 +401,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            rpc_forwarder: None,
             builder_disallow: Default::default(),
         }
     }
