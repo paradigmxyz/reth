@@ -582,6 +582,16 @@ where
         res
     }
 
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// For BAL
+    pub async fn get_payload_v6(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(

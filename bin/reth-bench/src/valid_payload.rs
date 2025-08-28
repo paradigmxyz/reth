@@ -156,7 +156,7 @@ pub(crate) fn block_to_new_payload(
             if let Some(prague) = sidecar.prague() {
                 if is_optimism {
                     (
-                        EngineApiMessageVersion::V5,
+                        EngineApiMessageVersion::V4,
                         serde_json::to_value((
                             OpExecutionPayloadV4 {
                                 payload_inner: payload.payload_inner,
@@ -169,7 +169,7 @@ pub(crate) fn block_to_new_payload(
                     )
                 } else {
                     (
-                        EngineApiMessageVersion::V5,
+                        EngineApiMessageVersion::V4,
                         serde_json::to_value((
                             payload,
                             cancun.versioned_hashes.clone(),
@@ -180,12 +180,11 @@ pub(crate) fn block_to_new_payload(
                 }
             } else {
                 (
-                    EngineApiMessageVersion::V4,
+                    EngineApiMessageVersion::V3,
                     serde_json::to_value((
                         payload,
                         cancun.versioned_hashes.clone(),
                         cancun.parent_beacon_block_root,
-                        prague.requests.requests_hash(),
                     ))?,
                 )
             }
@@ -284,7 +283,10 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
     match message_version {
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {
