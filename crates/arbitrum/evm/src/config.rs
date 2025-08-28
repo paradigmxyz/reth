@@ -74,6 +74,11 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
                 info.l1_block_number = input.execution_ctx.l1_block_number;
             }
+            if info.arbos_format_version == 0 {
+                if let Some(ver) = read_arbos_version(input.state_provider) {
+                    info.arbos_format_version = ver;
+                }
+            }
             info.apply_to_header(&mut header);
         } else {
             let l1_bn = input.execution_ctx.l1_block_number;
