@@ -1,6 +1,5 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
-use alloy_primitives::BlockHash;
 use eyre::OptionExt;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
@@ -41,7 +40,6 @@ pub struct FlashBlockService<
     evm_config: EvmConfig,
     provider: Provider,
     canon_receiver: CanonStateNotifications<N>,
-    tip: Option<BlockHash>,
 }
 
 impl<
@@ -67,7 +65,6 @@ impl<
             evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
             provider,
-            tip: None,
         }
     }
 
@@ -178,15 +175,15 @@ impl<
         &mut self,
         cx: &mut Context<'_>,
     ) -> eyre::Result<Option<bool>> {
+        let mut tip = None;
         let fut = self.canon_receiver.recv();
         pin!(fut);
 
         while let Poll::Ready(result) = fut.poll_unpin(cx) {
-            self.tip = result?.tip_checked().map(RecoveredBlock::hash);
+            tip = result?.tip_checked().map(RecoveredBlock::hash);
         }
 
-        Ok(self
-            .tip
+        Ok(tip
             .zip(self.current.as_ref().map(PendingBlock::parent_hash))
             .map(|(latest, parent)| latest == parent))
     }
@@ -229,13 +226,11 @@ impl<
 
         // Verify that pending block is following up to the canonical state
         match this.verify_pending_block_integrity(cx) {
-            // Integrity check failed, erase last block
+            // Integrity check failed: erase last block
             Ok(Some(false)) => Poll::Ready(Some(Ok(None))),
-            // Integrity check is OK, output last block
-            Ok(Some(true)) => Poll::Ready(Some(Ok(this.current.clone()))),
-            // Cannot check integrity, tip or block is missing
-            Ok(None) => Poll::Pending,
-            // Cannot check integrity, error occurred
+            // Integrity check is OK or skipped: output last block
+            Ok(Some(true) | None) => Poll::Ready(Some(Ok(this.current.clone()))),
+            // Cannot check integrity: error occurred
             Err(err) => Poll::Ready(Some(Err(err))),
         }
     }
