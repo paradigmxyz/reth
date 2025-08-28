@@ -606,18 +606,17 @@ where
         })
     }
 
-    /// Return sealed block from database or in-memory state by hash.
+    /// Return sealed block header from database or in-memory state by hash.
     fn sealed_header_by_hash(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block =
-            state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone_sealed_header());
+        let header = state.tree_state.sealed_header_by_hash(&hash);
 
-        if block.is_some() {
-            Ok(block)
+        if header.is_some() {
+            Ok(header)
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
