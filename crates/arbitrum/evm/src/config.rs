@@ -70,7 +70,10 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
-        if let Some(info) = derive_arb_header_info_from_state(&input) {
+        if let Some(mut info) = derive_arb_header_info_from_state(&input) {
+            if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
+                info.l1_block_number = input.execution_ctx.l1_block_number;
+            }
             info.apply_to_header(&mut header);
         } else {
             let l1_bn = input.execution_ctx.l1_block_number;
