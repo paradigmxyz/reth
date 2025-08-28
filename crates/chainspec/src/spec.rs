@@ -393,25 +393,6 @@ impl ChainSpec {
         }
     }
 
-    /// Get the [`BaseFeeParams`] for the chain at the given block number
-    pub fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
-        match self.base_fee_params {
-            BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
-                // Walk through the base fee params configuration in reverse order, and return the
-                // first one that corresponds to a hardfork that is active at the
-                // given timestamp.
-                for (fork, params) in bf_params.iter().rev() {
-                    if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params;
-                    }
-                }
-
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
-            }
-        }
-    }
-
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         self.genesis_header.hash()
@@ -477,8 +458,8 @@ impl ChainSpec {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block)
+                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -505,8 +486,8 @@ impl ChainSpec {
         for (_, cond) in self.hardforks.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block

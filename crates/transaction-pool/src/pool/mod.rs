@@ -1232,7 +1232,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 }
 
 /// The state of a transaction when is was added to the pool
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddedTransactionState {
     /// Ready for execution
     Pending,
@@ -1240,13 +1240,37 @@ pub enum AddedTransactionState {
     Queued, // TODO: Break it down to missing nonce, insufficient balance, etc.
 }
 
+impl AddedTransactionState {
+    /// Returns whether the transaction was submitted as queued.
+    pub const fn is_queued(&self) -> bool {
+        matches!(self, Self::Queued)
+    }
+
+    /// Returns whether the transaction was submitted as pending.
+    pub const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+}
+
 /// The outcome of a successful transaction addition
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedTransactionOutcome {
     /// The hash of the transaction
     pub hash: TxHash,
     /// The state of the transaction
     pub state: AddedTransactionState,
+}
+
+impl AddedTransactionOutcome {
+    /// Returns whether the transaction was submitted as queued.
+    pub const fn is_queued(&self) -> bool {
+        self.state.is_queued()
+    }
+
+    /// Returns whether the transaction was submitted as pending.
+    pub const fn is_pending(&self) -> bool {
+        self.state.is_pending()
+    }
 }
 
 /// Contains all state changes after a [`CanonicalStateUpdate`] was processed
