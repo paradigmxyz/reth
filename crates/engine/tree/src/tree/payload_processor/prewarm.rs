@@ -19,7 +19,7 @@ use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmStat
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
@@ -104,37 +104,42 @@ where
         self.executor.spawn_blocking(move || {
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
-            let mut executing = 0;
+            let global_tx_counter = Arc::new(AtomicUsize::new(0));
+            let mut local_tx_count = 0;
+
             while let Ok(executable) = pending.recv() {
                 // Skip first N transactions for testing
-                if executing < skip_first {
-                    executing += 1;
+                if local_tx_count < skip_first {
                     tracing::info!(
                         target: "prewarm_timing",
-                        tx_index = executing - 1,
+                        tx_index = local_tx_count,
                         "SKIPPED_IN_PREWARM"
                     );
+                    local_tx_count += 1;
+                    global_tx_counter.fetch_add(1, Ordering::SeqCst);
                     continue;
                 }
 
-                let task_idx = (executing - skip_first) % max_concurrency;
+                let worker_id = (local_tx_count - skip_first) % max_concurrency;
 
-                if handles.len() <= task_idx {
+                if handles.len() <= worker_id {
                     let (tx, rx) = mpsc::channel();
                     let sender = actions_tx.clone();
                     let ctx = ctx.clone();
                     let done_tx = done_tx.clone();
+                    let global_counter = global_tx_counter.clone();
+                    let worker_id_copy = worker_id;
 
                     executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
+                        ctx.transact_batch(rx, sender, done_tx, global_counter, worker_id_copy);
                     });
 
                     handles.push(tx);
                 }
 
-                let _ = handles[task_idx].send(executable);
+                let _ = handles[worker_id].send(executable);
 
-                executing += 1;
+                local_tx_count += 1;
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
@@ -142,8 +147,9 @@ where
             drop(handles);
             while done_rx.recv().is_ok() {}
 
+            let final_count = global_tx_counter.load(Ordering::SeqCst);
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: final_count });
         });
     }
 
@@ -325,17 +331,24 @@ where
         txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
+        global_tx_counter: Arc<AtomicUsize>,
+        worker_id: usize,
     ) {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
-        let mut tx_index = 0;
+        let mut local_tx_index = 0;
         while let Ok(tx) = txs.recv() {
             let tx_hash = *tx.tx().tx_hash();
 
-            // Log prewarm start
+            // Get and increment the global transaction position atomically
+            let global_tx_position = global_tx_counter.fetch_add(1, Ordering::SeqCst);
+
+            // Log prewarm start with detailed position info
             tracing::info!(
                 target: "prewarm_timing",
-                tx_index,
+                global_tx_position,
+                worker_id,
+                local_tx_index,
                 ?tx_hash,
                 "PREWARM_START"
             );
@@ -369,16 +382,18 @@ where
             metrics.prefetch_storage_targets.record(storage_targets as f64);
             metrics.total_runtime.record(prewarm_duration);
 
-            // Log prewarm end
+            // Log prewarm end with detailed position info
             tracing::info!(
                 target: "prewarm_timing",
-                tx_index,
+                global_tx_position,
+                worker_id,
+                local_tx_index,
                 ?tx_hash,
                 duration_ms = prewarm_duration.as_millis(),
                 "PREWARM_END"
             );
 
-            tx_index += 1;
+            local_tx_index += 1;
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }
