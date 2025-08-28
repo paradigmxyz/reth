@@ -392,7 +392,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
-            raw_tx_forwarder,
+            raw_tx_forwarder.forwarder_client(),
         )
     }
 

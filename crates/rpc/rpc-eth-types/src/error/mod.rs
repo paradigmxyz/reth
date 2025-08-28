@@ -48,16 +48,7 @@ impl ToRpcError for RpcError<TransportErrorKind> {
                 payload.message.clone(),
                 payload.data.clone(),
             ),
-            Self::NullResp => internal_rpc_err("null response"),
-            Self::UnsupportedFeature(feature) => {
-                internal_rpc_err(format!("unsupported feature: {feature}"))
-            }
-            Self::LocalUsageError(err) => internal_rpc_err(err.to_string()),
-            Self::SerError(err) => internal_rpc_err(format!("serialization error: {err}")),
-            Self::DeserError { err, text } => {
-                internal_rpc_err(format!("deserialization error: {err} (text: {text})"))
-            }
-            Self::Transport(_) => internal_rpc_err(self.to_string()),
+            err => internal_rpc_err(err.to_string()),
         }
     }
 }

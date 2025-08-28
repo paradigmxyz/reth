@@ -6,7 +6,7 @@ use crate::{
     EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
     RPC_DEFAULT_GAS_CAP,
 };
-use alloy_rpc_client::RpcClient;
+use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
@@ -201,10 +201,9 @@ impl EthConfig {
     }
 
     /// Configures the raw transaction forwarder.
-    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<Url>) -> Self {
         if let Some(tx_forwarder) = tx_forwarder {
-            self.raw_tx_forwarder.tx_forwarder =
-                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
+            self.raw_tx_forwarder.tx_forwarder = Some(tx_forwarder);
         }
         self
     }

@@ -17,6 +17,7 @@ use rand::Rng;
 use reth_cli_util::parse_ether_value;
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+use url::Url;
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
@@ -229,7 +230,7 @@ pub struct RpcServerArgs {
 
     /// Endpoint to forward transactions to.
     #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
-    pub rpc_forwarder: Option<String>,
+    pub rpc_forwarder: Option<Url>,
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
