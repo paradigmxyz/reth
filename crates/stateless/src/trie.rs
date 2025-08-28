@@ -71,7 +71,7 @@ impl StatelessSparseTrie {
 
         if let Some(bytes) = self.inner.get_account_value(&hashed_address) {
             let account = TrieAccount::decode(&mut bytes.as_slice())?;
-            return Ok(Some(account))
+            return Ok(Some(account));
         }
 
         if !self.inner.check_valid_account_witness(hashed_address) {
@@ -92,7 +92,7 @@ impl StatelessSparseTrie {
         let hashed_slot = keccak256(B256::from(slot));
 
         if let Some(raw) = self.inner.get_storage_slot_value(&hashed_address, &hashed_slot) {
-            return Ok(U256::decode(&mut raw.as_slice())?)
+            return Ok(U256::decode(&mut raw.as_slice())?);
         }
 
         // Storage slot value is not present in the trie, validate that the witness is complete.
@@ -286,7 +286,6 @@ fn calculate_state_root(
         state.accounts.into_iter().sorted_unstable_by_key(|(addr, _)| *addr)
     {
         let nibbles = Nibbles::unpack(hashed_address);
-        let account = account.unwrap_or_default();
 
         // Determine which storage root should be used for this account
         let storage_root = if let Some(storage_trie) = trie.storage_trie_mut(&hashed_address) {
@@ -298,12 +297,12 @@ fn calculate_state_root(
         };
 
         // Decide whether to remove or update the account leaf
-        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trie.remove_account_leaf(&nibbles, &provider_factory)?;
-        } else {
+        if let Some(account) = account {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
             trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
+        } else {
+            trie.remove_account_leaf(&nibbles, &provider_factory)?;
         }
     }
 

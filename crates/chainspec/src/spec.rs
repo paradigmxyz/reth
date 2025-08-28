@@ -384,7 +384,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -403,7 +403,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -517,7 +517,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -539,7 +539,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 
@@ -801,6 +801,12 @@ impl ChainSpecBuilder {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
+        self
+    }
+
+    /// Cleans any existing hardforks from the builder.
+    pub fn clean_hardforks(mut self) -> Self {
+        self.hardforks = ChainHardforks::default();
         self
     }
 
