@@ -39,13 +39,14 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
         match ctx.tx.tx_type() {
             ArbTxType::Deposit => Err(ctx),
             ty => {
+                let status_flag = ctx.result.is_success();
                 let mut logs = ctx.result.into_logs();
                 let mut extra = crate::log_sink::take();
                 if !extra.is_empty() {
                     logs.append(&mut extra);
                 }
                 let receipt = AlloyReceipt {
-                    status: Eip658Value::Eip658(ctx.result.is_success()),
+                    status: Eip658Value::Eip658(status_flag),
                     cumulative_gas_used: ctx.cumulative_gas_used,
                     logs,
                 };
