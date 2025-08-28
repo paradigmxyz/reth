@@ -196,6 +196,36 @@ pub fn arb_tx_with_other_fields(
         ArbTypedTransaction::Internal(_) => {
             let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
             let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x6a]));
+        }
+        ArbTypedTransaction::SubmitRetryable(s) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
+            let _ = out.other.insert_value("requestId".to_string(), s.request_id);
+            let _ = out.other.insert_value("refundTo".to_string(), s.fee_refund_addr);
+            let _ = out.other.insert_value("l1BaseFee".to_string(), s.l1_base_fee);
+            let _ = out.other.insert_value("depositValue".to_string(), s.deposit_value);
+            if let Some(to) = s.retry_to {
+                let _ = out.other.insert_value("retryTo".to_string(), to);
+            }
+            let _ = out.other.insert_value("retryValue".to_string(), s.retry_value);
+            let _ = out.other.insert_value("retryData".to_string(), s.retry_data.clone());
+            let _ = out.other.insert_value("beneficiary".to_string(), s.beneficiary);
+            let _ = out.other.insert_value("maxSubmissionFee".to_string(), s.max_submission_fee);
+        }
+        ArbTypedTransaction::Retry(r) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x68]));
+            let _ = out.other.insert_value("ticketId".to_string(), r.ticket_id);
+            let _ = out.other.insert_value("maxRefund".to_string(), r.max_refund);
+            let _ = out.other.insert_value("submissionFeeRefund".to_string(), r.submission_fee_refund);
+            let _ = out.other.insert_value("refundTo".to_string(), r.refund_to);
+        }
+        _ => {}
+    }
+
+    match &**tx {
+        ArbTypedTransaction::Internal(_) => {
+            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("requestId".to_string(), s.request_id);
