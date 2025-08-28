@@ -1,5 +1,6 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlockService, FlashBlockWsStream};
 use futures_util::StreamExt;
+use reth_chain_state::CanonStateSubscriptions;
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
 use reth_rpc_eth_api::helpers::pending_block::BuildPendingEnv;
@@ -29,6 +30,7 @@ where
                                  + 'static,
         > + 'static,
     Provider: StateProviderFactory
+        + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
             Block = BlockTy<N>,
