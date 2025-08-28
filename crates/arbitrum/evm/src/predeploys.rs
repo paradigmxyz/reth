@@ -2,7 +2,9 @@
 
 use alloy_primitives::{Address, Bytes, U256, B256};
 pub trait LogEmitter {
-    fn emit_log(&mut self, _address: alloy_primitives::Address, _topics: &[[u8; 32]], _data: &[u8]) {}
+    fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
+        crate::log_sink::push(address, topics, data);
+    }
 }
 pub struct NoopEmitter;
 impl LogEmitter for NoopEmitter {}

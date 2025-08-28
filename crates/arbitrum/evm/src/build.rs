@@ -199,37 +199,17 @@ where
                 depth: 0,
                 basefee: block_basefee,
             };
-            struct VecEmitter { logs: alloc::vec::Vec<(alloy_primitives::Address, alloc::vec::Vec<[u8; 32]>, alloy_primitives::Bytes)> }
-            impl LogEmitter for VecEmitter {
+            crate::log_sink::clear();
+            struct SinkEmitter;
+            impl LogEmitter for SinkEmitter {
                 fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
-                    self.logs.push((address, topics.to_vec(), alloy_primitives::Bytes::copy_from_slice(data)));
+                    crate::log_sink::push(address, topics, data);
                 }
             }
-            let mut emitter = VecEmitter { logs: alloc::vec::Vec::new() };
+            let mut emitter = SinkEmitter;
             if let Ok(mut reg) = self.predeploys.lock() {
-                if let Some((out, gas_left, success)) = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter) {
-                    let used = gas_limit.saturating_sub(gas_left);
-                    let exec = if success {
-                        revm::context::result::ExecutionResult::Success {
-                            reason: revm::context::result::SuccessReason::Stop,
-                            gas_used: used,
-                            gas_refunded: 0,
-                            logs: alloc::vec::Vec::new(),
-                            output: revm::context::result::Output::Call(out),
-                        }
-                    } else {
-                        revm::context::result::ExecutionResult::Revert {
-                            gas_used: used,
-                            output: alloy_primitives::Bytes::default(),
-                        }
-                    };
-                    maybe_predeploy_result = Some((exec, used));
-                }
+                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter);
             }
-        }
-        if let Some((exec, used)) = maybe_predeploy_result {
-            let _ = f(&exec);
-            return Ok(Some(used));
         }
 
         let current_nonce = {

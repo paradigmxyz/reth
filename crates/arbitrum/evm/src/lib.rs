@@ -43,6 +43,7 @@ pub use retryables::*;
 mod arb_evm;
 pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
 
+mod log_sink;
 
 
 pub struct ArbEvmConfig<ChainSpec = (), N = (), R = ArbRethReceiptBuilder>
