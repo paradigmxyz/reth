@@ -2895,4 +2895,53 @@ mod tests {
         let updated_peer = manager.peers.get(&peer_id).unwrap();
         assert_eq!(updated_peer.addr.tcp().ip(), updated_ip);
     }
+
+    #[tokio::test]
+    async fn test_inc_pending_with_idle_trusted_peers() {
+        // Test the fix for the issue where the condition was always true
+        // This test verifies that the logic now correctly checks if there are any idle trusted
+        // peers
+
+        // Create a config with max_inbound = 0 to trigger the edge case logic
+        let mut manager = PeersManager::new(PeersConfig::test().with_max_inbound(0));
+
+        // Add a trusted peer
+        let trusted_peer_id = PeerId::random();
+        manager.add_trusted_peer_id(trusted_peer_id);
+
+        // Initially, there are no peers in the peers HashMap, so num_idle_trusted_peers() returns 0
+        assert_eq!(manager.num_idle_trusted_peers(), 0);
+
+        // Since there are no idle trusted peers, the connection should be rejected
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 1)), 8008);
+        let result = manager.on_incoming_pending_session(addr.ip());
+        assert_eq!(result, Err(InboundConnectionError::ExceedsCapacity));
+
+        // Now add the trusted peer to the peers HashMap in idle state, then there is 1 idle trusted
+        // peer
+        let peer_addr = PeerAddr::from_tcp(addr);
+        manager.peers.insert(trusted_peer_id, Peer::trusted(peer_addr));
+        assert_eq!(manager.num_idle_trusted_peers(), 1);
+
+        // The connection should now be accepted
+        let result = manager.on_incoming_pending_session(addr.ip());
+        assert_eq!(result, Ok(()));
+
+        // // Clean up
+        // manager.on_incoming_pending_session_rejected_internally();
+
+        // Now change the peer state to connected (not idle)
+        manager
+            .peers
+            .get_mut(&trusted_peer_id)
+            .map(|peer| peer.state = PeerConnectionState::In)
+            .unwrap();
+
+        // Now there are 0 idle trusted peers
+        assert_eq!(manager.num_idle_trusted_peers(), 0);
+
+        // The connection should be rejected
+        let result = manager.on_incoming_pending_session(addr.ip());
+        assert_eq!(result, Err(InboundConnectionError::ExceedsCapacity));
+    }
 }
