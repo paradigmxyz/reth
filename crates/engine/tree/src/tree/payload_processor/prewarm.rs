@@ -32,7 +32,7 @@ use tracing::{debug, trace};
 /// Based on empirical performance analysis across 200 blocks, the first 11 transactions
 /// in each block consistently fail to benefit from prewarming due to timing conflicts
 /// with the main execution thread.
-const SKIP_PREWARM_TRANSACTIONS: usize = 11;
+const SKIP_PREWARM_TRANSACTIONS: usize = 8;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -155,13 +155,12 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-        
+
         // Count what we're saving
         let accounts_in_cache = state.state.len();
-        let storage_slots_in_cache: usize = state.state.values()
-            .map(|account| account.storage.len())
-            .sum();
-        
+        let storage_slots_in_cache: usize =
+            state.state.values().map(|account| account.storage.len()).sum();
+
         let cache = SavedCache::new(
             self.ctx.env.hash,
             self.ctx.cache.clone(),
@@ -174,7 +173,7 @@ where
         cache.update_metrics();
 
         debug!(
-            target: "engine::caching", 
+            target: "engine::caching",
             accounts_cached = accounts_in_cache,
             storage_slots_cached = storage_slots_in_cache,
             duration_ms = start.elapsed().as_millis(),
@@ -377,13 +376,12 @@ where
 
             // Track what we're populating into the cache
             let accounts_touched = res.state.len();
-            let storage_touched: usize = res.state.values()
-                .map(|account| account.storage.len())
-                .sum();
-            
+            let storage_touched: usize =
+                res.state.values().map(|account| account.storage.len()).sum();
+
             metrics.accounts_loaded.increment(accounts_touched as u64);
             metrics.storage_loaded.increment(storage_touched as u64);
-            
+
             // Log cache population for analysis
             if accounts_touched > 0 || storage_touched > 0 {
                 trace!(
