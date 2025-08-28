@@ -24,6 +24,7 @@ use crate::error::ArbEthApiError;
 use reth_storage_api::{ProviderHeader, ProviderTx};
 pub mod txinfo;
 pub mod response;
+pub mod header;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use reth_tasks::TaskSpawner;
 use reth_arbitrum_primitives::ArbTransactionSigned;
@@ -32,7 +33,7 @@ use reth_arbitrum_primitives::ArbTransactionSigned;
 pub struct ArbRpcTypes;
 
 impl reth_rpc_eth_api::RpcTypes for ArbRpcTypes {
-    type Header = alloy_rpc_types_eth::Header<alloy_consensus::Header>;
+    type Header = alloy_serde::WithOtherFields<alloy_rpc_types_eth::Header<alloy_consensus::Header>>;
     type Receipt = alloy_rpc_types_eth::TransactionReceipt;
     type TransactionResponse = alloy_serde::WithOtherFields<alloy_rpc_types_eth::Transaction<ArbTransactionSigned>>;
     type TransactionRequest = crate::eth::transaction::ArbTransactionRequest;
@@ -207,7 +208,7 @@ pub type ArbRpcConvert<N, NetworkT> = RpcConverter<
     NetworkT,
     <N as FullNodeComponents>::Evm,
     receipt::ArbReceiptConverter<<N as FullNodeTypes>::Provider>,
-    (),
+    header::ArbHeaderConverter,
     txinfo::ArbTxInfoMapper<<N as FullNodeTypes>::Provider>,
     (),
     response::ArbRpcTxConverter,
@@ -240,6 +241,7 @@ where
         let rpc_converter = RpcConverter::new(receipt::ArbReceiptConverter::new(
             ctx.components.provider().clone(),
         ))
+        .with_header_converter(header::ArbHeaderConverter)
         .with_mapper(txinfo::ArbTxInfoMapper::new(ctx.components.provider().clone()))
         .with_rpc_tx_converter(response::ArbRpcTxConverter);
         let eth_api = ctx.eth_api_builder().with_rpc_converter(rpc_converter).build_inner();
