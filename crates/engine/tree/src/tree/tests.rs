@@ -760,7 +760,7 @@ async fn test_get_canonical_blocks_to_persist() {
     let fork_block_hash = fork_block.recovered_block().hash();
     test_harness.tree.state.tree_state.insert_executed(fork_block);
 
-    assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
+    assert!(test_harness.tree.state.tree_state.sealed_header_by_hash(&fork_block_hash).is_some());
 
     let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);

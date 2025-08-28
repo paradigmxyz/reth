@@ -1040,7 +1040,7 @@ where
             // we still need to process payload attributes if the head is already canonical
             if let Some(attr) = attrs {
                 let tip = self
-                    .block_header_by_hash(self.state.tree_state.canonical_block_hash())?
+                    .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
                     .ok_or_else(|| {
                         // If we can't find the canonical block, then something is wrong and we need
                         // to return an error
@@ -1705,40 +1705,19 @@ where
         }))
     }
 
-    /// Return sealed block from database or in-memory state by hash.
+    /// Return sealed block header from in-memory state or database by hash.
     fn sealed_header_by_hash(
         &self,
         hash: B256,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block = self
-            .state
-            .tree_state
-            .block_by_hash(hash)
-            .map(|block| block.as_ref().clone_sealed_header());
+        let header = self.state.tree_state.sealed_header_by_hash(&hash);
 
-        if block.is_some() {
-            Ok(block)
+        if header.is_some() {
+            Ok(header)
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
-    }
-
-    /// Return block header from database or in-memory state by hash.
-    fn block_header_by_hash(&self, hash: B256) -> ProviderResult<Option<N::BlockHeader>> {
-        // check database first
-        let mut header = self.provider.header_by_hash_or_number(hash.into())?;
-        if header.is_none() {
-            // Note: it's fine to return the unsealed block because the caller already has
-            // the hash
-            header = self
-                .state
-                .tree_state
-                .block_by_hash(hash)
-                // TODO: clone for compatibility. should we return an Arc here?
-                .map(|block| block.header().clone());
-        }
-        Ok(header)
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
@@ -1770,7 +1749,7 @@ where
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        if self.block_header_by_hash(parent_hash)?.is_some() {
+        if self.sealed_header_by_hash(parent_hash)?.is_some() {
             return Ok(Some(parent_hash))
         }
 
@@ -1784,7 +1763,7 @@ where
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_block.is_none() && self.block_header_by_hash(current_hash)?.is_some() {
+            if current_block.is_none() && self.sealed_header_by_hash(current_hash)?.is_some() {
                 return Ok(Some(current_hash))
             }
         }
@@ -1797,7 +1776,7 @@ where
     fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.block_header_by_hash(parent_hash)? {
+        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? {
             if !parent.difficulty().is_zero() {
                 parent_hash = B256::ZERO;
             }
@@ -2301,7 +2280,7 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
-        match self.block_header_by_hash(block_num_hash.hash) {
+        match self.sealed_header_by_hash(block_num_hash.hash) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
