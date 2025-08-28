@@ -207,7 +207,7 @@ where
                 }
             }
             let mut emitter = VecEmitter { logs: alloc::vec::Vec::new() };
-            if let Ok(mut reg) = self.factory().predeploys.lock() {
+            if let Ok(mut reg) = self.predeploys.lock() {
                 if let Some((out, gas_left, success)) = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter) {
                     let used = gas_limit.saturating_sub(gas_left);
                     let exec = if success {
@@ -337,7 +337,6 @@ where
                 let evm = self.inner.evm_mut();
                 self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
             }
-                predeploys: self.predeploys.clone(),
             self.tx_state = state;
         }
 
@@ -398,6 +397,7 @@ where
                 alloy_evm::eth::spec::EthSpec::mainnet(),
                 &self.receipt_builder,
             ),
+            predeploys: self.predeploys.clone(),
             hooks: Default::default(),
             tx_state: Default::default(),
             _phantom: core::marker::PhantomData::<CS>,
