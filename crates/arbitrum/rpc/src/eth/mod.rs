@@ -1,3 +1,8 @@
+use reth_primitives_traits::SignedTransaction;
+use alloy_consensus::TxReceipt;
+use reth_rpc_eth_api::FromEthApiError;
+
+
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
 
 use core::fmt;
@@ -263,7 +268,12 @@ where
         tx: reth_storage_api::ProviderTx<Self::Provider>,
         meta: alloy_consensus::transaction::TransactionMeta,
         receipt: reth_storage_api::ProviderReceipt<Self::Provider>,
-    ) -> impl core::future::Future<Output = core::result::Result<Self::RpcReceipt, Self::Error>> + Send {
+    ) -> impl core::future::Future<
+        Output = core::result::Result<
+            <<Self::RpcConvert as reth_rpc_convert::transaction::RpcConvert>::Network as RpcTypes>::Receipt,
+            Self::Error
+        >
+    > + Send {
         let this = self.clone();
         async move {
             use reth_rpc_eth_types::EthApiError;

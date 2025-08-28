@@ -1,6 +1,11 @@
 #![allow(unused)]
 
 use alloy_primitives::{Address, Bytes, U256, B256};
+pub trait LogEmitter {
+    fn emit_log(&mut self, _address: alloy_primitives::Address, _topics: &[alloy_primitives::B256], _data: &[u8]) {}
+}
+pub struct NoopEmitter;
+impl LogEmitter for NoopEmitter {}
 use crate::retryables::{Retryables, DefaultRetryables};
 
 pub struct PredeployCallContext {
@@ -14,10 +19,14 @@ pub struct PredeployCallContext {
     pub depth: u64,
     pub basefee: U256,
 }
+fn abi_word_u256(x: U256) -> [u8; 32] { x.to_be_bytes::<32>() }
+fn abi_word_u64(x: u64) -> [u8; 32] { let mut out=[0u8;32]; out[24..].copy_from_slice(&x.to_be_bytes()); out }
+fn abi_word_b256(x: B256) -> [u8; 32] { x.0 }
+fn abi_word_address(a: Address) -> [u8; 32] { let mut out=[0u8;32]; out[12..].copy_from_slice(a.as_slice()); out }
 
 pub trait PredeployHandler {
     fn address(&self) -> Address;
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool);
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool);
 }
 
 #[derive(Default)]
@@ -35,17 +44,19 @@ impl PredeployRegistry {
         self.handlers.push(handler);
     }
 
-    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256) -> Option<(Bytes, u64, bool)> {
+    pub fn dispatch_with_emitter(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256, emitter: &mut dyn LogEmitter) -> Option<(Bytes, u64, bool)> {
         for h in &self.handlers {
             if h.address() == to {
-                return Some(h.call(ctx, input, gas_limit, value, &mut self.retryables));
+                return Some(h.call(ctx, input, gas_limit, value, &mut self.retryables, emitter));
             }
         }
         None
     }
 
-
-
+    pub fn dispatch(&mut self, ctx: &PredeployCallContext, to: Address, input: &Bytes, gas_limit: u64, value: U256) -> Option<(Bytes, u64, bool)> {
+        let mut noop = NoopEmitter;
+        self.dispatch_with_emitter(ctx, to, input, gas_limit, value, &mut noop)
+    }
 }
 
 /* Minimal handler stubs; logic to be filled to match Nitro precompiles */
@@ -66,7 +77,7 @@ impl PredeployHandler for ArbSys {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let send_tx_to_l1 = pre::selector(pre::SIG_SEND_TX_TO_L1);
@@ -213,7 +224,7 @@ impl PredeployHandler for ArbRetryableTx {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let redeem = pre::selector(pre::SIG_RETRY_REDEEM);
@@ -291,9 +302,27 @@ impl PredeployHandler for ArbRetryableTx {
                     gas_price_bid: U256::ZERO,
                 };
                 match retryables.create_retryable(params) {
-                    crate::retryables::RetryableAction::Created { ticket_id, .. } => {
+                    crate::retryables::RetryableAction::Created { ticket_id, user_gas, nonce, refund_to, max_refund, submission_fee_refund, .. } => {
                         let mut out = [0u8; 32];
                         out.copy_from_slice(&ticket_id.0);
+
+                        let topic_created = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_TICKET_CREATED);
+                        let topics_created = [topic_created];
+                        let data_created = abi_word_b256(B256(ticket_id.0));
+                        emitter.emit_log(self.addr, &topics_created, &data_created);
+
+                        let topic_redeem = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
+                        let topics_redeem = [topic_redeem];
+                        let mut data = alloc::vec::Vec::with_capacity(32 * 7);
+                        data.extend_from_slice(&abi_word_b256(B256(ticket_id.0)));
+                        data.extend_from_slice(&abi_word_b256(B256::ZERO));
+                        data.extend_from_slice(&abi_word_u64(user_gas));
+                        data.extend_from_slice(&abi_word_u64(nonce));
+                        data.extend_from_slice(&abi_word_address(refund_to));
+                        data.extend_from_slice(&abi_word_u256(max_refund));
+                        data.extend_from_slice(&abi_word_u256(submission_fee_refund));
+                        emitter.emit_log(self.addr, &topics_redeem, &data);
+
                         (Bytes::from(out.to_vec()), gas_limit, true)
                     }
                     _ => (abi_zero_word(), gas_limit, false),
