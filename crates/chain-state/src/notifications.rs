@@ -122,13 +122,33 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
         }
     }
 
-    /// Get the new tip of the chain.
+    /// Gets the new tip of the chain.
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
+        }
+    }
+
+    /// Gets the new tip of the chain.
+    ///
+    /// If the chain has no blocks, it returns `None`. Otherwise, it returns the new tip for
+    /// [`Self::Reorg`] and [`Self::Commit`] variants.
+    pub fn tip_checked(&self) -> Option<&RecoveredBlock<N::Block>> {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => {
+                if new.is_empty() {
+                    None
+                } else {
+                    Some(new.tip())
+                }
+            }
         }
     }
 
