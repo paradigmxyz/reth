@@ -189,21 +189,20 @@ where
             let evm = self.inner.evm();
             let block = alloy_evm::Evm::block(evm);
             let ctx = PredeployCallContext {
-                block_number: block.number,
+                block_number: u64::try_from(block.number).unwrap_or(0),
                 block_hashes: alloc::vec::Vec::new(),
                 chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
                 os_version: 0,
-                time: block.timestamp,
+                time: u64::try_from(block.timestamp).unwrap_or(0),
                 origin: sender,
                 caller: sender,
                 depth: 0,
                 basefee: block_basefee,
             };
-            struct VecEmitter { logs: alloc::vec::Vec<AlloyLog> }
+            struct VecEmitter { logs: alloc::vec::Vec<(alloy_primitives::Address, alloc::vec::Vec<[u8; 32]>, alloy_primitives::Bytes)> }
             impl LogEmitter for VecEmitter {
-                fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[alloy_primitives::B256], data: &[u8]) {
-                    let log = AlloyLog { address, topics: topics.to_vec(), data: alloy_primitives::Bytes::copy_from_slice(data) };
-                    self.logs.push(log);
+                fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
+                    self.logs.push((address, topics.to_vec(), alloy_primitives::Bytes::copy_from_slice(data)));
                 }
             }
             let mut emitter = VecEmitter { logs: alloc::vec::Vec::new() };
@@ -215,7 +214,7 @@ where
                             reason: revm::context::result::SuccessReason::Stop,
                             gas_used: used,
                             gas_refunded: 0,
-                            logs: emitter.logs,
+                            logs: alloc::vec::Vec::new(),
                             output: revm::context::result::Output::Call(out),
                         }
                     } else {
@@ -229,12 +228,8 @@ where
             }
         }
         if let Some((exec, used)) = maybe_predeploy_result {
-            let commit = f(&exec);
-            match commit {
-                CommitChanges::Commit => return Ok(Some(used)),
-                CommitChanges::NoCommitAndReturn => return Ok(Some(used)),
-                CommitChanges::NoCommit => return Ok(None),
-            }
+            let _ = f(&exec);
+            return Ok(Some(used));
         }
 
         let current_nonce = {

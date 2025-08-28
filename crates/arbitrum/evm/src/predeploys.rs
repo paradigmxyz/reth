@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Address, Bytes, U256, B256};
 pub trait LogEmitter {
-    fn emit_log(&mut self, _address: alloy_primitives::Address, _topics: &[alloy_primitives::B256], _data: &[u8]) {}
+    fn emit_log(&mut self, _address: alloy_primitives::Address, _topics: &[[u8; 32]], _data: &[u8]) {}
 }
 pub struct NoopEmitter;
 impl LogEmitter for NoopEmitter {}
@@ -307,13 +307,13 @@ impl PredeployHandler for ArbRetryableTx {
                         out.copy_from_slice(&ticket_id.0);
 
                         let topic_created = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_TICKET_CREATED);
-                        let topics_created = [topic_created, B256(ticket_id.0)];
+                        let topics_created = [topic_created, ticket_id.0];
                         let data_created: [u8; 0] = [];
                         emitter.emit_log(self.addr, &topics_created, &data_created);
 
                         let topic_redeem = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
-                        let seq_topic = B256(abi_word_u64(sequence_num));
-                        let topics_redeem = [topic_redeem, B256(ticket_id.0), retry_tx_hash, seq_topic];
+                        let seq_topic = abi_word_u64(sequence_num);
+                        let topics_redeem = [topic_redeem, ticket_id.0, retry_tx_hash.0, seq_topic];
                         let mut data = alloc::vec::Vec::with_capacity(32 * 3);
                         data.extend_from_slice(&abi_word_address(refund_to));
                         data.extend_from_slice(&abi_word_u256(max_refund));
@@ -346,7 +346,7 @@ impl PredeployHandler for NodeInterface {
         self.addr
     }
 
-    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -422,7 +422,7 @@ impl PredeployHandler for ArbOwner {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -515,7 +515,7 @@ impl PredeployHandler for ArbGasInfo {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
 
@@ -610,7 +610,7 @@ impl PredeployHandler for ArbAddressTable {
         self.addr
     }
 
-    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables) -> (Bytes, u64, bool) {
+    fn call(&self, _ctx: &PredeployCallContext, input: &Bytes, gas_limit: u64, _value: U256, _retryables: &mut dyn Retryables, _emitter: &mut dyn LogEmitter) -> (Bytes, u64, bool) {
         use arb_alloy_predeploys as pre;
         let sel = input.get(0..4).map(|s| [s[0], s[1], s[2], s[3]]).unwrap_or([0u8; 4]);
         let at_exists = pre::selector(pre::SIG_AT_ADDRESS_EXISTS);
