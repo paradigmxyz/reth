@@ -137,7 +137,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// This accepts a closure that does a handshake with the remote peer and returns a tuple of the
     /// primary stream and extra data.
     ///
-    /// See also [`UnauthedEthStream::handshake`]
+    /// See also [`UnauthedEthStream::handshake`](crate::UnauthedEthStream)
     pub async fn into_satellite_stream_with_tuple_handshake<F, Fut, Err, Primary, Extra>(
         mut self,
         cap: &Capability,
