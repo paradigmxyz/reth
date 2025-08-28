@@ -47,6 +47,7 @@ use super::precompile_cache::PrecompileCacheMap;
 
 mod configured_sparse_trie;
 pub mod executor;
+pub mod hot_addresses;
 pub mod multiproof;
 pub mod prewarm;
 pub mod sparse_trie;
