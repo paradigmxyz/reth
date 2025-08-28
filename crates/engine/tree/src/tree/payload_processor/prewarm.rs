@@ -87,12 +87,37 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
 
+        // TEST: Skip first N transactions based on env var
+        let skip_first = std::env::var("PREWARM_SKIP_FIRST")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+
+        if skip_first > 0 {
+            tracing::info!(
+                target: "prewarm_timing",
+                skip_first,
+                "EXPERIMENT: Skipping first N transactions in prewarm"
+            );
+        }
+
         self.executor.spawn_blocking(move || {
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
-                let task_idx = executing % max_concurrency;
+                // Skip first N transactions for testing
+                if executing < skip_first {
+                    executing += 1;
+                    tracing::info!(
+                        target: "prewarm_timing",
+                        tx_index = executing - 1,
+                        "SKIPPED_IN_PREWARM"
+                    );
+                    continue;
+                }
+
+                let task_idx = (executing - skip_first) % max_concurrency;
 
                 if handles.len() <= task_idx {
                     let (tx, rx) = mpsc::channel();
@@ -303,7 +328,18 @@ where
     ) {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
+        let mut tx_index = 0;
         while let Ok(tx) = txs.recv() {
+            let tx_hash = *tx.tx().tx_hash();
+
+            // Log prewarm start
+            tracing::info!(
+                target: "prewarm_timing",
+                tx_index,
+                ?tx_hash,
+                "PREWARM_START"
+            );
+
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
@@ -319,18 +355,30 @@ where
                     trace!(
                         target: "engine::tree",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
+                        %tx_hash,
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
                     return
                 }
             };
-            metrics.execution_duration.record(start.elapsed());
+            let prewarm_duration = start.elapsed();
+            metrics.execution_duration.record(prewarm_duration);
 
             let (targets, storage_targets) = multiproof_targets_from_state(res.state);
             metrics.prefetch_storage_targets.record(storage_targets as f64);
-            metrics.total_runtime.record(start.elapsed());
+            metrics.total_runtime.record(prewarm_duration);
+
+            // Log prewarm end
+            tracing::info!(
+                target: "prewarm_timing",
+                tx_index,
+                ?tx_hash,
+                duration_ms = prewarm_duration.as_millis(),
+                "PREWARM_END"
+            );
+
+            tx_index += 1;
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }

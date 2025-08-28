@@ -73,8 +73,30 @@ impl EngineApiMetrics {
 
         let f = || {
             executor.apply_pre_execution_changes()?;
+            let mut tx_index = 0;
             for tx in transactions {
-                executor.execute_transaction(tx?)?;
+                let tx = tx?;
+
+                // Log main execution start
+                let main_start = std::time::Instant::now();
+                tracing::info!(
+                    target: "prewarm_timing",
+                    tx_index,
+                    "MAIN_START"
+                );
+
+                executor.execute_transaction(tx)?;
+
+                // Log main execution end
+                let main_duration = main_start.elapsed();
+                tracing::info!(
+                    target: "prewarm_timing",
+                    tx_index,
+                    duration_ms = main_duration.as_millis(),
+                    "MAIN_END"
+                );
+
+                tx_index += 1;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };

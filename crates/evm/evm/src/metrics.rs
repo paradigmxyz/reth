@@ -35,6 +35,16 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// Prewarm timing metrics
+    /// Time to prewarm first 5 transactions
+    pub prewarm_first_5_txs: Histogram,
+    /// Time main thread reaches first 5 transactions  
+    pub main_first_5_txs: Histogram,
+    /// Count of times prewarm finished before main thread needed it
+    pub prewarm_ahead_count: Counter,
+    /// Count of times prewarm finished after main thread needed it
+    pub prewarm_behind_count: Counter,
 }
 
 impl ExecutorMetrics {
