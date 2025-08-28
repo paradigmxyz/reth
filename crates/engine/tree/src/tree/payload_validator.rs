@@ -718,7 +718,7 @@ where
                     // Track cache miss
                     metrics::counter!("tx_cache.validation_attempts").increment(1);
                     metrics::counter!("tx_cache.cache_misses").increment(1);
-                    
+
                     tracing::info!(
                         target: "engine::cache::metrics",
                         ?tx_hash,
@@ -732,7 +732,7 @@ where
                 // Track cache hit and validation attempt
                 metrics::counter!("tx_cache.validation_attempts").increment(1);
                 metrics::counter!("tx_cache.cache_hits").increment(1);
-                
+
                 tracing::info!(
                     target: "engine::cache::metrics",
                     ?tx_hash,
@@ -754,7 +754,7 @@ where
 
                     // Convert Arc<[AccessRecord]> to Vec for validation (temporary until we update validation)
                     let traces_vec = cached_tx.traces.to_vec();
-                    
+
                     // Use chunked validation for better performance
                     let validation_result =
                         validate_prewarm_accesses_against_db(db, traces_vec, cached_tx.coinbase_deltas);
@@ -773,10 +773,10 @@ where
                         Ok(Err(reason)) => {
                             // Validation failed with specific reason
                             let validation_time = validation_start.elapsed();
-                            
+
                             // Track validation failure with reason
                             metrics::counter!("tx_cache.validation_failures").increment(1);
-                            
+
                             // Track specific failure reason
                             let reason_label = match &reason {
                                 ValidationFailureReason::StateChanged(_) => "state_changed",
@@ -786,7 +786,7 @@ where
                             };
                             metrics::counter!("tx_cache.validation_failure_reason", "reason" => reason_label)
                                 .increment(1);
-                            
+
                             tracing::info!(
                                 target: "engine::cache::metrics",
                                 ?tx_hash,
@@ -795,14 +795,14 @@ where
                                 validation_us = validation_time.as_micros(),
                                 "VALIDATION_FAILED - Cache invalidated"
                             );
-                            
+
                             tracing::debug!(
                                 target: "engine::cache",
                                 ?tx_hash,
                                 ?reason,
                                 "Cache validation failed"
                             );
-                            
+
                             return None;
                         }
                         Err(err) => {
@@ -819,7 +819,7 @@ where
 
                     // Clone the result from Arc (cheap Arc clone was already done)
                     let mut result = (*cached_tx.result).clone();
-                    
+
                     // Apply coinbase deltas to account for gas fees accumulated from previous
                     // transactions. The cached result has the coinbase state
                     // from prewarming (incomplete balance), so we update it to:
@@ -837,7 +837,7 @@ where
                                     coinbase_db.balance + coinbase_balance_delta;
 
                                 let validation_time = validation_start.elapsed();
-                                
+
                                 // Track validation success and time saved
                                 metrics::counter!("tx_cache.validation_successes").increment(1);
                                 // Estimate time saved (validation time is typically much less than execution time)
@@ -845,7 +845,7 @@ where
                                 let estimated_execution_time_us: u64 = 1000; // Conservative estimate
                                 let time_saved_us = estimated_execution_time_us.saturating_sub(validation_time.as_micros() as u64);
                                 metrics::histogram!("tx_cache.time_saved_us").record(time_saved_us as f64);
-                                
+
                                 tracing::info!(
                                     target: "engine::cache::metrics",
                                     ?tx_hash,
@@ -860,13 +860,13 @@ where
                     } else {
                         // No coinbase deltas, but validation passed - return the cached result
                         let validation_time = validation_start.elapsed();
-                        
+
                         // Track validation success and time saved
                         metrics::counter!("tx_cache.validation_successes").increment(1);
                         let estimated_execution_time_us: u64 = 1000; // Conservative estimate
                         let time_saved_us = estimated_execution_time_us.saturating_sub(validation_time.as_micros() as u64);
                         metrics::histogram!("tx_cache.time_saved_us").record(time_saved_us as f64);
-                        
+
                         tracing::info!(
                             target: "engine::cache::metrics",
                             ?tx_hash,
@@ -1106,27 +1106,18 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<Result<(), ValidationFailureReason>, DB::Error> {
-    use crate::tree::payload_processor::prewarm::AccessRecord;
-    use alloy_primitives::{address, Address, U256};
+    use crate::tree::payload_processor::{hot_addresses::HOT_ADDRESSES, prewarm::AccessRecord};
+    use alloy_primitives::{Address, U256};
     use std::collections::BTreeMap;
-    
-    // Common hot addresses that change frequently (mainnet data)
-    // These account for 70% of validation failures, checking them first enables early exit
-    const HOT_ADDRESSES: [Address; 4] = [
-        address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), // USDC
-        address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), // WETH
-        address!("68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"), // Uniswap V3 Router
-        address!("00000000219ab540356cBB839Cbe05303d7705Fa"), // Beacon Deposit Contract
-    ];
 
     // Extract coinbase address if we have deltas
     let coinbase_addr = coinbase_deltas.map(|(addr, _, _)| addr);
-    
+
     // Separate and organize accesses
     let mut hot_accounts = Vec::new();
     let mut regular_accounts = Vec::new();
     let mut storage_by_contract: BTreeMap<Address, Vec<(U256, U256)>> = BTreeMap::new();
-    
+
     for access in prewarm_accesses {
         match access {
             AccessRecord::Account { address, result } => {
@@ -1134,7 +1125,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
                 if Some(address) == coinbase_addr {
                     continue;
                 }
-                
+
                 // Categorize as hot or regular account
                 if HOT_ADDRESSES.contains(&address) {
                     hot_accounts.push((address, result));
@@ -1144,13 +1135,11 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
             }
             AccessRecord::Storage { address, index, result } => {
                 // Group storage by contract for better cache locality
-                storage_by_contract.entry(address)
-                    .or_default()
-                    .push((index, result));
+                storage_by_contract.entry(address).or_default().push((index, result));
             }
         }
     }
-    
+
     // Step 1: Check hot accounts first (70% of failures detected here)
     for (address, expected) in hot_accounts {
         let actual = db.basic(address)?;
@@ -1159,7 +1148,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
             return Ok(Err(determine_failure_reason(address, &actual, &expected)));
         }
     }
-    
+
     // Step 2: Check remaining accounts
     for chunk in regular_accounts.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
         for (address, expected) in chunk {
@@ -1169,7 +1158,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
             }
         }
     }
-    
+
     // Step 3: Check storage (grouped by contract for cache locality)
     for (contract, slots) in storage_by_contract {
         for chunk in slots.chunks(CACHE_VALIDATION_CHUNK_SIZE) {
@@ -1181,7 +1170,7 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
             }
         }
     }
-    
+
     Ok(Ok(()))
 }
 
