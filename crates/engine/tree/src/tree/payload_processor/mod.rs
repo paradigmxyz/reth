@@ -35,6 +35,7 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
+use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -82,6 +83,8 @@ where
     >,
     /// Whether to use the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
+    /// Parallelism threshold for the parallel sparse trie.
+    parallel_sparse_trie_threshold: usize,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
 }
@@ -110,6 +113,7 @@ where
             sparse_state_trie: Arc::default(),
             trie_input: None,
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
+            parallel_sparse_trie_threshold: config.parallel_sparse_trie_threshold(),
         }
     }
 }
@@ -368,7 +372,10 @@ where
             let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
             } else {
-                ConfiguredSparseTrie::Parallel(Default::default())
+                ConfiguredSparseTrie::Parallel(Box::new(
+                    ParallelSparseTrie::default()
+                        .with_parallelism_threshold(self.parallel_sparse_trie_threshold),
+                ))
             });
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
