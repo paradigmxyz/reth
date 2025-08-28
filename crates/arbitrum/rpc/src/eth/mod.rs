@@ -267,7 +267,6 @@ where
         let this = self.clone();
         async move {
             use reth_rpc_eth_types::EthApiError;
-            use reth_primitives_traits::SignerRecoverable as _;
             use reth_rpc_convert::transaction::ConvertReceiptInput;
             use std::borrow::Cow;
 
@@ -288,8 +287,7 @@ where
                 }
             }
 
-            let signer = tx.try_recover_unchecked().map_err(Self::Error::from_eth_err)?;
-            let recovered_ref = tx.with_signer_ref(signer);
+            let recovered_ref = tx.with_signer_ref(alloy_primitives::Address::ZERO);
 
             let input = ConvertReceiptInput {
                 tx: recovered_ref,
