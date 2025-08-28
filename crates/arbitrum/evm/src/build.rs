@@ -25,8 +25,10 @@ use crate::arb_evm::ArbEvmExt;
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
 use alloy_evm::ToTxEnv;
 use revm::context::result::ExecutionResult;
+use alloy_primitives::Log as AlloyLog;
 
 use crate::predeploys::PredeployRegistry;
+use crate::predeploys::{PredeployCallContext, LogEmitter};
 use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext, ArbOsHooks};
 
 pub struct ArbBlockExecutorFactory<R, CS>
@@ -66,6 +68,7 @@ pub struct ArbBlockExecutionCtx {
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
     inner: EthBlockExecutor<'a, Evm, alloy_evm::eth::spec::EthSpec, &'a RB>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
     _phantom: PhantomData<CS>,
@@ -177,6 +180,62 @@ where
         }
 
         let mut used_pre_nonce = None;
+        let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
+        let to_addr = match tx.tx().kind() {
+            alloy_primitives::TxKind::Call(a) => Some(a),
+            _ => None,
+        };
+        if let Some(call_to) = to_addr {
+            let evm = self.inner.evm();
+            let block = alloy_evm::Evm::block(evm);
+            let ctx = PredeployCallContext {
+                block_number: block.number,
+                block_hashes: alloc::vec::Vec::new(),
+                chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
+                os_version: 0,
+                time: block.timestamp,
+                origin: sender,
+                caller: sender,
+                depth: 0,
+                basefee: block_basefee,
+            };
+            struct VecEmitter { logs: alloc::vec::Vec<AlloyLog> }
+            impl LogEmitter for VecEmitter {
+                fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[alloy_primitives::B256], data: &[u8]) {
+                    let log = AlloyLog { address, topics: topics.to_vec(), data: alloy_primitives::Bytes::copy_from_slice(data) };
+                    self.logs.push(log);
+                }
+            }
+            let mut emitter = VecEmitter { logs: alloc::vec::Vec::new() };
+            if let Ok(mut reg) = self.factory().predeploys.lock() {
+                if let Some((out, gas_left, success)) = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter) {
+                    let used = gas_limit.saturating_sub(gas_left);
+                    let exec = if success {
+                        revm::context::result::ExecutionResult::Success {
+                            reason: revm::context::result::SuccessReason::Stop,
+                            gas_used: used,
+                            gas_refunded: 0,
+                            logs: emitter.logs,
+                            output: revm::context::result::Output::Call(out),
+                        }
+                    } else {
+                        revm::context::result::ExecutionResult::Revert {
+                            gas_used: used,
+                            output: alloy_primitives::Bytes::default(),
+                        }
+                    };
+                    maybe_predeploy_result = Some((exec, used));
+                }
+            }
+        }
+        if let Some((exec, used)) = maybe_predeploy_result {
+            let commit = f(&exec);
+            match commit {
+                CommitChanges::Commit => return Ok(Some(used)),
+                CommitChanges::NoCommitAndReturn => return Ok(Some(used)),
+                CommitChanges::NoCommit => return Ok(None),
+            }
+        }
 
         let current_nonce = {
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
@@ -278,6 +337,7 @@ where
                 let evm = self.inner.evm_mut();
                 self.hooks.end_tx::<E>(evm, &mut state, &end_ctx);
             }
+                predeploys: self.predeploys.clone(),
             self.tx_state = state;
         }
 
