@@ -3,7 +3,8 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+        executor::WorkloadExecutor, hot_addresses::HOT_ADDRESSES, multiproof::MultiProofMessage,
+        ExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -43,51 +44,82 @@ use tracing::{debug, trace};
 
 use super::TxCache;
 
-/// Classifies a transaction based on its characteristics
-fn classify_transaction<T, E>(tx: &T) -> &'static str 
+/// Determines whether a transaction should be cached based on its characteristics.
+/// Returns false for transactions involving hot contracts that frequently change state.
+fn should_cache_transaction<T, E>(tx: &T) -> bool
 where
     T: ExecutableTxFor<E>,
-    E: ConfigureEvm
+    E: ConfigureEvm,
 {
     let tx_inner = tx.tx();
-    
+
+    // Check if transaction recipient is a hot contract
+    if let Some(to) = tx_inner.to() {
+        if HOT_ADDRESSES.contains(&to) {
+            metrics::counter!("tx_cache.skipped_hot_recipient").increment(1);
+            return false;
+        }
+    }
+
+    // Check if sender is a hot contract (for token transfers from hot contracts)
+    let from = tx.signer();
+    if HOT_ADDRESSES.contains(&from) {
+        metrics::counter!("tx_cache.skipped_hot_sender").increment(1);
+        return false;
+    }
+
+    true
+}
+
+/// Classifies a transaction based on its characteristics
+fn classify_transaction<T, E>(tx: &T) -> &'static str
+where
+    T: ExecutableTxFor<E>,
+    E: ConfigureEvm,
+{
+    let tx_inner = tx.tx();
+
     // Check if it's a contract creation (to address is None)
     if tx_inner.to().is_none() {
         return "contract_creation"
     }
-    
+
     // Check if it's a simple transfer (no input data)
     if tx_inner.input().is_empty() || tx_inner.input().len() == 0 {
         return "simple_transfer"
     }
-    
+
     // Check for common ERC-20 token transfer pattern
     // ERC-20 transfer method selector is 0xa9059cbb (first 4 bytes)
     if tx_inner.input().len() >= 4 {
         let selector = &tx_inner.input()[..4];
-        
+
         // Common token operations
-        if selector == [0xa9, 0x05, 0x9c, 0xbb] {  // transfer
+        if selector == [0xa9, 0x05, 0x9c, 0xbb] {
+            // transfer
             return "token_transfer"
         }
-        if selector == [0x23, 0xb8, 0x72, 0xdd] {  // transferFrom
+        if selector == [0x23, 0xb8, 0x72, 0xdd] {
+            // transferFrom
             return "token_transfer"
         }
-        if selector == [0x09, 0x5e, 0xa7, 0xb3] {  // approve
+        if selector == [0x09, 0x5e, 0xa7, 0xb3] {
+            // approve
             return "token_approval"
         }
-        
+
         // Common DEX operations (Uniswap, etc)
         // swapExactTokensForTokens: 0x38ed1739
         // swapExactETHForTokens: 0x7ff36ab5
         // swapTokensForExactETH: 0x4a25d94a
-        if selector == [0x38, 0xed, 0x17, 0x39] || 
-           selector == [0x7f, 0xf3, 0x6a, 0xb5] ||
-           selector == [0x4a, 0x25, 0xd9, 0x4a] {
+        if selector == [0x38, 0xed, 0x17, 0x39] ||
+            selector == [0x7f, 0xf3, 0x6a, 0xb5] ||
+            selector == [0x4a, 0x25, 0xd9, 0x4a]
+        {
             return "dex_swap"
         }
     }
-    
+
     // Default to other for any contract interaction
     "other"
 }
@@ -156,10 +188,10 @@ where
         let max_concurrency = self.max_concurrency;
 
         let tx_cache = self.tx_cache.clone();
-        
+
         // Track thread spawn time
         let spawn_start = Instant::now();
-        
+
         self.executor.spawn_blocking(move || {
             let spawn_time = spawn_start.elapsed();
             metrics::histogram!("prewarm.thread_spawn_ms").record(spawn_time.as_millis() as f64);
@@ -396,7 +428,7 @@ where
 
         while let Ok(tx) = txs.recv() {
             let tx_hash = *tx.tx().tx_hash();
-            
+
             // Classify transaction type
             let tx_type = classify_transaction::<_, Evm>(&tx);
             metrics::counter!("tx.type", "type" => tx_type).increment(1);
@@ -429,13 +461,13 @@ where
             };
             let execution_time = start.elapsed();
             metrics.execution_duration.record(execution_time);
-            
+
             // Track execution time in prewarming metrics
             metrics::histogram!("prewarm.execution_ms").record(execution_time.as_millis() as f64);
-            
+
             // Add transaction execution time metrics
             metrics::histogram!("tx.execution_time_us").record(execution_time.as_micros() as f64);
-            
+
             // Calculate gas per second if gas was used
             let gas_used = res.result.gas_used();
             if gas_used > 0 && !execution_time.is_zero() {
@@ -467,6 +499,19 @@ where
                 continue
             }
 
+            // Skip caching transactions involving hot contracts that frequently change state
+            if !should_cache_transaction::<_, Evm>(&tx) {
+                tracing::debug!(
+                    target: "engine::cache",
+                    ?tx_hash,
+                    to = ?tx.tx().to(),
+                    from = ?tx.signer(),
+                    "Skipping cache for hot contract transaction"
+                );
+                metrics::counter!("tx_cache.skipped_hot_contract_total").increment(1);
+                continue
+            }
+
             let execution_trace: Vec<AccessRecord> =
                 std::mem::take(&mut evm.db_mut().recorded_traces);
 
@@ -491,7 +536,7 @@ where
             let original_trace_count = execution_trace.len();
             let execution_trace = deduplicate_traces(execution_trace);
             let dedup_trace_count = execution_trace.len();
-            
+
             tracing::debug!(
                 target: "engine::cache",
                 ?tx_hash,
@@ -600,23 +645,23 @@ pub enum AccessRecord {
 
 /// Deduplicates access records while preserving the order of first occurrence.
 /// This significantly reduces validation overhead for transactions with loops or repeated checks.
-/// 
+///
 /// Returns a deduplicated vector of access records.
 fn deduplicate_traces(traces: Vec<AccessRecord>) -> Vec<AccessRecord> {
     let mut seen = HashSet::new();
     let mut unique = Vec::with_capacity(traces.len().min(32)); // Cap initial capacity
-    
+
     for record in traces {
         let key = match &record {
             AccessRecord::Account { address, .. } => (*address, None),
             AccessRecord::Storage { address, index, .. } => (*address, Some(*index)),
         };
-        
+
         if seen.insert(key) {
             unique.push(record); // Keep first occurrence
         }
     }
-    
+
     unique.shrink_to_fit();
     unique
 }
@@ -730,4 +775,22 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::address;
+
+    #[test]
+    fn test_hot_addresses_contains_critical_contracts() {
+        // Verify that all critical hot addresses are included
+        assert!(HOT_ADDRESSES.contains(&address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"))); // WETH
+        assert!(HOT_ADDRESSES.contains(&address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"))); // USDC
+        assert!(HOT_ADDRESSES.contains(&address!("dAC17F958D2ee523a2206206994597C13D831ec7"))); // USDT
+        assert!(HOT_ADDRESSES.contains(&address!("68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"))); // Uniswap V3 Router
+        assert!(HOT_ADDRESSES.contains(&address!("E592427A0AEce92De3Edee1F18E0157C05861564"))); // Uniswap V3 Router 2
+        assert!(HOT_ADDRESSES.contains(&address!("7a250d5630B4cF539739dF2C5dAcb4c659F2488D"))); // Uniswap V2 Router
+        assert!(HOT_ADDRESSES.contains(&address!("00000000219ab540356cBB839Cbe05303d7705Fa"))); // Beacon Deposit Contract
+    }
 }
