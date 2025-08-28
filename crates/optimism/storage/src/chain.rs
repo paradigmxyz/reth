@@ -1,5 +1,5 @@
 use alloc::{vec, vec::Vec};
-use alloy_consensus::Header;
+use alloy_consensus::{private::alloy_eips::eip4895::Withdrawals, Header};
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -101,9 +101,10 @@ where
             .map(|(header, transactions)| alloy_consensus::BlockBody::<T, H> {
                 transactions,
                 ommers: vec![],
+                // after shanghai the body should have an empty withdrawals list
                 withdrawals: chain_spec
                     .is_shanghai_active_at_timestamp(header.timestamp())
-                    .then(|| vec![].into()),
+                    .then(Withdrawals::default),
             })
             .collect())
     }
