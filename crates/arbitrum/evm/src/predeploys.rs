@@ -302,7 +302,7 @@ impl PredeployHandler for ArbRetryableTx {
                     gas_price_bid: U256::ZERO,
                 };
                 match retryables.create_retryable(params) {
-                    crate::retryables::RetryableAction::Created { ticket_id, user_gas, nonce, refund_to, max_refund, submission_fee_refund, .. } => {
+                    crate::retryables::RetryableAction::Created { ticket_id, user_gas: _, nonce, refund_to, max_refund, submission_fee_refund, retry_tx_hash, sequence_num, .. } => {
                         let mut out = [0u8; 32];
                         out.copy_from_slice(&ticket_id.0);
 
@@ -312,9 +312,8 @@ impl PredeployHandler for ArbRetryableTx {
                         emitter.emit_log(self.addr, &topics_created, &data_created);
 
                         let topic_redeem = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
-                        let retry_tx_hash = B256::ZERO;
-                        let sequence_num = abi_word_u64(nonce);
-                        let topics_redeem = [topic_redeem, B256(ticket_id.0), retry_tx_hash, B256(sequence_num)];
+                        let seq_topic = B256(abi_word_u64(sequence_num));
+                        let topics_redeem = [topic_redeem, B256(ticket_id.0), retry_tx_hash, seq_topic];
                         let mut data = alloc::vec::Vec::with_capacity(32 * 3);
                         data.extend_from_slice(&abi_word_address(refund_to));
                         data.extend_from_slice(&abi_word_u256(max_refund));

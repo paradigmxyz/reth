@@ -26,6 +26,8 @@ pub enum RetryableAction {
         refund_to: Address,
         max_refund: U256,
         submission_fee_refund: U256,
+        retry_tx_hash: alloy_primitives::B256,
+        sequence_num: u64,
     },
     Redeemed { ticket_id: RetryableTicketId, success: bool },
     Canceled { ticket_id: RetryableTicketId },
@@ -94,6 +96,8 @@ impl Retryables for DefaultRetryables {
             refund_to,
             max_refund,
             submission_fee_refund,
+            retry_tx_hash: alloy_primitives::B256::ZERO,
+            sequence_num: 0,
         }
     }
 
