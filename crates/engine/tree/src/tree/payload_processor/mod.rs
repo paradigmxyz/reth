@@ -63,7 +63,7 @@ pub type CoinbaseDeltas = Option<(Address, u64, U256)>;
 
 /// Cached transaction execution entry with Arc-wrapped data to avoid cloning.
 #[derive(Clone, Debug)]
-pub struct CachedTransaction<Evm> 
+pub struct CachedTransaction<Evm>
 where
     Evm: ConfigureEvm,
 {
