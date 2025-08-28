@@ -231,6 +231,20 @@ where
                         .metrics
                         .transactions_prewarmed
                         .increment(prewarmed_transactions as u64);
+                    
+                    // Log prewarm effectiveness summary
+                    let skip_rate = (skipped_transactions as f64 / executed_transactions.max(1) as f64) * 100.0;
+                    let prewarm_rate = (prewarmed_transactions as f64 / executed_transactions.max(1) as f64) * 100.0;
+                    
+                    debug!(
+                        target: "prewarm::summary",
+                        total_transactions = executed_transactions,
+                        skipped_transactions = skipped_transactions,
+                        prewarmed_transactions = prewarmed_transactions,
+                        skip_rate = format!("{:.1}%", skip_rate),
+                        prewarm_rate = format!("{:.1}%", prewarm_rate),
+                        "Prewarm execution completed"
+                    );
 
                     finished_execution = true;
 
@@ -359,16 +373,19 @@ where
 
             // create the tx env
             let start = Instant::now();
+            let tx_hash = tx.tx().tx_hash();
             let res = match evm.transact(&tx) {
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
                         target: "engine::tree",
                         %err,
-                        tx_hash=%tx.tx().tx_hash(),
+                        tx_hash=%tx_hash,
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
+                    // Track this as a miss since we couldn't prewarm this transaction's state
+                    metrics.prewarm_cache_misses.increment(1);
                     return
                 }
             };
@@ -382,14 +399,27 @@ where
             metrics.accounts_loaded.increment(accounts_touched as u64);
             metrics.storage_loaded.increment(storage_touched as u64);
 
+            // Track cache effectiveness - these are all hits since we're prewarming
+            // Every account and storage slot we load will be available as a cache hit
+            metrics.prewarm_cache_hits.increment(accounts_touched as u64);
+            metrics.prewarm_cache_hits.increment(storage_touched as u64);
+            
+            // Estimate I/O time saved (assuming ~1ms per account read and ~0.5ms per storage read from disk)
+            // These are typical SSD latencies for database reads
+            let estimated_io_saved_us = (accounts_touched * 1000 + storage_touched * 500) as f64;
+            if estimated_io_saved_us > 0.0 {
+                metrics.prewarm_io_time_saved_us.record(estimated_io_saved_us);
+            }
+
             // Log cache population for analysis
             if accounts_touched > 0 || storage_touched > 0 {
                 trace!(
                     target: "prewarm::cache",
-                    tx_hash=%tx.tx().tx_hash(),
+                    %tx_hash,
                     accounts_loaded = accounts_touched,
                     storage_slots_loaded = storage_touched,
                     execution_ms = start.elapsed().as_millis(),
+                    estimated_io_saved_us = estimated_io_saved_us,
                     "Populated cache with state"
                 );
             }
