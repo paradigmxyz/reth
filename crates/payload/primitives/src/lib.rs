@@ -157,17 +157,17 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    let is_amsterdam = true; /* ///todo chain_spec.is_amstardam_active_at_timestamp(timestamp); */
-    if version.is_v6() && !is_amsterdam {
-        // From the Engine API spec:
-        // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
-        //
-        // For `engine_getPayloadV5`
-        //
-        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
-        //    built payload does not fall within the time frame of the Amsterdam fork.
-        return Err(EngineObjectValidationError::UnsupportedFork)
-    }
+    // let is_amsterdam = true; /* ///todo chain_spec.is_amstardam_active_at_timestamp(timestamp);
+    // */ if version.is_v6() && !is_amsterdam {
+    //     // From the Engine API spec:
+    //     // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
+    //     //
+    //     // For `engine_getPayloadV5`
+    //     //
+    //     // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+    //     //    built payload does not fall within the time frame of the Amsterdam fork.
+    //     return Err(EngineObjectValidationError::UnsupportedFork)
+    // }
 
     Ok(())
 }
