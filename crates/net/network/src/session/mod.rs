@@ -1151,7 +1151,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
 
         let (multiplex_stream, their_status) = match multiplex_stream
-            .into_eth_satellite_stream(status, fork_filter, handshake.clone())
+            .into_eth_satellite_stream(status, fork_filter, handshake)
             .await
         {
             Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),

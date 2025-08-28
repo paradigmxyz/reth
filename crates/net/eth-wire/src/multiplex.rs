@@ -171,9 +171,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
             tokio::select! {
                 // Poll all subprotocols for new messages
                 msg = ProtocolsPoller::new(&mut self.inner.protocols) => {
-                    if let Some(msg) = msg {
-                        self.inner.conn.send(msg).await.map_err(Into::into)?; // Direct send like primary
-                    }
+                    self.inner.conn.send(msg.map_err(Into::into)?).await.map_err(Into::into)?;
                 }
                 Some(Ok(msg)) = self.inner.conn.next() => {
                     // Ensure the message belongs to the primary protocol
@@ -213,7 +211,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     }
 
     /// Converts this multiplexer into a [`RlpxSatelliteStream`] with eth protocol as the given
-    /// primary protocol.
+    /// primary protocol and the handshake implementation.
     pub async fn into_eth_satellite_stream<N: NetworkPrimitives>(
         self,
         status: UnifiedStatus,
@@ -227,7 +225,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         self.into_satellite_stream_with_tuple_handshake(&Capability::eth(eth_cap), move |proxy| {
             let handshake = handshake.clone();
             async move {
-                let mut unauth = ProxyUnauth { inner: proxy };
+                let mut unauth = UnauthProxy { inner: proxy };
                 let their_status = handshake
                     .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
                     .await?;
@@ -394,47 +392,45 @@ impl CanDisconnect<Bytes> for ProtocolProxy {
 /// Adapter so the injected `EthRlpxHandshake` can run over a multiplexed `ProtocolProxy`
 /// using the same error type expectations (`P2PStreamError`).
 #[derive(Debug)]
-struct ProxyUnauth {
+struct UnauthProxy {
     inner: ProtocolProxy,
 }
 
-impl ProxyUnauth {
+impl UnauthProxy {
     fn into_inner(self) -> ProtocolProxy {
         self.inner
     }
 }
 
-impl Stream for ProxyUnauth {
+impl Stream for UnauthProxy {
     type Item = Result<BytesMut, P2PStreamError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner)
-            .poll_next(cx)
-            .map(|opt| opt.map(|res| res.map_err(P2PStreamError::from)))
+        self.inner.poll_next_unpin(cx).map(|opt| opt.map(|res| res.map_err(P2PStreamError::from)))
     }
 }
 
-impl Sink<Bytes> for ProxyUnauth {
+impl Sink<Bytes> for UnauthProxy {
     type Error = P2PStreamError;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.inner).poll_ready(cx).map_err(P2PStreamError::from)
+        self.inner.poll_ready_unpin(cx).map_err(P2PStreamError::from)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
-        Pin::new(&mut self.inner).start_send(item).map_err(P2PStreamError::from)
+        self.inner.start_send_unpin(item).map_err(P2PStreamError::from)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.inner).poll_flush(cx).map_err(P2PStreamError::from)
+        self.inner.poll_flush_unpin(cx).map_err(P2PStreamError::from)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.inner).poll_close(cx).map_err(P2PStreamError::from)
+        self.inner.poll_close_unpin(cx).map_err(P2PStreamError::from)
     }
 }
 
-impl CanDisconnect<Bytes> for ProxyUnauth {
+impl CanDisconnect<Bytes> for UnauthProxy {
     fn disconnect(
         &mut self,
         reason: DisconnectReason,
@@ -744,8 +740,8 @@ impl<'a> ProtocolsPoller<'a> {
     }
 }
 
-impl<'a> std::future::Future for ProtocolsPoller<'a> {
-    type Output = Option<Bytes>;
+impl<'a> Future for ProtocolsPoller<'a> {
+    type Output = Result<Bytes, P2PStreamError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Process protocols in reverse order, like the existing pattern
@@ -754,13 +750,11 @@ impl<'a> std::future::Future for ProtocolsPoller<'a> {
 
             // Poll once; if not ready, put back and continue
             match proto.poll_next_unpin(cx) {
-                Poll::Ready(Some(Err(_err))) => {
-                    // Protocol error, drop this protocol
-                }
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Err(P2PStreamError::from(err))),
                 Poll::Ready(Some(Ok(msg))) => {
                     // Got a message, put protocol back and return the message
                     self.protocols.push(proto);
-                    return Poll::Ready(Some(msg));
+                    return Poll::Ready(Ok(msg));
                 }
                 Poll::Ready(None) => {
                     // Protocol ended, don't put it back
@@ -780,16 +774,14 @@ impl<'a> std::future::Future for ProtocolsPoller<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{
-            connect_passthrough, eth_handshake, eth_hello,
-            proto::{test_hello, TestProtoMessage},
-        },
-        UnauthedP2PStream,
-    };
+    use crate::{test_utils::{
+        connect_passthrough, eth_handshake, eth_hello,
+        proto::{test_hello, TestProtoMessage},
+    }, UnauthedEthStream, UnauthedP2PStream};
     use reth_eth_wire_types::EthNetworkPrimitives;
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
+    use crate::handshake::EthHandshake;
 
     #[tokio::test]
     async fn eth_satellite() {
