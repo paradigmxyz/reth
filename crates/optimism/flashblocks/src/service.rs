@@ -206,7 +206,7 @@ impl<
             > + Unpin,
     > Stream for FlashBlockService<N, S, EvmConfig, Provider>
 {
-    type Item = eyre::Result<PendingBlock<N>>;
+    type Item = eyre::Result<Option<PendingBlock<N>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -220,33 +220,22 @@ impl<
         }
 
         // Execute block if there are flashblocks but no last pending block
-        let new_block = if this.current.is_none() && !this.blocks.is_empty() {
+        if this.current.is_none() && !this.blocks.is_empty() {
             match this.execute() {
-                Ok(block) => Some(block),
+                Ok(block) => this.current = Some(block),
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
-        } else {
-            None
-        };
-
-        let changed = new_block.is_some();
-
-        if let Some(new_block) = new_block {
-            this.current = Some(new_block);
         }
 
         // Verify that pending block is following up to the canonical state
         match this.verify_pending_block_integrity(cx) {
-            Ok(Some(false)) => Poll::Ready(None), // Integrity check failed, erase last block
-            Ok(Some(true)) => {
-                // Integrity check is OK
-                if changed {
-                    Poll::Ready(this.current.clone().map(Ok)) // Output new block
-                } else {
-                    Poll::Pending // Keep last block
-                }
-            }
-            Ok(None) => Poll::Pending, // Cannot check integrity, tip or block is missing
+            // Integrity check failed, erase last block
+            Ok(Some(false)) => Poll::Ready(Some(Ok(None))),
+            // Integrity check is OK, output last block
+            Ok(Some(true)) => Poll::Ready(Some(Ok(this.current.clone()))),
+            // Cannot check integrity, tip or block is missing
+            Ok(None) => Poll::Pending,
+            // Cannot check integrity, error occurred
             Err(err) => Poll::Ready(Some(Err(err))),
         }
     }

@@ -46,7 +46,7 @@ where
     tokio::spawn(async move {
         while let Some(block) = service.next().await {
             if let Ok(block) = block.inspect_err(|e| tracing::error!("{e}")) {
-                let _ = tx.send(Some(block)).inspect_err(|e| tracing::error!("{e}"));
+                let _ = tx.send(block).inspect_err(|e| tracing::error!("{e}"));
             }
         }
     });
