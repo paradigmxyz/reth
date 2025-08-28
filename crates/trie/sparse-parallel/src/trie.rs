@@ -109,6 +109,8 @@ pub struct ParallelSparseTrie {
     /// Reusable buffer pool used for collecting [`SparseTrieUpdatesAction`]s during hash
     /// computations.
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
+    /// Threshold number under which parallelism is not enabled.
+    parallelism_threshold: usize,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -127,6 +129,7 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
+            parallelism_threshold: 0,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -200,18 +203,19 @@ impl SparseTrieInterface for ParallelSparseTrie {
             self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
 
-        #[cfg(not(feature = "std"))]
-        // Reveal lower subtrie nodes serially if nostd
-        {
+        if !self.is_parallelism_enabled(lower_nodes.len()) {
             for node in lower_nodes {
                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
-                    subtrie.reveal_node(node.path, &node.node, &node.masks)?;
+                    subtrie.reveal_node(node.path, &node.node, node.masks)?;
                 } else {
                     panic!("upper subtrie node {node:?} found amongst lower nodes");
                 }
             }
-            Ok(())
+            return Ok(())
         }
+
+        #[cfg(not(feature = "std"))]
+        unreachable!("nostd is checked by is_parallelism_enabled");
 
         #[cfg(feature = "std")]
         // Reveal lower subtrie nodes in parallel
@@ -718,76 +722,62 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // Take changed subtries according to the prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let (subtries, unchanged_prefix_set) = self.take_changed_lower_subtries(&mut prefix_set);
+        let num_changed_keys = prefix_set.len();
+        let (mut changed_subtries, unchanged_prefix_set) =
+            self.take_changed_lower_subtries(&mut prefix_set);
 
         // update metrics
         #[cfg(feature = "metrics")]
-        self.metrics.subtries_updated.record(subtries.len() as f64);
+        self.metrics.subtries_updated.record(changed_subtries.len() as f64);
 
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
-        let (tx, rx) = mpsc::channel();
+        // Update subtrie hashes serially parallelism is not enabled
+        if !self.is_parallelism_enabled(num_changed_keys) {
+            for changed_subtrie in &mut changed_subtries {
+                changed_subtrie.subtrie.update_hashes(
+                    &mut changed_subtrie.prefix_set,
+                    &mut changed_subtrie.update_actions_buf,
+                    &self.branch_node_tree_masks,
+                    &self.branch_node_hash_masks,
+                );
+            }
+
+            self.insert_changed_subtries(changed_subtries);
+            return
+        }
 
         #[cfg(not(feature = "std"))]
-        // Update subtrie hashes serially if nostd
-        for ChangedSubtrie { index, mut subtrie, mut prefix_set, mut update_actions_buf } in
-            subtries
-        {
-            subtrie.update_hashes(
-                &mut prefix_set,
-                &mut update_actions_buf,
-                &self.branch_node_tree_masks,
-                &self.branch_node_hash_masks,
-            );
-            tx.send((index, subtrie, update_actions_buf)).unwrap();
-        }
+        unreachable!("nostd is checked by is_parallelism_enabled");
 
         #[cfg(feature = "std")]
         // Update subtrie hashes in parallel
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            let (tx, rx) = mpsc::channel();
+
             let branch_node_tree_masks = &self.branch_node_tree_masks;
             let branch_node_hash_masks = &self.branch_node_hash_masks;
-            subtries
+            changed_subtries
                 .into_par_iter()
-                .map(
-                    |ChangedSubtrie {
-                         index,
-                         mut subtrie,
-                         mut prefix_set,
-                         mut update_actions_buf,
-                     }| {
-                        #[cfg(feature = "metrics")]
-                        let start = std::time::Instant::now();
-                        subtrie.update_hashes(
-                            &mut prefix_set,
-                            &mut update_actions_buf,
-                            branch_node_tree_masks,
-                            branch_node_hash_masks,
-                        );
-                        #[cfg(feature = "metrics")]
-                        self.metrics.subtrie_hash_update_latency.record(start.elapsed());
-                        (index, subtrie, update_actions_buf)
-                    },
-                )
+                .map(|mut changed_subtrie| {
+                    #[cfg(feature = "metrics")]
+                    let start = std::time::Instant::now();
+                    changed_subtrie.subtrie.update_hashes(
+                        &mut changed_subtrie.prefix_set,
+                        &mut changed_subtrie.update_actions_buf,
+                        branch_node_tree_masks,
+                        branch_node_hash_masks,
+                    );
+                    #[cfg(feature = "metrics")]
+                    self.metrics.subtrie_hash_update_latency.record(start.elapsed());
+                    changed_subtrie
+                })
                 .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
-        }
 
-        drop(tx);
-
-        // Return updated subtries back to the trie after executing any actions required on the
-        // top-level `SparseTrieUpdates`.
-        for (index, subtrie, update_actions_buf) in rx {
-            if let Some(mut update_actions_buf) = update_actions_buf {
-                self.apply_subtrie_update_actions(
-                    #[allow(clippy::iter_with_drain)]
-                    update_actions_buf.drain(..),
-                );
-                self.update_actions_buffers.push(update_actions_buf);
-            }
-
-            self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
+            drop(tx);
+            self.insert_changed_subtries(rx);
         }
     }
 
@@ -889,9 +879,29 @@ impl SparseTrieInterface for ParallelSparseTrie {
 }
 
 impl ParallelSparseTrie {
+    /// If the trie has fewer than the given number of keys modified via `update_leaf` or
+    /// `remove_leaf` then parallel state root computation won't be enabled.
+    ///
+    /// Sets a threshold which controls when parallelism is used during operations.
+    /// * `reveal_nodes` compares the number of nodes to be revealed against this number.
+    /// * `root` and `update_subtrie_hashes` compare the prefix set lsength against this number.
+    pub const fn with_parallelism_threshold(mut self, parallelism_threshold: usize) -> Self {
+        self.parallelism_threshold = parallelism_threshold;
+        self
+    }
+
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
+    }
+
+    /// Returns true if the given value is at or above the parallelism threshold. Will always return
+    /// false in nostd builds.
+    const fn is_parallelism_enabled(&self, v: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        return false;
+
+        v >= self.parallelism_threshold
     }
 
     /// Creates a new revealed sparse trie from the given root node.
@@ -1451,6 +1461,25 @@ impl ParallelSparseTrie {
         }
 
         Ok(())
+    }
+
+    /// Return updated subtries back to the trie after executing any actions required on the
+    /// top-level `SparseTrieUpdates`.
+    fn insert_changed_subtries(
+        &mut self,
+        changed_subtries: impl IntoIterator<Item = ChangedSubtrie>,
+    ) {
+        for ChangedSubtrie { index, subtrie, update_actions_buf, .. } in changed_subtries {
+            if let Some(mut update_actions_buf) = update_actions_buf {
+                self.apply_subtrie_update_actions(
+                    #[allow(clippy::iter_with_drain)]
+                    update_actions_buf.drain(..),
+                );
+                self.update_actions_buffers.push(update_actions_buf);
+            }
+
+            self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
+        }
     }
 }
 
