@@ -192,7 +192,7 @@ pub trait Peers: PeersInfo {
     /// Disconnect an existing connection to the given peer using the provided reason
     fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
 
-    /// Connect to the given peer. NOTE: if the maximum number out outbound sessions is reached,
+    /// Connect to the given peer. NOTE: if the maximum number of outbound sessions is reached,
     /// this won't do anything. See `reth_network::SessionManager::dial_outbound`.
     fn connect_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.connect_peer_kind(peer, PeerKind::Static, tcp_addr, None)

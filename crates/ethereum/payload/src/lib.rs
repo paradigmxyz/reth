@@ -11,12 +11,14 @@
 
 use alloy_consensus::Transaction;
 use alloy_primitives::U256;
+use alloy_rlp::Encodable;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError};
+use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -193,10 +195,13 @@ where
     let mut blob_sidecars = BlobSidecars::Empty;
 
     let mut block_blob_count = 0;
+    let mut block_transactions_rlp_length = 0;
 
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -218,6 +223,22 @@ where
 
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
+
+        let estimated_block_size_with_tx = block_transactions_rlp_length +
+            tx.inner().length() +
+            attributes.withdrawals().length() +
+            1024; // 1Kb of overhead for the block header
+
+        if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::OversizedData(
+                    estimated_block_size_with_tx,
+                    MAX_RLP_BLOCK_SIZE,
+                ),
+            );
+            continue;
+        }
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
@@ -307,6 +328,8 @@ where
             }
         }
 
+        block_transactions_rlp_length += tx.inner().length();
+
         // update and add to total fees
         let miner_fee =
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
@@ -335,6 +358,13 @@ where
 
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
+
+    if sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
+        return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
+            rlp_length: sealed_block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        }));
+    }
 
     let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
         // add blob sidecars from the executed txs

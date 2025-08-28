@@ -28,7 +28,10 @@ use reth_trie::{
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
     MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::proof::{DecodedProofNodes, ProofRetainer};
+use reth_trie_common::{
+    added_removed_keys::MultiAddedRemovedKeys,
+    proof::{DecodedProofNodes, ProofRetainer},
+};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
 use tracing::debug;
@@ -52,6 +55,8 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
@@ -73,6 +78,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
+            multi_added_removed_keys: None,
             storage_proof_task_handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
@@ -82,6 +88,16 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Configure the `ParallelProof` with a [`MultiAddedRemovedKeys`], allowing for retaining
+    /// extra proofs needed to add and remove leaf nodes from the tries.
+    pub fn with_multi_added_removed_keys(
+        mut self,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    ) -> Self {
+        self.multi_added_removed_keys = multi_added_removed_keys;
         self
     }
 }
@@ -102,6 +118,7 @@ where
             prefix_set,
             target_slots,
             self.collect_branch_node_masks,
+            self.multi_added_removed_keys.clone(),
         );
 
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -217,15 +234,23 @@ where
             &self.state_sorted,
         );
 
+        let accounts_added_removed_keys =
+            self.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
         // Create the walker.
-        let walker = TrieWalker::state_trie(
+        let walker = TrieWalker::<_>::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
+        .with_added_removed_keys(accounts_added_removed_keys)
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer = targets
+            .keys()
+            .map(Nibbles::unpack)
+            .collect::<ProofRetainer>()
+            .with_added_removed_keys(accounts_added_removed_keys);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);

@@ -260,10 +260,23 @@ impl RpcServerArgs {
         self
     }
 
+    /// Configures modules for WS-RPC server.
+    pub fn with_ws_api(mut self, ws_api: RpcModuleSelection) -> Self {
+        self.ws_api = Some(ws_api);
+        self
+    }
+
     /// Enables the Auth IPC
     pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
+    }
+
+    /// Configures modules for both the HTTP-RPC server and WS-RPC server.
+    ///
+    /// This is the same as calling both [`Self::with_http_api`] and [`Self::with_ws_api`].
+    pub fn with_api(self, api: RpcModuleSelection) -> Self {
+        self.with_http_api(api.clone()).with_ws_api(api)
     }
 
     /// Change rpc port numbers based on the instance number, if provided.
@@ -332,6 +345,14 @@ impl RpcServerArgs {
         self = self.with_auth_unused_port();
         self = self.with_ipc_random_path();
         self
+    }
+
+    /// Apply a function to the args.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
     }
 }
 
