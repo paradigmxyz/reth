@@ -307,17 +307,15 @@ impl PredeployHandler for ArbRetryableTx {
                         out.copy_from_slice(&ticket_id.0);
 
                         let topic_created = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_TICKET_CREATED);
-                        let topics_created = [topic_created];
-                        let data_created = abi_word_b256(B256(ticket_id.0));
+                        let topics_created = [topic_created, B256(ticket_id.0)];
+                        let data_created: [u8; 0] = [];
                         emitter.emit_log(self.addr, &topics_created, &data_created);
 
                         let topic_redeem = arb_alloy_predeploys::topic(arb_alloy_predeploys::EVT_REDEEM_SCHEDULED);
-                        let topics_redeem = [topic_redeem];
-                        let mut data = alloc::vec::Vec::with_capacity(32 * 7);
-                        data.extend_from_slice(&abi_word_b256(B256(ticket_id.0)));
-                        data.extend_from_slice(&abi_word_b256(B256::ZERO));
-                        data.extend_from_slice(&abi_word_u64(user_gas));
-                        data.extend_from_slice(&abi_word_u64(nonce));
+                        let retry_tx_hash = B256::ZERO;
+                        let sequence_num = abi_word_u64(nonce);
+                        let topics_redeem = [topic_redeem, B256(ticket_id.0), retry_tx_hash, B256(sequence_num)];
+                        let mut data = alloc::vec::Vec::with_capacity(32 * 3);
                         data.extend_from_slice(&abi_word_address(refund_to));
                         data.extend_from_slice(&abi_word_u256(max_refund));
                         data.extend_from_slice(&abi_word_u256(submission_fee_refund));
