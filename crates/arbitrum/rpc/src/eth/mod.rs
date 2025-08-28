@@ -258,4 +258,48 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = crate::error::ArbEthApiError>,
 {
+    fn build_transaction_receipt(
+        &self,
+        tx: reth_storage_api::ProviderTx<Self::Provider>,
+        meta: alloy_consensus::transaction::TransactionMeta,
+        receipt: reth_storage_api::ProviderReceipt<Self::Provider>,
+    ) -> impl core::future::Future<Output = core::result::Result<Self::RpcReceipt, Self::Error>> + Send {
+        let this = self.clone();
+        async move {
+            use reth_rpc_eth_types::EthApiError;
+            use reth_primitives_traits::SignerRecoverable as _;
+            use reth_rpc_convert::transaction::ConvertReceiptInput;
+            use std::borrow::Cow;
+
+            let hash = meta.block_hash;
+            let all_receipts = this
+                .cache()
+                .get_receipts(hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+
+            let mut gas_used = 0u64;
+            let mut next_log_index = 0usize;
+            if meta.index > 0 {
+                for r in all_receipts.iter().take(meta.index as usize) {
+                    gas_used = r.cumulative_gas_used();
+                    next_log_index += r.logs().len();
+                }
+            }
+
+            let signer = tx.try_recover_unchecked().map_err(Self::Error::from_eth_err)?;
+            let recovered_ref = tx.with_signer_ref(signer);
+
+            let input = ConvertReceiptInput {
+                tx: recovered_ref,
+                gas_used: receipt.cumulative_gas_used() - gas_used,
+                receipt: Cow::Owned(receipt),
+                next_log_index,
+                meta,
+            };
+
+            Ok(this.tx_resp_builder().convert_receipts(vec![input])?.pop().unwrap())
+        }
+    }
 }
