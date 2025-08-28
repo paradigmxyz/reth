@@ -37,4 +37,5 @@ std = [
     "reth-primitives-traits/std",
     "reth-ethereum-primitives/std",
     "alloy-primitives/std",
+    "alloy-rlp/std",
 ]
