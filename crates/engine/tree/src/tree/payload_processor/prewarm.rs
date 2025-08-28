@@ -32,7 +32,7 @@ use tracing::{debug, trace};
 /// Based on empirical performance analysis across 200 blocks, the first 11 transactions
 /// in each block consistently fail to benefit from prewarming due to timing conflicts
 /// with the main execution thread.
-const SKIP_PREWARM_TRANSACTIONS: usize = 18;
+const SKIP_PREWARM_TRANSACTIONS: usize = 4;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -155,7 +155,7 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-        
+
         // Count what we're saving
         let accounts_in_cache = state.state.len();
         let storage_slots_in_cache: usize =
@@ -231,11 +231,14 @@ where
                         .metrics
                         .transactions_prewarmed
                         .increment(prewarmed_transactions as u64);
-                    
+
                     // Log prewarm effectiveness summary
-                    let skip_rate = (skipped_transactions as f64 / executed_transactions.max(1) as f64) * 100.0;
-                    let prewarm_rate = (prewarmed_transactions as f64 / executed_transactions.max(1) as f64) * 100.0;
-                    
+                    let skip_rate =
+                        (skipped_transactions as f64 / executed_transactions.max(1) as f64) * 100.0;
+                    let prewarm_rate = (prewarmed_transactions as f64 /
+                        executed_transactions.max(1) as f64) *
+                        100.0;
+
                     debug!(
                         target: "prewarm::summary",
                         total_transactions = executed_transactions,
@@ -403,9 +406,9 @@ where
             // Every account and storage slot we load will be available as a cache hit
             metrics.prewarm_cache_hits.increment(accounts_touched as u64);
             metrics.prewarm_cache_hits.increment(storage_touched as u64);
-            
-            // Estimate I/O time saved (assuming ~1ms per account read and ~0.5ms per storage read from disk)
-            // These are typical SSD latencies for database reads
+
+            // Estimate I/O time saved (assuming ~1ms per account read and ~0.5ms per storage read
+            // from disk) These are typical SSD latencies for database reads
             let estimated_io_saved_us = (accounts_touched * 1000 + storage_touched * 500) as f64;
             if estimated_io_saved_us > 0.0 {
                 metrics.prewarm_io_time_saved_us.record(estimated_io_saved_us);
@@ -523,7 +526,7 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) accounts_loaded: Counter,
     /// Number of storage slots loaded by prewarm (populated into cache)
     pub(crate) storage_loaded: Counter,
-    
+
     // Cache effectiveness metrics (these track how effective the prewarm was)
     /// Total cache hits from prewarmed state during main execution
     pub(crate) prewarm_cache_hits: Counter,
