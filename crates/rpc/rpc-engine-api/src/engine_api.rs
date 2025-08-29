@@ -296,9 +296,11 @@ where
             PayloadT::ExecutionData,
             PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
-        self.inner
-            .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
+        self.inner.validator.validate_version_specific_fields(
+            EngineApiMessageVersion::V6,
+            /* //todo */
+            payload_or_attrs,
+        )?;
 
         Ok(self
             .inner
@@ -588,7 +590,7 @@ where
     pub async fn get_payload_v6(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV5> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
         self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
     }
 

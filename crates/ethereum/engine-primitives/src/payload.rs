@@ -11,8 +11,9 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -156,6 +157,38 @@ impl EthBuiltPayload {
             execution_requests: requests.unwrap_or_default(),
         })
     }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV6`].
+    pub fn try_into_v6(self) -> Result<ExecutionPayloadEnvelopeV6, BuiltPayloadConversionError> {
+        let Self { block, fees, sidecars, requests, .. } = self;
+
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
+
+        Ok(ExecutionPayloadEnvelopeV6 {
+            execution_payload: ExecutionPayloadV4::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
+    }
 }
 
 impl BuiltPayload for EthBuiltPayload {
@@ -220,6 +253,14 @@ impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
 
     fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
         value.try_into_v5()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV6 {
+    type Error = BuiltPayloadConversionError;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v6()
     }
 }
 
