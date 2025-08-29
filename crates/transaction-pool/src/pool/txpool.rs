@@ -2963,6 +2963,97 @@ mod tests {
     }
 
     #[test]
+    fn test_basefee_decrease_zero_allocation_optimization() {
+        use alloy_primitives::address;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create transactions that will be in basefee pool (can't afford initial high fee)
+        // Use different senders to avoid nonce gap issues
+        let sender_a = address!("0x000000000000000000000000000000000000000a");
+        let sender_b = address!("0x000000000000000000000000000000000000000b");
+        let sender_c = address!("0x000000000000000000000000000000000000000c");
+
+        let tx1 = MockTransaction::eip1559()
+            .set_sender(sender_a)
+            .set_nonce(0)
+            .set_max_fee(500)
+            .inc_limit();
+        let tx2 = MockTransaction::eip1559()
+            .set_sender(sender_b)
+            .set_nonce(0)
+            .set_max_fee(600)
+            .inc_limit();
+        let tx3 = MockTransaction::eip1559()
+            .set_sender(sender_c)
+            .set_nonce(0)
+            .set_max_fee(400)
+            .inc_limit();
+
+        // Set high initial basefee so transactions go to basefee pool
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 700;
+        pool.set_block_info(block_info);
+
+        let validated1 = f.validated(tx1);
+        let validated2 = f.validated(tx2);
+        let validated3 = f.validated(tx3);
+        let id1 = *validated1.id();
+        let id2 = *validated2.id();
+        let id3 = *validated3.id();
+
+        // Add transactions - they should go to basefee pool due to high basefee
+        // All transactions have nonce 0 from different senders, so on_chain_nonce should be 0 for
+        // all
+        pool.add_transaction(validated1, U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated2, U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated3, U256::from(10_000), 0, None).unwrap();
+
+        // Debug: Check where transactions ended up
+        println!("Basefee pool len: {}", pool.basefee_pool.len());
+        println!("Pending pool len: {}", pool.pending_pool.len());
+        println!("tx1 subpool: {:?}", pool.all_transactions.txs.get(&id1).unwrap().subpool);
+        println!("tx2 subpool: {:?}", pool.all_transactions.txs.get(&id2).unwrap().subpool);
+        println!("tx3 subpool: {:?}", pool.all_transactions.txs.get(&id3).unwrap().subpool);
+
+        // Verify they're in basefee pool
+        assert_eq!(pool.basefee_pool.len(), 3);
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.all_transactions.txs.get(&id1).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&id2).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&id3).unwrap().subpool, SubPool::BaseFee);
+
+        // Now decrease basefee to trigger the zero-allocation optimization
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 450; // tx1 (500) and tx2 (600) can now afford it, tx3 (400) cannot
+        pool.set_block_info(block_info);
+
+        // Verify the optimization worked correctly:
+        // - tx1 and tx2 should be promoted to pending (mathematical certainty)
+        // - tx3 should remain in basefee pool
+        // - All state transitions should be correct
+        assert_eq!(pool.basefee_pool.len(), 1);
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // tx3 should still be in basefee pool (fee 400 < basefee 450)
+        assert_eq!(pool.all_transactions.txs.get(&id3).unwrap().subpool, SubPool::BaseFee);
+
+        // tx1 and tx2 should be in pending pool with correct state bits
+        let tx1_meta = pool.all_transactions.txs.get(&id1).unwrap();
+        let tx2_meta = pool.all_transactions.txs.get(&id2).unwrap();
+        assert_eq!(tx1_meta.subpool, SubPool::Pending);
+        assert_eq!(tx2_meta.subpool, SubPool::Pending);
+        assert!(tx1_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(tx2_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+        // Verify that best_transactions returns the promoted transactions
+        let best: Vec<_> = pool.best_transactions().take(3).collect();
+        assert_eq!(best.len(), 2); // Only tx1 and tx2 should be returned
+        assert!(best.iter().any(|tx| tx.id() == &id1));
+        assert!(best.iter().any(|tx| tx.id() == &id2));
+    }
+
+    #[test]
     fn get_highest_transaction_by_sender_and_nonce() {
         // Set up a mock transaction factory and a new transaction pool.
         let mut f = MockTransactionFactory::default();
