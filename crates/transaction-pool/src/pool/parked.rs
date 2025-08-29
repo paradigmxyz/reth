@@ -310,33 +310,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     where
         F: FnMut(Arc<ValidPoolTransaction<T>>),
     {
-        let basefee = basefee as u128;
-
-        // Collect qualifying transaction IDs first
-        let to_remove = {
-            let mut qualifying_ids = Vec::new();
-            let mut iter = self.by_id.iter().peekable();
-
-            while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee {
-                    // Transaction still can't afford base fee
-                    // Skip all remaining transactions from this sender due to sequential nonce
-                    // ordering: BTreeMap iteration guarantees sender+nonce
-                    // lexicographic order, so if the earliest transaction
-                    // (lowest nonce) can't afford basefee, later ones shouldn't be promoted
-                    'skip_sender: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'skip_sender;
-                        }
-                        iter.next();
-                    }
-                } else {
-                    // Transaction can now afford base fee - mark for immediate processing
-                    qualifying_ids.push(*id);
-                }
-            }
-            qualifying_ids
-        };
+        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
 
         for id in to_remove {
             if let Some(tx) = self.remove_transaction(&id) {
