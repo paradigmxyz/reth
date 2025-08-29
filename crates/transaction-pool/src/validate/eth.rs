@@ -212,70 +212,6 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state)
     }
-
-    /// Performs validation, not requiring chain state, on single transaction.
-    ///
-    /// Returns unaltered input transaction if all checks pass, so transaction can continue
-    /// through to stateful validation as argument to
-    /// [`apply_checks_against_state`](Self::apply_checks_against_state).
-    pub fn apply_checks_no_state(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> Result<Tx, TransactionValidationOutcome<Tx>> {
-        self.inner.apply_checks_no_state(origin, transaction)
-    }
-
-    /// Validates single transaction using given state.
-    pub fn apply_checks_against_state<P>(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-        state: P,
-    ) -> TransactionValidationOutcome<Tx>
-    where
-        P: AccountInfoReader,
-    {
-        self.inner.apply_checks_against_state(origin, transaction, state)
-    }
-}
-
-impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
-where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
-    Tx: EthPoolTransaction,
-{
-    type Transaction = Tx;
-
-    async fn validate_transaction(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
-    }
-
-    async fn validate_transactions(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.inner.validate_batch(transactions)
-    }
-
-    async fn validate_transactions_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.inner.validate_batch_with_origin(origin, transactions)
-    }
-
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
-        self.inner.on_new_head_block(new_tip_block.header())
-    }
 }
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
@@ -337,16 +273,11 @@ impl<Client: ChainSpecProvider, Tx> EthTransactionValidatorInner<Client, Tx> {
     }
 }
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
+impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Returns the configured chain spec
-    fn chain_spec(&self) -> Arc<Client::ChainSpec> {
-        self.client.chain_spec()
-    }
-
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
@@ -385,7 +316,7 @@ where
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
     /// to [`apply_checks_against_state`](Self::apply_checks_against_state).
-    fn apply_checks_no_state(
+    pub fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -639,7 +570,7 @@ where
     }
 
     /// Validates a single transaction using given state provider.
-    fn apply_checks_against_state<P>(
+    pub fn apply_checks_against_state<P>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
