@@ -9334,6 +9334,7 @@ dependencies = [
  "reth-storage-api",
  "serde",
  "serde_json",
+ "test-case",
  "tokio",
  "tokio-tungstenite",
  "tracing",
