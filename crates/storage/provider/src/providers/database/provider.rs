@@ -44,6 +44,10 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_log_index::{
+    BlockBoundary, FilterError, FilterMapMeta, FilterMapParams, FilterMapRowEntry,
+    FilterMapsReader, FilterMapsWriter, FilterResult, MapValueRows,
+};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
@@ -3165,6 +3169,151 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastSafeBlockBlock, block_number)?)
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX, N> {
+    fn get_metadata(&self) -> FilterResult<Option<FilterMapMeta>> {
+        self.tx_ref()
+            .get::<tables::FilterMapMeta>(tables::FilterMapMetaKey)
+            .map_err(|e| FilterError::Database(e.to_string()))
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        value: &B256,
+    ) -> FilterResult<Vec<Vec<u32>>> {
+        let params = FilterMapParams::default();
+        let row_index = params.row_index(map_start, 0, value);
+
+        let mut results = Vec::with_capacity((map_end - map_start + 1) as usize);
+
+        for map_index in map_start..=map_end {
+            let map_row_index = params.map_row_index(map_index, row_index);
+
+            let row = self
+                .tx_ref()
+                .get::<tables::FilterMapRows>(map_row_index)
+                .map_err(|e| FilterError::Database(e.to_string()))?
+                .map(|entry| entry.columns)
+                .unwrap_or_default();
+
+            results.push(row);
+        }
+
+        Ok(results)
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        map_index: u32,
+        value: &B256,
+    ) -> FilterResult<Vec<Vec<u32>>> {
+        let params = FilterMapParams::default();
+        let mut layers = Vec::new();
+
+        for layer in 1..reth_log_index::MAX_LAYERS {
+            let row_index = params.row_index(map_index, layer as u32, value);
+            let map_row_index = params.map_row_index(map_index, row_index);
+
+            let row = self
+                .tx_ref()
+                .get::<tables::FilterMapRows>(map_row_index)
+                .map_err(|e| FilterError::Database(e.to_string()))?
+                .map(|entry| entry.columns)
+                .unwrap_or_default();
+
+            let max_len = params.max_row_length(layer as u32) as usize;
+
+            if row.len() < max_len {
+                layers.push(row);
+                break;
+            }
+
+            layers.push(row);
+        }
+
+        Ok(layers)
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        values: &[B256],
+    ) -> FilterResult<Vec<MapValueRows>> {
+        let mut results = Vec::new();
+
+        for value in values {
+            let base_rows = self.get_base_layer_rows_for_value(map_start, map_end, value)?;
+
+            for (i, base_row) in base_rows.iter().enumerate() {
+                let map_index = map_start + i as u32;
+                let params = FilterMapParams::default();
+                let max_len = params.max_row_length(0) as usize;
+
+                let mut layers = vec![base_row.clone()];
+
+                if base_row.len() >= max_len {
+                    let more_layers = self.fetch_more_layers_for_map(map_index, value)?;
+                    layers.extend(more_layers);
+                }
+
+                results.push(MapValueRows { map_index, value: *value, layers });
+            }
+        }
+
+        Ok(results)
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        block_range: impl RangeBounds<BlockNumber>,
+    ) -> FilterResult<Vec<BlockBoundary>> {
+        let mut cursor = self
+            .tx_ref()
+            .cursor_read::<tables::LogValueIndices>()
+            .map_err(|e| FilterError::Database(e.to_string()))?;
+        let mut boundaries = Vec::new();
+
+        for entry in
+            cursor.walk_range(block_range).map_err(|e| FilterError::Database(e.to_string()))?
+        {
+            let (block_number, log_value_index) =
+                entry.map_err(|e| FilterError::Database(e.to_string()))?;
+            boundaries.push(BlockBoundary { block_number, log_value_index });
+        }
+
+        Ok(boundaries)
+    }
+}
+
+impl<TX: DbTxMut, N: NodeTypes> FilterMapsWriter for DatabaseProvider<TX, N> {
+    fn store_meta(&self, metadata: FilterMapMeta) -> FilterResult<()> {
+        self.tx
+            .put::<tables::FilterMapMeta>(tables::FilterMapMetaKey, metadata)
+            .map_err(|e| FilterError::Database(e.to_string()))
+    }
+
+    fn store_filter_map_rows_batch(&self, rows: Vec<FilterMapRowEntry>) -> FilterResult<()> {
+        for FilterMapRowEntry { map_row_index, columns } in rows {
+            let entry = FilterMapRowEntry { map_row_index, columns };
+            self.tx
+                .put::<tables::FilterMapRows>(map_row_index, entry)
+                .map_err(|e| FilterError::Database(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn store_log_value_indices_batch(&self, indices: Vec<BlockBoundary>) -> FilterResult<()> {
+        for boundary in indices {
+            self.tx
+                .put::<tables::LogValueIndices>(boundary.block_number, boundary.log_value_index)
+                .map_err(|e| FilterError::Database(e.to_string()))?;
+        }
+        Ok(())
     }
 }
 

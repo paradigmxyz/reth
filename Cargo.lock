@@ -9777,6 +9777,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-fs-util",
+ "reth-log-index",
  "reth-metrics",
  "reth-nippy-jar",
  "reth-node-types",

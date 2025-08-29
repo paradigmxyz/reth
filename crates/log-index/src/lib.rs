@@ -16,12 +16,9 @@
 //! ## Usage
 //!
 //! ```rust
-//! use reth_log_index::{
-//!     FilterMapParams, LogValueIterator,
-//!     query::query_logs_in_block_range,
-//! };
 //! use alloy_primitives::B256;
 //! use alloy_rpc_types_eth::Filter;
+//! use reth_log_index::{query::query_logs_in_block_range, FilterMapParams, LogValueIterator};
 //!
 //! // Create filter map parameters
 //! let params = FilterMapParams::default();
@@ -65,5 +62,5 @@ pub mod utils;
 pub use constants::{DEFAULT_PARAMS, EXPECTED_MATCHES, MAX_LAYERS, RANGE_TEST_PARAMS};
 pub use log_values::LogValueIterator;
 pub use params::FilterMapParams;
-pub use provider::{FilterMapsReader, FilterMapsWriter, MapLastBlockNumHash, MapValueRows};
+pub use provider::{FilterMapsReader, FilterMapsWriter, MapValueRows};
 pub use types::*;

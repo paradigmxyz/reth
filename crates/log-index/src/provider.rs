@@ -3,9 +3,11 @@
 //! This module defines the storage representations of filter maps data
 //! that can be stored in the database.
 
-use crate::types::{BlockBoundary, FilterMapMeta, FilterResult};
+use crate::{
+    types::{BlockBoundary, FilterMapMeta, FilterResult},
+    FilterMapRowEntry,
+};
 use alloy_primitives::{BlockNumber, B256};
-use alloy_rpc_types_eth::BlockNumHash;
 use std::ops::RangeBounds;
 
 /// Rows for a specific map
@@ -25,14 +27,6 @@ pub struct MapValueRows {
     /// Rows across all layers for this (map, value) pair
     /// Ordered by layer (1..MAX_LAYERS)
     pub layers: Vec<Vec<u32>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MapLastBlockNumHash {
-    /// The map index
-    pub map_index: u32,
-    /// The last block number for this map
-    pub block_numhash: BlockNumHash,
 }
 
 /// Provider trait for reading filter map data.
@@ -84,13 +78,6 @@ pub trait FilterMapsReader: Send + Sync {
         &self,
         block_range: impl RangeBounds<BlockNumber>,
     ) -> FilterResult<Vec<BlockBoundary>>;
-
-    /// Get a map's last block number
-    fn get_map_last_blocks_range(
-        &self,
-        from_map: u32,
-        to_map: u32,
-    ) -> FilterResult<Vec<MapLastBlockNumHash>>;
 }
 
 /// Provider trait for writing filter map data.
@@ -99,14 +86,8 @@ pub trait FilterMapsWriter: Send + Sync {
     fn store_meta(&self, metadata: FilterMapMeta) -> FilterResult<()>;
 
     /// Store filter map rows.
-    fn store_filter_map_rows_batch(&self, rows: Vec<(u64, Vec<u32>)>) -> FilterResult<()>;
+    fn store_filter_map_rows_batch(&self, rows: Vec<FilterMapRowEntry>) -> FilterResult<()>;
 
     /// Batch store log value indices for multiple blocks.
     fn store_log_value_indices_batch(&self, indices: Vec<BlockBoundary>) -> FilterResult<()>;
-
-    /// Batch store last block info for multiple maps.
-    fn store_map_last_blocks_batch(
-        &self,
-        last_blocks: Vec<MapLastBlockNumHash>,
-    ) -> FilterResult<()>;
 }
