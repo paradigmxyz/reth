@@ -159,7 +159,7 @@ where
 
         // Take the bundle state
         let mut db = executor.into_state();
-        let mut bundle_state = db.take_bundle();
+        let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
@@ -251,7 +251,8 @@ where
 
         // The bundle state after re-execution should match the original one.
         //
-        // Reverts now supports order-independent equality, so we can compare directly without sorting the reverts vectors.
+        // Reverts now supports order-independent equality, so we can compare directly without
+        // sorting the reverts vectors.
         //
         // See: https://github.com/bluealloy/revm/pull/1827
         if bundle_state != output.state {
