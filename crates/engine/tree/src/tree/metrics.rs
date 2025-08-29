@@ -3,6 +3,7 @@ use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
 };
+use alloy_primitives::TxHash;
 use core::borrow::BorrowMut;
 use reth_errors::BlockExecutionError;
 use reth_evm::{metrics::ExecutorMetrics, OnStateHook};
@@ -11,8 +12,12 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
-use revm::database::{states::bundle_state::BundleRetention, State};
+use revm::{
+    context::result::ResultAndState,
+    database::{states::bundle_state::BundleRetention, State},
+};
 use std::time::Instant;
 
 /// Metrics for the `EngineApi`.
@@ -85,6 +90,121 @@ impl EngineApiMetrics {
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
             (gas_used, res)
         })?;
+
+        // merge transitions into bundle state
+        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
+
+        // Update the metrics for the number of accounts, storage slots and bytecodes updated
+        let accounts = output.state.state.len();
+        let storage_slots =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = output.state.contracts.len();
+
+        self.executor.accounts_updated_histogram.record(accounts as f64);
+        self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+
+        Ok(output)
+    }
+
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
+    /// execution, with support for cached transaction results.
+    ///
+    /// This method updates metrics for execution time, gas usage, and the number
+    /// of accounts, storage slots and bytecodes loaded and updated, while also
+    /// supporting cached transaction results for performance optimization.
+    pub(crate) fn execute_metered_with_cache<E, DB, T: SignedTransaction>(
+        &self,
+        executor: E,
+        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        state_hook: Box<dyn OnStateHook>,
+        get_cached_tx_result: impl Fn(
+            &mut <E::Evm as Evm>::DB,
+            TxHash,
+        ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
+    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    where
+        DB: alloy_evm::Database,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction = T>,
+    {
+        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
+        // they are globally registered so that the data recorded in the hook will
+        // be accessible.
+        let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
+
+        let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
+
+        // Track cache statistics for logging
+        let mut cache_hits_in_block = 0u64;
+        let mut cache_misses_in_block = 0u64;
+        let mut gas_skipped_in_block = 0u64;
+
+        let f = || {
+            executor.apply_pre_execution_changes()?;
+            for tx in transactions {
+                let tx = tx?;
+                let tx_hash = *tx.tx().tx_hash();
+                if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
+                    cache_hits_in_block += 1;
+                    self.executor.execution_results_cache_hits.increment(1);
+                    self.executor.transactions_skipped.increment(1);
+
+                    // Track gas skipped
+                    let gas_used = result.result.gas_used();
+                    gas_skipped_in_block += gas_used;
+                    self.executor.gas_skipped.increment(gas_used);
+                    self.executor.gas_skipped_per_tx_histogram.record(gas_used as f64);
+
+                    tracing::debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        gas_skipped = gas_used,
+                        "Using cached transaction result"
+                    );
+                    executor.commit_cached_execution(tx, result, |_| {
+                        alloy_evm::block::CommitChanges::Yes
+                    })?;
+                } else {
+                    cache_misses_in_block += 1;
+                    self.executor.execution_results_cache_misses.increment(1);
+                    tracing::debug!(
+                        target: "reth::evm::metrics",
+                        ?tx_hash,
+                        "Cache miss, executing transaction"
+                    );
+                    executor.execute_transaction(tx)?;
+                }
+            }
+            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+        };
+
+        // Use metered to execute and track timing/gas metrics
+        let (mut db, result) = self.metered(|| {
+            let res = f();
+            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            (gas_used, res)
+        })?;
+
+        // Log cache performance summary with enhanced metrics
+        let total_txs = cache_hits_in_block + cache_misses_in_block;
+        let hit_rate = if total_txs > 0 {
+            (cache_hits_in_block as f64 / total_txs as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        if total_txs > 0 {
+            self.executor.cache_hit_rate_histogram.record(hit_rate);
+            tracing::info!(
+                target: "engine::cache::metrics",
+                cache_hits = cache_hits_in_block,
+                cache_misses = cache_misses_in_block,
+                hit_rate = format!("{:.1}%", hit_rate),
+                gas_skipped = gas_skipped_in_block,
+                "BLOCK_CACHE_STATS - Summary for block execution"
+            );
+        }
 
         // merge transitions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);

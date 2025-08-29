@@ -35,6 +35,24 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Counter for number of execution results cached hits when executing the latest block.
+    pub execution_results_cache_hits: Counter,
+    /// The Counter for number of execution results cached misses when executing the latest block.
+    pub execution_results_cache_misses: Counter,
+
+    /// The Counter for number of transactions skipped due to cache hits.
+    pub transactions_skipped: Counter,
+    /// The Counter for total gas skipped due to cache hits.
+    pub gas_skipped: Counter,
+    /// The Histogram for gas skipped per cached transaction.
+    pub gas_skipped_per_tx_histogram: Histogram,
+    /// The Histogram for cache hit rate per block.
+    pub cache_hit_rate_histogram: Histogram,
+    /// The Counter for cache validation failures.
+    pub cache_validation_failures: Counter,
+    /// The Histogram for cache validation time per transaction.
+    pub cache_validation_time_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -98,24 +116,21 @@ mod tests {
         // Execute with metered_one
         let result = metrics.metered_one(&block, |b| {
             // Simulate some work
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            b.header().gas_used()
+            b.header().gas_used() * 2
         });
 
-        // Verify result
-        assert_eq!(result, 1000);
+        assert_eq!(result, 2000);
+
+        // Note: We can't easily test the counter values because they use global state
+        // but the function should update them correctly
     }
 
     #[test]
-    fn test_metered_helper_tracks_timing() {
+    fn test_metered_with_empty_block() {
         let metrics = ExecutorMetrics::default();
+        let block = create_test_block_with_gas(0);
 
-        let result = metrics.metered(|| {
-            // Simulate some work
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            (500, "test_result")
-        });
-
-        assert_eq!(result, "test_result");
+        let result = metrics.metered_one(&block, |_| "test");
+        assert_eq!(result, "test");
     }
 }
