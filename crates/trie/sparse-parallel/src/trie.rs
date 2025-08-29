@@ -6272,7 +6272,7 @@ mod tests {
 
         // Assert the root hash matches the expected value
         let expected_root =
-            b256!("29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
+            b256!("0x29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
         assert_eq!(trie.root(), expected_root);
     }
 
