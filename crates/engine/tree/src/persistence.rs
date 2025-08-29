@@ -9,7 +9,7 @@ use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
+use reth_prune::{PruneProgress, PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
     sync::mpsc::{Receiver, SendError, Sender},
@@ -61,8 +61,14 @@ where
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "engine::persistence", ?block_num, "Running pruner");
+
+        // Check if pruning is actually needed to avoid unnecessary work
+        if !self.pruner.is_pruning_needed(block_num) {
+            debug!(target: "engine::persistence", ?block_num, "Pruning not needed, skipping");
+            return Ok(PrunerOutput::from(PruneProgress::Finished));
+        }
+
         let start_time = Instant::now();
-        // TODO: doing this properly depends on pruner segment changes
         let result = self.pruner.run(block_num);
         self.metrics.prune_before_duration_seconds.record(start_time.elapsed());
         result
