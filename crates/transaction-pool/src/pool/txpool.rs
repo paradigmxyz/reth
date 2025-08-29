@@ -301,14 +301,14 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //   ENOUGH_BLOB_FEE_CAP_BLOCK.
                 // With the lower base fee they gain ENOUGH_FEE_CAP_BLOCK, so we can set the bit and
                 // insert directly into Pending (skip generic routing).
-                self.basefee_pool.enforce_basefee_with_handler(
+                self.basefee_pool.enforce_basefee_with(
                     self.all_transactions.pending_fees.base_fee,
                     |tx| {
                         // Update transaction state — guaranteed Pending by the invariants above
                         let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                         meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        meta.subpool = SubPool::Pending;
+                        meta.subpool = meta.state.into();
 
                         self.pending_pool
                             .add_transaction(tx, self.all_transactions.pending_fees.base_fee);

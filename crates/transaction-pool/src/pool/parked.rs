@@ -306,7 +306,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// still cannot afford the basefee, higher-nonce transactions from that sender are skipped.
     ///
     /// Note: the transactions are not returned in a particular order.
-    pub(crate) fn enforce_basefee_with_handler<F>(&mut self, basefee: u64, mut tx_handler: F)
+    pub(crate) fn enforce_basefee_with<F>(&mut self, basefee: u64, mut tx_handler: F)
     where
         F: FnMut(Arc<ValidPoolTransaction<T>>),
     {
@@ -355,13 +355,13 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// satisfy the given basefee.
     ///
     /// Legacy method maintained for compatibility with read-only queries.
-    /// For basefee enforcement, prefer `enforce_basefee_with_handler` for better performance.
+    /// For basefee enforcement, prefer `enforce_basefee_with` for better performance.
     ///
     /// Note: the transactions are not returned in a particular order.
     #[cfg(test)]
     pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
         let mut removed = Vec::new();
-        self.enforce_basefee_with_handler(basefee, |tx| {
+        self.enforce_basefee_with(basefee, |tx| {
             removed.push(tx);
         });
         removed
@@ -1142,7 +1142,7 @@ mod tests {
         let mut processed_txs = Vec::new();
         let mut handler_call_count = 0;
 
-        pool.enforce_basefee_with_handler(400, |tx| {
+        pool.enforce_basefee_with(400, |tx| {
             processed_txs.push(tx);
             handler_call_count += 1;
         });
