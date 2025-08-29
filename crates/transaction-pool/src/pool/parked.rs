@@ -298,16 +298,73 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     /// Removes all transactions and their dependent transaction from the subpool that no longer
     /// satisfy the given basefee.
     ///
+    /// Legacy method maintained for compatibility with read-only queries.
+    /// For basefee enforcement, prefer `enforce_basefee_with_handler` for better performance.
+    ///
     /// Note: the transactions are not returned in a particular order.
+    #[cfg(test)]
     pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
-
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
+        let mut removed = Vec::new();
+        self.enforce_basefee_with_handler(basefee, |tx| {
+            removed.push(tx);
+        });
         removed
+    }
+
+    /// Removes all transactions from this subpool that can now afford the given basefee,
+    /// invoking the provided handler for each transaction as it is removed.
+    ///
+    /// This method enforces the basefee constraint by identifying transactions that now
+    /// satisfy the basefee requirement (typically after a basefee decrease) and processing
+    /// them via the provided transaction handler closure.
+    ///
+    /// Respects per-sender nonce ordering: if the lowest-nonce transaction for a sender
+    /// still cannot afford the basefee, higher-nonce transactions from that sender are skipped.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee_with_handler<F>(&mut self, basefee: u64, mut tx_handler: F)
+    where
+        F: FnMut(Arc<ValidPoolTransaction<T>>),
+    {
+        let basefee = basefee as u128;
+
+        // Collect qualifying transaction IDs first
+        let to_remove = {
+            let mut qualifying_ids = Vec::new();
+            let mut iter = self.by_id.iter().peekable();
+
+            while let Some((id, tx)) = iter.next() {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee {
+                    // Transaction still can't afford base fee
+                    // Skip all remaining transactions from this sender due to sequential nonce
+                    // ordering: BTreeMap iteration guarantees sender+nonce
+                    // lexicographic order, so if the earliest transaction
+                    // (lowest nonce) can't afford basefee, later ones shouldn't be promoted
+                    'skip_sender: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'skip_sender;
+                        }
+                        iter.next();
+                    }
+                } else {
+                    // Transaction can now afford base fee - mark for immediate processing
+                    qualifying_ids.push(*id);
+                }
+            }
+            qualifying_ids
+        };
+
+        for id in to_remove {
+            if let Some(tx) = self.remove_transaction(&id) {
+                tx_handler(tx);
+            } else {
+                tracing::warn!(
+                    target: "reth::txpool::parked",
+                    ?id,
+                    "Failed to remove transaction during basefee enforcement - possible data structure inconsistency"
+                );
+            }
+        }
     }
 }
 

@@ -293,19 +293,27 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Ordering::Greater
             }
             Ordering::Less => {
-                // decreased base fee: recheck basefee pool and promote all that are now valid
-                let removed =
-                    self.basefee_pool.enforce_basefee(self.all_transactions.pending_fees.base_fee);
-                for tx in removed {
-                    let to = {
-                        let tx =
+                // Base fee decreased: recheck BaseFee and promote.
+                // Invariants:
+                // - BaseFee contains only non-blob txs (blob txs live in Blob) and they already
+                //   have ENOUGH_BLOB_FEE_CAP_BLOCK.
+                // - PENDING_POOL_BITS = BASE_FEE_POOL_BITS | ENOUGH_FEE_CAP_BLOCK |
+                //   ENOUGH_BLOB_FEE_CAP_BLOCK.
+                // With the lower base fee they gain ENOUGH_FEE_CAP_BLOCK, so we can set the bit and
+                // insert directly into Pending (skip generic routing).
+                self.basefee_pool.enforce_basefee_with_handler(
+                    self.all_transactions.pending_fees.base_fee,
+                    |tx| {
+                        // Update transaction state — guaranteed Pending by the invariants above
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
-                    };
-                    self.add_transaction_to_subpool(to, tx);
-                }
+                        meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        meta.subpool = SubPool::Pending;
+
+                        self.pending_pool
+                            .add_transaction(tx, self.all_transactions.pending_fees.base_fee);
+                    },
+                );
 
                 Ordering::Less
             }
