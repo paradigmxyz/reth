@@ -295,22 +295,6 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         transactions
     }
 
-    /// Removes all transactions and their dependent transaction from the subpool that no longer
-    /// satisfy the given basefee.
-    ///
-    /// Legacy method maintained for compatibility with read-only queries.
-    /// For basefee enforcement, prefer `enforce_basefee_with_handler` for better performance.
-    ///
-    /// Note: the transactions are not returned in a particular order.
-    #[cfg(test)]
-    pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let mut removed = Vec::new();
-        self.enforce_basefee_with_handler(basefee, |tx| {
-            removed.push(tx);
-        });
-        removed
-    }
-
     /// Removes all transactions from this subpool that can afford the given basefee,
     /// invoking the provided handler for each transaction as it is removed.
     ///
@@ -365,6 +349,22 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                 );
             }
         }
+    }
+
+    /// Removes all transactions and their dependent transaction from the subpool that no longer
+    /// satisfy the given basefee.
+    ///
+    /// Legacy method maintained for compatibility with read-only queries.
+    /// For basefee enforcement, prefer `enforce_basefee_with_handler` for better performance.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    #[cfg(test)]
+    pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let mut removed = Vec::new();
+        self.enforce_basefee_with_handler(basefee, |tx| {
+            removed.push(tx);
+        });
+        removed
     }
 }
 
@@ -1160,5 +1160,4 @@ mod tests {
         // Verify transactions were removed from pool
         assert_eq!(pool.len(), 1); // Only the 300 fee tx should remain
     }
-
 }
