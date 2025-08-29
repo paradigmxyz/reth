@@ -540,8 +540,10 @@ fn multiproof_targets_from_state(state: &EvmState) -> (MultiProofTargets, usize)
             continue
         }
 
+        // Count changed slots first to allocate exact capacity
+        let changed_count = account.storage.values().filter(|s| s.is_changed()).count();
         let mut storage_set =
-            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+            B256Set::with_capacity_and_hasher(changed_count, Default::default());
         for (key, slot) in &account.storage {
             // do nothing if unchanged
             if !slot.is_changed() {
