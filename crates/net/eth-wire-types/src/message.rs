@@ -500,6 +500,15 @@ impl EthMessageID {
             Self::Receipts.to_u8()
         }
     }
+
+    /// Returns the total number of message types for the given version.
+    ///
+    /// This is used for message ID multiplexing.
+    ///
+    /// <https://github.com/ethereum/go-ethereum/blob/85077be58edea572f29c3b1a6a055077f1a56a8b/eth/protocols/eth/protocol.go#L45-L47>
+    pub const fn message_count(version: EthVersion) -> u8 {
+        Self::max(version) + 1
+    }
 }
 
 impl Encodable for EthMessageID {

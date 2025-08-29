@@ -49,7 +49,7 @@ jobs:
     needs: extract-version
     if: ${{ github.event.inputs.dry_run != 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify crate version matches tag
         # Check that the Cargo version starts with the tag,
@@ -99,7 +99,7 @@ jobs:
           - command: op-build
             binary: op-reth
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -166,11 +166,11 @@ jobs:
     steps:
       # This is necessary for generating the changelog.
       # It has to come before "Download Artifacts" or else it deletes the artifacts.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
       - name: Generate full changelog
         id: changelog
         run: |
@@ -223,7 +223,7 @@ jobs:
           | Payload Builders     | <TODO> |
           | Non-Payload Builders | <TODO>    |
 
-          *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
+          *See [Update Priorities](https://reth.rs/installation/priorities) for more information about this table.*
 
           ## All Changes
 
@@ -231,7 +231,7 @@ jobs:
 
           ## Binaries
 
-          [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
+          [See pre-built binaries documentation.](https://reth.rs/installation/binaries)
 
           The binaries are signed with the PGP key: `50FB 7CC5 5B2E 8AFA 59FE 03B7 AA5E D56A 7FBF 253E`
 

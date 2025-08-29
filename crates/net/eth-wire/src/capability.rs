@@ -134,7 +134,7 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub const fn num_messages(&self) -> u8 {
         match self {
-            Self::Eth { version, .. } => EthMessageID::max(*version) + 1,
+            Self::Eth { version, .. } => EthMessageID::message_count(*version),
             Self::UnknownCapability { messages, .. } => *messages,
         }
     }
@@ -238,13 +238,13 @@ impl SharedCapabilities {
 
     /// Returns the number of shared capabilities.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Returns true if there are no shared capabilities.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }

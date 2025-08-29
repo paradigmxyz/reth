@@ -56,10 +56,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
-    version::{
-        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
-        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
-    },
+    version::version_metadata,
 };
 use reth_node_metrics::{
     chain::ChainSpecInfo,
@@ -315,7 +312,7 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
         &self.attachment.right
     }
 
-    /// Get a mutable reference to the right value.
+    /// Get a mutable reference to the left value.
     pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
@@ -445,11 +442,14 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {
-            MiningMode::instant(pool)
+            MiningMode::instant(pool, self.node_config().dev.block_max_transactions)
         }
     }
 }
@@ -589,12 +589,12 @@ where
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
-                    version: CARGO_PKG_VERSION,
-                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
-                    cargo_features: VERGEN_CARGO_FEATURES,
-                    git_sha: VERGEN_GIT_SHA,
-                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
-                    build_profile: BUILD_PROFILE_NAME,
+                    version: version_metadata().cargo_pkg_version.as_ref(),
+                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                    git_sha: version_metadata().vergen_git_sha.as_ref(),
+                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
+                    build_profile: version_metadata().build_profile_name.as_ref(),
                 },
                 ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
                 self.task_executor().clone(),
@@ -1119,9 +1119,9 @@ impl<L, R> Attached<L, R> {
         &self.right
     }
 
-    /// Get a mutable reference to the right value.
-    pub const fn left_mut(&mut self) -> &mut R {
-        &mut self.right
+    /// Get a mutable reference to the left value.
+    pub const fn left_mut(&mut self) -> &mut L {
+        &mut self.left
     }
 
     /// Get a mutable reference to the right value.

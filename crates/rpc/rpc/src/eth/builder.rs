@@ -10,9 +10,9 @@ use reth_rpc_eth_api::{
     helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    GasPriceOracleConfig,
+    builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
+    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
+    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -40,6 +40,9 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
+    max_batch_size: usize,
+    pending_block_kind: PendingBlockKind,
+    raw_tx_forwarder: ForwardConfig,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -78,6 +81,9 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -94,6 +100,9 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 }
@@ -121,6 +130,9 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
+            max_batch_size: 1,
+            pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -155,6 +167,9 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -171,6 +186,9 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -194,6 +212,9 @@ where
             task_spawner,
             gas_oracle_config,
             next_env: _,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -210,6 +231,9 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -281,6 +305,24 @@ where
         self
     }
 
+    /// Sets the max batch size for batching transaction insertions.
+    pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Sets the pending block kind
+    pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: ForwardConfig) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -309,6 +351,9 @@ where
             proof_permits,
             task_spawner,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder,
         } = self;
 
         let provider = components.provider().clone();
@@ -345,6 +390,9 @@ where
             proof_permits,
             rpc_converter,
             next_env,
+            max_batch_size,
+            pending_block_kind,
+            raw_tx_forwarder.forwarder_client(),
         )
     }
 

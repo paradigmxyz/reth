@@ -2,7 +2,7 @@
 
 use crate::{node::NodeTestContext, NodeHelperType, Wallet};
 use reth_chainspec::ChainSpec;
-use reth_cli_commands::import_op::{import_blocks_from_file, ImportConfig};
+use reth_cli_commands::import_core::{import_blocks_from_file, ImportConfig};
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_node_api::{NodeTypesWithDBAdapter, TreeConfig};
@@ -166,13 +166,10 @@ pub async fn setup_engine_with_chain_import(
             result.is_complete()
         );
 
-        // The import counts genesis block in total_imported_blocks, so we expect
-        // total_imported_blocks to be total_decoded_blocks + 1
-        let expected_imported = result.total_decoded_blocks + 1; // +1 for genesis
-        if result.total_imported_blocks != expected_imported {
+        if result.total_decoded_blocks != result.total_imported_blocks {
             debug!(target: "e2e::import",
-                "Import block count mismatch: expected {} (decoded {} + genesis), got {}",
-                expected_imported, result.total_decoded_blocks, result.total_imported_blocks
+                "Import block count mismatch: decoded {} != imported {}",
+                result.total_decoded_blocks, result.total_imported_blocks
             );
             return Err(eyre::eyre!("Chain import block count mismatch for node {}", idx));
         }
@@ -351,7 +348,7 @@ mod tests {
             .unwrap();
 
             assert_eq!(result.total_decoded_blocks, 5);
-            assert_eq!(result.total_imported_blocks, 6); // +1 for genesis
+            assert_eq!(result.total_imported_blocks, 5);
 
             // Verify stage checkpoints exist
             let provider = provider_factory.database_provider_ro().unwrap();
@@ -508,7 +505,7 @@ mod tests {
 
         // Verify the import was successful
         assert_eq!(result.total_decoded_blocks, 10);
-        assert_eq!(result.total_imported_blocks, 11); // +1 for genesis
+        assert_eq!(result.total_imported_blocks, 10);
         assert_eq!(result.total_decoded_txns, 0);
         assert_eq!(result.total_imported_txns, 0);
 

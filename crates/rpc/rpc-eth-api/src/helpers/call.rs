@@ -9,10 +9,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
-use alloy_evm::{
-    call::caller_gas_allowance,
-    overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
-};
+use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -37,7 +34,7 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
+    EthApiError, RevertError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
@@ -48,7 +45,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Result type for `eth_simulateV1` RPC method.
 pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, E>;
@@ -361,8 +358,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
 
-            self.spawn_blocking_io(move |this| {
-                this.create_access_list_with(evm_env, at, request, state_override)
+            self.spawn_blocking_io_fut(move |this| async move {
+                this.create_access_list_with(evm_env, at, request, state_override).await
             })
             .await
         }
@@ -376,84 +373,95 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         at: BlockId,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state_override: Option<StateOverride>,
-    ) -> Result<AccessListResult, Self::Error>
+    ) -> impl Future<Output = Result<AccessListResult, Self::Error>> + Send
     where
         Self: Trace,
     {
-        let state = self.state_at_block_id(at)?;
-        let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        self.spawn_blocking_io_fut(move |this| async move {
+            let state = this.state_at_block_id(at).await?;
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-        if let Some(state_overrides) = state_override {
-            apply_state_overrides(state_overrides, &mut db).map_err(Self::Error::from_eth_err)?;
-        }
-
-        let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
-
-        // we want to disable this in eth_createAccessList, since this is common practice used by
-        // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        evm_env.cfg_env.disable_block_gas_limit = true;
-
-        // The basefee should be ignored for eth_createAccessList
-        // See:
-        // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        evm_env.cfg_env.disable_base_fee = true;
-
-        // Disabled because eth_createAccessList is sometimes used with non-eoa senders
-        evm_env.cfg_env.disable_eip3607 = true;
-
-        if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
-            let cap = caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
-            // no gas limit was provided in the request, so we need to cap the request's gas limit
-            tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
-        }
-
-        // can consume the list since we're not using the request anymore
-        let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-
-        let mut inspector = AccessListInspector::new(initial);
-
-        let (result, (evm_env, mut tx_env)) =
-            self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
-        let access_list = inspector.into_access_list();
-        tx_env.set_access_list(access_list.clone());
-        match result.result {
-            ExecutionResult::Halt { reason, gas_used } => {
-                let error =
-                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            if let Some(state_overrides) = state_override {
+                apply_state_overrides(state_overrides, &mut db)
+                    .map_err(Self::Error::from_eth_err)?;
             }
-            ExecutionResult::Revert { output, gas_used } => {
-                let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-            }
-            ExecutionResult::Success { .. } => {}
-        };
 
-        // transact again to get the exact gas used
-        let gas_limit = tx_env.gas_limit();
-        let result = self.transact(&mut db, evm_env, tx_env)?;
-        let res = match result.result {
-            ExecutionResult::Halt { reason, gas_used } => {
-                let error = Some(Self::Error::from_evm_halt(reason, gas_limit).to_string());
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
-            }
-            ExecutionResult::Revert { output, gas_used } => {
-                let error = Some(RevertError::new(output).to_string());
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error }
-            }
-            ExecutionResult::Success { gas_used, .. } => {
-                AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
-            }
-        };
+            let mut tx_env = this.create_txn_env(&evm_env, request.clone(), &mut db)?;
 
-        Ok(res)
+            // we want to disable this in eth_createAccessList, since this is common practice used
+            // by other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+            evm_env.cfg_env.disable_block_gas_limit = true;
+
+            // The basefee should be ignored for eth_createAccessList
+            // See:
+            // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
+            evm_env.cfg_env.disable_base_fee = true;
+
+            // Disabled because eth_createAccessList is sometimes used with non-eoa senders
+            evm_env.cfg_env.disable_eip3607 = true;
+
+            if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
+                let cap = this.caller_gas_allowance(&mut db, &tx_env)?;
+                // no gas limit was provided in the request, so we need to cap the request's gas
+                // limit
+                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
+            }
+
+            // can consume the list since we're not using the request anymore
+            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+
+            let mut inspector = AccessListInspector::new(initial);
+
+            let result = this.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+            let access_list = inspector.into_access_list();
+            tx_env.set_access_list(access_list.clone());
+            match result.result {
+                ExecutionResult::Halt { reason, gas_used } => {
+                    let error =
+                        Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error,
+                    })
+                }
+                ExecutionResult::Revert { output, gas_used } => {
+                    let error = Some(RevertError::new(output).to_string());
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error,
+                    })
+                }
+                ExecutionResult::Success { .. } => {}
+            };
+
+            // transact again to get the exact gas used
+            let gas_limit = tx_env.gas_limit();
+            let result = this.transact(&mut db, evm_env, tx_env)?;
+            let res = match result.result {
+                ExecutionResult::Halt { reason, gas_used } => {
+                    let error = Some(Self::Error::from_evm_halt(reason, gas_limit).to_string());
+                    AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+                }
+                ExecutionResult::Revert { output, gas_used } => {
+                    let error = Some(RevertError::new(output).to_string());
+                    AccessListResult { access_list, gas_used: U256::from(gas_used), error }
+                }
+                ExecutionResult::Success { gas_used, .. } => {
+                    AccessListResult { access_list, gas_used: U256::from(gas_used), error: None }
+                }
+            };
+
+            Ok(res)
+        })
     }
 }
 
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Spec = SpecFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
@@ -467,13 +475,31 @@ pub trait Call:
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
     fn max_simulate_blocks(&self) -> u64;
 
+    /// Returns the max gas limit that the caller can afford given a transaction environment.
+    fn caller_gas_allowance(
+        &self,
+        mut db: impl Database<Error: Into<EthApiError>>,
+        env: &TxEnvFor<Self::Evm>,
+    ) -> Result<u64, Self::Error> {
+        alloy_evm::call::caller_gas_allowance(&mut db, env).map_err(Self::Error::from_eth_err)
+    }
+
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
-    fn with_state_at_block<F, R>(&self, at: BlockId, f: F) -> Result<R, Self::Error>
+    fn with_state_at_block<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> Result<R, Self::Error>,
+        R: Send + 'static,
+        F: FnOnce(Self, StateProviderTraitObjWrapper<'_>) -> Result<R, Self::Error>
+            + Send
+            + 'static,
     {
-        let state = self.state_at_block_id(at)?;
-        f(StateProviderTraitObjWrapper(&state))
+        self.spawn_blocking_io_fut(move |this| async move {
+            let state = this.state_at_block_id(at).await?;
+            f(this, StateProviderTraitObjWrapper(&state))
+        })
     }
 
     /// Executes the `TxEnv` against the given [Database] without committing state
@@ -538,8 +564,8 @@ pub trait Call:
         F: FnOnce(StateProviderTraitObjWrapper<'_>) -> Result<R, Self::Error> + Send + 'static,
         R: Send + 'static,
     {
-        self.spawn_tracing(move |this| {
-            let state = this.state_at_block_id(at)?;
+        self.spawn_blocking_io_fut(move |this| async move {
+            let state = this.state_at_block_id(at).await?;
             f(StateProviderTraitObjWrapper(&state))
         })
     }
@@ -580,8 +606,8 @@ pub trait Call:
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
             let this = self.clone();
-            self.spawn_blocking_io(move |_| {
-                let state = this.state_at_block_id(at)?;
+            self.spawn_blocking_io_fut(move |_| async move {
+                let state = this.state_at_block_id(at).await?;
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
@@ -729,11 +755,12 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
-        if request.as_ref().gas_limit() > Some(self.call_gas_limit()) {
-            // configured gas exceeds limit
-            return Err(
-                EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            )
+        if let Some(requested_gas) = request.as_ref().gas_limit() {
+            let global_gas_cap = self.call_gas_limit();
+            if global_gas_cap != 0 && global_gas_cap < requested_gas {
+                warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
+                request.as_mut().set_gas_limit(global_gas_cap);
+            }
         }
 
         // apply configured gas cap
@@ -772,7 +799,7 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &tx_env).map_err(EthApiError::from_call_err)?;
+                let cap = self.caller_gas_allowance(db, &tx_env)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }

@@ -9,17 +9,21 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
-use alloy_evm::block::StateChangeSource;
+use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
+use reth_engine_primitives::ExecutableTxIterator;
+use reth_evm::{
+    execute::{ExecutableTxFor, WithTxEnv},
+    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
-    StateProviderFactory, StateReader,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
+    StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
@@ -75,7 +79,7 @@ where
         parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
     >,
     /// Whether to use the parallel sparse trie.
-    use_parallel_sparse_trie: bool,
+    disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
 }
@@ -103,7 +107,7 @@ where
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
             trie_input: None,
-            use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
+            disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
         }
     }
 }
@@ -153,13 +157,12 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<I::Tx, I::Error>
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
             + StateProviderFactory
             + StateReader
-            + StateCommitmentProvider
             + Clone
             + 'static,
     {
@@ -241,14 +244,9 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<I::Tx, I::Error>
+    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
-        P: BlockReader
-            + StateProviderFactory
-            + StateReader
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
@@ -265,16 +263,20 @@ where
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
         transactions: I,
-    ) -> (mpsc::Receiver<I::Tx>, mpsc::Receiver<Result<I::Tx, I::Error>>) {
+    ) -> (
+        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
+        mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
+    ) {
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            for transaction in transactions {
+            for tx in transactions {
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx });
                 // only send Ok(_) variants to prewarming task
-                if let Ok(tx) = &transaction {
+                if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(transaction);
+                let _ = execute_tx.send(tx);
             }
         });
 
@@ -285,17 +287,12 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
-        P: BlockReader
-            + StateProviderFactory
-            + StateReader
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
+        P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
@@ -366,10 +363,10 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let accounts_trie = if self.use_parallel_sparse_trie {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            } else {
+            let accounts_trie = if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
+            } else {
+                ConfiguredSparseTrie::Parallel(Default::default())
             };
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
@@ -380,7 +377,6 @@ where
 
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
-                self.executor.clone(),
                 sparse_trie_rx,
                 proof_task_handle,
                 self.trie_metrics.clone(),
@@ -567,26 +563,6 @@ where
     }
 }
 
-/// Iterator over executable transactions.
-pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
-{
-    /// The executable transaction type iterator yields.
-    type Tx: OwnedExecutableTxFor<Evm>;
-    /// Errors that may occur while recovering or decoding transactions.
-    type Error: core::error::Error + Send + 'static;
-}
-
-impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
-where
-    Tx: OwnedExecutableTxFor<Evm>,
-    Err: core::error::Error + Send + 'static,
-    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
-{
-    type Tx = Tx;
-    type Error = Err;
-}
-
 #[cfg(test)]
 mod tests {
     use crate::tree::{
@@ -618,7 +594,7 @@ mod tests {
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
-        let mut updates = Vec::new();
+        let mut updates = Vec::with_capacity(updates_per_account);
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.random_range(1..=num_accounts);

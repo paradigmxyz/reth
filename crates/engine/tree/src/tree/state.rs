@@ -1,13 +1,13 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
+use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
 use reth_chain_state::{EthPrimitives, ExecutedBlockWithTrieUpdates};
-use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedBlock};
+use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_trie::updates::TrieUpdates;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -85,9 +85,12 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.get(&hash)
     }
 
-    /// Returns the block by hash.
-    pub(crate) fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
-        self.blocks_by_hash.get(&hash).map(|b| Arc::new(b.recovered_block().sealed_block().clone()))
+    /// Returns the sealed block header by hash.
+    pub(crate) fn sealed_header_by_hash(
+        &self,
+        hash: &B256,
+    ) -> Option<SealedHeader<N::BlockHeader>> {
+        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
@@ -348,21 +351,21 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a direct descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
-    pub(crate) fn is_descendant(&self, first: BlockNumHash, second: &N::BlockHeader) -> bool {
+    pub(crate) fn is_descendant(&self, first: BlockNumHash, second: BlockWithParent) -> bool {
         // If the second block's parent is the first block's hash, then it is a direct descendant
         // and we can return early.
-        if second.parent_hash() == first.hash {
+        if second.parent == first.hash {
             return true
         }
 
         // If the second block is lower than, or has the same block number, they are not
         // descendants.
-        if second.number() <= first.number {
+        if second.block.number <= first.number {
             return false
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent_hash()) else {
+        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
@@ -416,18 +419,18 @@ mod tests {
         tree_state.insert_executed(blocks[0].clone());
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            blocks[1].recovered_block().header()
+            blocks[1].recovered_block().block_with_parent()
         ));
 
         tree_state.insert_executed(blocks[1].clone());
 
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            blocks[2].recovered_block().header()
+            blocks[2].recovered_block().block_with_parent()
         ));
         assert!(tree_state.is_descendant(
             blocks[1].recovered_block().num_hash(),
-            blocks[2].recovered_block().header()
+            blocks[2].recovered_block().block_with_parent()
         ));
     }
 

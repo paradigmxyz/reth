@@ -1,5 +1,7 @@
 //! E2E test implementations using the e2e test framework for engine tree functionality.
 
+mod fcu_finalized_blocks;
+
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
@@ -33,10 +35,7 @@ fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
         ))
         .with_network(NetworkSetup::single_node())
         .with_tree_config(
-            TreeConfig::default()
-                .with_legacy_state_root(false)
-                .with_has_enough_parallelism(true)
-                .with_enable_parallel_sparse_trie(true),
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
         )
 }
 

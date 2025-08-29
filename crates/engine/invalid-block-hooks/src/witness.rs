@@ -2,7 +2,6 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
@@ -66,17 +65,15 @@ impl BundleStateSorted {
             .clone()
             .into_iter()
             .map(|(address, account)| {
-                {
-                    (
-                        address,
-                        BundleAccountSorted {
-                            info: account.info,
-                            original_info: account.original_info,
-                            status: account.status,
-                            storage: BTreeMap::from_iter(account.storage),
-                        },
-                    )
-                }
+                (
+                    address,
+                    BundleAccountSorted {
+                        info: account.info,
+                        original_info: account.original_info,
+                        status: account.status,
+                        storage: BTreeMap::from_iter(account.storage),
+                    },
+                )
             })
             .collect();
 
@@ -138,11 +135,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -166,7 +159,7 @@ where
 
         // Take the bundle state
         let mut db = executor.into_state();
-        let mut bundle_state = db.take_bundle();
+        let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
@@ -258,20 +251,10 @@ where
 
         // The bundle state after re-execution should match the original one.
         //
-        // NOTE: This should not be needed if `Reverts` had a comparison method that sorted first,
-        // or otherwise did not care about order.
+        // Reverts now supports order-independent equality, so we can compare directly without
+        // sorting the reverts vectors.
         //
-        // See: https://github.com/bluealloy/revm/issues/1813
-        let mut output = output.clone();
-        for reverts in output.state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
-        // We also have to sort the `bundle_state` reverts
-        for reverts in bundle_state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
+        // See: https://github.com/bluealloy/revm/pull/1827
         if bundle_state != output.state {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
@@ -366,11 +349,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(

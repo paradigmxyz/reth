@@ -1,17 +1,30 @@
 use crate::{
     chainspec::CustomChainSpec,
-    evm::{alloy::CustomEvmFactory, CustomBlockAssembler},
-    primitives::{Block, CustomHeader, CustomNodePrimitives},
+    engine::{CustomExecutionData, CustomPayloadBuilderAttributes},
+    evm::{alloy::CustomEvmFactory, executor::CustomBlockExecutionCtx, CustomBlockAssembler},
+    primitives::{Block, CustomHeader, CustomNodePrimitives, CustomTransaction},
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip2718::WithEncoded, Decodable2718};
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_rpc_types_engine::PayloadError;
 use op_revm::OpSpecId;
+use reth_engine_primitives::ExecutableTxIterator;
 use reth_ethereum::{
-    node::api::ConfigureEvm,
+    chainspec::EthChainSpec,
+    node::api::{BuildNextEnv, ConfigureEvm, PayloadBuilderError},
     primitives::{SealedBlock, SealedHeader},
 };
-use reth_op::node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_node_builder::{ConfigureEngineEvm, NewPayloadError};
+use reth_op::{
+    chainspec::OpHardforks,
+    evm::primitives::{EvmEnvFor, ExecutionCtxFor},
+    node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
+    primitives::SignedTransaction,
+};
+use reth_optimism_flashblocks::ExecutionPayloadBaseV1;
+use reth_rpc_api::eth::helpers::pending_block::BuildPendingEnv;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -37,7 +50,7 @@ impl CustomEvmConfig {
 impl ConfigureEvm for CustomEvmConfig {
     type Primitives = CustomNodePrimitives;
     type Error = <OpEvmConfig as ConfigureEvm>::Error;
-    type NextBlockEnvCtx = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
+    type NextBlockEnvCtx = CustomNextBlockEnvAttributes;
     type BlockExecutorFactory = Self;
     type BlockAssembler = CustomBlockAssembler;
 
@@ -56,16 +69,19 @@ impl ConfigureEvm for CustomEvmConfig {
     fn next_evm_env(
         &self,
         parent: &CustomHeader,
-        attributes: &OpNextBlockEnvAttributes,
+        attributes: &CustomNextBlockEnvAttributes,
     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
+        self.inner.next_evm_env(parent, &attributes.inner)
     }
 
-    fn context_for_block(&self, block: &SealedBlock<Block>) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
-            parent_hash: block.header().parent_hash(),
-            parent_beacon_block_root: block.header().parent_beacon_block_root(),
-            extra_data: block.header().extra_data().clone(),
+    fn context_for_block(&self, block: &SealedBlock<Block>) -> CustomBlockExecutionCtx {
+        CustomBlockExecutionCtx {
+            inner: OpBlockExecutionCtx {
+                parent_hash: block.header().parent_hash(),
+                parent_beacon_block_root: block.header().parent_beacon_block_root(),
+                extra_data: block.header().extra_data().clone(),
+            },
+            extension: block.extension,
         }
     }
 
@@ -73,11 +89,83 @@ impl ConfigureEvm for CustomEvmConfig {
         &self,
         parent: &SealedHeader<CustomHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
-            parent_hash: parent.hash(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            extra_data: attributes.extra_data,
+    ) -> CustomBlockExecutionCtx {
+        CustomBlockExecutionCtx {
+            inner: OpBlockExecutionCtx {
+                parent_hash: parent.hash(),
+                parent_beacon_block_root: attributes.inner.parent_beacon_block_root,
+                extra_data: attributes.inner.extra_data,
+            },
+            extension: attributes.extension,
         }
+    }
+}
+
+impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
+    fn evm_env_for_payload(&self, payload: &CustomExecutionData) -> EvmEnvFor<Self> {
+        self.inner.evm_env_for_payload(&payload.inner)
+    }
+
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a CustomExecutionData,
+    ) -> ExecutionCtxFor<'a, Self> {
+        CustomBlockExecutionCtx {
+            inner: self.inner.context_for_payload(&payload.inner),
+            extension: payload.extension,
+        }
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &CustomExecutionData,
+    ) -> impl ExecutableTxIterator<Self> {
+        payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+            let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
+                .map_err(Into::into)
+                .map_err(PayloadError::Decode)?;
+            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
+            Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+        })
+    }
+}
+
+/// Additional parameters required for executing next block custom transactions.
+#[derive(Debug, Clone)]
+pub struct CustomNextBlockEnvAttributes {
+    inner: OpNextBlockEnvAttributes,
+    extension: u64,
+}
+
+impl From<ExecutionPayloadBaseV1> for CustomNextBlockEnvAttributes {
+    fn from(value: ExecutionPayloadBaseV1) -> Self {
+        Self { inner: value.into(), extension: 0 }
+    }
+}
+
+impl BuildPendingEnv<CustomHeader> for CustomNextBlockEnvAttributes {
+    fn build_pending_env(parent: &SealedHeader<CustomHeader>) -> Self {
+        Self {
+            inner: OpNextBlockEnvAttributes::build_pending_env(parent),
+            extension: parent.extension,
+        }
+    }
+}
+
+impl<H, ChainSpec> BuildNextEnv<CustomPayloadBuilderAttributes, H, ChainSpec>
+    for CustomNextBlockEnvAttributes
+where
+    H: BlockHeader,
+    ChainSpec: EthChainSpec + OpHardforks,
+{
+    fn build_next_env(
+        attributes: &CustomPayloadBuilderAttributes,
+        parent: &SealedHeader<H>,
+        chain_spec: &ChainSpec,
+    ) -> Result<Self, PayloadBuilderError> {
+        let inner =
+            OpNextBlockEnvAttributes::build_next_env(&attributes.inner, parent, chain_spec)?;
+
+        Ok(CustomNextBlockEnvAttributes { inner, extension: attributes.extension })
     }
 }

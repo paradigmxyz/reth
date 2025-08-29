@@ -75,8 +75,7 @@ fn canonical_state_change_bench(c: &mut Criterion) {
             let total_txs = num_senders * txs_per_sender;
 
             let group_id = format!(
-                "txpool | canonical_state_change | senders: {} | txs_per_sender: {} | total: {}",
-                num_senders, txs_per_sender, total_txs
+                "txpool | canonical_state_change | senders: {num_senders} | txs_per_sender: {txs_per_sender} | total: {total_txs}",
             );
 
             // Create the update

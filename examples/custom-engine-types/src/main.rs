@@ -34,13 +34,13 @@ use reth_ethereum::{
     node::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-            validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+            validate_version_specific_fields, AddOnsContext, EngineApiValidator, EngineTypes,
             FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
             NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
-            rpc::{EngineValidatorBuilder, RpcAddOns},
+            rpc::{PayloadValidatorBuilder, RpcAddOns},
             BuilderContext, Node, NodeAdapter, NodeBuilder,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
@@ -60,7 +60,6 @@ use reth_ethereum::{
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
-use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
@@ -212,7 +211,7 @@ impl PayloadValidator<CustomEngineTypes> for CustomEngineValidator {
     }
 }
 
-impl EngineValidator<CustomEngineTypes> for CustomEngineValidator {
+impl EngineApiValidator<CustomEngineTypes> for CustomEngineValidator {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -250,15 +249,9 @@ impl EngineValidator<CustomEngineTypes> for CustomEngineValidator {
 #[non_exhaustive]
 pub struct CustomEngineValidatorBuilder;
 
-impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
+impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-        >,
-    >,
+    N: FullNodeComponents<Types = MyCustomNode, Evm = EthEvmConfig>,
 {
     type Validator = CustomEngineValidator;
 
@@ -275,7 +268,6 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = EthPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = EthStorage;
     type Payload = CustomEngineTypes;
 }

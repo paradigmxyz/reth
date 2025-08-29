@@ -40,6 +40,7 @@ exclude_crates=(
   reth-node-events
   reth-node-metrics
   reth-optimism-cli
+  reth-optimism-flashblocks
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc

@@ -6,7 +6,7 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
+    ConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
@@ -212,12 +212,9 @@ impl NodeState {
         }
     }
 
-    fn handle_consensus_engine_event<N: NodePrimitives>(
-        &mut self,
-        event: BeaconConsensusEngineEvent<N>,
-    ) {
+    fn handle_consensus_engine_event<N: NodePrimitives>(&mut self, event: ConsensusEngineEvent<N>) {
         match event {
-            BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
+            ConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
                 if self.safe_block_hash != Some(safe_block_hash) &&
@@ -236,7 +233,7 @@ impl NodeState {
                 self.safe_block_hash = Some(safe_block_hash);
                 self.finalized_block_hash = Some(finalized_block_hash);
             }
-            BeaconConsensusEngineEvent::LiveSyncProgress(live_sync_progress) => {
+            ConsensusEngineEvent::LiveSyncProgress(live_sync_progress) => {
                 match live_sync_progress {
                     ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                         remaining_blocks,
@@ -250,38 +247,38 @@ impl NodeState {
                     }
                 }
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
+            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
                 info!(
                     number=block.number(),
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body().transactions().len(),
-                    gas=%format_gas(block.gas_used()),
+                    gas_used=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
                     gas_limit=%format_gas(block.gas_limit()),
                     full=%format!("{:.1}%", block.gas_used() as f64 * 100.0 / block.gas_limit() as f64),
-                    base_fee=%format!("{:.2}gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    base_fee=%format!("{:.2}Gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
             }
-            BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+            ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number());
                 self.latest_block_time = Some(head.timestamp());
 
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
+            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
                 let block = executed.sealed_block();
                 info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
-            BeaconConsensusEngineEvent::InvalidBlock(block) => {
+            ConsensusEngineEvent::InvalidBlock(block) => {
                 warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
             }
-            BeaconConsensusEngineEvent::BlockReceived(num_hash) => {
+            ConsensusEngineEvent::BlockReceived(num_hash) => {
                 info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
             }
         }
@@ -378,7 +375,7 @@ pub enum NodeEvent<N: NodePrimitives> {
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
-    ConsensusEngine(BeaconConsensusEngineEvent<N>),
+    ConsensusEngine(ConsensusEngineEvent<N>),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event

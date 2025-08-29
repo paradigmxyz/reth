@@ -46,7 +46,6 @@ pub struct CustomNode {
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
     type ChainSpec = CustomChainSpec;
-    type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
     type Payload = CustomPayloadTypes;
 }

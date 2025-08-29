@@ -1,5 +1,5 @@
 use crate::{
-    engine::{CustomExecutionData, CustomPayloadTypes},
+    engine::{CustomExecutionData, CustomPayloadAttributes, CustomPayloadTypes},
     primitives::CustomNodePrimitives,
     CustomNode,
 };
@@ -8,9 +8,8 @@ use alloy_rpc_types_engine::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
-use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_ethereum::node::api::{
-    AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
+    AddOnsContext, ConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
 use reth_op::node::OpBuiltPayload;
@@ -51,7 +50,7 @@ pub trait CustomEngineApi {
     async fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<CustomPayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     #[method(name = "getPayload")]
@@ -64,13 +63,13 @@ pub struct CustomEngineApi {
 }
 
 struct CustomEngineApiInner {
-    beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
+    beacon_consensus: ConsensusEngineHandle<CustomPayloadTypes>,
     payload_store: PayloadStore<CustomPayloadTypes>,
 }
 
 impl CustomEngineApiInner {
     fn new(
-        beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
+        beacon_consensus: ConsensusEngineHandle<CustomPayloadTypes>,
         payload_store: PayloadStore<CustomPayloadTypes>,
     ) -> Self {
         Self { beacon_consensus, payload_store }
@@ -91,7 +90,7 @@ impl CustomEngineApiServer for CustomEngineApi {
     async fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<CustomPayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         Ok(self
             .inner
@@ -125,7 +124,7 @@ where
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CustomEngineApiBuilder {}
 
 impl<N> EngineApiBuilder<N> for CustomEngineApiBuilder

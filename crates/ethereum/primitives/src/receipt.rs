@@ -319,8 +319,7 @@ where
             tx_type: value.tx_type(),
             success: value.is_success(),
             cumulative_gas_used: value.cumulative_gas_used(),
-            // TODO: remove after <https://github.com/alloy-rs/alloy/pull/2533>
-            logs: value.logs().to_vec(),
+            logs: value.into_logs(),
         }
     }
 }
