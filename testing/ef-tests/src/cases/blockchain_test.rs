@@ -288,7 +288,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             return Err(Error::block_failed(
                 block_number,
                 Error::Assertion("state root mismatch".to_string()),
-            ));
+            ))
         }
 
         // Commit the post state/state diff to the database
