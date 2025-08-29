@@ -3774,7 +3774,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        let sender = address!("1234567890123456789012345678901234567890");
+        let sender = address!("0x1234567890123456789012345678901234567890");
         let tx0 = f.validated_arc(
             MockTransaction::legacy().with_sender(sender).with_nonce(0).with_gas_price(10),
         );
