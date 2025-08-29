@@ -7655,6 +7655,7 @@ dependencies = [
  "reth-codecs",
  "reth-db-models",
  "reth-ethereum-primitives",
+ "reth-log-index",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-prune-types",

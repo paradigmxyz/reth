@@ -1,6 +1,7 @@
 //! Core types used by the `FilterMaps` implementation.
 
 use alloy_primitives::BlockNumber;
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
@@ -8,8 +9,7 @@ use std::vec::Vec;
 ///
 /// This struct maintains information about which blocks have been indexed and which filter maps
 /// have been generated. It is used to track progress and enable resuming of the indexing process.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Copy)]
-#[cfg_attr(feature = "reth-codecs", derive(Compact))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Copy, Compact)]
 pub struct FilterMapMeta {
     /// The first block number that has had its logs fully indexed.
     /// This represents the starting point of our complete log index.
@@ -45,8 +45,7 @@ pub struct FilterMapMeta {
 /// A row in a filter map stored in the database.
 ///
 /// Each row contains column indices where log values are stored.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "reth-codecs", derive(Compact))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
 pub struct FilterMapRowEntry {
     pub map_row_index: u64,
     pub columns: Vec<u32>,

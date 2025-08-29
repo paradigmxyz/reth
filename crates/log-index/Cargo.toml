@@ -25,11 +25,11 @@ auto_impl.workspace = true
 reth-errors.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
-
+reth-codecs.workspace = true
+modular-bitfield.workspace = true
 
 tracing.workspace = true
 tracing-subscriber.workspace = true
-
 
 # misc
 serde = { workspace = true, features = ["derive"] }
@@ -38,8 +38,6 @@ sha2.workspace = true
 fnv.workspace = true
 
 # codecs
-reth-codecs = { workspace = true, optional = true }
-modular-bitfield = { workspace = true, optional = true }
 
 [dev-dependencies]
 # For tests
@@ -59,5 +57,5 @@ reth-tracing.workspace = true
 
 [features]
 default = []
-reth-codecs = ["dep:reth-codecs", "dep:modular-bitfield"]
+reth-codecs = []
 test-utils = []

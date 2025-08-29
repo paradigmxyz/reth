@@ -15,12 +15,19 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-db-models = { workspace = true, features = ["serde", "reth-codec"] }
-reth-ethereum-primitives = { workspace = true, features = ["serde", "reth-codec"] }
-reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
+reth-ethereum-primitives = { workspace = true, features = [
+    "serde",
+    "reth-codec",
+] }
+reth-primitives-traits = { workspace = true, features = [
+    "serde",
+    "reth-codec",
+] }
 reth-stages-types = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types = { workspace = true, features = ["serde", "reth-codec"] }
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
+reth-log-index.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
