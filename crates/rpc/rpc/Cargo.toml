@@ -52,6 +52,7 @@ alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-client.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
