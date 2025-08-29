@@ -443,12 +443,11 @@ where
             handle.cache_metrics(),
         );
 
-        let (output, execution_finish) = if self.config.state_provider_metrics() {
+        let output = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
+            let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
             state_provider.record_total_latency();
-            (output, execution_finish)
+            output
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
@@ -509,7 +508,7 @@ where
                 debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
-                        let elapsed = execution_finish.elapsed();
+                        let elapsed = root_time.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
@@ -621,18 +620,17 @@ where
         })
     }
 
-    /// Return sealed block from database or in-memory state by hash.
+    /// Return sealed block header from database or in-memory state by hash.
     fn sealed_header_by_hash(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block =
-            state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone_sealed_header());
+        let header = state.tree_state.sealed_header_by_hash(&hash);
 
-        if block.is_some() {
-            Ok(block)
+        if header.is_some() {
+            Ok(header)
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
@@ -660,8 +658,8 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<Evm, impl ExecutableTxFor<Evm>, Err>,
-    ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
     where
         S: StateProvider,
         Err: core::error::Error + Send + Sync + 'static,
@@ -885,7 +883,7 @@ where
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
-        Ok((output, execution_finish))
+        Ok(output)
     }
 
     /// Compute state root for the given hashed post state in parallel.

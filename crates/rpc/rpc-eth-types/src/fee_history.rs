@@ -405,10 +405,11 @@ where
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
         self.header.excess_blob_gas().and_then(|excess_blob_gas| {
-            Some(
-                self.blob_params?
-                    .next_block_excess_blob_gas(excess_blob_gas, self.header.blob_gas_used()?),
-            )
+            Some(self.blob_params?.next_block_excess_blob_gas_osaka(
+                excess_blob_gas,
+                self.header.blob_gas_used()?,
+                self.header.base_fee_per_gas()?,
+            ))
         })
     }
 }

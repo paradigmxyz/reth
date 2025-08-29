@@ -455,6 +455,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.config.attributes.timestamp())
+    }
+
     fn resolve_kind(
         &mut self,
         kind: PayloadKind,

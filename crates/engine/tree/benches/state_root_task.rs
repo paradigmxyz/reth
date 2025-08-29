@@ -42,12 +42,8 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts)
-        .map(|_| {
-            // TODO: rand08
-            Address::random()
-        })
-        .collect();
+    let all_addresses: Vec<Address> =
+        (0..params.num_accounts).map(|_| Address::random_with(&mut rng)).collect();
     let mut updates = Vec::new();
 
     for _ in 0..params.updates_per_account {

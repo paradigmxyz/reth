@@ -11,6 +11,13 @@ use reth_primitives_traits::{
     SealedHeader,
 };
 
+/// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
+///
+/// Calculated as `MAX_BLOCK_SIZE` - `SAFETY_MARGIN` where
+/// `MAX_BLOCK_SIZE` = `10_485_760`
+/// `SAFETY_MARGIN` = `2_097_152`
+pub const MAX_RLP_BLOCK_SIZE: usize = 8_388_608;
+
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
 pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
@@ -157,6 +164,7 @@ where
 ///   information about the specific checks in [`validate_shanghai_withdrawals`].
 /// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
 ///   information about the specific checks in [`validate_cancun_gas`].
+/// * EIP-7934 block size limit validation, if osaka is active based on the given chainspec.
 pub fn post_merge_hardfork_fields<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
@@ -184,6 +192,15 @@ where
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
         validate_cancun_gas(block)?;
+    }
+
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+        block.rlp_length() > MAX_RLP_BLOCK_SIZE
+    {
+        return Err(ConsensusError::BlockTooLarge {
+            rlp_length: block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        })
     }
 
     Ok(())
@@ -335,8 +352,12 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     }
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
-    let expected_excess_blob_gas =
-        blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    let parent_base_fee_per_gas = parent.base_fee_per_gas().unwrap_or(0);
+    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
+        parent_excess_blob_gas,
+        parent_blob_gas_used,
+        parent_base_fee_per_gas,
+    );
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
