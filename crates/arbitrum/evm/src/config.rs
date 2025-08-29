@@ -71,22 +71,23 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
         if let Some(mut info) = derive_arb_header_info_from_state(&input) {
-            if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
+            if input.execution_ctx.l1_block_number != 0 {
                 info.l1_block_number = input.execution_ctx.l1_block_number;
             }
             if info.arbos_format_version == 0 {
                 if let Some(ver) = read_arbos_version(input.state_provider) {
                     info.arbos_format_version = ver;
+                } else {
+                    info.arbos_format_version = 10;
                 }
             }
             info.apply_to_header(&mut header);
         } else {
             let l1_bn = input.execution_ctx.l1_block_number;
             if l1_bn != 0 {
-                if let Some(ver) = read_arbos_version(input.state_provider) {
-                    header.mix_hash = compute_nitro_mixhash(0, l1_bn, ver);
-                    header.extra_data = alloy_primitives::Bytes::from(vec![0u8; 32]);
-                }
+                let ver = read_arbos_version(input.state_provider).unwrap_or(10);
+                header.mix_hash = compute_nitro_mixhash(0, l1_bn, ver);
+                header.extra_data = alloy_primitives::Bytes::from(vec![0u8; 32]);
             }
         }
 
