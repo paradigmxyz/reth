@@ -1,17 +1,17 @@
 //! Contains RPC handler implementations specific to state.
 
+use crate::EthApi;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthState, LoadState},
+    helpers::{EthState, LoadPendingBlock, LoadState},
     RpcNodeCore,
 };
-
-use crate::EthApi;
 
 impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
+    Self: LoadPendingBlock,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
@@ -22,6 +22,7 @@ impl<N, Rpc> LoadState for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
+    Self: LoadPendingBlock,
 {
 }
 

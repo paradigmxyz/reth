@@ -36,12 +36,10 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateCommitmentProvider,
-    StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostState;
-use reth_trie_db::StateCommitment;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
 use revm_database::BundleState;
 use std::{
     ops::{Add, RangeBounds, RangeInclusive, Sub},
@@ -173,10 +171,6 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.database.database_provider_rw()
     }
-}
-
-impl<N: ProviderNodeTypes> StateCommitmentProvider for BlockchainProvider<N> {
-    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
@@ -611,9 +605,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
 
 impl<N: NodeTypesWithDB> HashedPostStateProvider for BlockchainProvider<N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
-            bundle_state.state(),
-        )
+        HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 

@@ -36,12 +36,12 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider, StateProviderFactory,
+    StateReader, StateRootProvider,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
+use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
@@ -178,7 +178,6 @@ where
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
-        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -430,12 +429,11 @@ where
             handle.cache_metrics(),
         );
 
-        let (output, execution_finish) = if self.config.state_provider_metrics() {
+        let output = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
+            let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
             state_provider.record_total_latency();
-            (output, execution_finish)
+            output
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
@@ -496,7 +494,7 @@ where
                 debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
-                        let elapsed = execution_finish.elapsed();
+                        let elapsed = root_time.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
@@ -608,18 +606,17 @@ where
         })
     }
 
-    /// Return sealed block from database or in-memory state by hash.
+    /// Return sealed block header from database or in-memory state by hash.
     fn sealed_header_by_hash(
         &self,
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block =
-            state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone_sealed_header());
+        let header = state.tree_state.sealed_header_by_hash(&hash);
 
-        if block.is_some() {
-            Ok(block)
+        if header.is_some() {
+            Ok(header)
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
@@ -648,7 +645,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
-    ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
+    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
     where
         S: StateProvider,
         Err: core::error::Error + Send + Sync + 'static,
@@ -669,7 +666,8 @@ where
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
-            executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+            // Only cache pure precompiles to avoid issues with stateful precompiles
+            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
                 let metrics = self
                     .precompile_cache_metrics
                     .entry(*address)
@@ -686,7 +684,7 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.executor.execute_metered(
+        let output = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
@@ -694,7 +692,7 @@ where
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
-        Ok((output, execution_finish))
+        Ok(output)
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -873,9 +871,10 @@ where
             debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
             HashedPostState::default()
         } else {
-            let revert_state = HashedPostState::from_reverts::<
-                <P::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)
+            let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                provider.tx_ref(),
+                block_number + 1,
+            )
             .map_err(ProviderError::from)?;
             debug!(
                 target: "engine::tree",
@@ -959,7 +958,6 @@ where
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
-        + StateCommitmentProvider
         + HashedPostStateProvider
         + Clone
         + 'static,
