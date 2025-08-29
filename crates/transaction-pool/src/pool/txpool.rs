@@ -309,7 +309,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                         meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         meta.subpool = meta.state.into();
-
                         self.pending_pool
                             .add_transaction(tx, self.all_transactions.pending_fees.base_fee);
                     },
