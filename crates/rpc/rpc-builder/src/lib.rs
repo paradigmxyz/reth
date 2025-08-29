@@ -919,11 +919,10 @@ where
         let namespaces: Vec<_> = namespaces.collect();
         namespaces
             .iter()
-            .copied()
             .map(|namespace| {
                 self.modules
-                    .entry(namespace)
-                    .or_insert_with(|| match namespace {
+                    .entry(namespace.clone())
+                    .or_insert_with(|| match namespace.clone() {
                         RethRpcModule::Admin => {
                             AdminApi::new(self.network.clone(), self.provider.chain_spec())
                                 .into_rpc()
@@ -985,7 +984,9 @@ where
                         // only relevant for Ethereum and configured in `EthereumAddOns`
                         // implementation
                         // TODO: can we get rid of this here?
-                        RethRpcModule::Flashbots => Default::default(),
+                        // Custom modules are not handled here - they should be registered via
+                        // extend_rpc_modules
+                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
@@ -1574,9 +1575,9 @@ impl TransportRpcModuleConfig {
             let ws_modules =
                 self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
 
-            let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
-            let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
-            let overlap = http_modules.intersection(&ws_modules).copied().collect();
+            let http_not_ws = http_modules.difference(&ws_modules).cloned().collect();
+            let ws_not_http = ws_modules.difference(&http_modules).cloned().collect();
+            let overlap = http_modules.intersection(&ws_modules).cloned().collect();
 
             Err(WsHttpSamePortError::ConflictingModules(Box::new(ConflictingModules {
                 overlap,
@@ -1712,7 +1713,7 @@ impl TransportRpcModules {
     /// Returns all unique endpoints installed for the given module.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+    pub fn methods_by_module(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
