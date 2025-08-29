@@ -55,10 +55,10 @@ impl<S, C> WsFlashBlockStream<S, C> {
     }
 }
 
-impl<
-        S: Stream<Item = Result<Message, Error>> + Unpin,
-        C: WsConnect<Stream = S> + Clone + Send + Sync + 'static + Unpin,
-    > Stream for WsFlashBlockStream<S, C>
+impl<S, C> Stream for WsFlashBlockStream<S, C>
+where
+    S: Stream<Item = Result<Message, Error>> + Unpin,
+    C: WsConnect<Stream = S> + Clone + Send + Sync + 'static + Unpin,
 {
     type Item = eyre::Result<FlashBlock>;
 
@@ -92,7 +92,10 @@ impl<
     }
 }
 
-impl<S, C: WsConnect<Stream = S> + Clone + Send + Sync + 'static> WsFlashBlockStream<S, C> {
+impl<S, C> WsFlashBlockStream<S, C>
+where
+    C: WsConnect<Stream = S> + Clone + Send + Sync + 'static,
+{
     fn connect(&mut self) {
         let ws_url = self.ws_url.clone();
         let connector = self.connector.clone();
