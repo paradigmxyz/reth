@@ -622,11 +622,11 @@ where
     }
 }
 
-impl<N, NetworkT, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB, RpcMiddleware>
+impl<N, EAB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
+    for OpAddOns<N, EAB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    EAB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
