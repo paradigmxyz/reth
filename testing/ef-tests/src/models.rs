@@ -321,7 +321,7 @@ pub enum ForkSpec {
 
 impl From<ForkSpec> for ChainSpec {
     fn from(fork_spec: ForkSpec) -> Self {
-        let spec_builder = ChainSpecBuilder::mainnet().clean_hardforks();
+        let spec_builder = ChainSpecBuilder::mainnet().reset();
 
         match fork_spec {
             ForkSpec::Frontier => spec_builder.frontier_activated(),

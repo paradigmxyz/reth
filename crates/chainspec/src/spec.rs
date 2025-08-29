@@ -790,8 +790,8 @@ impl ChainSpecBuilder {
         self
     }
 
-    /// Cleans any existing hardforks from the builder.
-    pub fn clean_hardforks(mut self) -> Self {
+    /// Resets any existing hardforks from the builder.
+    pub fn reset(mut self) -> Self {
         self.hardforks = ChainHardforks::default();
         self
     }
