@@ -119,7 +119,7 @@ impl EngineApiMetrics {
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
-        get_cached_tx_result: impl Fn(
+        _get_cached_tx_result: impl Fn(
             &mut <E::Evm as Evm>::DB,
             TxHash,
         ) -> Option<ResultAndState<<E::Evm as Evm>::HaltReason>>,
@@ -135,46 +135,13 @@ impl EngineApiMetrics {
 
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        // Track cache statistics for logging
-        let mut cache_hits_in_block = 0u64;
-        let mut cache_misses_in_block = 0u64;
-        let mut gas_skipped_in_block = 0u64;
-
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
                 let tx = tx?;
-                let tx_hash = *tx.tx().tx_hash();
-                if let Some(result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
-                    cache_hits_in_block += 1;
-                    self.executor.execution_results_cache_hits.increment(1);
-                    self.executor.transactions_skipped.increment(1);
-
-                    // Track gas skipped
-                    let gas_used = result.result.gas_used();
-                    gas_skipped_in_block += gas_used;
-                    self.executor.gas_skipped.increment(gas_used);
-                    self.executor.gas_skipped_per_tx_histogram.record(gas_used as f64);
-
-                    tracing::debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        gas_skipped = gas_used,
-                        "Using cached transaction result"
-                    );
-                    executor.commit_cached_execution(tx, result, |_| {
-                        alloy_evm::block::CommitChanges::Yes
-                    })?;
-                } else {
-                    cache_misses_in_block += 1;
-                    self.executor.execution_results_cache_misses.increment(1);
-                    tracing::debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        "Cache miss, executing transaction"
-                    );
-                    executor.execute_transaction(tx)?;
-                }
+                // Temporarily disabled caching after reverting hot account caching optimization
+                // The commit_cached_execution method requires a patched alloy-evm version
+                executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -185,26 +152,6 @@ impl EngineApiMetrics {
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
             (gas_used, res)
         })?;
-
-        // Log cache performance summary with enhanced metrics
-        let total_txs = cache_hits_in_block + cache_misses_in_block;
-        let hit_rate = if total_txs > 0 {
-            (cache_hits_in_block as f64 / total_txs as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        if total_txs > 0 {
-            self.executor.cache_hit_rate_histogram.record(hit_rate);
-            tracing::info!(
-                target: "engine::cache::metrics",
-                cache_hits = cache_hits_in_block,
-                cache_misses = cache_misses_in_block,
-                hit_rate = format!("{:.1}%", hit_rate),
-                gas_skipped = gas_skipped_in_block,
-                "BLOCK_CACHE_STATS - Summary for block execution"
-            );
-        }
 
         // merge transitions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
