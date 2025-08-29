@@ -1048,6 +1048,13 @@ checksum = "d96157f2af6b7adee519c2fce60b07a79628164410c2b32558ef816018ec748e"
 
 [[package]]
 name = "arb-alloy-predeploys"
+version = "0.1.1"
+dependencies = [
+ "alloy-primitives",
+]
+
+[[package]]
+name = "arb-alloy-predeploys"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94abc6fbd063269c1c16ff91e63ffcb6087ae1371b816cd49520de4dacab1338"
@@ -7368,7 +7375,7 @@ dependencies = [
  "alloy-evm",
  "alloy-primitives",
  "arb-alloy-consensus",
- "arb-alloy-predeploys",
+ "arb-alloy-predeploys 0.1.2",
  "arb-alloy-util",
  "reth-arbitrum-chainspec",
  "reth-arbitrum-payload",
@@ -7474,6 +7481,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arb-alloy-consensus",
+ "arb-alloy-predeploys 0.1.1",
  "bytes",
  "modular-bitfield",
  "reth-codecs",
