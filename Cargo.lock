@@ -98,7 +98,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "alloy-block-access-list"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -123,7 +123,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-block-access-list",
  "alloy-eips",
@@ -149,7 +149,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -163,7 +163,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -245,7 +245,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -288,7 +288,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -366,7 +366,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -436,7 +436,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -480,7 +480,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -523,7 +523,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -548,7 +548,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -571,7 +571,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -582,7 +582,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -592,7 +592,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -609,7 +609,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -620,7 +620,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -640,7 +640,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -662,7 +662,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -676,7 +676,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -700,7 +700,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -711,7 +711,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -725,7 +725,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -813,7 +813,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -836,7 +836,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -850,7 +850,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -869,7 +869,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.0.25"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#3283c8ebeee63a2fcd71fbd4d496a995bc543015"
+source = "git+https://github.com/Soubhik-10/alloy?branch=engine-api-trial#8113df1eadfed256bd1c8e00e041047601fb739c"
 dependencies = [
  "alloy-primitives",
  "darling 0.20.11",
@@ -1345,9 +1345,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.4.28"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6448dfb3960f0b038e88c781ead1e7eb7929dfc3a71a1336ec9086c00f6d1e75"
+checksum = "5bee399cc3a623ec5a2db2c5b90ee0190a2260241fbe0c023ac8f7bab426aaf8"
 dependencies = [
  "brotli",
  "compression-codecs",
@@ -2286,11 +2286,11 @@ dependencies = [
 
 [[package]]
 name = "comfy-table"
-version = "7.1.4"
+version = "7.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a65ebfec4fb190b6f90e944a817d60499ee0744e582530e2c9900a22e591d9a"
+checksum = "3f8e18d0dca9578507f13f9803add0df13362b02c501c1c17734f0dbb52eaf0b"
 dependencies = [
- "crossterm",
+ "crossterm 0.29.0",
  "unicode-segmentation",
  "unicode-width 0.2.0",
 ]
@@ -2311,9 +2311,9 @@ dependencies = [
 
 [[package]]
 name = "compression-codecs"
-version = "0.4.28"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46cc6539bf1c592cff488b9f253b30bc0ec50d15407c2cf45e27bd8f308d5905"
+checksum = "c7eea68f0e02c2b0aa8856e9a9478444206d4b6828728e7b0697c0f8cca265cb"
 dependencies = [
  "brotli",
  "compression-core",
@@ -2327,9 +2327,9 @@ dependencies = [
 
 [[package]]
 name = "compression-core"
-version = "0.4.28"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2957e823c15bde7ecf1e8b64e537aa03a6be5fda0e2334e99887669e75b12e01"
+checksum = "e47641d3deaf41fb1538ac1f54735925e275eaf3bf4d55c81b137fba797e5cbb"
 
 [[package]]
 name = "concat-kdf"
@@ -2530,6 +2530,20 @@ dependencies = [
  "rustix 0.38.44",
  "signal-hook",
  "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+dependencies = [
+ "bitflags 2.9.3",
+ "crossterm_winapi",
+ "document-features",
+ "parking_lot",
+ "rustix 1.0.8",
  "winapi",
 ]
 
@@ -2992,6 +3006,15 @@ name = "doctest-file"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aac81fa3e28d21450aa4d2ac065992ba96a1d7303efbce51a95f4fd175b67562"
+
+[[package]]
+name = "document-features"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
+dependencies = [
+ "litrs",
+]
 
 [[package]]
 name = "dunce"
@@ -5431,6 +5454,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "241eaef5fd12c88705a01fc1066c48c4b36e0dd4377dcdc7ec3942cea7a69956"
 
 [[package]]
+name = "litrs"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
+
+[[package]]
 name = "lock_api"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6543,9 +6572,9 @@ checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
 
 [[package]]
 name = "potential_utf"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5a7c30837279ca13e7c867e9e40053bc68740f988cb07f7ca6df43cc734b585"
+checksum = "84df19adbe5b5a0782edcab45899906947ab039ccf4573713735ee7de1e6b08a"
 dependencies = [
  "zerovec 0.11.4",
 ]
@@ -6981,7 +7010,7 @@ dependencies = [
  "bitflags 2.9.3",
  "cassowary",
  "compact_str",
- "crossterm",
+ "crossterm 0.28.1",
  "indoc",
  "instability",
  "itertools 0.13.0",
@@ -7379,7 +7408,7 @@ dependencies = [
  "backon",
  "clap",
  "comfy-table",
- "crossterm",
+ "crossterm 0.28.1",
  "eyre",
  "fdlimit",
  "futures",
