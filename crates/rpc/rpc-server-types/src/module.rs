@@ -291,9 +291,14 @@ impl RethRpcModule {
         Self::STANDARD_VARIANTS.len()
     }
 
-    /// Returns all variant names of standard modules
+    /// Returns all variant names including Other (for parsing)
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
+    }
+
+    /// Returns standard variant names (excludes "other") for CLI display
+    pub fn standard_variant_names() -> impl Iterator<Item = &'static str> {
+        <Self as VariantNames>::VARIANTS.iter().copied().filter(|&name| name != "other")
     }
 
     /// Returns all standard variants (excludes Other)
@@ -312,6 +317,11 @@ impl RethRpcModule {
             Self::Other(s) => s.as_str(),
             _ => self.as_ref(), // Uses AsRefStr trait
         }
+    }
+
+    /// Returns true if this is an `Other` variant.
+    pub const fn is_other(&self) -> bool {
+        matches!(self, Self::Other(_))
     }
 }
 
@@ -380,6 +390,80 @@ impl Serialize for RethRpcModule {
         S: Serializer,
     {
         s.serialize_str(self.as_str())
+    }
+}
+
+/// Trait for validating RPC module selections.
+///
+/// This allows customizing how RPC module names are validated when parsing
+/// CLI arguments or configuration.
+pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
+    /// Parse and validate an RPC module selection string.
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String>;
+
+    /// Validates RPC module selection that was already parsed.
+    ///
+    /// This is used to validate modules that were parsed as `Other` variants
+    /// to ensure they meet the validation rules of the specific implementation.
+    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
+        // Re-validate the modules using the parser's validator
+        // This is necessary because the clap value parser accepts any input
+        // and we need to validate according to the specific parser's rules
+        let RpcModuleSelection::Selection(module_set) = modules else {
+            // All or Standard variants are always valid
+            return Ok(());
+        };
+
+        for module in module_set {
+            let RethRpcModule::Other(name) = module else {
+                // Standard modules are always valid
+                continue;
+            };
+
+            // Try to parse and validate using the configured validator
+            // This will check for typos and other validation rules
+            Self::parse_selection(name)
+                .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Default validator that rejects unknown module names.
+///
+/// This validator only accepts known RPC module names.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultRpcModuleValidator;
+
+impl RpcModuleValidator for DefaultRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // First try standard parsing
+        let selection = RpcModuleSelection::from_str(s)
+            .map_err(|e| format!("Failed to parse RPC modules: {}", e))?;
+
+        // Validate each module in the selection
+        if let RpcModuleSelection::Selection(modules) = &selection {
+            for module in modules {
+                if let RethRpcModule::Other(name) = module {
+                    return Err(format!("Unknown RPC module: '{}'", name));
+                }
+            }
+        }
+
+        Ok(selection)
+    }
+}
+
+/// Lenient validator that accepts any module name without validation.
+///
+/// This validator accepts any module name, including unknown ones.
+#[derive(Debug, Clone, Copy)]
+pub struct LenientRpcModuleValidator;
+
+impl RpcModuleValidator for LenientRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        RpcModuleSelection::from_str(s).map_err(|e| format!("Failed to parse RPC modules: {}", e))
     }
 }
 
@@ -664,5 +748,100 @@ mod test {
         assert_eq!(other1, other2);
         assert_ne!(other1, other3);
         assert_ne!(other1, RethRpcModule::Eth);
+    }
+
+    #[test]
+    fn test_rpc_module_is_other() {
+        // Standard modules should return false
+        assert!(!RethRpcModule::Eth.is_other());
+        assert!(!RethRpcModule::Admin.is_other());
+        assert!(!RethRpcModule::Debug.is_other());
+
+        // Other variants should return true
+        assert!(RethRpcModule::Other("custom".to_string()).is_other());
+        assert!(RethRpcModule::Other("mycustomrpc".to_string()).is_other());
+    }
+
+    #[test]
+    fn test_standard_variant_names_excludes_other() {
+        let standard_names: Vec<_> = RethRpcModule::standard_variant_names().collect();
+
+        // Verify "other" is not in the list
+        assert!(!standard_names.contains(&"other"));
+
+        // Should have exactly as many names as STANDARD_VARIANTS
+        assert_eq!(standard_names.len(), RethRpcModule::STANDARD_VARIANTS.len());
+
+        // Verify all standard variants have their names in the list
+        for variant in RethRpcModule::STANDARD_VARIANTS {
+            assert!(standard_names.contains(&variant.as_ref()));
+        }
+    }
+
+    #[test]
+    fn test_default_validator_accepts_standard_modules() {
+        // Should accept standard modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,debug");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        assert!(matches!(selection, RpcModuleSelection::Selection(_)));
+    }
+
+    #[test]
+    fn test_default_validator_rejects_unknown_modules() {
+        // Should reject unknown module names
+        let result = DefaultRpcModuleValidator::parse_selection("eth,mycustom");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'mycustom'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("unknownmodule");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'unknownmodule'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,xyz123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'xyz123'"));
+    }
+
+    #[test]
+    fn test_default_validator_all_selection() {
+        // Should accept "all" selection
+        let result = DefaultRpcModuleValidator::parse_selection("all");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn test_default_validator_none_selection() {
+        // Should accept "none" selection
+        let result = DefaultRpcModuleValidator::parse_selection("none");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+    }
+
+    #[test]
+    fn test_lenient_validator_accepts_unknown_modules() {
+        // Lenient validator should accept any module name without validation
+        let result = LenientRpcModuleValidator::parse_selection("eht,adimn,xyz123,customrpc");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        if let RpcModuleSelection::Selection(modules) = selection {
+            assert!(modules.contains(&RethRpcModule::Other("eht".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("adimn".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("xyz123".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("customrpc".to_string())));
+        } else {
+            panic!("Expected Selection variant");
+        }
+    }
+
+    #[test]
+    fn test_default_validator_mixed_standard_and_custom() {
+        // Should reject mix of standard and custom modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,mycustom,debug");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'mycustom'"));
     }
 }

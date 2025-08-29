@@ -380,7 +380,7 @@ impl Default for RpcServerArgs {
     }
 }
 
-/// clap value parser for [`RpcModuleSelection`].
+/// clap value parser for [`RpcModuleSelection`] with configurable validation.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;
@@ -403,8 +403,8 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        // Only show standard modules in help text
-        let values = RethRpcModule::all_variant_names().iter().map(PossibleValue::new);
+        // Only show standard modules in help text (excludes "other")
+        let values = RethRpcModule::standard_variant_names().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }
