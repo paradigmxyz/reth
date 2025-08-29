@@ -12,7 +12,7 @@ Commands:
   node          Start the node
   init          Initialize the database from a genesis file
   init-state    Initialize the database from a state dump file
-  import        This syncs RLP encoded blocks from a file
+  import        This syncs RLP encoded blocks from a file or files
   import-era    This syncs ERA encoded blocks from a directory
   export-era    Exports block to era1 files in a specified directory
   dump-genesis  Dumps genesis block JSON configuration to stdout
@@ -68,6 +68,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

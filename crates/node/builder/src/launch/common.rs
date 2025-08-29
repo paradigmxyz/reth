@@ -312,7 +312,7 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
         &self.attachment.right
     }
 
-    /// Get a mutable reference to the right value.
+    /// Get a mutable reference to the left value.
     pub const fn left_mut(&mut self) -> &mut L {
         &mut self.attachment.left
     }
@@ -442,7 +442,10 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {
@@ -1116,9 +1119,9 @@ impl<L, R> Attached<L, R> {
         &self.right
     }
 
-    /// Get a mutable reference to the right value.
-    pub const fn left_mut(&mut self) -> &mut R {
-        &mut self.right
+    /// Get a mutable reference to the left value.
+    pub const fn left_mut(&mut self) -> &mut L {
+        &mut self.left
     }
 
     /// Get a mutable reference to the right value.

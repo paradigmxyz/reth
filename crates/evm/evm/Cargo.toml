@@ -36,7 +36,6 @@ metrics = { workspace = true, optional = true }
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
-metrics-util = { workspace = true, features = ["debugging"] }
 
 [features]
 default = ["std"]

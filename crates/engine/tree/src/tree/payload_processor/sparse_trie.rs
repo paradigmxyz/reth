@@ -1,9 +1,6 @@
 //! Sparse Trie task related functionality.
 
-use crate::tree::payload_processor::{
-    executor::WorkloadExecutor,
-    multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
-};
+use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
@@ -13,6 +10,7 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
 };
+use smallvec::SmallVec;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -26,9 +24,6 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
-    /// Executor used to spawn subtasks.
-    #[expect(unused)] // TODO use this for spawning trie tasks
-    pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
     /// `SparseStateTrie` used for computing the state root.
@@ -48,19 +43,12 @@ where
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
-        executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
         sparse_state_trie: ClearedSparseStateTrie<A, S>,
     ) -> Self {
-        Self {
-            executor,
-            updates,
-            metrics,
-            trie: sparse_state_trie.into_inner(),
-            blinded_provider_factory,
-        }
+        Self { updates, metrics, trie: sparse_state_trie.into_inner(), blinded_provider_factory }
     }
 
     /// Runs the sparse trie task to completion.
@@ -184,19 +172,32 @@ where
                 trace!(target: "engine::root::sparse", "Wiping storage");
                 storage_trie.wipe()?;
             }
+
+            // Defer leaf removals until after updates/additions, so that we don't delete an
+            // intermediate branch node during a removal and then re-add that branch back during a
+            // later leaf addition. This is an optimization, but also a requirement inherited from
+            // multiproof generating, which can't know the order that leaf operations happen in.
+            let mut removed_slots = SmallVec::<[Nibbles; 8]>::new();
+
             for (slot, value) in storage.storage {
                 let slot_nibbles = Nibbles::unpack(slot);
+
                 if value.is_zero() {
-                    trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
-                } else {
-                    trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
-                    storage_trie.update_leaf(
-                        slot_nibbles,
-                        alloy_rlp::encode_fixed_size(&value).to_vec(),
-                        &storage_provider,
-                    )?;
+                    removed_slots.push(slot_nibbles);
+                    continue;
                 }
+
+                trace!(target: "engine::root::sparse", ?slot_nibbles, "Updating storage slot");
+                storage_trie.update_leaf(
+                    slot_nibbles,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                    &storage_provider,
+                )?;
+            }
+
+            for slot_nibbles in removed_slots {
+                trace!(target: "engine::root::sparse", ?slot_nibbles, "Removing storage slot");
+                storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
             }
 
             storage_trie.root();
@@ -205,6 +206,12 @@ where
         })
         .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
     drop(tx);
+
+    // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
+    // branch node during a removal and then re-add that branch back during a later leaf addition.
+    // This is an optimization, but also a requirement inherited from multiproof generating, which
+    // can't know the order that leaf operations happen in.
+    let mut removed_accounts = Vec::new();
 
     // Update account storage roots
     for result in rx {
@@ -215,18 +222,35 @@ where
             // If the account itself has an update, remove it from the state update and update in
             // one go instead of doing it down below.
             trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
-            trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
+            if !trie.update_account(
+                address,
+                account.unwrap_or_default(),
+                blinded_provider_factory,
+            )? {
+                removed_accounts.push(address);
+            }
         } else if trie.is_account_revealed(address) {
             // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
-            trie.update_account_storage_root(address, blinded_provider_factory)?;
+            if !trie.update_account_storage_root(address, blinded_provider_factory)? {
+                removed_accounts.push(address);
+            }
         }
     }
 
     // Update accounts
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
+        if !trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)? {
+            removed_accounts.push(address);
+        }
+    }
+
+    // Remove accounts
+    for address in removed_accounts {
+        trace!(target: "trie::sparse", ?address, "Removing account");
+        let nibbles = Nibbles::unpack(address);
+        trie.remove_account_leaf(&nibbles, blinded_provider_factory)?;
     }
 
     let elapsed_before = started_at.elapsed();

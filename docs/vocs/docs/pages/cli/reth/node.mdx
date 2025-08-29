@@ -238,6 +238,13 @@ Networking:
 
           Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
 
+      --tx-propagation-mode <PROPAGATION_MODE>
+          Sets the transaction propagation mode by determining how new pending transactions are propagated to other peers in full.
+
+          Examples: sqrt, all, max:10
+
+          [default: sqrt]
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -406,6 +413,9 @@ RPC:
           Options: full (include all transactions), empty (header only), none (disable pending blocks).
 
           [default: full]
+
+      --rpc.forwarder <FORWARDER>
+          Endpoint to forward transactions to
 
       --builder.disallow <PATH>
           Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
@@ -906,6 +916,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

@@ -314,24 +314,15 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Sets the current block info for the pool.
     ///
-    /// This will also apply updates to the pool based on the new base fee
+    /// This will also apply updates to the pool based on the new base fee and blob fee
     pub fn set_block_info(&mut self, info: BlockInfo) {
-        let BlockInfo {
-            block_gas_limit,
-            last_seen_block_hash,
-            last_seen_block_number,
-            pending_basefee,
-            pending_blob_fee,
-        } = info;
-        self.all_transactions.last_seen_block_hash = last_seen_block_hash;
-        self.all_transactions.last_seen_block_number = last_seen_block_number;
-        let basefee_ordering = self.update_basefee(pending_basefee);
-
-        self.all_transactions.block_gas_limit = block_gas_limit;
-
-        if let Some(blob_fee) = pending_blob_fee {
+        // first update the subpools based on the new values
+        let basefee_ordering = self.update_basefee(info.pending_basefee);
+        if let Some(blob_fee) = info.pending_blob_fee {
             self.update_blob_fee(blob_fee, basefee_ordering)
         }
+        // then update tracked values
+        self.all_transactions.set_block_info(info);
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block with
@@ -554,8 +545,8 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates the entire pool after a new block was mined.
     ///
-    /// This removes all mined transactions, updates according to the new base fee and rechecks
-    /// sender allowance.
+    /// This removes all mined transactions, updates according to the new base fee and blob fee and
+    /// rechecks sender allowance based on the given changed sender infos.
     pub(crate) fn on_canonical_state_change(
         &mut self,
         block_info: BlockInfo,
@@ -565,7 +556,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
-        self.all_transactions.set_block_info(block_info);
+        self.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
         let mut removed_txs_count = 0;
