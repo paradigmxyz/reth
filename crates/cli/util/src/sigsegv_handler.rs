@@ -121,7 +121,18 @@ pub fn install() {
     unsafe {
         let alt_stack_size: usize = min_sigstack_size() + 64 * 1024;
         let mut alt_stack: libc::stack_t = mem::zeroed();
-        alt_stack.ss_sp = alloc(Layout::from_size_align(alt_stack_size, 1).unwrap()).cast();
+
+        // Use proper error handling instead of unwrap() to prevent panic in signal handler context
+        let layout = match Layout::from_size_align(alt_stack_size, 1) {
+            Ok(layout) => layout,
+            Err(_) => {
+                // If layout creation fails, we can't set up the signal handler properly
+                // This is a critical failure, but we should handle it gracefully
+                return;
+            }
+        };
+
+        alt_stack.ss_sp = alloc(layout).cast();
         alt_stack.ss_size = alt_stack_size;
         libc::sigaltstack(&raw const alt_stack, ptr::null_mut());
 
