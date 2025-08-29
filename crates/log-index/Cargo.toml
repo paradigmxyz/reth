@@ -1,0 +1,63 @@
+[package]
+name = "reth-log-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Log index implementation for efficient log indexing"
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+# bytes
+bytes.workspace = true
+
+auto_impl.workspace = true
+
+# reth
+reth-errors.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
+
+
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+
+# misc
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+sha2.workspace = true
+fnv.workspace = true
+
+# codecs
+reth-codecs = { workspace = true, optional = true }
+modular-bitfield = { workspace = true, optional = true }
+
+[dev-dependencies]
+# For tests
+alloy-consensus.workspace = true
+rand.workspace = true
+test-fuzz.workspace = true
+futures.workspace = true
+
+# For integration tests
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-ethereum-primitives.workspace = true
+tokio = { workspace = true, features = ["full"] }
+reth-testing-utils.workspace = true
+reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
+reth-tracing.workspace = true
+
+[features]
+default = []
+reth-codecs = ["dep:reth-codecs", "dep:modular-bitfield"]
+test-utils = []
