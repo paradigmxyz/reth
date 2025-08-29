@@ -5,7 +5,8 @@ use reth_engine_primitives::TreeConfig;
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
-    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
+    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PARALLEL_SPARSE_TRIE_THRESHOLD,
+    DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
 };
 
 /// Parameters for configuring the engine driver.
@@ -43,6 +44,11 @@ pub struct EngineArgs {
     /// Disable the parallel sparse trie in the engine.
     #[arg(long = "engine.disable-parallel-sparse-trie", default_value = "false")]
     pub parallel_sparse_trie_disabled: bool,
+
+    /// Configure the parallelism threshold for the parallel sparse trie.
+    /// This determines the minimum number of operations required before parallelism is enabled.
+    #[arg(long = "engine.parallel-sparse-trie-threshold", default_value_t = DEFAULT_PARALLEL_SPARSE_TRIE_THRESHOLD)]
+    pub parallel_sparse_trie_threshold: usize,
 
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
     /// about how long state provider calls took during execution, but this does introduce slight
@@ -109,6 +115,7 @@ impl Default for EngineArgs {
             caching_and_prewarming_disabled: false,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
+            parallel_sparse_trie_threshold: DEFAULT_PARALLEL_SPARSE_TRIE_THRESHOLD,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
@@ -131,6 +138,7 @@ impl EngineArgs {
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_caching_and_prewarming(self.caching_and_prewarming_disabled)
             .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
+            .with_parallel_sparse_trie_threshold(self.parallel_sparse_trie_threshold)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
