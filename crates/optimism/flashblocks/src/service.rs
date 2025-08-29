@@ -70,7 +70,7 @@ impl<
             evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
             provider,
-            cached_state: None
+            cached_state: None,
         }
     }
 
