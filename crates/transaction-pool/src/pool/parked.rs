@@ -311,7 +311,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         removed
     }
 
-    /// Removes all transactions from this subpool that can now afford the given basefee,
+    /// Removes all transactions from this subpool that can afford the given basefee,
     /// invoking the provided handler for each transaction as it is removed.
     ///
     /// This method enforces the basefee constraint by identifying transactions that now
