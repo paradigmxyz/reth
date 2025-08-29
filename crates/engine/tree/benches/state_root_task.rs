@@ -44,7 +44,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut rng = runner.rng().clone();
     let all_addresses: Vec<Address> =
         (0..params.num_accounts).map(|_| Address::random_with(&mut rng)).collect();
-    let mut updates = Vec::new();
+    let mut updates = Vec::with_capacity(params.updates_per_account);
 
     for _ in 0..params.updates_per_account {
         let mut state_update = EvmState::default();
@@ -122,7 +122,7 @@ fn setup_provider(
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
-        let mut account_updates = Vec::new();
+        let mut account_updates = Vec::with_capacity(update.len());
 
         for (address, account) in update {
             // only process self-destructs if account exists, always process
