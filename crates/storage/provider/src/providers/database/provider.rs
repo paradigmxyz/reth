@@ -3186,21 +3186,42 @@ impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX,
         value: &B256,
     ) -> FilterResult<Vec<Vec<u32>>> {
         let params = FilterMapParams::default();
-        let row_index = params.row_index(map_start, 0, value);
+        if params.map_epoch(map_start) != params.map_epoch(map_end) {
+            return Err(FilterError::InvalidBaseBand);
+        }
 
-        let mut results = Vec::with_capacity((map_end - map_start + 1) as usize);
+        let first_epoch_map = params.first_epoch_map(params.map_epoch(map_start));
+        let row_index = params.row_index(first_epoch_map, 0, value);
 
-        for map_index in map_start..=map_end {
-            let map_row_index = params.map_row_index(map_index, row_index);
+        // First map's row key
+        let start_key = params.map_row_index(map_start, row_index);
+        // Last map's row key
+        let end_key = params.map_row_index(map_end, row_index);
 
-            let row = self
-                .tx_ref()
-                .get::<tables::FilterMapRows>(map_row_index)
-                .map_err(|e| FilterError::Database(e.to_string()))?
-                .map(|entry| entry.columns)
-                .unwrap_or_default();
+        let mut cursor = self
+            .tx_ref()
+            .cursor_read::<tables::FilterMapRows>()
+            .map_err(|e| FilterError::Database(e.to_string()))?;
+        let walker = cursor
+            .walk_range(start_key..=end_key)
+            .map_err(|e| FilterError::Database(e.to_string()))?;
 
-            results.push(row);
+        let mut results = vec![Vec::new(); (map_end - map_start + 1) as usize];
+
+        for entry in walker {
+            let (map_row_idx, row_entry) =
+                entry.map_err(|e| FilterError::Database(e.to_string()))?;
+
+            // Calculate which map this belongs to
+            // Reverse the map_row_index formula to get map_index
+            let map_in_epoch = (map_row_idx & ((1 << params.log_maps_per_epoch) - 1)) as u32;
+            let map_index = first_epoch_map + map_in_epoch;
+
+            // Place in correct position
+            let position = (map_index - map_start) as usize;
+            if position < results.len() {
+                results[position] = row_entry.columns;
+            }
         }
 
         Ok(results)
