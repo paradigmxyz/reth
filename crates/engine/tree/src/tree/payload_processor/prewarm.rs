@@ -88,7 +88,7 @@ where
         let max_concurrency = self.max_concurrency;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::new();
+            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
