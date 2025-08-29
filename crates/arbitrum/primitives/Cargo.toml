@@ -41,6 +41,8 @@ bytes = { version = "1", default-features = false }
 
 # arb-alloy consensus types
 arb-alloy-consensus = { workspace = true }
+# arb-alloy predeploys helpers used for selectors and addresses
+arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys" }
 
 # reth workspace crates
 reth-codecs = { path = "../../storage/codecs", default-features = false, package = "reth-codecs", optional = true }
