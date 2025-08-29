@@ -21,11 +21,14 @@ use reth_evm::{OnStateHook, TransactionEnv};
 use alloy_evm::Database;
 use revm::Database as RevmDatabase;
 use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, ExecutableTx, BlockExecutor as AlloyBlockExecutor};
+use crate::arb_evm::ArbEvmExt;
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
 use alloy_evm::ToTxEnv;
 use revm::context::result::ExecutionResult;
+use alloy_primitives::Log as AlloyLog;
 
 use crate::predeploys::PredeployRegistry;
+use crate::predeploys::{PredeployCallContext, LogEmitter};
 use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext, ArbOsHooks};
 
 pub struct ArbBlockExecutorFactory<R, CS>
@@ -65,6 +68,7 @@ pub struct ArbBlockExecutionCtx {
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
     inner: EthBlockExecutor<'a, Evm, alloy_evm::eth::spec::EthSpec, &'a RB>,
+    predeploys: Arc<Mutex<PredeployRegistry>>,
     hooks: DefaultArbOsHooks,
     tx_state: ArbTxProcessorState,
     _phantom: PhantomData<CS>,
@@ -91,7 +95,7 @@ where
     RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
     D: RevmDatabase + core::fmt::Debug + 'a,
     <D as RevmDatabase>::Error: Send + Sync + 'static,
-    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>>,
+    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>> + crate::arb_evm::ArbEvmExt,
     E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
     for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
     <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
@@ -128,14 +132,7 @@ where
         };
         let is_internal = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
-        let needs_precredit = {
-            use reth_arbitrum_primitives::ArbTxType::*;
-            match tx.tx().tx_type() {
-                Internal => true,
-                Deposit => true,
-                _ => true,
-            }
-        };
+        let needs_precredit = is_sequenced;
 
         let paid_gas_price = {
             use reth_arbitrum_primitives::ArbTxType::*;
@@ -183,6 +180,37 @@ where
         }
 
         let mut used_pre_nonce = None;
+        let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
+        let to_addr = match tx.tx().kind() {
+            alloy_primitives::TxKind::Call(a) => Some(a),
+            _ => None,
+        };
+        if let Some(call_to) = to_addr {
+            let evm = self.inner.evm();
+            let block = alloy_evm::Evm::block(evm);
+            let ctx = PredeployCallContext {
+                block_number: u64::try_from(block.number).unwrap_or(0),
+                block_hashes: alloc::vec::Vec::new(),
+                chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
+                os_version: 0,
+                time: u64::try_from(block.timestamp).unwrap_or(0),
+                origin: sender,
+                caller: sender,
+                depth: 0,
+                basefee: block_basefee,
+            };
+            crate::log_sink::clear();
+            struct SinkEmitter;
+            impl LogEmitter for SinkEmitter {
+                fn emit_log(&mut self, address: alloy_primitives::Address, topics: &[[u8; 32]], data: &[u8]) {
+                    crate::log_sink::push(address, topics, data);
+                }
+            }
+            let mut emitter = SinkEmitter;
+            if let Ok(mut reg) = self.predeploys.lock() {
+                let _ = reg.dispatch_with_emitter(&ctx, call_to, &calldata, gas_limit, alloy_primitives::U256::from(tx.tx().value()), &mut emitter);
+            }
+        }
 
         let current_nonce = {
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
@@ -229,32 +257,10 @@ where
                 "pre-crediting sender for upfront funds"
             );
 
-            use alloy_primitives::map::HashMap;
-            use alloy_evm::block::state_changes::balance_increment_state;
-            use revm::state::AccountInfo;
-            use alloy_consensus::constants::KECCAK_EMPTY;
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
-
-            let mut increments = HashMap::default();
-            increments.insert(sender, needed_fee.to::<u128>());
-            let _ = balance_increment_state(&increments, state);
-
-            let existing = match state.basic(sender) {
-                Ok(Some(info)) => info,
-                _ => AccountInfo { balance: alloy_primitives::U256::ZERO, nonce: current_nonce, code_hash: KECCAK_EMPTY, code: None },
-            };
-            let mut updated = existing;
-            updated.balance = updated.balance.saturating_add(needed_fee);
-            state.insert_account(sender, updated);
-
-            let overlay_bal = state
-                .bundle_state
-                .state
-                .get(&sender)
-                .and_then(|acc| acc.info.as_ref().map(|i| i.balance))
-                .unwrap_or_default();
-            tracing::info!(target: "arb-reth::executor", sender_balance_after_precredit_overlay = %overlay_bal, "bundle overlay balance after pre-credit");
+            let inc: u128 = needed_fee.to::<u128>();
+            let _ = state.increment_balances(core::iter::once((sender, inc)));
         }
 
 
@@ -266,8 +272,19 @@ where
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, pre_nonce);
         }
 
-        let wrapped = WithTxEnv { tx_env, tx };
-        let result = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+        let result = {
+            let evm = self.inner.evm_mut();
+            let prev_disable = evm.cfg_mut().disable_balance_check;
+            evm.cfg_mut().disable_balance_check = is_internal || is_deposit;
+
+            let wrapped = WithTxEnv { tx_env, tx };
+            let res = self.inner.execute_transaction_with_commit_condition(wrapped, f);
+
+            let evm = self.inner.evm_mut();
+            evm.cfg_mut().disable_balance_check = prev_disable;
+
+            res
+        };
 
         if used_pre_nonce.is_some() {
             if let Ok(Some(_)) = result {
@@ -283,10 +300,8 @@ where
             }
         }
 
-        let res = result;
-
         let end_ctx = ArbEndTxContext {
-            success: res.is_ok(),
+            success: result.is_ok(),
             gas_left: 0,
             gas_limit,
             basefee: block_basefee,
@@ -300,7 +315,7 @@ where
             self.tx_state = state;
         }
 
-        res
+        result
     }
 
     fn finish(self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
@@ -357,6 +372,7 @@ where
                 alloy_evm::eth::spec::EthSpec::mainnet(),
                 &self.receipt_builder,
             ),
+            predeploys: self.predeploys.clone(),
             hooks: Default::default(),
             tx_state: Default::default(),
             _phantom: core::marker::PhantomData::<CS>,

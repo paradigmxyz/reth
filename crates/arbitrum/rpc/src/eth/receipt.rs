@@ -2,7 +2,7 @@ use std::vec;
 use reth_storage_api::HeaderProvider;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
-use alloy_consensus::ReceiptEnvelope;
+use alloy_consensus::{ReceiptEnvelope, Typed2718, TxType};
 use reth_rpc_eth_types::receipt::build_receipt;
 
 #[derive(Clone, Debug)]
@@ -30,8 +30,9 @@ where
     ) -> Result<vec::Vec<Self::RpcReceipt>, Self::Error> {
         let mut out = Vec::with_capacity(receipts.len());
         for input in receipts {
+            let tx_type_eth = TxType::Legacy;
             out.push(build_receipt(&input, None, |receipt_with_bloom| {
-                ReceiptEnvelope::Legacy(receipt_with_bloom)
+                ReceiptEnvelope::from_typed(tx_type_eth, receipt_with_bloom)
             }));
         }
         Ok(out)

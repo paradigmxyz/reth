@@ -1038,9 +1038,9 @@ impl ConsensusTx for ArbTransactionSigned {
                 Some(to) => TxKind::Call(to),
                 None => TxKind::Create,
             },
-            ArbTypedTransaction::SubmitRetryable(tx) => match tx.retry_to {
-                Some(to) => TxKind::Call(to),
-                None => TxKind::Create,
+            ArbTypedTransaction::SubmitRetryable(_tx) => {
+                let addr = alloy_primitives::address!("000000000000000000000000000000000000006e");
+                TxKind::Call(addr)
             },
             ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
         }
@@ -1078,7 +1078,13 @@ impl ConsensusTx for ArbTransactionSigned {
                 self.input_cache.get_or_init(|| Bytes::from(tx.data.clone()))
             }
             ArbTypedTransaction::SubmitRetryable(tx) => {
-                self.input_cache.get_or_init(|| Bytes::from(tx.retry_data.clone()))
+                self.input_cache.get_or_init(|| {
+                    let sel = arb_alloy_predeploys::selector(arb_alloy_predeploys::SIG_RETRY_SUBMIT_RETRYABLE);
+                    let mut out = alloc::vec::Vec::with_capacity(4 + tx.retry_data.len());
+                    out.extend_from_slice(&sel);
+                    out.extend_from_slice(&tx.retry_data);
+                    Bytes::from(out)
+                })
             }
             ArbTypedTransaction::Internal(tx) => {
                 self.input_cache.get_or_init(|| Bytes::from(tx.data.clone()))

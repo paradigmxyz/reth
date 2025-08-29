@@ -54,14 +54,14 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             withdrawals_root: None,
             logs_bloom,
             timestamp: input.evm_env.block_env.timestamp.saturating_to(),
-            mix_hash: input.evm_env.block_env.prevrandao.unwrap_or_default(),
+            mix_hash: input.parent.mix_hash,
             nonce: alloy_eips::merge::BEACON_NONCE.into(),
             base_fee_per_gas: Some(input.evm_env.block_env.basefee),
             number: input.evm_env.block_env.number.saturating_to(),
             gas_limit: input.evm_env.block_env.gas_limit,
             difficulty: input.evm_env.block_env.difficulty,
             gas_used: *gas_used,
-            extra_data: alloy_primitives::Bytes(input.execution_ctx.extra_data.clone()),
+            extra_data: alloy_primitives::Bytes::from(input.parent.extra_data.clone()),
             parent_beacon_block_root: input.execution_ctx.parent_beacon_block_root,
             blob_gas_used: None,
             excess_blob_gas: None,
@@ -70,7 +70,15 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
-        if let Some(info) = derive_arb_header_info_from_state(&input) {
+        if let Some(mut info) = derive_arb_header_info_from_state(&input) {
+            if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
+                info.l1_block_number = input.execution_ctx.l1_block_number;
+            }
+            if info.arbos_format_version == 0 {
+                if let Some(ver) = read_arbos_version(input.state_provider) {
+                    info.arbos_format_version = ver;
+                }
+            }
             info.apply_to_header(&mut header);
         } else {
             let l1_bn = input.execution_ctx.l1_block_number;
@@ -161,7 +169,7 @@ where
     ) -> Result<Self, reth_payload_primitives::PayloadBuilderError> {
         let attrs: reth_payload_builder::EthPayloadBuilderAttributes = attrs.clone().into();
         let mut ts = attrs.timestamp;
-        let min_ts = parent.timestamp().saturating_add(1);
+        let min_ts = parent.timestamp();
         if ts < min_ts {
             ts = min_ts;
         }

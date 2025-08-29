@@ -194,10 +194,15 @@ pub fn arb_tx_with_other_fields(
 
     match &**tx {
         ArbTypedTransaction::Internal(_) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x6a]));
             let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
             let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(s.gas));
+            let _ = out.other.insert_value("gasPrice".to_string(), s.gas_fee_cap);
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), s.gas_fee_cap);
             let _ = out.other.insert_value("requestId".to_string(), s.request_id);
             let _ = out.other.insert_value("refundTo".to_string(), s.fee_refund_addr);
             let _ = out.other.insert_value("l1BaseFee".to_string(), s.l1_base_fee);
@@ -211,6 +216,10 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("maxSubmissionFee".to_string(), s.max_submission_fee);
         }
         ArbTypedTransaction::Retry(r) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x68]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(r.gas));
+            let _ = out.other.insert_value("gasPrice".to_string(), r.gas_fee_cap);
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), r.gas_fee_cap);
             let _ = out.other.insert_value("ticketId".to_string(), r.ticket_id);
             let _ = out.other.insert_value("maxRefund".to_string(), r.max_refund);
             let _ = out.other.insert_value("submissionFeeRefund".to_string(), r.submission_fee_refund);

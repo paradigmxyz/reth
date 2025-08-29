@@ -18,7 +18,17 @@ pub struct RetryableCreateParams {
 }
 
 pub enum RetryableAction {
-    Created { ticket_id: RetryableTicketId, escrowed: U256 },
+    Created {
+        ticket_id: RetryableTicketId,
+        escrowed: U256,
+        user_gas: u64,
+        nonce: u64,
+        refund_to: Address,
+        max_refund: U256,
+        submission_fee_refund: U256,
+        retry_tx_hash: alloy_primitives::B256,
+        sequence_num: u64,
+    },
     Redeemed { ticket_id: RetryableTicketId, success: bool },
     Canceled { ticket_id: RetryableTicketId },
     KeptAlive { ticket_id: RetryableTicketId },
@@ -72,7 +82,23 @@ impl Retryables for DefaultRetryables {
             TicketState { escrowed, beneficiary: params.beneficiary, active: true },
         );
 
-        RetryableAction::Created { ticket_id, escrowed }
+        let user_gas: u64 = params.max_gas.try_into().unwrap_or(0u64);
+        let nonce: u64 = 0;
+        let refund_to: Address = params.beneficiary;
+        let max_refund = params.max_gas.saturating_mul(params.gas_price_bid);
+        let submission_fee_refund = submission_fee;
+
+        RetryableAction::Created {
+            ticket_id,
+            escrowed,
+            user_gas,
+            nonce,
+            refund_to,
+            max_refund,
+            submission_fee_refund,
+            retry_tx_hash: alloy_primitives::B256::ZERO,
+            sequence_num: 0,
+        }
     }
 
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {

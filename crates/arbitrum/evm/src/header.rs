@@ -134,29 +134,63 @@ fn merkle_root_from_partials(
 pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecutorFactory>(
     input: &reth_evm::execute::BlockAssemblerInput<'_, '_, F, Header>,
 ) -> Option<ArbHeaderInfo> {
-    let provider = input.state_provider;
     let addr = arbos_state_address();
-
     let root_storage_key: &[u8] = &[];
 
     let version_slot = storage_key_map(&root_storage_key, uint_to_hash_u64_be(0));
-    let arbos_version = read_storage_u64_be(provider, addr, version_slot)?;
+    let arbos_version = {
+        if let Some(acc) = input.bundle_state.account(&addr) {
+            if let Some(ver_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(version_slot.0)) {
+                let bytes: [u8; 32] = ver_u256.to_be_bytes::<32>();
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[24..32]);
+                u64::from_be_bytes(buf)
+            } else {
+                read_storage_u64_be(input.state_provider, addr, version_slot)?
+            }
+        } else {
+            read_storage_u64_be(input.state_provider, addr, version_slot)?
+        }
+    };
 
     let send_merkle_sub = subspace(&root_storage_key, &[5u8]);
     let blockhashes_sub = subspace(&root_storage_key, &[6u8]);
 
     let send_count_slot = storage_key_map(&send_merkle_sub, uint_to_hash_u64_be(0));
-    let send_count = read_storage_u64_be(provider, addr, send_count_slot).unwrap_or(0);
+    let send_count = if let Some(acc) = input.bundle_state.account(&addr) {
+        if let Some(sc_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(send_count_slot.0)) {
+            let bytes: [u8; 32] = sc_u256.to_be_bytes::<32>();
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(&bytes[24..32]);
+            u64::from_be_bytes(buf)
+        } else {
+            read_storage_u64_be(input.state_provider, addr, send_count_slot).unwrap_or(0)
+        }
+    } else {
+        read_storage_u64_be(input.state_provider, addr, send_count_slot).unwrap_or(0)
+    };
 
-    let send_root = merkle_root_from_partials(provider, addr, &send_merkle_sub, send_count)
-        .unwrap_or(B256::ZERO);
+    let send_root = if let Some(acc) = input.bundle_state.account(&addr) {
+        merkle_root_from_partials(input.state_provider, addr, &send_merkle_sub, send_count)
+            .unwrap_or(B256::ZERO)
+    } else {
+        merkle_root_from_partials(input.state_provider, addr, &send_merkle_sub, send_count)
+            .unwrap_or(B256::ZERO)
+    };
 
     let l1_block_num_slot = storage_key_map(&blockhashes_sub, uint_to_hash_u64_be(0));
-    let l1_block_number = read_storage_u64_be(provider, addr, l1_block_num_slot).unwrap_or(0);
-
-    if l1_block_number == 0 {
-        return None;
-    }
+    let l1_block_number = if let Some(acc) = input.bundle_state.account(&addr) {
+        if let Some(bn_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(l1_block_num_slot.0)) {
+            let bytes: [u8; 32] = bn_u256.to_be_bytes::<32>();
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(&bytes[24..32]);
+            u64::from_be_bytes(buf)
+        } else {
+            read_storage_u64_be(input.state_provider, addr, l1_block_num_slot).unwrap_or(0)
+        }
+    } else {
+        read_storage_u64_be(input.state_provider, addr, l1_block_num_slot).unwrap_or(0)
+    };
 
     Some(ArbHeaderInfo {
         send_root,

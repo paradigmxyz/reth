@@ -335,24 +335,10 @@ where
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
-        let sugg = attrs.suggested_fee_recipient;
-        if sugg != alloy_primitives::Address::ZERO {
-            next_env.suggested_fee_recipient = sugg;
-        }
-        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO && kind == 13 {
-            let mut cur = &l2_owned[..];
-            if cur.len() >= 32 + 20 {
-                cur = &cur[32..];
-                let mut poster_bytes = [0u8; 20];
-                poster_bytes.copy_from_slice(&cur[..20]);
-                let batch_poster_addr = alloy_primitives::Address::from(poster_bytes);
-                reth_tracing::tracing::info!(target: "arb-reth::follower", beneficiary = %batch_poster_addr, "setting beneficiary from BatchPostingReport");
-                next_env.suggested_fee_recipient = batch_poster_addr;
-            }
-        }
-        if next_env.suggested_fee_recipient == alloy_primitives::Address::ZERO {
-            next_env.suggested_fee_recipient = poster;
-        }
+        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, "follower: setting suggested_fee_recipient to poster");
+
+        next_env.suggested_fee_recipient = poster;
+        reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
@@ -637,9 +623,7 @@ where
                 let callvalue_refund_addr = read_address_from_256(&mut cur)?;
                 let gas_limit = read_u256_be32(&mut cur)?;
                 let gas = u256_to_u64_checked(&gas_limit, "retryable gas limit")?;
-                let max_fee_per_gas = read_u256_be32(&mut cur)?;
-                let min_bf = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
-                let max_fee_per_gas = if max_fee_per_gas < min_bf { min_bf } else { max_fee_per_gas };
+                let max_fee_per_gas_submit = read_u256_be32(&mut cur)?;
                 let data_len = read_u256_be32(&mut cur)?;
                 let data_len_u64 = u256_to_u64_checked(&data_len, "retryable data length")?;
                 if data_len_u64 as usize > cur.len() {
@@ -656,7 +640,7 @@ where
                         from: poster,
                         l1_base_fee,
                         deposit_value,
-                        gas_fee_cap: max_fee_per_gas,
+                        gas_fee_cap: max_fee_per_gas_submit,
                         gas,
                         retry_to: retry_to_opt,
                         retry_value: callvalue,
@@ -672,19 +656,24 @@ where
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
                 let ticket_id = *submit_tx.tx_hash();
 
+                let retry_gas_price = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
+                let max_refund = retry_gas_price
+                    .saturating_mul(alloy_primitives::U256::from(gas))
+                    .saturating_add(max_submission_fee);
+
                 let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
                     arb_alloy_consensus::tx::ArbRetryTx {
                         chain_id: chain_id_u256,
                         nonce: 0,
                         from: poster,
-                        gas_fee_cap: max_fee_per_gas,
+                        gas_fee_cap: retry_gas_price,
                         gas,
                         to: retry_to_opt,
                         value: callvalue,
                         data: alloy_primitives::Bytes::from(retry_data),
                         ticket_id,
                         refund_to: fee_refund_addr,
-                        max_refund: max_fee_per_gas.saturating_mul(alloy_primitives::U256::from(gas)),
+                        max_refund,
                         submission_fee_refund: max_submission_fee,
                     },
                 );
@@ -695,7 +684,9 @@ where
                 vec![submit_tx, retry_tx]
             }
             10 => return Err(eyre::eyre!("BatchForGasEstimation unimplemented")),
-            11 => Vec::new(),
+            11 => {
+                Vec::new()
+            }
             12 => {
                 let mut cur = &l2_owned[..];
                 let to = read_address20(&mut cur)?;
@@ -718,7 +709,37 @@ where
                     .map_err(|_| eyre::eyre!("decode deposit failed"))?]
             }
             13 => {
-                Vec::new()
+                let mut cur = &l2_owned[..];
+                let batch_timestamp = read_u256_be32(&mut cur)?;
+                let batch_poster = read_address20(&mut cur)?;
+                let _ = read_address20(&mut cur)?;
+                let batch_num = read_u64_be(&mut cur)?;
+                let l1_base_fee = read_u256_be32(&mut cur)?;
+                let extra_gas = read_u64_be(&mut cur).unwrap_or(0);
+
+                let batch_data_gas = match batch_gas_cost {
+                    Some(g) => g.saturating_add(extra_gas),
+                    None => extra_gas,
+                };
+
+                let data = encode_batch_posting_report_data(
+                    batch_timestamp,
+                    batch_poster,
+                    batch_num,
+                    batch_data_gas,
+                    l1_base_fee,
+                );
+
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
+                    arb_alloy_consensus::tx::ArbInternalTx {
+                        chain_id: chain_id_u256,
+                        data,
+                    },
+                );
+                let mut enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
@@ -751,6 +772,8 @@ where
             txs.insert(0, start_tx);
         }
 
+        reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
+
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable};
         for tx in &txs {
@@ -776,9 +799,16 @@ where
             .finish(&state_provider)
             .map_err(|e| eyre::eyre!("finish error: {e}"))?;
 
-        let sealed_block = outcome.block.sealed_block().clone();
+        let sealed_block0 = outcome.block.sealed_block().clone();
+        let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
+        header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
+        type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
+        let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
+            reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
 
         let header = sealed_block.header();
+        reth_tracing::tracing::info!(target: "arb-reth::follower", header_beneficiary = %header.beneficiary, header_nonce = ?header.nonce, "follower: sealed header fields");
+
         reth_tracing::tracing::info!(target: "arb-reth::follower", assembled_gas_limit = header.gas_limit, "follower: assembled block gas limit before import");
 
         let new_block_hash = sealed_block.hash();

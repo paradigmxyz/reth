@@ -6,7 +6,7 @@ use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
+    validate_against_parent_hash_number,
     validate_header_base_fee, validate_header_extra_data,
 };
 use reth_execution_types::BlockExecutionResult;
@@ -105,7 +105,11 @@ where
     ) -> Result<(), ConsensusError> {
         let h = header.header();
         validate_against_parent_hash_number(h, parent)?;
-        validate_against_parent_timestamp(h, parent.header())?;
+        let parent_ts = parent.timestamp();
+        let ts = h.timestamp();
+        if ts < parent_ts {
+            return Err(ConsensusError::TimestampIsInPast { parent_timestamp: parent_ts, timestamp: ts });
+        }
         Ok(())
     }
 }
