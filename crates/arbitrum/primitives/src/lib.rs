@@ -660,10 +660,10 @@ impl ArbTransactionSigned {
             ArbTypedTransaction::SubmitRetryable(_) => ArbTxType::SubmitRetryable,
             ArbTypedTransaction::Internal(_) => ArbTxType::Internal,
             ArbTypedTransaction::Legacy(_) => ArbTxType::Legacy,
-            ArbTypedTransaction::Eip2930(_) => ArbTxType::Legacy,
-            ArbTypedTransaction::Eip1559(_) => ArbTxType::Legacy,
-            ArbTypedTransaction::Eip4844(_) => ArbTxType::Legacy,
-            ArbTypedTransaction::Eip7702(_) => ArbTxType::Legacy,
+            ArbTypedTransaction::Eip2930(_) => ArbTxType::Eip2930,
+            ArbTypedTransaction::Eip1559(_) => ArbTxType::Eip1559,
+            ArbTypedTransaction::Eip4844(_) => ArbTxType::Eip4844,
+            ArbTypedTransaction::Eip7702(_) => ArbTxType::Eip7702,
         }
     }
 
@@ -1265,6 +1265,10 @@ pub enum ArbTxType {
     SubmitRetryable,
     Internal,
     Legacy,
+    Eip2930,
+    Eip1559,
+    Eip4844,
+    Eip7702,
 }
 
 
