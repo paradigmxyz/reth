@@ -335,9 +335,14 @@ where
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
-        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, "follower: setting suggested_fee_recipient to sequencer coinbase");
-
-        next_env.suggested_fee_recipient = alloy_primitives::address!("0xA4B000000000000000000073657175656e636572");
+        let next_block_number = sealed_parent.number() + 1;
+        if next_block_number <= 1 {
+            reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: using poster as beneficiary for early block");
+            next_env.suggested_fee_recipient = poster;
+        } else {
+            reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: setting suggested_fee_recipient to sequencer coinbase");
+            next_env.suggested_fee_recipient = alloy_primitives::address!("0xA4B000000000000000000073657175656e636572");
+        }
         reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
 
         let mut builder = evm_config
@@ -487,6 +492,14 @@ where
                         let before_len = s.len();
                         let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                             .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
+                        reth_tracing::tracing::debug!(
+                            target: "arb-reth::decode",
+                            tx_type = ?tx.tx_type(),
+                            tx_hash = %tx.tx_hash(),
+                            remaining = s.len(),
+                            "decoded 0x04 segment tx"
+                        );
+
                         out.push(tx);
                         if s.len() == before_len {
                             break;
@@ -495,6 +508,13 @@ where
                 }
                 _ => {}
             }
+            reth_tracing::tracing::debug!(
+                target: "arb-reth::decode",
+                parsed_kind = kind,
+                out_len = out.len(),
+                "finished parsing L2 message kind"
+            );
+
             Ok(out)
         }
         fn abi_encode_u256(v: &alloy_primitives::U256) -> [u8; 32] {
@@ -812,6 +832,7 @@ where
             reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
 
         let header = sealed_block.header();
+        reth_tracing::tracing::info!(target: "arb-reth::follower", header_hash = %new_block_hash, header_mix = ?header.mix_hash, header_extra = ?header.extra_data, header_ts = header.timestamp, header_l1_bn = attrs.prev_randao, "follower: sealed header after finish");
         reth_tracing::tracing::info!(target: "arb-reth::follower", header_beneficiary = %header.beneficiary, header_nonce = ?header.nonce, "follower: sealed header fields");
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", assembled_gas_limit = header.gas_limit, "follower: assembled block gas limit before import");
