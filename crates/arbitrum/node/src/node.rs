@@ -558,8 +558,13 @@ where
         let chain_id_u256 =
             alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
         let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = match kind {
-            3 => parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
-                .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?,
+            3 => {
+                let first = l2_owned.first().copied().unwrap_or(0xff);
+                let len = l2_owned.len();
+                reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
+                parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
+                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?
+            },
             6 => Vec::new(),
             7 => {
                 let req = request_id.ok_or_else(|| {
