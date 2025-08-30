@@ -407,6 +407,12 @@ where
             }
             let l2_kind = bytes[0];
             let mut cur = &bytes[1..];
+            reth_tracing::tracing::debug!(
+                target: "arb-reth::decode",
+                l2_kind = l2_kind,
+                payload_len = cur.len(),
+                "parse_l2_message_to_txs: entering with l2_kind and payload size"
+            );
             match l2_kind {
                 0x00 | 0x01 => {
                     let gas_limit = read_u256_be32(&mut cur)?;
@@ -728,37 +734,7 @@ where
                     .map_err(|_| eyre::eyre!("decode deposit failed"))?]
             }
             13 => {
-                let mut cur = &l2_owned[..];
-                let batch_timestamp = read_u256_be32(&mut cur)?;
-                let batch_poster = read_address20(&mut cur)?;
-                let _ = read_address20(&mut cur)?;
-                let batch_num = read_u64_be(&mut cur)?;
-                let l1_base_fee = read_u256_be32(&mut cur)?;
-                let extra_gas = read_u64_be(&mut cur).unwrap_or(0);
-
-                let batch_data_gas = match batch_gas_cost {
-                    Some(g) => g.saturating_add(extra_gas),
-                    None => extra_gas,
-                };
-
-                let data = encode_batch_posting_report_data(
-                    batch_timestamp,
-                    batch_poster,
-                    batch_num,
-                    batch_data_gas,
-                    l1_base_fee,
-                );
-
-                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
-                    arb_alloy_consensus::tx::ArbInternalTx {
-                        chain_id: chain_id_u256,
-                        data,
-                    },
-                );
-                let mut enc = env.encode_typed();
-                let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
+                Vec::new()
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
