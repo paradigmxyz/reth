@@ -691,7 +691,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
             ArbTypedTransaction::Eip2930(tx) => {
                 let mut tmp = alloc::vec::Vec::new();
                 tx.encode_for_signing(&mut tmp);
@@ -732,7 +732,7 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => Ok(tx.from),
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
-            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
             ArbTypedTransaction::Eip2930(tx) => {
                 let mut tmp = alloc::vec::Vec::new();
                 tx.encode_for_signing(&mut tmp);
@@ -1180,7 +1180,7 @@ impl ConsensusTx for ArbTransactionSigned {
                 let addr = alloy_primitives::address!("000000000000000000000000000000000000006e");
                 TxKind::Call(addr)
             },
-            ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")),
             ArbTypedTransaction::Eip2930(tx) => tx.to,
             ArbTypedTransaction::Eip1559(tx) => tx.to,
             ArbTypedTransaction::Eip4844(tx) => TxKind::Call(tx.to),

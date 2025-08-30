@@ -26,7 +26,7 @@ mod tests {
         use serde_json::to_string;
 
         fn signer() -> Address {
-            address!("0x00000000000000000000000000000000000a4b05")
+            address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
         }
 
         fn dummy_info() -> alloy_rpc_types_eth::TransactionInfo {
