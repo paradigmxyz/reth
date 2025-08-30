@@ -272,7 +272,7 @@ pub fn shared_capability_offsets(
     // The `Ord` implementation for capability names should be equivalent to geth (and every other
     // client), since geth uses golang's default string comparison, which orders strings
     // lexicographically.
-    // https://golang.org/pkg/strings/#Compare
+    // https://pkg.go.dev/strings#Compare
     //
     // This is important because the capability name is used to determine the message id offset, so
     // if the sorting is not identical, offsets for connected peers could be inconsistent.
