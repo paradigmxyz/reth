@@ -420,6 +420,12 @@ impl reth_codecs::Compact for ArbTypedTransaction {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
                 tx.encode(buf);
             }
+            ArbTypedTransaction::Eip2930(_)
+            | ArbTypedTransaction::Eip1559(_)
+            | ArbTypedTransaction::Eip4844(_)
+            | ArbTypedTransaction::Eip7702(_) => {
+                todo!()
+            }
         }
         buf.as_mut().len() - start
     }
@@ -654,6 +660,10 @@ impl ArbTransactionSigned {
             ArbTypedTransaction::SubmitRetryable(_) => ArbTxType::SubmitRetryable,
             ArbTypedTransaction::Internal(_) => ArbTxType::Internal,
             ArbTypedTransaction::Legacy(_) => ArbTxType::Legacy,
+            ArbTypedTransaction::Eip2930(_) => ArbTxType::Legacy,
+            ArbTypedTransaction::Eip1559(_) => ArbTxType::Legacy,
+            ArbTypedTransaction::Eip4844(_) => ArbTxType::Legacy,
+            ArbTypedTransaction::Eip7702(_) => ArbTxType::Legacy,
         }
     }
 
@@ -682,6 +692,30 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
             ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Eip2930(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip1559(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip4844(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip7702(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer(&self.signature, sig_hash)
+            }
         }
     }
 
@@ -699,6 +733,30 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => Ok(tx.from),
             ArbTypedTransaction::SubmitRetryable(tx) => Ok(tx.from),
             ArbTypedTransaction::Internal(_) => Ok(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Eip2930(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer_unchecked(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip1559(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer_unchecked(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip4844(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer_unchecked(&self.signature, sig_hash)
+            }
+            ArbTypedTransaction::Eip7702(tx) => {
+                let mut tmp = alloc::vec::Vec::new();
+                tx.encode_for_signing(&mut tmp);
+                let sig_hash = keccak256(&tmp);
+                recover_signer_unchecked(&self.signature, sig_hash)
+            }
         }
     }
 }
@@ -840,6 +898,10 @@ impl alloy_consensus::Typed2718 for ArbTransactionSigned {
             ArbTypedTransaction::Retry(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx.as_u8(),
             ArbTypedTransaction::SubmitRetryable(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx.as_u8(),
             ArbTypedTransaction::Internal(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8(),
+            ArbTypedTransaction::Eip2930(_) => 0x01,
+            ArbTypedTransaction::Eip1559(_) => 0x02,
+            ArbTypedTransaction::Eip4844(_) => 0x03,
+            ArbTypedTransaction::Eip7702(_) => 0x04,
         }
     }
 }
@@ -856,6 +918,10 @@ impl Encodable2718 for ArbTransactionSigned {
                 ArbTypedTransaction::Retry(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx.as_u8(),
                 ArbTypedTransaction::SubmitRetryable(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx.as_u8(),
                 ArbTypedTransaction::Internal(_) => arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8(),
+                ArbTypedTransaction::Eip2930(_) => 0x01,
+                ArbTypedTransaction::Eip1559(_) => 0x02,
+                ArbTypedTransaction::Eip4844(_) => 0x03,
+                ArbTypedTransaction::Eip7702(_) => 0x04,
                 ArbTypedTransaction::Legacy(_) => 0,
             }),
         }
@@ -996,10 +1062,10 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::SubmitRetryable(tx) => Some(tx.chain_id.to::<u64>()),
             ArbTypedTransaction::Internal(tx) => Some(tx.chain_id.to::<u64>()),
 
-            ArbTypedTransaction::Eip2930(tx) => tx.chain_id.map(|cid| cid as u64),
-            ArbTypedTransaction::Eip1559(tx) => tx.chain_id.map(|cid| cid as u64),
-            ArbTypedTransaction::Eip4844(tx) => tx.chain_id.map(|cid| cid as u64),
-            ArbTypedTransaction::Eip7702(tx) => tx.chain_id.map(|cid| cid as u64),
+            ArbTypedTransaction::Eip2930(tx) => Some(tx.chain_id as u64),
+            ArbTypedTransaction::Eip1559(tx) => Some(tx.chain_id as u64),
+            ArbTypedTransaction::Eip4844(tx) => Some(tx.chain_id as u64),
+            ArbTypedTransaction::Eip7702(tx) => Some(tx.chain_id as u64),
         }
     }
 
@@ -1115,6 +1181,10 @@ impl ConsensusTx for ArbTransactionSigned {
                 TxKind::Call(addr)
             },
             ArbTypedTransaction::Internal(_) => TxKind::Call(alloy_primitives::address!("0x00000000000000000000000000000000000a4b05")),
+            ArbTypedTransaction::Eip2930(tx) => tx.to,
+            ArbTypedTransaction::Eip1559(tx) => tx.to,
+            ArbTypedTransaction::Eip4844(tx) => TxKind::Call(tx.to),
+            ArbTypedTransaction::Eip7702(tx) => TxKind::Call(tx.to),
         }
     }
 
@@ -1131,6 +1201,10 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => tx.value,
             ArbTypedTransaction::SubmitRetryable(tx) => tx.retry_value,
             ArbTypedTransaction::Internal(_) => U256::ZERO,
+            ArbTypedTransaction::Eip2930(tx) => tx.value,
+            ArbTypedTransaction::Eip1559(tx) => tx.value,
+            ArbTypedTransaction::Eip4844(tx) => tx.value,
+            ArbTypedTransaction::Eip7702(tx) => tx.value,
         }
     }
 
