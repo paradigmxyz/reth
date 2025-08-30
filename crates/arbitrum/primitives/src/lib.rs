@@ -375,7 +375,12 @@ pub enum ArbTypedTransaction {
     Retry(arb_alloy_consensus::tx::ArbRetryTx),
     SubmitRetryable(arb_alloy_consensus::tx::ArbSubmitRetryableTx),
     Internal(arb_alloy_consensus::tx::ArbInternalTx),
+
     Legacy(TxLegacy),
+    Eip2930(alloy_consensus::TxEip2930),
+    Eip1559(alloy_consensus::TxEip1559),
+    Eip4844(alloy_consensus::TxEip4844),
+    Eip7702(alloy_consensus::TxEip7702),
 }
 
 #[cfg(feature = "reth-codec")]
@@ -865,6 +870,11 @@ impl Encodable2718 for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => tx.length() + 1,
             ArbTypedTransaction::SubmitRetryable(tx) => tx.length() + 1,
             ArbTypedTransaction::Internal(tx) => tx.length() + 1,
+
+            ArbTypedTransaction::Eip2930(tx) => tx.eip2718_encoded_length(&self.signature),
+            ArbTypedTransaction::Eip1559(tx) => tx.eip2718_encoded_length(&self.signature),
+            ArbTypedTransaction::Eip4844(tx) => tx.eip2718_encoded_length(&self.signature),
+            ArbTypedTransaction::Eip7702(tx) => tx.eip2718_encoded_length(&self.signature),
         }
     }
 
@@ -897,38 +907,73 @@ impl Encodable2718 for ArbTransactionSigned {
                 out.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
                 tx.encode(out);
             }
+
+            ArbTypedTransaction::Eip2930(tx) => {
+                tx.eip2718_encode(&self.signature, out)
+            }
+            ArbTypedTransaction::Eip1559(tx) => {
+                tx.eip2718_encode(&self.signature, out)
+            }
+            ArbTypedTransaction::Eip4844(tx) => {
+                tx.eip2718_encode(&self.signature, out)
+            }
+            ArbTypedTransaction::Eip7702(tx) => {
+                tx.eip2718_encode(&self.signature, out)
+            }
         }
     }
 }
 
 impl Decodable2718 for ArbTransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        match arb_alloy_consensus::tx::ArbTxType::from_u8(ty).map_err(|_| Eip2718Error::UnexpectedType(ty))? {
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
-                let tx = arb_alloy_consensus::tx::ArbDepositTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::Deposit(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
+        if let Ok(kind) = arb_alloy_consensus::tx::ArbTxType::from_u8(ty) {
+            return Ok(match kind {
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
+                    let tx = arb_alloy_consensus::tx::ArbDepositTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::Deposit(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => {
+                    let tx = arb_alloy_consensus::tx::ArbUnsignedTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::Unsigned(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => {
+                    let tx = arb_alloy_consensus::tx::ArbContractTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::Contract(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => {
+                    let tx = arb_alloy_consensus::tx::ArbRetryTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::Retry(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => {
+                    let tx = arb_alloy_consensus::tx::ArbSubmitRetryableTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::SubmitRetryable(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => {
+                    let tx = arb_alloy_consensus::tx::ArbInternalTx::decode(buf)?;
+                    Self::new_unhashed(ArbTypedTransaction::Internal(tx), Signature::new(U256::ZERO, U256::ZERO, false))
+                }
+                arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => return Err(Eip2718Error::UnexpectedType(0x78)),
+            });
+        }
+
+        match alloy_consensus::TxType::try_from(ty).map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+            alloy_consensus::TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
+            alloy_consensus::TxType::Eip2930 => {
+                let (tx, signature) = alloy_consensus::TxEip2930::rlp_decode_with_signature(buf)?;
+                Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip2930(tx), input_cache: Default::default() })
             }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => {
-                let tx = arb_alloy_consensus::tx::ArbUnsignedTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::Unsigned(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
+            alloy_consensus::TxType::Eip1559 => {
+                let (tx, signature) = alloy_consensus::TxEip1559::rlp_decode_with_signature(buf)?;
+                Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip1559(tx), input_cache: Default::default() })
             }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => {
-                let tx = arb_alloy_consensus::tx::ArbContractTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::Contract(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
+            alloy_consensus::TxType::Eip4844 => {
+                let (tx, signature) = alloy_consensus::TxEip4844::rlp_decode_with_signature(buf)?;
+                Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip4844(tx), input_cache: Default::default() })
             }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => {
-                let tx = arb_alloy_consensus::tx::ArbRetryTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::Retry(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
+            alloy_consensus::TxType::Eip7702 => {
+                let (tx, signature) = alloy_consensus::TxEip7702::rlp_decode_with_signature(buf)?;
+                Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip7702(tx), input_cache: Default::default() })
             }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => {
-                let tx = arb_alloy_consensus::tx::ArbSubmitRetryableTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::SubmitRetryable(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
-            }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => {
-                let tx = arb_alloy_consensus::tx::ArbInternalTx::decode(buf)?;
-                Ok(Self::new_unhashed(ArbTypedTransaction::Internal(tx), Signature::new(U256::ZERO, U256::ZERO, false)))
-            }
-            arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => Err(Eip2718Error::UnexpectedType(0x78)),
         }
     }
 
@@ -950,6 +995,11 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => Some(tx.chain_id.to::<u64>()),
             ArbTypedTransaction::SubmitRetryable(tx) => Some(tx.chain_id.to::<u64>()),
             ArbTypedTransaction::Internal(tx) => Some(tx.chain_id.to::<u64>()),
+
+            ArbTypedTransaction::Eip2930(tx) => tx.chain_id.map(|cid| cid as u64),
+            ArbTypedTransaction::Eip1559(tx) => tx.chain_id.map(|cid| cid as u64),
+            ArbTypedTransaction::Eip4844(tx) => tx.chain_id.map(|cid| cid as u64),
+            ArbTypedTransaction::Eip7702(tx) => tx.chain_id.map(|cid| cid as u64),
         }
     }
 
@@ -962,6 +1012,11 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => tx.nonce,
             ArbTypedTransaction::SubmitRetryable(_) => 0,
             ArbTypedTransaction::Internal(_) => 0,
+
+            ArbTypedTransaction::Eip2930(tx) => tx.nonce,
+            ArbTypedTransaction::Eip1559(tx) => tx.nonce,
+            ArbTypedTransaction::Eip4844(tx) => tx.nonce,
+            ArbTypedTransaction::Eip7702(tx) => tx.nonce,
         }
     }
 
@@ -974,12 +1029,21 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Retry(tx) => tx.gas,
             ArbTypedTransaction::SubmitRetryable(tx) => tx.gas,
             ArbTypedTransaction::Internal(_) => 0,
+
+            ArbTypedTransaction::Eip2930(tx) => tx.gas_limit,
+            ArbTypedTransaction::Eip1559(tx) => tx.gas_limit,
+            ArbTypedTransaction::Eip4844(tx) => tx.gas_limit,
+            ArbTypedTransaction::Eip7702(tx) => tx.gas_limit,
         }
     }
 
     fn gas_price(&self) -> Option<u128> {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => Some(tx.gas_price.into()),
+            ArbTypedTransaction::Eip2930(_) => None,
+            ArbTypedTransaction::Eip1559(_) => None,
+            ArbTypedTransaction::Eip4844(_) => None,
+            ArbTypedTransaction::Eip7702(_) => None,
             _ => None,
         }
     }
@@ -991,6 +1055,12 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Contract(tx) => tx.gas_fee_cap.to::<u128>(),
             ArbTypedTransaction::Retry(tx) => tx.gas_fee_cap.to::<u128>(),
             ArbTypedTransaction::SubmitRetryable(tx) => tx.gas_fee_cap.to::<u128>(),
+
+            ArbTypedTransaction::Eip2930(_) => 0,
+            ArbTypedTransaction::Eip1559(tx) => tx.max_fee_per_gas as u128,
+            ArbTypedTransaction::Eip4844(tx) => tx.max_fee_per_gas as u128,
+            ArbTypedTransaction::Eip7702(_) => 0,
+
             _ => 0,
         }
     }
@@ -1010,6 +1080,8 @@ impl ConsensusTx for ArbTransactionSigned {
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
         match &self.transaction {
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
+            ArbTypedTransaction::Eip1559(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
+            ArbTypedTransaction::Eip4844(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
             _ => self.max_fee_per_gas(),
         }
     }
@@ -1019,7 +1091,7 @@ impl ConsensusTx for ArbTransactionSigned {
     }
 
     fn is_dynamic_fee(&self) -> bool {
-        !matches!(self.transaction, ArbTypedTransaction::Legacy(_))
+        !matches!(self.transaction, ArbTypedTransaction::Legacy(_) | ArbTypedTransaction::Eip2930(_))
     }
 
     fn kind(&self) -> TxKind {
@@ -1089,6 +1161,11 @@ impl ConsensusTx for ArbTransactionSigned {
             ArbTypedTransaction::Internal(tx) => {
                 self.input_cache.get_or_init(|| Bytes::from(tx.data.clone()))
             }
+
+            ArbTypedTransaction::Eip2930(tx) => &tx.input,
+            ArbTypedTransaction::Eip1559(tx) => &tx.input,
+            ArbTypedTransaction::Eip4844(tx) => &tx.input,
+            ArbTypedTransaction::Eip7702(tx) => &tx.input,
         }
     }
 
