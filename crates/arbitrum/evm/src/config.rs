@@ -71,9 +71,6 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
         if let Some(mut info) = derive_arb_header_info_from_state(&input) {
-            if input.execution_ctx.l1_block_number != 0 {
-                info.l1_block_number = input.execution_ctx.l1_block_number;
-            }
             if info.arbos_format_version == 0 {
                 if let Some(ver) = read_arbos_version(input.state_provider) {
                     info.arbos_format_version = ver;
