@@ -336,8 +336,13 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
-        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: setting suggested_fee_recipient to poster");
-        next_env.suggested_fee_recipient = poster;
+        let sequencer_beneficiary = if chain_id == 421_614 {
+            alloy_primitives::address!("0xa4b000000000000000000073657175656e636572")
+        } else {
+            poster
+        };
+        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: setting suggested_fee_recipient");
+        next_env.suggested_fee_recipient = sequencer_beneficiary;
         reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
 
         let mut builder = evm_config
