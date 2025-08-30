@@ -57,6 +57,10 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     ArbTxType::SubmitRetryable => ArbReceipt::Legacy(receipt),
                     ArbTxType::Internal => ArbReceipt::Legacy(receipt),
                     ArbTxType::Legacy => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Eip2930 => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Eip1559 => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Eip4844 => ArbReceipt::Legacy(receipt),
+                    ArbTxType::Eip7702 => ArbReceipt::Legacy(receipt),
                     ArbTxType::Deposit => unreachable!(),
                 };
                 Ok(out)

@@ -42,6 +42,10 @@ reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, fea
 
 # revm (workspace)
 revm.workspace = true
+revm-state.workspace = true
+revm-database.workspace = true
+
+
 
 # arb-alloy
 arb-alloy-predeploys = { workspace = true, features = ["alloc"] }

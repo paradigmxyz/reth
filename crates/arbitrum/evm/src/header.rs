@@ -199,6 +199,14 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
         arbos_format_version: arbos_version,
     })
 }
+
+pub fn arbos_l1_block_number_slot() -> (Address, B256) {
+    let addr = arbos_state_address();
+    let root_storage_key: &[u8] = &[];
+    let blockhashes_sub = subspace(&root_storage_key, &[6u8]);
+    let l1_block_num_slot = storage_key_map(&blockhashes_sub, uint_to_hash_u64_be(0));
+    (addr, l1_block_num_slot)
+}
 pub fn read_arbos_version(provider: &dyn StateProvider) -> Option<u64> {
     let addr = arbos_state_address();
     let root_storage_key: &[u8] = &[];

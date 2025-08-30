@@ -508,12 +508,6 @@ where
                 }
                 _ => {}
             }
-            reth_tracing::tracing::debug!(
-                target: "arb-reth::decode",
-                parsed_kind = kind,
-                out_len = out.len(),
-                "finished parsing L2 message kind"
-            );
 
             Ok(out)
         }
@@ -846,12 +840,34 @@ where
             reth_primitives_traits::block::SealedBlock::seal_parts(header_unsealed, body_unsealed);
 
         let header = sealed_block.header();
-        reth_tracing::tracing::info!(target: "arb-reth::follower", header_hash = %new_block_hash, header_mix = ?header.mix_hash, header_extra = ?header.extra_data, header_ts = header.timestamp, header_l1_bn = attrs.prev_randao, "follower: sealed header after finish");
-        reth_tracing::tracing::info!(target: "arb-reth::follower", header_beneficiary = %header.beneficiary, header_nonce = ?header.nonce, "follower: sealed header fields");
-
-        reth_tracing::tracing::info!(target: "arb-reth::follower", assembled_gas_limit = header.gas_limit, "follower: assembled block gas limit before import");
 
         let new_block_hash = sealed_block.hash();
+        let header_hash_hex = format!("{:#x}", new_block_hash);
+        let header_mix_hex = format!("{:#x}", header.mix_hash);
+        let header_extra_hex = format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));
+
+        let prev_randao_hex = format!("{:#x}", attrs.prev_randao);
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            header_hash = %header_hash_hex,
+            header_mix = %header_mix_hex,
+            header_extra = %header_extra_hex,
+            header_ts = header.timestamp,
+            header_prev_randao = %prev_randao_hex,
+            "follower: sealed header after finish"
+        );
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            header_beneficiary = %header.beneficiary,
+            header_nonce = ?header.nonce,
+            "follower: sealed header fields"
+        );
+        reth_tracing::tracing::info!(
+            target: "arb-reth::follower",
+            assembled_gas_limit = header.gas_limit,
+            "follower: assembled block gas limit before import"
+        );
+
         let new_send_root = reth_arbitrum_evm::header::extract_send_root_from_header_extra(
             header.extra_data.as_ref(),
         );
