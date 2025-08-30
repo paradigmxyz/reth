@@ -2976,7 +2976,7 @@ mod tests {
     }
 
     #[test]
-    fn test_basefee_decrease_zero_allocation_optimization() {
+    fn basefee_decrease_promotes_affordable_and_keeps_unaffordable() {
         use alloy_primitives::address;
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
