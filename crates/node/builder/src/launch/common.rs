@@ -442,7 +442,10 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {

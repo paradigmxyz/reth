@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::B256;
+use alloy_primitives::{BlockHash, B256};
 use derive_more::Constructor;
 use reth_chain_state::{
     BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -125,6 +125,11 @@ impl<N: NodePrimitives> PendingBlock<N> {
     /// cloning from borrowed self.
     pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
         (self.executed_block.recovered_block.clone(), self.receipts.clone())
+    }
+
+    /// Returns a hash of the parent block for this `executed_block`.
+    pub fn parent_hash(&self) -> BlockHash {
+        self.executed_block.recovered_block().parent_hash()
     }
 }
 
