@@ -241,7 +241,7 @@ where
 
                     let (arbos_addr, l1_slot) = header::arbos_l1_block_number_slot();
                     let l1_slot_u256 = alloy_primitives::U256::from_be_bytes(l1_slot.0);
-                    let present = alloy_primitives::U256::from(l1_bn.saturating_sub(1));
+                    let present = alloy_primitives::U256::from(l1_bn);
 
                     if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                         acc.storage.insert(
