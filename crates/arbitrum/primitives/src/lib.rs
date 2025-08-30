@@ -1033,8 +1033,7 @@ impl Decodable2718 for ArbTransactionSigned {
                 Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip1559(tx), input_cache: Default::default() })
             }
             alloy_consensus::TxType::Eip4844 => {
-                let (tx, signature) = alloy_consensus::TxEip4844::rlp_decode_with_signature(buf)?;
-                Ok(Self { hash: Default::default(), signature, transaction: ArbTypedTransaction::Eip4844(tx), input_cache: Default::default() })
+                return Err(Eip2718Error::UnexpectedType(ty));
             }
             alloy_consensus::TxType::Eip7702 => {
                 let (tx, signature) = alloy_consensus::TxEip7702::rlp_decode_with_signature(buf)?;
