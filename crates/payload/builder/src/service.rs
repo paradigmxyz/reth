@@ -178,21 +178,6 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
     }
-
-    /// Updates inclusion list for a specific Payload ID
-    pub fn update_payload_with_inclusion_list(
-        &self,
-        payload_id: PayloadId,
-        inclusion_list: Vec<Bytes>,
-    ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.to_service.send(PayloadServiceCommand::UpdatePayloadWithInclusionList(
-            payload_id,
-            inclusion_list,
-            tx,
-        ));
-        rx
-    }
 }
 
 impl<T> Clone for PayloadBuilderHandle<T>

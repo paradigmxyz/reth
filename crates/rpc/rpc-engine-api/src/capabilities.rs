@@ -21,7 +21,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV1",
     "engine_getBlobsV2",
     "engine_getInclusionListV1",
-    "engine_updatePayloadWithInclusionListV1",
+    "engine_forkchoiceUpdatedV4",
 ];
 
 // The list of all supported Engine capabilities available over the engine endpoint.

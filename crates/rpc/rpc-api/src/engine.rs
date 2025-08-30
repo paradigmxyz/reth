@@ -129,6 +129,19 @@ pub trait EngineApi<Engine: EngineTypes> {
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
+    
+    /// Post Amsterdam forkchoice update handler.
+    ///
+    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
+    /// `InclusionListTransactions` field in the `payloadAttributes`.
+    /// 
+    /// See also <github.com/jihoonsong/execution-apis/blob/ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#engine_forkchoiceupdatedv4>
+    #[method(name = "forkchoiceUpdatedV4")]
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
     ///
@@ -261,14 +274,6 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Fetch the inclusion list (IL).
     #[method(name = "getInclusionListV1")]
     async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
-
-    /// Update the given payload with the given inclusion list transactions (IL).
-    #[method(name = "updatePayloadWithInclusionListV1")]
-    async fn update_payload_with_inclusion_list_v1(
-        &self,
-        payload_id: PayloadId,
-        inclusion_list_transactions: Vec<Bytes>,
-    ) -> RpcResult<Option<PayloadId>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>

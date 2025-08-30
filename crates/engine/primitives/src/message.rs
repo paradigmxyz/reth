@@ -164,15 +164,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
-    /// Message with new aggregate inclusion list for a given payload.
-    UpdatePayloadWithInclusionList {
-        /// The payload to update.
-        payload_id: PayloadId,
-        /// The latest aggregate inclusion list of transactions.
-        inclusion_list_transactions: Vec<Bytes>,
-        /// The sender for returning updated payload result.
-        tx: oneshot::Sender<oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>>,
-    },
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -195,9 +186,6 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
                     payload_attrs.is_some()
                 )
-            }
-            Self::UpdatePayloadWithInclusionList { payload_id, .. } => {
-                write!(f, "UpdatePayloadWithInclusionList(payload: {})", payload_id)
             }
         }
     }
@@ -268,29 +256,5 @@ where
             version,
         });
         rx
-    }
-
-    /// Sends a new inclusion list message to the beacon consensus engine.
-    pub async fn update_payload_with_inclusion_list(
-        &self,
-        payload_id: PayloadId,
-        inclusion_list_transactions: Vec<Bytes>,
-    ) -> Result<PayloadId, BeaconUpdatePayloadWithInclusionListError> {
-        let (tx, rx) = oneshot::channel();
-
-        let _ = self.to_engine.send(BeaconEngineMessage::UpdatePayloadWithInclusionList {
-            payload_id,
-            inclusion_list_transactions,
-            tx,
-        });
-
-        match rx.await {
-            Ok(rx) => match rx.await {
-                Ok(Ok(res)) => Ok(res),
-                Ok(Err(err)) => Err(BeaconUpdatePayloadWithInclusionListError::internal(err)),
-                Err(_err) => Err(BeaconUpdatePayloadWithInclusionListError::EngineUnavailable),
-            },
-            Err(_err) => Err(BeaconUpdatePayloadWithInclusionListError::EngineUnavailable),
-        }
     }
 }

@@ -609,17 +609,6 @@ where
         Ok(outcome)
     }
 
-    fn on_update_payload_with_inclusion_list(
-        &mut self,
-        payload_id: PayloadId,
-        inclusion_list_transactions: Vec<Bytes>,
-    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
-        let len = inclusion_list_transactions.len();
-        info!(target: "engine::tree", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
-        self.payload_builder
-            .update_payload_with_inclusion_list(payload_id, inclusion_list_transactions)
-    }
-
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
@@ -1141,19 +1130,6 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
-                            }
-                            BeaconEngineMessage::UpdatePayloadWithInclusionList {
-                                payload_id,
-                                inclusion_list_transactions,
-                                tx,
-                            } => {
-                                let res = self.on_update_payload_with_inclusion_list(
-                                    payload_id,
-                                    inclusion_list_transactions,
-                                );
-                                if let Err(err) = tx.send(res) {
-                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
-                                }
                             }
                         }
                     }

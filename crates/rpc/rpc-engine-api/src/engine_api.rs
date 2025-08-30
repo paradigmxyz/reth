@@ -422,6 +422,34 @@ where
         res
     }
 
+    /// Sends a message to the beacon consensus engine to update the fork choice for Prague (V4).
+    ///
+    /// This behaves like previous fork choice handlers but validates attributes according to the
+    /// Amsterdam rules and forwards the update to the beacon consensus engine.
+    /// 
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        res
+    }
+
     /// Helper function for retrieving the build payload by id.
     async fn get_built_payload(
         &self,
@@ -1020,7 +1048,7 @@ where
         Ok(self.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV2`
+    /// Handler for `engine_forkchoiceUpdatedV3`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
@@ -1030,6 +1058,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+    
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/jihoonsong/execution-apis/blob/ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1234,26 +1274,6 @@ where
         Ok(il)
     }
 
-    async fn update_payload_with_inclusion_list_v1(
-        &self,
-        payload_id: PayloadId,
-        inclusion_list_transactions: Vec<Bytes>,
-    ) -> RpcResult<Option<PayloadId>> {
-        info!(target: "rpc::engine", len = %inclusion_list_transactions.len(), "Serving engine_updatePayloadWithInclusionListV1");
-        let len = inclusion_list_transactions.len();
-        tracing::info!(target: "engine::api", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
-
-        let payload_id = self
-            .inner
-            .beacon_consensus
-            .update_payload_with_inclusion_list(payload_id, inclusion_list_transactions)
-            .await
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-
-        // TODO: handle case where `payload_id` is unknown
-        // TODO: handle error from prior call
-        Ok(Some(payload_id))
-    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
