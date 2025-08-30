@@ -39,7 +39,7 @@ impl ArbHeaderInfo {
 }
 
 const fn arbos_state_address() -> Address {
-    alloy_primitives::address!("00000000000000000000000000000000000a4b05")
+    alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
 }
 
 fn uint_to_hash_u64_be(k: u64) -> B256 {
