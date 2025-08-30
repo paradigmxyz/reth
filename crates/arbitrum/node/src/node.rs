@@ -483,10 +483,15 @@ where
                 }
                 0x04 => {
                     let mut s = cur;
-                    let tx =
-                        reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    while !s.is_empty() {
+                        let before_len = s.len();
+                        let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                             .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
-                    out.push(tx);
+                        out.push(tx);
+                        if s.len() == before_len {
+                            break;
+                        }
+                    }
                 }
                 _ => {}
             }
