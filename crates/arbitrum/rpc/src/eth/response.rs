@@ -186,8 +186,10 @@ use reth_rpc_convert::transaction::FromConsensusTx;
 pub fn arb_tx_with_other_fields(
     tx: &ArbTransactionSigned,
     signer: Address,
-    tx_info: TransactionInfo,
+    mut tx_info: TransactionInfo,
 ) -> WithOtherFields<EthTransaction<ArbTransactionSigned>> {
+    tx_info.hash = Some(*tx.tx_hash());
+
     let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
 
     let mut out = WithOtherFields::new(inner);
