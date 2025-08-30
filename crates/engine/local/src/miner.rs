@@ -215,8 +215,9 @@ where
         };
 
         let block = payload.block();
-
+        println!("Block is: {:#?}", block);
         let payload = T::block_to_payload(payload.block().clone());
+        println!("Payload is {:#?}", payload);
         let res = self.to_engine.new_payload(payload).await?;
 
         if !res.is_valid() {
