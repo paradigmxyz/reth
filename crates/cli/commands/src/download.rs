@@ -32,7 +32,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
         long_help = "Specify a snapshot URL or let the command propose a default one.\n\
         \n\
         Available snapshot sources:\n\
-        - https://snapshots.merkle.io (default, mainnet archive)\n\
+        - https://www.merkle.io/snapshots (default, mainnet archive)\n\
         - https://publicnode.com/snapshots (full nodes & testnets)\n\
         \n\
         If no URL is provided, the latest mainnet archive snapshot\n\
