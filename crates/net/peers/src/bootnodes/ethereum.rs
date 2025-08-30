@@ -1,4 +1,4 @@
-//! Ethereum bootnodes come from <https://github.com/ledgerwatch/erigon/blob/devel/params/bootnodes.go>
+//! Ethereum bootnodes come from <https://github.com/erigontech/erigon/blob/release/2.60/params/bootnodes.go>
 
 /// Ethereum Foundation Go Bootnodes
 pub static MAINNET_BOOTNODES: [&str; 4] = [
