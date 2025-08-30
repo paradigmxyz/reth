@@ -433,7 +433,7 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
             .await
     }
 
