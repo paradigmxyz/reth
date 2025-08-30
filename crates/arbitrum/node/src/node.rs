@@ -336,13 +336,8 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
-        if next_block_number <= 1 {
-            reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: using poster as beneficiary for early block");
-            next_env.suggested_fee_recipient = poster;
-        } else {
-            reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: setting suggested_fee_recipient to sequencer coinbase");
-            next_env.suggested_fee_recipient = alloy_primitives::address!("0xA4B000000000000000000073657175656e636572");
-        }
+        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: using poster as beneficiary");
+        next_env.suggested_fee_recipient = poster;
         reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
 
         let mut builder = evm_config

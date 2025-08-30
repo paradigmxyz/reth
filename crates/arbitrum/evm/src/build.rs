@@ -225,46 +225,6 @@ where
             }
         };
 
-        if is_internal {
-            let input_bytes = calldata.as_ref();
-            if input_bytes.len() >= 4 {
-                const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
-                let selector = alloy_primitives::keccak256(SIG.as_bytes());
-                if &input_bytes[0..4] == &selector.0[0..4] && input_bytes.len() >= 4 + 32 * 4 {
-                    let bn_slice = &input_bytes[4 + 32..4 + 64];
-                    let mut buf = [0u8; 8];
-                    buf.copy_from_slice(&bn_slice[24..32]);
-                    let l1_bn = u64::from_be_bytes(buf);
-
-                    let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                    let state: &mut revm::database::State<D> = *db_ref;
-
-                    let (arbos_addr, l1_slot) = header::arbos_l1_block_number_slot();
-                    let l1_slot_u256 = alloy_primitives::U256::from_be_bytes(l1_slot.0);
-                    let present = alloy_primitives::U256::from(l1_bn);
-
-                    if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
-                        acc.storage.insert(
-                            l1_slot_u256,
-                            EvmStorageSlot { present_value: present, ..Default::default() }.into(),
-                        );
-                    } else {
-                        let mut storage = HashMap::default();
-                        storage.insert(
-                            l1_slot_u256,
-                            EvmStorageSlot { present_value: present, ..Default::default() }.into(),
-                        );
-                        let acc = BundleAccount {
-                            info: None,
-                            storage,
-                            original_info: Default::default(),
-                            status: AccountStatus::Changed,
-                        };
-                        state.bundle_state.state.insert(arbos_addr, acc);
-                    }
-                }
-            }
-        }
         let mut tx_env = tx.to_tx_env();
         if is_internal {
             reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
