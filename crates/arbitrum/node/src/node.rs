@@ -774,42 +774,56 @@ where
         };
 
         {
-            let parent_number = sealed_parent.number();
-            let parent_ts = sealed_parent.timestamp();
-            let l2_block_number = parent_number.saturating_add(1);
-            let time_passed = attrs.timestamp.saturating_sub(parent_ts);
-            let start_data = encode_start_block_data(
-                l1_base_fee,
-                l1_block_number,
-                l2_block_number,
-                time_passed,
-            );
-            let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
-                arb_alloy_consensus::tx::ArbInternalTx {
-                    chain_id: chain_id_u256,
-                    data: start_data,
-                }
-            );
-            let mut enc = env.encode_typed();
-            let mut s = enc.as_slice();
-            let start_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
-            txs.insert(0, start_tx);
+            let is_first_startblock = txs.first().map(|tx| {
+                use reth_primitives_traits::SignedTransaction;
+                let is_internal = matches!(tx.tx_type(), reth_arbitrum_primitives::ArbTxType::Internal);
+                let input = tx.input();
+                const SIG: &str = "startBlock(uint256,uint64,uint64,uint64)";
+                let selector = alloy_primitives::keccak256(SIG.as_bytes());
+                let has_selector = input.as_ref().len() >= 4 && &input.as_ref()[0..4] == &selector.0[..4];
+                is_internal && has_selector
+            }).unwrap_or(false);
+
+            if !is_first_startblock {
+                let parent_number = sealed_parent.number();
+                let parent_ts = sealed_parent.timestamp();
+                let l2_block_number = parent_number.saturating_add(1);
+                let time_passed = attrs.timestamp.saturating_sub(parent_ts);
+                let start_data = encode_start_block_data(
+                    l1_base_fee,
+                    l1_block_number,
+                    l2_block_number,
+                    time_passed,
+                );
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
+                    arb_alloy_consensus::tx::ArbInternalTx {
+                        chain_id: chain_id_u256,
+                        data: start_data,
+                    }
+                );
+                let mut enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                let start_tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
+                txs.insert(0, start_tx);
+            }
         }
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
-        use reth_primitives_traits::{Recovered, SignerRecoverable};
+        use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
         for tx in &txs {
             let sender =
                 tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover signer"))?;
             let bal =
                 state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
             let gp = tx.max_fee_per_gas();
+            let txh = *tx.tx_hash();
             reth_tracing::tracing::info!(
                 target: "arb-reth::follower",
                 tx_type = ?tx.tx_type(),
+                tx_hash = %txh,
                 sender = %sender,
                 sender_balance = %bal,
                 max_fee_per_gas = %gp,
