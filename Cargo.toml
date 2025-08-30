@@ -481,7 +481,7 @@ alloy-sol-macro = "1.3.0"
 alloy-sol-types = { version = "1.3.0", default-features = false }
 alloy-trie = { version = "0.9.0", default-features = false }
 
-alloy-hardforks = "0.2.7"
+alloy-hardforks = "0.3.0"
 
 alloy-consensus = { version = "1.0.25", default-features = false }
 alloy-contract = { version = "1.0.25", default-features = false }
@@ -514,7 +514,7 @@ alloy-block-access-list = { version = "1.0.25", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.18", default-features = false }
-alloy-op-hardforks = "0.2.2"
+alloy-op-hardforks = "0.3.0"
 op-alloy-rpc-types = { version = "0.18.12", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.12", default-features = false }
 op-alloy-network = { version = "0.18.12", default-features = false }
@@ -744,7 +744,9 @@ alloy-transport = { git = "https://github.com/Soubhik-10/alloy", branch = "engin
 alloy-transport-http = { git = "https://github.com/Soubhik-10/alloy", branch = "engine-api-trial" }
 alloy-transport-ipc = { git = "https://github.com/Soubhik-10/alloy", branch = "engine-api-trial" }
 alloy-transport-ws = { git = "https://github.com/Soubhik-10/alloy", branch = "engine-api-trial" }
+alloy-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "amsterdam" }
 
+alloy-op-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "amsterdam" }
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }

@@ -267,7 +267,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#867730d5805bd4954648176ea65affb629a64713"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#f7a3c427d1e2464a2f9b20244336e6b6b33f8836"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -300,9 +300,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.2.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3165210652f71dfc094b051602bafd691f506c54050a174b1cba18fb5ef706a3"
+version = "0.3.0"
+source = "git+https://github.com/Rimeeeeee/hardforks?branch=amsterdam#052dddaa0f6935a2a3c4ba1c06f1c17f9585b533"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -378,7 +377,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#867730d5805bd4954648176ea65affb629a64713"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#f7a3c427d1e2464a2f9b20244336e6b6b33f8836"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -393,9 +392,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-hardforks"
-version = "0.2.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3417f4187eaf7f7fb0d7556f0197bca26f0b23c4bb3aca0c9d566dc1c5d727a2"
+version = "0.3.0"
+source = "git+https://github.com/Rimeeeeee/hardforks?branch=amsterdam#052dddaa0f6935a2a3c4ba1c06f1c17f9585b533"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
