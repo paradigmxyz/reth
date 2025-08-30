@@ -310,7 +310,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                         meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         meta.subpool = meta.state.into();
 
-                        // Inline add_transaction_to_subpool logic (minus unreachable basefee arm)
                         trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
                         match meta.subpool {
                             SubPool::Queued => self.queued_pool.add_transaction(tx),
@@ -321,8 +320,8 @@ impl<T: TransactionOrdering> TxPool<T> {
                                 self.blob_pool.add_transaction(tx);
                             }
                             SubPool::BaseFee => {
-                                // Unreachable as transactions from BaseFee pool with decreased
-                                // basefee are guaranteed to become Pending
+                                // This should be unreachable as transactions from BaseFee pool with
+                                // decreased basefee are guaranteed to become Pending
                                 unreachable!("BaseFee transactions should become Pending after basefee decrease");
                             }
                         }
