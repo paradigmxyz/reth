@@ -181,6 +181,7 @@ use alloy_rpc_types_eth::{Transaction as EthTransaction, TransactionInfo};
 use alloy_serde::{OtherFields, WithOtherFields};
 use reth_arbitrum_primitives::{ArbTransactionSigned, ArbTypedTransaction};
 use reth_primitives_traits::Recovered;
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_convert::transaction::FromConsensusTx;
 
 pub fn arb_tx_with_other_fields(
