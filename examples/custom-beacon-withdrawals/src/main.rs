@@ -22,7 +22,7 @@ use reth_ethereum::{
             NextBlockEnvAttributes, OnStateHook,
         },
         revm::{
-            context::{result::ExecutionResult, TxEnv},
+            context::{result::{ExecResultAndState, ExecutionResult}, TxEnv},
             db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
@@ -197,6 +197,24 @@ where
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         self.inner.execute_transaction_with_commit_condition(tx, f)
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<
+        ExecResultAndState<ExecutionResult<<Self::Evm as Evm>::HaltReason>>,
+        BlockExecutionError,
+    > {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        result: ExecResultAndState<ExecutionResult<<Self::Evm as Evm>::HaltReason>>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(result, tx)
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {

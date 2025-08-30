@@ -17,8 +17,9 @@ use reth_evm::{
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::result::{ExecutionResult, HaltReason},
+    context::result::{ExecutionResult, HaltReason, Output, SuccessReason},
     database::State,
+    primitives::Bytes,
     Inspector,
 };
 
@@ -96,13 +97,31 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         Ok(Some(0))
     }
 
-    fn commit_cached_execution(
+    fn execute_transaction_without_commit(
         &mut self,
         _tx: impl alloy_evm::block::ExecutableTx<Self>,
-        _result: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
-        Ok(Some(0))
+    ) -> Result<
+        revm::context::result::ExecResultAndState<ExecutionResult<HaltReason>>,
+        BlockExecutionError,
+    > {
+        Ok(revm::context::result::ExecResultAndState {
+            result: ExecutionResult::Success {
+                reason: SuccessReason::Stop,
+                gas_used: 0,
+                gas_refunded: 0,
+                logs: Default::default(),
+                output: Output::Call(Bytes::new()),
+            },
+            state: Default::default(),
+        })
+    }
+
+    fn commit_transaction(
+        &mut self,
+        _result: revm::context::result::ExecResultAndState<ExecutionResult<HaltReason>>,
+        _tx: impl alloy_evm::block::ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        Ok(0)
     }
 
     fn finish(
