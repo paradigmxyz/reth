@@ -389,59 +389,64 @@ impl reth_codecs::Compact for ArbTypedTransaction {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let start = buf.as_mut().len();
         match self {
             ArbTypedTransaction::Legacy(tx) => {
                 let mut tmp = alloc::vec::Vec::new();
                 tx.encode(&mut tmp);
                 buf.put_slice(&tmp);
+                0
             }
             ArbTypedTransaction::Deposit(tx) => {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::Unsigned(tx) => {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::Contract(tx) => {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::Retry(tx) => {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::SubmitRetryable(tx) => {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::Internal(tx) => {
-                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
+                buf.put_u8(arb_alloy_consensus::tx::ArbitrumInternalTx.as_u8());
                 tx.encode(buf);
+                1
             }
             ArbTypedTransaction::Eip2930(tx) => {
                 buf.put_u8(0x01);
                 tx.encode(buf);
-                return 2;
+                2
             }
             ArbTypedTransaction::Eip1559(tx) => {
                 buf.put_u8(0x02);
                 tx.encode(buf);
-                return 2;
+                2
             }
             ArbTypedTransaction::Eip4844(tx) => {
                 buf.put_u8(0x03);
                 tx.encode(buf);
-                return 2;
+                2
             }
             ArbTypedTransaction::Eip7702(tx) => {
                 buf.put_u8(0x04);
                 tx.encode(buf);
-                return 2;
+                2
             }
         }
-        buf.as_mut().len() - start
     }
 
     fn from_compact(buf: &[u8], tx_bits: usize) -> (Self, &[u8]) {
