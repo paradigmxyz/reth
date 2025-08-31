@@ -228,6 +228,60 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("submissionFeeRefund".to_string(), r.submission_fee_refund);
             let _ = out.other.insert_value("refundTo".to_string(), r.refund_to);
         }
+        ArbTypedTransaction::Eip2930(tx2930) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x01]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx2930.gas_limit));
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::from(tx2930.gas_price));
+            if !tx2930.access_list.0.is_empty() {
+                let _ = out.other.insert_value("accessList".to_string(), tx2930.access_list.clone());
+            }
+        }
+        ArbTypedTransaction::Eip1559(tx1559) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x02]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx1559.gas_limit));
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx1559.max_fee_per_gas));
+            let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx1559.max_priority_fee_per_gas));
+            if !tx1559.access_list.0.is_empty() {
+                let _ = out.other.insert_value("accessList".to_string(), tx1559.access_list.clone());
+            }
+        }
+        ArbTypedTransaction::Eip4844(tx4844) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x03]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx4844.tx().gas_limit()));
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx4844.tx().max_fee_per_gas()));
+            let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx4844.tx().max_priority_fee_per_gas()));
+            if let Some(b) = tx4844.tx().blob_versioned_hashes() {
+                let _ = out.other.insert_value("blobVersionedHashes".to_string(), b.clone());
+            }
+            if let Some(ac) = tx4844.tx().access_list() {
+                if !ac.0.is_empty() {
+                    let _ = out.other.insert_value("accessList".to_string(), ac.clone());
+                }
+            }
+        }
+        ArbTypedTransaction::Eip7702(tx7702) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x04]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx7702.tx().gas_limit()));
+            if let Some(gp) = tx7702.tx().gas_price() {
+                let _ = out.other.insert_value("gasPrice".to_string(), U256::from(gp));
+            }
+            if let Some(mf) = tx7702.tx().max_fee_per_gas() {
+                let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(mf));
+            }
+            if let Some(mp) = tx7702.tx().max_priority_fee_per_gas() {
+                let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
+            }
+            if let Some(ac) = tx7702.tx().access_list() {
+                if !ac.0.is_empty() {
+                    let _ = out.other.insert_value("accessList".to_string(), ac.clone());
+                }
+            }
+            if let Some(auth) = tx7702.tx().authorization_list() {
+                if !auth.0.is_empty() {
+                    let _ = out.other.insert_value("authorizationList".to_string(), auth.clone());
+                }
+            }
+        }
         _ => {}
     }
 
