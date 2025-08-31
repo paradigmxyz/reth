@@ -594,6 +594,17 @@ where
         self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
     }
 
+    /// Metrics version of `get_payload_v6`
+    pub async fn get_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        let start = Instant::now();
+        let res = Self::get_payload_v6(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
+        res
+    }
+
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
     pub async fn get_payload_bodies_by_range_with<F, R>(
