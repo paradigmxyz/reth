@@ -763,9 +763,6 @@ where
                         "Cache validation successful"
                     );
 
-                    // Clone the result
-                    let mut result = cached_tx.result.clone();
-
                     // Apply coinbase deltas to account for gas fees accumulated from previous
                     // transactions. The cached result has the coinbase state
                     // from prewarming (incomplete balance), so we update it to:
@@ -773,6 +770,9 @@ where
                     if let Some((coinbase, coinbase_nonce_delta, coinbase_balance_delta)) =
                         cached_tx.coinbase_deltas
                     {
+                        // Only clone the result when we need to modify it
+                        let mut result = cached_tx.result.clone();
+                        
                         if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
                             if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
                                 // Current DB balance includes all fees from previous transactions
@@ -809,6 +809,7 @@ where
                         }
                     } else {
                         // No coinbase deltas, but validation passed - return the cached result
+                        // directly without cloning since we don't need to modify it
                         let validation_time = validation_start.elapsed();
 
                         // Track validation success and time saved
@@ -826,7 +827,7 @@ where
                             estimated_time_saved_us = time_saved_us,
                             "VALIDATION_SUCCESS - Cache entry valid"
                         );
-                        return Some(result)
+                        return Some(cached_tx.result)
                     }
 
                     None
