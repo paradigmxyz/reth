@@ -420,95 +420,107 @@ impl reth_codecs::Compact for ArbTypedTransaction {
                 buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
                 tx.encode(buf);
             }
-            ArbTypedTransaction::Eip2930(_)
-            | ArbTypedTransaction::Eip1559(_)
-            | ArbTypedTransaction::Eip4844(_)
-            | ArbTypedTransaction::Eip7702(_) => {
-                todo!()
+            ArbTypedTransaction::Eip2930(tx) => {
+                buf.put_u8(0x01);
+                tx.encode(buf);
+                return 2;
+            }
+            ArbTypedTransaction::Eip1559(tx) => {
+                buf.put_u8(0x02);
+                tx.encode(buf);
+                return 2;
+            }
+            ArbTypedTransaction::Eip4844(tx) => {
+                buf.put_u8(0x03);
+                tx.encode(buf);
+                return 2;
+            }
+            ArbTypedTransaction::Eip7702(tx) => {
+                buf.put_u8(0x04);
+                tx.encode(buf);
+                return 2;
             }
         }
         buf.as_mut().len() - start
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (head, tail) = buf.split_at(len);
-        let mut slice: &[u8] = head;
+    fn from_compact(buf: &[u8], tx_bits: usize) -> (Self, &[u8]) {
+        let mut slice: &[u8] = buf;
 
-        if let Some(first) = slice.first().copied() {
-            if let Ok(kind) = arb_alloy_consensus::tx::ArbTxType::from_u8(first) {
-                let mut rest = &slice[1..];
-                let tx = match kind {
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
-                        match <arb_alloy_consensus::tx::ArbDepositTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::Deposit(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
+        match tx_bits {
+            0 => {
+                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).unwrap_or_default();
+                return (ArbTypedTransaction::Legacy(tx), &buf[buf.len() - slice.len()..]);
+            }
+            1 => {
+                if let Some(first) = slice.first().copied() {
+                    if let Ok(kind) = arb_alloy_consensus::tx::ArbTxType::from_u8(first) {
+                        let mut rest = &slice[1..];
+                        let parsed = match kind {
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
+                                <arb_alloy_consensus::tx::ArbDepositTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::Deposit)
                             }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => {
+                                <arb_alloy_consensus::tx::ArbUnsignedTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::Unsigned)
+                            }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => {
+                                <arb_alloy_consensus::tx::ArbContractTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::Contract)
+                            }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => {
+                                <arb_alloy_consensus::tx::ArbRetryTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::Retry)
+                            }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => {
+                                <arb_alloy_consensus::tx::ArbSubmitRetryableTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::SubmitRetryable)
+                            }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => {
+                                <arb_alloy_consensus::tx::ArbInternalTx as alloy_rlp::Decodable>::decode(&mut rest)
+                                    .map(ArbTypedTransaction::Internal)
+                            }
+                            arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => {
+                                <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).map(ArbTypedTransaction::Legacy)
+                            }
+                        };
+                        if let Ok(tx) = parsed {
+                            let consumed = buf.len() - rest.len() - 1;
+                            return (tx, &buf[consumed..]);
                         }
                     }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumUnsignedTx => {
-                        match <arb_alloy_consensus::tx::ArbUnsignedTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::Unsigned(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
-                            }
-                        }
+                }
+                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).unwrap_or_default();
+                return (ArbTypedTransaction::Legacy(tx), &buf[buf.len() - slice.len()..]);
+            }
+            2 => {
+                if let Some(first) = slice.first().copied() {
+                    let mut rest = &slice[1..];
+                    let parsed = match first {
+                        0x01 => <alloy_consensus::TxEip2930 as alloy_rlp::Decodable>::decode(&mut rest)
+                            .map(ArbTypedTransaction::Eip2930),
+                        0x02 => <alloy_consensus::TxEip1559 as alloy_rlp::Decodable>::decode(&mut rest)
+                            .map(ArbTypedTransaction::Eip1559),
+                        0x03 => <alloy_consensus::TxEip4844 as alloy_rlp::Decodable>::decode(&mut rest)
+                            .map(ArbTypedTransaction::Eip4844),
+                        0x04 => <alloy_consensus::TxEip7702 as alloy_rlp::Decodable>::decode(&mut rest)
+                            .map(ArbTypedTransaction::Eip7702),
+                        _ => Err(alloy_rlp::Error::Custom("unknown eth typed tx tag")),
+                    };
+                    if let Ok(tx) = parsed {
+                        let consumed = buf.len() - rest.len() - 1;
+                        return (tx, &buf[consumed..]);
                     }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumContractTx => {
-                        match <arb_alloy_consensus::tx::ArbContractTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::Contract(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
-                            }
-                        }
-                    }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumRetryTx => {
-                        match <arb_alloy_consensus::tx::ArbRetryTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::Retry(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
-                            }
-                        }
-                    }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumSubmitRetryableTx => {
-                        match <arb_alloy_consensus::tx::ArbSubmitRetryableTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::SubmitRetryable(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
-                            }
-                        }
-                    }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx => {
-                        match <arb_alloy_consensus::tx::ArbInternalTx as alloy_rlp::Decodable>::decode(&mut rest) {
-                            Ok(v) => ArbTypedTransaction::Internal(v),
-                            Err(_) => {
-                                let mut s = slice;
-                                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-                                ArbTypedTransaction::Legacy(tx)
-                            }
-                        }
-                    }
-                    arb_alloy_consensus::tx::ArbTxType::ArbitrumLegacyTx => {
-                        let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).unwrap_or_default();
-                        ArbTypedTransaction::Legacy(tx)
-                    }
-                };
-                return (tx, tail);
+                }
+                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).unwrap_or_default();
+                return (ArbTypedTransaction::Legacy(tx), &buf[buf.len() - slice.len()..]);
+            }
+            _ => {
+                let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut slice).unwrap_or_default();
+                return (ArbTypedTransaction::Legacy(tx), &buf[buf.len() - slice.len()..]);
             }
         }
-        let mut s = slice;
-        let tx = <TxLegacy as alloy_rlp::Decodable>::decode(&mut s).unwrap_or_default();
-        (ArbTypedTransaction::Legacy(tx), tail)
     }
 }
 
