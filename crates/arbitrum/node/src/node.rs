@@ -336,9 +336,7 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
-        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: setting suggested_fee_recipient");
-        next_env.suggested_fee_recipient = poster;
-        reth_tracing::tracing::info!(target: "arb-reth::follower", next_env_beneficiary = %next_env.suggested_fee_recipient, "follower: next_env before builder_for_next_block");
+        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
