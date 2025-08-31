@@ -251,7 +251,9 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x03]));
             let _ = out.other.insert_value("gas".to_string(), U256::from(tx4844.gas_limit()));
             let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx4844.max_fee_per_gas()));
-            let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx4844.max_priority_fee_per_gas()));
+            if let Some(mp) = tx4844.max_priority_fee_per_gas() {
+                let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
+            }
             if let Some(b) = tx4844.blob_versioned_hashes() {
                 let _ = out.other.insert_value("blobVersionedHashes".to_string(), b.clone());
             }
@@ -279,8 +281,8 @@ pub fn arb_tx_with_other_fields(
                 }
             }
             if let Some(auth) = tx7702.authorization_list() {
-                if !auth.0.is_empty() {
-                    let _ = out.other.insert_value("authorizationList".to_string(), auth.clone());
+                if !auth.is_empty() {
+                    let _ = out.other.insert_value("authorizationList".to_string(), auth.to_vec());
                 }
             }
         }
