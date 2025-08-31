@@ -241,6 +241,12 @@ pub fn arb_tx_with_other_fields(
             if !tx2930.access_list.0.is_empty() {
                 let _ = out.other.insert_value("accessList".to_string(), tx2930.access_list.clone());
             }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
         }
         ArbTypedTransaction::Eip1559(tx1559) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x02]));
@@ -249,6 +255,12 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx1559.max_priority_fee_per_gas));
             if !tx1559.access_list.0.is_empty() {
                 let _ = out.other.insert_value("accessList".to_string(), tx1559.access_list.clone());
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
             }
         }
         ArbTypedTransaction::Eip4844(tx4844) => {
@@ -265,6 +277,12 @@ pub fn arb_tx_with_other_fields(
                 if !ac.0.is_empty() {
                     let _ = out.other.insert_value("accessList".to_string(), ac.clone());
                 }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
             }
         }
         ArbTypedTransaction::Eip7702(tx7702) => {
@@ -289,6 +307,12 @@ pub fn arb_tx_with_other_fields(
                 if !auth.is_empty() {
                     let _ = out.other.insert_value("authorizationList".to_string(), auth.to_vec());
                 }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
             }
         }
         _ => {}
