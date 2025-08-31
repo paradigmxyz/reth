@@ -269,10 +269,12 @@ pub fn arb_tx_with_other_fields(
             if let Some(gp) = tx7702.gas_price() {
                 let _ = out.other.insert_value("gasPrice".to_string(), U256::from(gp));
             }
-            if let Some(mf) = tx7702.max_fee_per_gas() {
+            {
+                let mf = tx7702.max_fee_per_gas();
                 let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(mf));
             }
-            if let Some(mp) = tx7702.max_priority_fee_per_gas() {
+            {
+                let mp = tx7702.max_priority_fee_per_gas();
                 let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
             }
             if let Some(ac) = tx7702.access_list() {
