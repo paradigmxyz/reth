@@ -86,7 +86,7 @@ impl Default for BeaconSidecarConfig {
     /// Default setup for lighthouse client
     fn default() -> Self {
         Self {
-            cl_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), // Equivalent to Ipv4Addr::LOCALHOST
+            cl_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
             cl_port: 5052,
         }
     }
