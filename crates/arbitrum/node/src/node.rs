@@ -412,7 +412,7 @@ where
             }
             let l2_kind = bytes[0];
             let mut cur = &bytes[1..];
-            reth_tracing::tracing::debug!(
+            reth_tracing::tracing::info!(
                 target: "arb-reth::decode",
                 l2_kind = l2_kind,
                 payload_len = cur.len(),
@@ -480,16 +480,35 @@ where
                 }
                 0x03 => {
                     let mut inner = cur;
-                    while !inner.is_empty() {
-                        match <Vec<u8> as Decodable>::decode(&mut inner) {
-                            Ok(seg) => {
-                                let mut seg_txs = parse_l2_message_to_txs(
-                                    &seg, chain_id, poster, request_id,
-                                )?;
-                                out.append(&mut seg_txs);
-                            }
-                            Err(_) => break,
+                    let mut index: u128 = 0;
+                    while inner.len() >= 8 {
+                        let mut len_bytes = [0u8; 8];
+                        len_bytes.copy_from_slice(&inner[..8]);
+                        inner = &inner[8..];
+                        let seg_len = u64::from_be_bytes(len_bytes) as usize;
+                        if seg_len > inner.len() {
+                            break;
                         }
+                        let seg = &inner[..seg_len];
+                        inner = &inner[seg_len..];
+
+                        let sub_request_id = if let Some(req) = request_id {
+                            let mut idx_be = [0u8; 32];
+                            let mut tmp = index;
+                            for i in (0..32).rev() {
+                                idx_be[i] = (tmp & 0xff) as u8;
+                                tmp >>= 8;
+                            }
+                            Some(alloy_primitives::keccak256((&req.0, &idx_be)))
+                        } else {
+                            None
+                        };
+
+                        let mut seg_txs = parse_l2_message_to_txs(
+                            seg, chain_id, poster, sub_request_id,
+                        )?;
+                        out.append(&mut seg_txs);
+                        index = index.saturating_add(1);
                     }
                 }
                 0x04 => {
@@ -498,7 +517,7 @@ where
                         let before_len = s.len();
                         let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                             .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
-                        reth_tracing::tracing::debug!(
+                        reth_tracing::tracing::info!(
                             target: "arb-reth::decode",
                             tx_type = ?tx.tx_type(),
                             tx_hash = %tx.tx_hash(),
@@ -782,6 +801,12 @@ where
                     .map_err(|_| eyre::eyre!("decode Internal failed for StartBlock"))?;
                 txs.insert(0, start_tx);
             }
+        }
+
+        {
+            use reth_primitives_traits::SignedTransaction;
+            let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
+            reth_tracing::tracing::info!(target: "arb-reth::follower", tx_hashes = ?tx_hashes, "follower: built tx hashes before execution");
         }
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
