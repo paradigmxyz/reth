@@ -422,7 +422,7 @@ impl reth_codecs::Compact for ArbTypedTransaction {
                 1
             }
             ArbTypedTransaction::Internal(tx) => {
-                buf.put_u8(arb_alloy_consensus::tx::ArbitrumInternalTx.as_u8());
+                buf.put_u8(arb_alloy_consensus::tx::ArbTxType::ArbitrumInternalTx.as_u8());
                 tx.encode(buf);
                 1
             }
