@@ -2492,7 +2492,7 @@ mod tests {
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
         b256, hex,
-        map::{foldhash::fast::RandomState, B256Set, DefaultHashBuilder, HashMap},
+        map::{B256Set, DefaultHashBuilder, HashMap},
         B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
@@ -2548,7 +2548,7 @@ mod tests {
     impl MockTrieNodeProvider {
         /// Creates a new empty mock provider
         fn new() -> Self {
-            Self { nodes: HashMap::with_hasher(RandomState::default()) }
+            Self { nodes: HashMap::default() }
         }
 
         /// Adds a revealed node at the specified path

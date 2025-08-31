@@ -7403,7 +7403,6 @@ dependencies = [
 name = "reth-cli-commands"
 version = "1.6.0"
 dependencies = [
- "ahash",
  "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
