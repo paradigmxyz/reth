@@ -499,7 +499,10 @@ where
                                 idx_be[i] = (tmp & 0xff) as u8;
                                 tmp >>= 8;
                             }
-                            Some(alloy_primitives::keccak256((&req.0, &idx_be)))
+                            let mut data = [0u8; 64];
+                            data[..32].copy_from_slice(&req.0);
+                            data[32..].copy_from_slice(&idx_be);
+                            Some(alloy_primitives::keccak256(data))
                         } else {
                             None
                         };
