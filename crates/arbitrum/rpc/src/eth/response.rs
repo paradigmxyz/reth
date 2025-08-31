@@ -1,3 +1,5 @@
+use alloy_consensus::Transaction;
+
 use alloy_primitives::{bytes, address, Address, B256, U256};
 #[cfg(test)]
 mod tests {
@@ -265,18 +267,18 @@ pub fn arb_tx_with_other_fields(
             if let Some(gp) = tx7702.gas_price() {
                 let _ = out.other.insert_value("gasPrice".to_string(), U256::from(gp));
             }
-            if let Some(mf) = tx7702.max_fee_per_gas {
+            if let Some(mf) = tx7702.max_fee_per_gas() {
                 let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(mf));
             }
-            if let Some(mp) = tx7702.max_priority_fee_per_gas {
+            if let Some(mp) = tx7702.max_priority_fee_per_gas() {
                 let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
             }
-            if let Some(ac) = tx7702.access_list {
+            if let Some(ac) = tx7702.access_list() {
                 if !ac.0.is_empty() {
                     let _ = out.other.insert_value("accessList".to_string(), ac.clone());
                 }
             }
-            if let Some(auth) = tx7702.authorization_list {
+            if let Some(auth) = tx7702.authorization_list() {
                 if !auth.0.is_empty() {
                     let _ = out.other.insert_value("authorizationList".to_string(), auth.clone());
                 }
