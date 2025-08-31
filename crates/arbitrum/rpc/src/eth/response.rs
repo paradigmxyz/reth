@@ -273,8 +273,7 @@ pub fn arb_tx_with_other_fields(
                 let mf = tx7702.max_fee_per_gas();
                 let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(mf));
             }
-            {
-                let mp = tx7702.max_priority_fee_per_gas();
+            if let Some(mp) = tx7702.max_priority_fee_per_gas() {
                 let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
             }
             if let Some(ac) = tx7702.access_list() {
