@@ -1938,8 +1938,6 @@ impl SparseTrieUpdates {
 mod find_leaf_tests {
     use super::*;
     use crate::provider::DefaultTrieNodeProvider;
-    use alloy_primitives::map::foldhash::fast::RandomState;
-    // Assuming this exists
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
@@ -2102,7 +2100,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::with_hasher(RandomState::default());
+        let mut nodes = alloy_primitives::map::HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),
@@ -2143,7 +2141,7 @@ mod find_leaf_tests {
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = HashMap::with_hasher(RandomState::default());
+        let mut nodes = HashMap::default();
 
         // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
         // So we set Bit 1 and Bit 5 in the state_mask
@@ -2158,7 +2156,7 @@ mod find_leaf_tests {
             SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
         );
 
-        let mut values = HashMap::with_hasher(RandomState::default());
+        let mut values = HashMap::default();
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = SerialSparseTrie {
