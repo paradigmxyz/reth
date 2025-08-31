@@ -202,6 +202,10 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x6a]));
             let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
             let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("input".to_string(), tx.input().clone());
+            let sys_addr = address!("0x00000000000000000000000000000000000a4b05");
+            let _ = out.other.insert_value("from".to_string(), sys_addr);
+            let _ = out.other.insert_value("to".to_string(), sys_addr);
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
