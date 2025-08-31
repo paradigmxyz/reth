@@ -835,6 +835,43 @@ where
         let outcome = builder
             .finish(&state_provider)
             .map_err(|e| eyre::eyre!("finish error: {e}"))?;
+        {
+            use reth_primitives_traits::SignedTransaction as _;
+            let mut fin_types: Vec<String> = Vec::new();
+            let mut fin_hashes: Vec<String> = Vec::new();
+            for t in outcome.block.body().transactions.iter() {
+                fin_types.push(format!("{:?}", t.tx_type()));
+                fin_hashes.push(format!("{:#x}", t.tx_hash()));
+            }
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                finalized_txs = fin_types.len(),
+                finalized_tx_types = ?fin_types,
+                finalized_tx_hashes = ?fin_hashes,
+                "follower: finalized txs after finish()"
+            );
+        }
+        let exec_outcome = reth_execution_types::ExecutionOutcome::new(
+            db.take_bundle(),
+            vec![outcome.execution_result.receipts.clone()],
+            outcome.block.number(),
+            Vec::new(),
+        );
+        let hashed_sorted = outcome.hashed_state.clone().into_sorted();
+        let trie_updates = outcome.trie_updates.clone();
+        {
+            let provider_rw = db_factory.provider_rw().map_err(|e| eyre::eyre!("provider_rw error: {e}"))?;
+            provider_rw
+                .append_blocks_with_state(
+                    vec![outcome.block.clone()],
+                    &exec_outcome,
+                    hashed_sorted,
+                    trie_updates,
+                )
+                .map_err(|e| eyre::eyre!("append_blocks_with_state error: {e}"))?;
+        }
+
+
 
         let sealed_block0 = outcome.block.sealed_block().clone();
         let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
