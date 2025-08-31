@@ -741,7 +741,7 @@ where
 
                     if let Err(err) = validate_prewarm_accesses_against_db(
                         db,
-                        cached_tx.traces.clone(),
+                        &cached_tx.traces,
                         cached_tx.coinbase_deltas,
                     ) {
                         // Database error during validation
@@ -1054,7 +1054,7 @@ where
 ///   nonce and balance will be adjusted after validation using the provided deltas.
 fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
-    prewarm_accesses: Vec<crate::tree::payload_processor::prewarm::AccessRecord>,
+    prewarm_accesses: &[crate::tree::payload_processor::prewarm::AccessRecord],
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<(), DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
@@ -1066,17 +1066,17 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         match access {
             AccessRecord::Account { address, result } => {
                 // Skip coinbase validation if we have deltas
-                if Some(address) == coinbase_addr {
+                if Some(*address) == coinbase_addr {
                     continue;
                 }
-                let actual = db.basic(address)?;
-                if actual != result {
+                let actual = db.basic(*address)?;
+                if actual != *result {
                     return Ok(())
                 }
             }
             AccessRecord::Storage { address, index, result } => {
-                let actual = db.storage(address, index)?;
-                if actual != result {
+                let actual = db.storage(*address, *index)?;
+                if actual != *result {
                     return Ok(())
                 }
             }

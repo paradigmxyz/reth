@@ -359,6 +359,73 @@ mod tests {
         fn evm_mut(&mut self) -> &mut Self::Evm {
             panic!("Mock executor evm_mut() not implemented")
         }
+        
+        fn execute_transaction(
+            &mut self,
+            tx: impl ExecutableTx<Self>,
+        ) -> Result<u64, BlockExecutionError> {
+            self.execute_transaction_with_result_closure(tx, |_| ())
+        }
+        
+        fn execute_transaction_with_result_closure(
+            &mut self,
+            tx: impl ExecutableTx<Self>,
+            f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+        ) -> Result<u64, BlockExecutionError> {
+            self.execute_transaction_with_commit_condition(tx, |res| {
+                f(res);
+                CommitChanges::Yes
+            })
+            .map(Option::unwrap_or_default)
+        }
+        
+        fn apply_post_execution_changes(
+            self,
+        ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
+        where
+            Self: Sized,
+        {
+            self.finish().map(|(_, result)| result)
+        }
+        
+        fn with_state_hook(mut self, hook: Option<Box<dyn OnStateHook>>) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_state_hook(hook);
+            self
+        }
+        
+        fn execute_block(
+            mut self,
+            transactions: impl IntoIterator<Item = impl ExecutableTx<Self>>,
+        ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
+        where
+            Self: Sized,
+        {
+            self.apply_pre_execution_changes()?;
+        
+            for tx in transactions {
+                self.execute_transaction(tx)?;
+            }
+        
+            self.apply_post_execution_changes()
+        }
+        
+        fn execute_transaction_without_commit(
+            &mut self,
+            tx: impl ExecutableTx<Self>,
+        ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+            todo!()
+        }
+        
+        fn commit_transaction(
+            &mut self,
+            output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+            tx: impl ExecutableTx<Self>,
+        ) -> Result<u64, BlockExecutionError> {
+            todo!()
+        }
     }
 
     struct ChannelStateHook {
