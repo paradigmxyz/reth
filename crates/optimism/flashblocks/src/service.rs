@@ -309,7 +309,7 @@ where
 
 #[derive(Debug)]
 struct PreparedFlashBlock<T> {
-    /// The preapred transactions, ready for execution
+    /// The prepared transactions, ready for execution
     txs: Vec<WithEncoded<Recovered<T>>>,
     /// The tracked flashblock
     block: FlashBlock,
