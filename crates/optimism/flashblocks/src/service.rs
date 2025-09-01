@@ -38,6 +38,7 @@ pub struct FlashBlockService<
 > {
     rx: S,
     current: Option<PendingBlock<N>>,
+    height: Option<u64>,
     blocks: Vec<FlashBlock>,
     evm_config: EvmConfig,
     provider: Provider,
@@ -68,6 +69,7 @@ impl<
         Self {
             rx,
             current: None,
+            height: None,
             blocks: Vec::new(),
             evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
@@ -111,16 +113,23 @@ impl<
     /// * Be added to all the flashblocks received prior using this function.
     /// * Cause a reset of the flashblocks and become the sole member of the collection.
     /// * Be ignored.
-    pub fn add_flash_block(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
-        let latest = self
-            .provider
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?
-            .number();
+    pub fn add_flash_block(&mut self, flashblock: FlashBlock) {
+        let height = match self.height {
+            Some(height) => height,
+            None => {
+                if flashblock.index != 0 {
+                    error!(message = "Receiving first flashblock with non zero index");
+                    return;
+                }
+                // extract height from base flashblock
+                self.height = Some(flashblock.metadata.block_number);
+                flashblock.metadata.block_number
+            }
+        };
 
         // compare flashblock block number against current pending block number
         // check against parent hash is done in `execute`
-        match flashblock.metadata.block_number.cmp(&(latest + 1)) {
+        match flashblock.metadata.block_number.cmp(&height) {
             Ordering::Equal => {
                 // Current pending block, directly process it
 
@@ -138,20 +147,26 @@ impl<
                     self.current.take();
                 } else {
                     // TODO: store non sequential flashblock index for later processing
-                    debug!("ignoring early {flashblock:?} at current height {latest}");
+                    debug!("ignoring early {flashblock:?} at current {height}");
                 }
             }
             Ordering::Greater => {
                 // Flashblocks for pending block not parent of current canonical head,
                 // Store for future processing when current chain sync
                 // TODO: store non sequential block target fb for later processing
-                debug!("ignoring early {flashblock:?} at current height {latest}");
+                // but for now, we still reset the sequence on each base fb
+                if flashblock.index == 0 {
+                    self.clear();
+                    self.height = Some(flashblock.metadata.block_number);
+                    self.blocks.push(flashblock);
+                } else {
+                    debug!("early {flashblock:?} at current {height}");
+                }
             }
             Ordering::Less => {
-                debug!("ignoring old {flashblock:?} at current height {latest}");
+                debug!("ignoring old {flashblock:?} at current {height}");
             }
         }
-        Ok(())
     }
 
     /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
@@ -272,11 +287,7 @@ impl<
         // Consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
-                Ok(flashblock) => {
-                    if let Err(err) = this.add_flash_block(flashblock) {
-                        return Poll::Ready(Some(Err(err)));
-                    }
-                }
+                Ok(flashblock) => this.add_flash_block(flashblock),
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
         }
