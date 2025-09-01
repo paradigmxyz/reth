@@ -586,9 +586,11 @@ impl ChunkedFileReader {
     where
         T: FromReceiptReader,
     {
-        let Some(next_chunk_byte_len) = self.read_next_chunk().await.map_err(|e| match e {
-            FileClientError::Io(io_err) => T::Error::from(io_err),
-            _ => T::Error::from(io::Error::other(e.to_string())),
+        let Some(next_chunk_byte_len) = self.read_next_chunk().await.map_err(|e| {
+            T::Error::from(match e {
+                FileClientError::Io(io_err) => io_err,
+                _ => io::Error::other(e.to_string()),
+            })
         })?
         else {
             return Ok(None)
