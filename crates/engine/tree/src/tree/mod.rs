@@ -96,6 +96,7 @@ pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// The max number of blocks to persist in batch.
 /// Memory is released after blocks are persisted in a batch, so limiting the batch size
 /// prevents memory accumulation and ensures timely cleanup in high-throughput scenarios.
+/// The default value of 8 provides a good balance between memory efficiency and I/O performance.
 const MAX_BLOCKS_TO_PERSIST: u64 = 8;
 
 /// A builder for creating state providers that can be used across threads.
@@ -2787,7 +2788,7 @@ where
 /// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
 /// variant.
 ///
-/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
