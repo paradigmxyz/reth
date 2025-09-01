@@ -41,9 +41,10 @@ pub struct FlashBlockService<
     evm_config: EvmConfig,
     provider: Provider,
     canon_receiver: CanonStateNotifications<N>,
-    // Cached state reads for the current block.
-    // Current PendingBlock is built out of a sequence of FlashBlocks, and executed again when fb
-    // received. Avoid redundant I/O across multiple executions within the same block.
+    /// Cached state reads for the current block.
+    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when fb
+    /// received on top of the same block. Avoid redundant I/O across multiple executions within
+    /// the same block.
     cached_state: Option<(B256, CachedReads)>,
 }
 
@@ -74,20 +75,23 @@ impl<
         }
     }
 
-    /// Returns the cached reads at the given head hash
-    fn cached_reads(&self, head: B256) -> CachedReads {
-        match self.cached_state.as_ref() {
-            Some((h, state)) if *h == head => state.clone(),
-            _ => CachedReads::default(),
+    /// Returns the cached reads at the given head hash.
+    ///
+    /// Returns a new cache instance if this is new `head` hash.
+    fn cached_reads(&mut self, head: B256) -> CachedReads {
+        if let Some((tracked, cache)) = self.cached_state.take() {
+            if tracked == head {
+                return cache
+            }
         }
+
+        // instantiate a new cache instance
+        CachedReads::default()
     }
 
     /// Updates the cached reads at the given head hash
     fn update_cached_reads(&mut self, head: B256, cached_reads: CachedReads) {
-        match self.cached_state.as_mut() {
-            Some((h, state)) if *h == head => state.extend(cached_reads),
-            _ => self.cached_state = Some((head, cached_reads)),
-        }
+        self.cached_state = Some((head, cached_reads));
     }
 
     /// Clear the state of the service, including:
