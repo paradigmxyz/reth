@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stream_fails_to_decode_non_binary_message() {
+    async fn test_stream_ignores_non_binary_message() {
         let messages = FakeConnector::from([Ok(Message::Text(Utf8Bytes::from("test")))]);
         let ws_url = "http://localhost".parse().unwrap();
         let mut stream = WsFlashBlockStream::with_connector(ws_url, messages);
