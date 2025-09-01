@@ -208,7 +208,7 @@ where
         }
 
         if !new_flashblock && this.current.is_none() {
-            // no new flashbblocks received since, block is still unchanged
+            // no new flashblocks received since, block is still unchanged
             return Poll::Pending
         }
 
