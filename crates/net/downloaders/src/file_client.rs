@@ -406,6 +406,11 @@ enum FileReader {
 }
 
 impl FileReader {
+    /// Returns true if this is a gzip-compressed file reader.
+    const fn is_gzip(&self) -> bool {
+        matches!(self, Self::Gzip(_))
+    }
+
     /// Read data into the provided buffer.
     async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
         match self {
@@ -438,8 +443,6 @@ pub struct ChunkedFileReader {
     /// Optionally, tracks highest decoded block number. Needed when decoding data that maps * to 1
     /// with block number
     highest_block: Option<u64>,
-    /// Whether the file is gzip compressed.
-    is_gzip: bool,
 }
 
 impl ChunkedFileReader {
@@ -496,7 +499,6 @@ impl ChunkedFileReader {
             chunk: vec![],
             chunk_byte_len,
             highest_block: None,
-            is_gzip,
         })
     }
 
@@ -506,7 +508,7 @@ impl ChunkedFileReader {
         let Self { chunk_byte_len, file_byte_len, .. } = *self;
 
         // For gzipped files, we don't know the decompressed size, so always use chunk_byte_len
-        if self.is_gzip {
+        if self.file.is_gzip() {
             return chunk_byte_len;
         }
 
@@ -523,7 +525,7 @@ impl ChunkedFileReader {
     /// Reads bytes from file and buffers as next chunk to decode. Returns byte length of next
     /// chunk to read.
     async fn read_next_chunk(&mut self) -> Result<Option<u64>, io::Error> {
-        if !self.is_gzip && self.file_byte_len == 0 && self.chunk.is_empty() {
+        if !self.file.is_gzip() && self.file_byte_len == 0 && self.chunk.is_empty() {
             // eof for non-gzipped files
             return Ok(None)
         }
@@ -537,7 +539,7 @@ impl ChunkedFileReader {
         }
 
         // For gzipped files, if we have no data in chunk, try to read some to check EOF
-        if self.is_gzip && self.chunk.is_empty() {
+        if self.file.is_gzip() && self.chunk.is_empty() {
             // Try to read a small amount to check if we're at EOF
             let mut buf = vec![0u8; 128];
             match self.file.read(&mut buf).await {
@@ -568,12 +570,12 @@ impl ChunkedFileReader {
         let new_read_bytes_len = match self.file.read_exact(reader).await {
             Ok(()) => {
                 // update remaining file length (only for non-gzipped files)
-                if !self.is_gzip {
+                if !self.file.is_gzip() {
                     self.file_byte_len -= new_read_bytes_target_len;
                 }
                 new_read_bytes_target_len
             }
-            Err(e) if self.is_gzip && e.kind() == io::ErrorKind::UnexpectedEof => {
+            Err(e) if self.file.is_gzip() && e.kind() == io::ErrorKind::UnexpectedEof => {
                 // For gzipped files, this indicates we've reached the end
                 // Try to read whatever bytes are available
                 let mut actual_read = 0;
@@ -651,7 +653,7 @@ impl ChunkedFileReader {
         consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
-        let chunk_len = if self.is_gzip {
+        let chunk_len = if self.file.is_gzip() {
             if !self.read_gzip_chunk().await? {
                 return Ok(None)
             }
