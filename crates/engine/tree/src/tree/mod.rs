@@ -1285,7 +1285,10 @@ where
                         self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            ConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
+                            ConsensusEngineEvent::CanonicalBlockAdded(
+                                Box::new(block),
+                                now.elapsed(),
+                            ),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -2356,9 +2359,9 @@ where
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if is_fork {
-            ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::ForkBlockAdded(Box::new(executed), elapsed)
         } else {
-            ConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
+            ConsensusEngineEvent::CanonicalBlockAdded(Box::new(executed), elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 

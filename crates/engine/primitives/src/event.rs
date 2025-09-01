@@ -24,11 +24,11 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    ForkBlockAdded(Box<ExecutedBlockWithTrieUpdates<N>>, Duration),
     /// A new block was received from the consensus engine
     BlockReceived(BlockNumHash),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    CanonicalBlockAdded(Box<ExecutedBlockWithTrieUpdates<N>>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
