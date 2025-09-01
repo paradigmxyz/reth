@@ -8,7 +8,7 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
@@ -531,9 +531,8 @@ where
         if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
             for block_number in range {
                 stage_checkpoint.progress.processed -= provider
-                    .block_by_number(block_number)?
+                    .header_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .header()
                     .gas_used();
             }
         }
