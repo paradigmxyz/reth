@@ -12,7 +12,7 @@ use crate::tree::{
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
     PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{transaction::Either, TxReceipt};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -484,6 +484,14 @@ where
         }
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        
+        // Create temporary timing context for state root computation
+        let start_time = Instant::now();
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"E1\" event=\"State Root Start\" elapsed_since_start_us=0 total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used=0",
+            block_num_hash.number,
+            block_num_hash.hash
+        );
 
         let root_time = Instant::now();
 
@@ -565,6 +573,15 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+        
+        // Log state root computation complete
+        let elapsed_us = start_time.elapsed().as_micros() as u64;
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"E3\" event=\"State Root Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used=0",
+            block_num_hash.number,
+            block_num_hash.hash,
+            elapsed_us
+        );
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -657,6 +674,11 @@ where
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree", block=?num_hash, "Executing block");
+        
+        // Create timing context for this block
+        let mut timing = NewPayloadTiming::new(num_hash.number, num_hash.hash, 0);
+        timing.log_timing("A4", "Block Execution Setup");
+        
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
@@ -685,6 +707,8 @@ where
         }
 
         let execution_start = Instant::now();
+        timing.log_timing("C1", "Transaction Execution Start");
+        
         let state_hook = Box::new(handle.state_hook());
         let tx_cache = handle.tx_cache.clone();
         let output = self.metrics.execute_metered_with_cache::<_, _, N::SignedTx>(
@@ -692,6 +716,9 @@ where
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
             |db, tx_hash| {
+                // ============== TOTAL TRANSACTION OVERHEAD MEASUREMENT START ==============
+                let total_overhead_start = std::time::Instant::now();
+                
                 // Try to reuse cached execution result from prewarming.
                 // This validates that the state the transaction read during prewarming
                 // matches the current database state.
@@ -704,11 +731,15 @@ where
                     // Track cache miss
                     metrics::counter!("tx_cache.validation_attempts").increment(1);
                     metrics::counter!("tx_cache.cache_misses").increment(1);
+                    
+                    let total_overhead_time = total_overhead_start.elapsed();
+                    metrics::histogram!("tx_cache.total_overhead_us").record(total_overhead_time.as_micros() as f64);
 
                     tracing::info!(
                         target: "engine::cache::metrics",
                         ?tx_hash,
                         cache_lookup_us = cache_lookup_time.as_micros(),
+                        total_overhead_us = total_overhead_time.as_micros(),
                         cache_size = tx_cache.len(),
                         "CACHE_MISS - No cached result"
                     );
@@ -741,6 +772,7 @@ where
                     );
 
                     // Validate cached accesses against current database state
+                    let db_validation_start = std::time::Instant::now();
 
                     let validation_result = match validate_prewarm_accesses_against_db(
                         db,
@@ -770,7 +802,9 @@ where
                         metrics::counter!("tx_cache.validation_failures").increment(1);
                         metrics::counter!("tx_cache.validation_failures", "tx_type" => tx_type).increment(1);
                         let total_validation_time_us = validation_result.dedup_time_us + validation_result.db_validation_time_us;
+                        let total_overhead_time = total_overhead_start.elapsed();
                         metrics::histogram!("tx_cache.validation_failure_time_us").record(total_validation_time_us as f64);
+                        metrics::histogram!("tx_cache.total_overhead_us").record(total_overhead_time.as_micros() as f64);
 
                         // Log failure details
                         match validation_result.failure_details {
@@ -832,10 +866,16 @@ where
                         cached_tx.coinbase_deltas
                     {
                         // Only clone the result when we need to modify it
+                        let clone_start = std::time::Instant::now();
                         let mut result = cached_tx.result.clone();
+                        let clone_time = clone_start.elapsed();
+                        metrics::histogram!("tx_cache.result_clone_us").record(clone_time.as_micros() as f64);
 
                         if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
+                            let coinbase_db_start = std::time::Instant::now();
                             if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
+                                let coinbase_db_time = coinbase_db_start.elapsed();
+                                metrics::histogram!("tx_cache.coinbase_db_basic_us").record(coinbase_db_time.as_micros() as f64);
                                 // Current DB balance includes all fees from previous transactions
                                 // Add the delta (fees from this transaction) to get final state
                                 coinbase_account.info.nonce =
@@ -844,9 +884,12 @@ where
                                     coinbase_db.balance + coinbase_balance_delta;
 
                                 let validation_time = validation_start.elapsed();
+                                let total_overhead_time = total_overhead_start.elapsed();
+                                let db_validation_time = db_validation_start.elapsed();
 
                                 // Track validation success and time saved
                                 metrics::counter!("tx_cache.validation_successes").increment(1);
+                                metrics::histogram!("tx_cache.total_overhead_us").record(total_overhead_time.as_micros() as f64);
                                 // Estimate time saved (validation time is typically much less than
                                 // execution time) A rough estimate:
                                 // execution takes ~500-2000 microseconds vs validation ~50-200
@@ -862,6 +905,13 @@ where
                                     ?tx_hash,
                                     trace_count,
                                     validation_us = validation_time.as_micros(),
+                                    total_overhead_us = total_overhead_time.as_micros(),
+                                    cache_lookup_us = cache_lookup_time.as_micros(),
+                                    db_validation_us = db_validation_time.as_micros(),
+                                    dedup_time_us = validation_result.dedup_time_us,
+                                    db_basic_time_us = validation_result.db_validation_time_us,
+                                    clone_time_us = clone_time.as_micros(),
+                                    coinbase_db_time_us = coinbase_db_time.as_micros(),
                                     estimated_time_saved_us = time_saved_us,
                                     "VALIDATION_SUCCESS - Cache entry valid (with coinbase)"
                                 );
@@ -872,9 +922,12 @@ where
                         // No coinbase deltas, but validation passed - return the cached result
                         // directly without cloning since we don't need to modify it
                         let validation_time = validation_start.elapsed();
+                        let total_overhead_time = total_overhead_start.elapsed();
+                        let db_validation_time = db_validation_start.elapsed();
 
                         // Track validation success and time saved
                         metrics::counter!("tx_cache.validation_successes").increment(1);
+                        metrics::histogram!("tx_cache.total_overhead_us").record(total_overhead_time.as_micros() as f64);
                         let estimated_execution_time_us: u64 = 1000; // Conservative estimate
                         let time_saved_us = estimated_execution_time_us
                             .saturating_sub(validation_time.as_micros() as u64);
@@ -895,9 +948,18 @@ where
                 })
             },
         )?;
+        
+        // Extract gas used from the last receipt
+        if let Some(last_receipt) = output.result.receipts.last() {
+            timing.gas_used = last_receipt.cumulative_gas_used();
+        }
+        timing.log_timing("C4", "Transaction Execution Complete");
+        
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        
+        timing.log_timing("F4", "Block Execution Complete");
         Ok(output)
     }
 
@@ -1152,6 +1214,15 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     use crate::tree::payload_processor::prewarm::AccessRecord;
     use std::collections::HashSet;
 
+    let function_start = std::time::Instant::now();
+    
+    tracing::debug!(
+        target: "engine::cache::section_timing",
+        prewarm_accesses_count = prewarm_accesses.len(),
+        has_coinbase_deltas = coinbase_deltas.is_some(),
+        "VALIDATE_PREWARM_ACCESSES_START - Function entry"
+    );
+
     let dedup_start = std::time::Instant::now();
     
     // Extract coinbase address if we have deltas
@@ -1186,14 +1257,42 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     }
 
     let dedup_time_us = dedup_start.elapsed().as_micros() as u64;
+    
+    tracing::debug!(
+        target: "engine::cache::section_timing",
+        dedup_time_us,
+        unique_accesses = unique_accesses.len(),
+        original_accesses = prewarm_accesses.len(),
+        "DEDUPLICATION_COMPLETE - Setup for database validation"
+    );
+    
     let db_validation_start = std::time::Instant::now();
     let mut accesses_validated = 0;
+    let mut db_basic_total_time = 0u64;
+    let mut db_storage_total_time = 0u64;
+    let mut db_basic_calls = 0;
+    let mut db_storage_calls = 0;
+
+    tracing::debug!(
+        target: "engine::cache::section_timing", 
+        "DATABASE_VALIDATION_START - Beginning validation loop"
+    );
 
     // Validate unique accesses
     for access in unique_accesses {
         match access {
             AccessRecord::Account { address, result } => {
+                let db_basic_start = std::time::Instant::now();
                 let actual = db.basic(*address)?;
+                db_basic_total_time += db_basic_start.elapsed().as_micros() as u64;
+                db_basic_calls += 1;
+                
+                tracing::debug!(
+                    target: "engine::cache::db_timing",
+                    ?address,
+                    db_basic_us = db_basic_start.elapsed().as_micros(),
+                    "DB_BASIC call completed"
+                );
                 if actual != *result {
                     return Ok(ValidationResult {
                         success: false,
@@ -1209,7 +1308,18 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
                 }
             }
             AccessRecord::Storage { address, index, result } => {
+                let db_storage_start = std::time::Instant::now();
                 let actual = db.storage(*address, *index)?;
+                db_storage_total_time += db_storage_start.elapsed().as_micros() as u64;
+                db_storage_calls += 1;
+                
+                tracing::debug!(
+                    target: "engine::cache::db_timing",
+                    ?address,
+                    ?index,
+                    db_storage_us = db_storage_start.elapsed().as_micros(),
+                    "DB_STORAGE call completed"
+                );
                 if actual != *result {
                     return Ok(ValidationResult {
                         success: false,
@@ -1228,12 +1338,46 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         }
         accesses_validated += 1;
     }
+    
+    tracing::debug!(
+        target: "engine::cache::section_timing",
+        accesses_validated,
+        db_basic_calls,
+        db_storage_calls,
+        "DATABASE_VALIDATION_LOOP_COMPLETE - All validations passed"
+    );
+
+    let total_db_validation_time_us = db_validation_start.elapsed().as_micros() as u64;
+    
+    tracing::info!(
+        target: "engine::cache::db_breakdown",
+        accesses_validated,
+        total_db_validation_us = total_db_validation_time_us,
+        db_basic_total_us = db_basic_total_time,
+        db_storage_total_us = db_storage_total_time,
+        db_basic_calls,
+        db_storage_calls,
+        avg_db_basic_us = if db_basic_calls > 0 { db_basic_total_time / db_basic_calls as u64 } else { 0 },
+        avg_db_storage_us = if db_storage_calls > 0 { db_storage_total_time / db_storage_calls as u64 } else { 0 },
+        "DATABASE_VALIDATION_BREAKDOWN - Detailed timing per operation type"
+    );
+    
+    let total_function_time_us = function_start.elapsed().as_micros() as u64;
+    
+    tracing::debug!(
+        target: "engine::cache::section_timing",
+        total_function_us = total_function_time_us,
+        dedup_time_us,
+        db_validation_time_us = total_db_validation_time_us,
+        overhead_time_us = total_function_time_us - dedup_time_us - total_db_validation_time_us,
+        "VALIDATE_PREWARM_ACCESSES_COMPLETE - Function exit with success"
+    );
 
     Ok(ValidationResult {
         success: true,
         accesses_validated,
         dedup_time_us,
-        db_validation_time_us: db_validation_start.elapsed().as_micros() as u64,
+        db_validation_time_us: total_db_validation_time_us,
         failure_details: None,
     })
 }
@@ -1380,5 +1524,65 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
         }
+    }
+}
+
+/// Timing infrastructure for comprehensive newPayload performance analysis
+#[derive(Debug)]
+pub struct NewPayloadTiming {
+    /// Block number being processed
+    pub block_number: u64,
+    /// Block hash being processed
+    pub block_hash: B256,
+    /// Start time of the entire process
+    pub process_start: Instant,
+    /// Total number of transactions in this block
+    pub total_txs: usize,
+    /// Number of transactions successfully cached
+    pub cached_txs: usize,
+    /// Number of cache hits during validation
+    pub cache_hits: u32,
+    /// Number of cache misses during validation
+    pub cache_misses: u32,
+    /// Number of database calls made
+    pub db_calls: u32,
+    /// Total gas used in the block
+    pub gas_used: u64,
+}
+
+impl NewPayloadTiming {
+    /// Creates a new timing context for a block
+    pub fn new(block_number: u64, block_hash: B256, total_txs: usize) -> Self {
+        Self {
+            block_number,
+            block_hash,
+            process_start: Instant::now(),
+            total_txs,
+            cached_txs: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            db_calls: 0,
+            gas_used: 0,
+        }
+    }
+    
+    /// Log a timing checkpoint with phase information
+    pub fn log_timing(&self, phase: &str, event: &str) {
+        let elapsed_us = self.process_start.elapsed().as_micros() as u64;
+        
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"{}\" event=\"{}\" elapsed_since_start_us={} total_txs={} cached_txs={} cache_hits={} cache_misses={} db_calls={} gas_used={}",
+            self.block_number,
+            self.block_hash,
+            phase,
+            event,
+            elapsed_us,
+            self.total_txs,
+            self.cached_txs,
+            self.cache_hits,
+            self.cache_misses,
+            self.db_calls,
+            self.gas_used
+        );
     }
 }

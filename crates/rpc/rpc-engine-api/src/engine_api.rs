@@ -159,9 +159,32 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
+        let block_number = payload.block_number();
+        let block_hash = payload.block_hash();
+
+        // Log RPC entry point timing
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"A1\" event=\"RPC Entry Point\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            elapsed_us,
+            gas_used
+        );
 
         let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
+        
+        // Log RPC completion timing
+        let final_elapsed_us = elapsed.as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"F4\" event=\"RPC Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            final_elapsed_us,
+            gas_used
+        );
+        
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
@@ -195,9 +218,32 @@ where
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
+        let block_number = payload.block_number();
+        let block_hash = payload.block_hash();
+
+        // Log RPC entry point timing
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"A1\" event=\"RPC Entry Point\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            elapsed_us,
+            gas_used
+        );
 
         let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
+        
+        // Log RPC completion timing
+        let final_elapsed_us = elapsed.as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"F4\" event=\"RPC Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            final_elapsed_us,
+            gas_used
+        );
+        
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         res
@@ -232,9 +278,32 @@ where
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
+        let block_number = payload.block_number();
+        let block_hash = payload.block_hash();
+
+        // Log RPC entry point timing
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"A1\" event=\"RPC Entry Point\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            elapsed_us,
+            gas_used
+        );
 
         let res = Self::new_payload_v3(self, payload).await;
         let elapsed = start.elapsed();
+        
+        // Log RPC completion timing
+        let final_elapsed_us = elapsed.as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"F4\" event=\"RPC Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            final_elapsed_us,
+            gas_used
+        );
+        
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
@@ -269,10 +338,33 @@ where
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
+        let block_number = payload.block_number();
+        let block_hash = payload.block_hash();
+
+        // Log RPC entry point timing
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"A1\" event=\"RPC Entry Point\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            elapsed_us,
+            gas_used
+        );
 
         let res = Self::new_payload_v4(self, payload).await;
 
         let elapsed = start.elapsed();
+        
+        // Log RPC completion timing
+        let final_elapsed_us = elapsed.as_micros() as u64;
+        tracing::info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"F4\" event=\"RPC Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used={}",
+            block_number,
+            block_hash,
+            final_elapsed_us,
+            gas_used
+        );
+        
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
