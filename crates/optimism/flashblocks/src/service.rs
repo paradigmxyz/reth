@@ -9,7 +9,9 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SignedTransaction};
+use reth_primitives_traits::{
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, SignedTransaction,
+};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
@@ -293,9 +295,7 @@ where
     /// the sequence
     ///
     /// Note: flashblocks start at `index 0`.
-    fn ready_transaction(
-        &self,
-    ) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
+    fn ready_transaction(&self) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
         self.inner
             .values()
             .enumerate()
