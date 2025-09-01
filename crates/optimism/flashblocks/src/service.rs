@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::pin;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
