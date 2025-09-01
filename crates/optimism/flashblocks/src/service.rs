@@ -25,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::pin;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -47,56 +47,6 @@ pub struct FlashBlockService<
     /// fb received on top of the same block. Avoid redundant I/O across multiple executions
     /// within the same block.
     cached_state: Option<(B256, CachedReads)>,
-}
-
-/// Simple wrapper around an ordered B-tree to keep track of a sequence of flashblocks by index
-#[derive(Debug)]
-struct FlashBlockSequence {
-    inner: BTreeMap<u64, FlashBlock>,
-}
-
-impl FlashBlockSequence {
-    const fn new() -> Self {
-        Self { inner: BTreeMap::new() }
-    }
-
-    /// Insert flashblock in the current sequence
-    /// Only take in account given flashblock index
-    fn insert(&mut self, flashblock: FlashBlock) {
-        self.inner.insert(flashblock.index, flashblock);
-    }
-
-    fn clear(&mut self) {
-        self.inner.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-
-    /// Return base flashblock
-    /// Base flashblock is the first flashblock of index 0 in the sequence
-    fn base(&self) -> Option<&FlashBlock> {
-        self.inner.get(&0)
-    }
-
-    /// Iterator over sequence of ready flashblocks
-    /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
-    /// the sequence
-    fn iter_ready(&self) -> impl Iterator<Item = &FlashBlock> {
-        let mut current_index = 0;
-        self.inner
-            .iter()
-            .take_while(move |(&idx, _)| {
-                if idx == current_index {
-                    current_index += 1;
-                    true
-                } else {
-                    false
-                }
-            })
-            .map(|(_, f)| f)
-    }
 }
 
 impl<
@@ -153,49 +103,6 @@ impl<
         self.blocks.clear();
         self.current.take();
         self.cached_state.take();
-    }
-
-    /// Adds the `block` into the collection.
-    ///
-    /// Depending on its index and associated block number, it may:
-    /// * Be added to all the flashblocks received prior using this function.
-    /// * Cause a reset of the flashblocks and become the sole member of the collection.
-    /// * Be ignored.
-    pub fn add_flash_block(&mut self, flashblock: FlashBlock) {
-        // Flash block at index zero resets the whole state
-        if flashblock.index == 0 {
-            self.clear();
-            self.blocks.insert(flashblock);
-        }
-        // Flash block at the following index adds to the collection and invalidates built block
-        else if flashblock.index ==
-            self.blocks.iter_ready().last().map(|last| last.index + 1).unwrap_or(0)
-        {
-            self.blocks.insert(flashblock);
-            self.current.take();
-        }
-        // Flash block at a different index is ignored
-        else if let Some(pending_block) = self.current.as_ref() {
-            // Delete built block if it corresponds to a different height
-            if pending_block.block().header().number() == flashblock.metadata.block_number {
-                info!(
-                    message = "None sequential Flashblocks, keeping cache",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
-                self.blocks.insert(flashblock);
-            } else {
-                error!(
-                    message = "Received Flashblock for new block, zeroing Flashblocks until we receive a base Flashblock",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
-
-                self.clear();
-            }
-        } else {
-            debug!("ignoring {flashblock:?}");
-        }
     }
 
     /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
@@ -316,7 +223,7 @@ impl<
         // Consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
-                Ok(flashblock) => this.add_flash_block(flashblock),
+                Ok(flashblock) => this.blocks.insert(flashblock),
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
         }
@@ -348,5 +255,66 @@ impl<
             // Cannot check integrity: error occurred
             Err(err) => Poll::Ready(Some(Err(err))),
         }
+    }
+}
+
+/// Simple wrapper around an ordered B-tree to keep track of a sequence of flashblocks by index
+#[derive(Debug)]
+struct FlashBlockSequence {
+    inner: BTreeMap<u64, FlashBlock>,
+}
+
+impl FlashBlockSequence {
+    const fn new() -> Self {
+        Self { inner: BTreeMap::new() }
+    }
+
+    /// Inserts a new block into the sequence.
+    ///
+    /// A [`FlashBlock`] with index 0 resets the set.
+    fn insert(&mut self, flashblock: FlashBlock) {
+        if flashblock.index == 0 {
+            trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
+            // Flash block at index zero resets the whole state
+            self.clear();
+            self.inner.insert(flashblock.index, flashblock);
+            return
+        }
+
+        // only insert if we we previously received the same block, assume we received index 0
+        if self.block_number() == Some(flashblock.metadata.block_number) {
+            trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len() + 1  ,"Received followup flashblock");
+            self.inner.insert(flashblock.index, flashblock);
+        }
+    }
+
+    /// Returns the first block number
+    fn block_number(&self) -> Option<u64> {
+        Some(self.inner.values().next()?.metadata.block_number)
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Return base flashblock
+    /// Base flashblock is the first flashblock of index 0 in the sequence
+    fn base(&self) -> Option<&FlashBlock> {
+        self.inner.get(&0)
+    }
+
+    /// Iterator over sequence of ready flashblocks
+    /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
+    /// the sequence
+    fn iter_ready(&self) -> impl Iterator<Item = &FlashBlock> {
+        self.inner
+            .values()
+            .enumerate()
+            .take_while(|(idx, block)| block.index == *idx as u64)
+            .map(|(_, block)| block)
     }
 }
