@@ -18,6 +18,7 @@ use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State}
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
 use std::{
+    cmp::Ordering,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -110,38 +111,47 @@ impl<
     /// * Be added to all the flashblocks received prior using this function.
     /// * Cause a reset of the flashblocks and become the sole member of the collection.
     /// * Be ignored.
-    pub fn add_flash_block(&mut self, flashblock: FlashBlock) {
-        // Flash block at index zero resets the whole state
-        if flashblock.index == 0 {
-            self.clear();
-            self.blocks.push(flashblock);
-        }
-        // Flash block at the following index adds to the collection and invalidates built block
-        else if flashblock.index == self.blocks.last().map(|last| last.index + 1).unwrap_or(0) {
-            self.blocks.push(flashblock);
-            self.current.take();
-        }
-        // Flash block at a different index is ignored
-        else if let Some(pending_block) = self.current.as_ref() {
-            // Delete built block if it corresponds to a different height
-            if pending_block.block().header().number() == flashblock.metadata.block_number {
-                info!(
-                    message = "None sequential Flashblocks, keeping cache",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
-            } else {
-                error!(
-                    message = "Received Flashblock for new block, zeroing Flashblocks until we receive a base Flashblock",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
+    pub fn add_flash_block(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
+        let latest = self
+            .provider
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?
+            .number();
 
-                self.clear();
+        // compare flashblock block number against current pending block number
+        // check against parent hash is done in `execute`
+        match flashblock.metadata.block_number.cmp(&(latest + 1)) {
+            Ordering::Equal => {
+                // Current pending block, directly process it
+
+                // Fb index zero resets the whole state (base flashblock)
+                if flashblock.index == 0 {
+                    self.clear();
+                    self.blocks.push(flashblock);
+                }
+                // Fb at the following index adds to the collection and invalidates built block
+                else if flashblock.index ==
+                    self.blocks.last().map(|last| last.index + 1).unwrap_or(0)
+                {
+                    self.blocks.push(flashblock);
+                    // invalidate current built block
+                    self.current.take();
+                } else {
+                    // TODO: store non sequential flashblock index for later processing
+                    debug!("ignoring early {flashblock:?} at current height {latest}");
+                }
             }
-        } else {
-            debug!("ignoring {flashblock:?}");
+            Ordering::Greater => {
+                // Flashblocks for pending block not parent of current canonical head,
+                // Store for future processing when current chain sync
+                // TODO: store non sequential block target fb for later processing
+                debug!("ignoring early {flashblock:?} at current height {latest}");
+            }
+            Ordering::Less => {
+                debug!("ignoring old {flashblock:?} at current height {latest}");
+            }
         }
+        Ok(())
     }
 
     /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
@@ -262,7 +272,11 @@ impl<
         // Consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
-                Ok(flashblock) => this.add_flash_block(flashblock),
+                Ok(flashblock) => {
+                    if let Err(err) = this.add_flash_block(flashblock) {
+                        return Poll::Ready(Some(Err(err)));
+                    }
+                }
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
         }
