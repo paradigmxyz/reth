@@ -94,12 +94,12 @@ where
         let mut built_block_access_list = None;
         let mut block_access_list_hash = None;
 
-        // if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-        built_block_access_list = block_access_list.clone();
-        block_access_list_hash = block_access_list
-            .as_ref()
-            .map(|bal| alloy_primitives::keccak256(alloy_rlp::encode(bal)));
-        // }
+        if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+            built_block_access_list = block_access_list.clone();
+            block_access_list_hash = block_access_list
+                .as_ref()
+                .map(|bal| alloy_primitives::keccak256(alloy_rlp::encode(bal)));
+        }
 
         let header = Header {
             parent_hash: ctx.parent_hash,
