@@ -128,7 +128,7 @@ where
 
         builder.apply_pre_execution_changes()?;
 
-        for tx in self.blocks.ready_transaction() {
+        for tx in self.blocks.ready_transactions() {
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
@@ -295,7 +295,7 @@ where
     /// the sequence
     ///
     /// Note: flashblocks start at `index 0`.
-    fn ready_transaction(&self) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
+    fn ready_transactions(&self) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
         self.inner
             .values()
             .enumerate()
