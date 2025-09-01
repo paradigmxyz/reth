@@ -1059,17 +1059,43 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
 ) -> Result<(), DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
+    use std::collections::HashSet;
 
     // Extract coinbase address if we have deltas
     let coinbase_addr = coinbase_deltas.map(|(addr, _, _)| addr);
 
+    // Deduplicate access records for more efficient validation
+    let mut unique_accounts = HashSet::new();
+    let mut unique_storage = HashSet::new();
+
+    // Collect unique accesses to avoid redundant validation
+    let mut unique_accesses = Vec::new();
+
     for access in prewarm_accesses {
         match access {
-            AccessRecord::Account { address, result } => {
+            AccessRecord::Account { address, result: _ } => {
                 // Skip coinbase validation if we have deltas
                 if Some(*address) == coinbase_addr {
                     continue;
                 }
+                // Deduplicate account accesses - only validate each account once
+                if unique_accounts.insert(*address) {
+                    unique_accesses.push(access);
+                }
+            }
+            AccessRecord::Storage { address, index, .. } => {
+                // Deduplicate storage accesses - only validate each storage slot once
+                if unique_storage.insert((*address, *index)) {
+                    unique_accesses.push(access);
+                }
+            }
+        }
+    }
+
+    // Validate unique accesses
+    for access in unique_accesses {
+        match access {
+            AccessRecord::Account { address, result } => {
                 let actual = db.basic(*address)?;
                 if actual != *result {
                     return Ok(())
