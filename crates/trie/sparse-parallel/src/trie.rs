@@ -30,6 +30,26 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 /// Number of lower subtries which are managed by the [`ParallelSparseTrie`].
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
+/// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParallelismThresholds {
+    /// Minimum number of nodes to reveal before parallel processing is enabled.
+    /// When `reveal_nodes` has fewer nodes than this threshold, they will be processed serially.
+    pub min_revealed_nodes: usize,
+    /// Minimum number of changed keys (prefix set length) before parallel processing is enabled
+    /// for hash updates. When updating subtrie hashes with fewer changed keys than this threshold,
+    /// the updates will be processed serially.
+    pub min_updated_nodes: usize,
+}
+
+/// Default parallelism thresholds used by the [`ParallelSparseTrie`].
+///
+/// These values were determined by performing benchmarks using gradually increasing values to judge
+/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
+/// would deteriorate to the point where PST might as well not be used.
+pub const DEFAULT_PARALLELISM_THRESHOLDS: ParallelismThresholds =
+    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
+
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
 /// ## Structure
@@ -109,8 +129,8 @@ pub struct ParallelSparseTrie {
     /// Reusable buffer pool used for collecting [`SparseTrieUpdatesAction`]s during hash
     /// computations.
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
-    /// Threshold number under which parallelism is not enabled.
-    parallelism_threshold: usize,
+    /// Thresholds controlling when parallelism is enabled for different operations.
+    parallelism_thresholds: ParallelismThresholds,
     /// Metrics for the parallel sparse trie.
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::ParallelSparseTrieMetrics,
@@ -129,7 +149,7 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
-            parallelism_threshold: 0,
+            parallelism_thresholds: DEFAULT_PARALLELISM_THRESHOLDS,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -203,7 +223,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
             self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
 
-        if !self.is_parallelism_enabled(lower_nodes.len()) {
+        if !self.is_reveal_parallelism_enabled(lower_nodes.len()) {
             for node in lower_nodes {
                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
                     subtrie.reveal_node(node.path, &node.node, node.masks)?;
@@ -215,7 +235,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
 
         #[cfg(not(feature = "std"))]
-        unreachable!("nostd is checked by is_parallelism_enabled");
+        unreachable!("nostd is checked by is_reveal_parallelism_enabled");
 
         #[cfg(feature = "std")]
         // Reveal lower subtrie nodes in parallel
@@ -741,7 +761,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self.prefix_set = unchanged_prefix_set;
 
         // Update subtrie hashes serially parallelism is not enabled
-        if !self.is_parallelism_enabled(num_changed_keys) {
+        if !self.is_update_parallelism_enabled(num_changed_keys) {
             for changed_subtrie in &mut changed_subtries {
                 changed_subtrie.subtrie.update_hashes(
                     &mut changed_subtrie.prefix_set,
@@ -756,7 +776,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
 
         #[cfg(not(feature = "std"))]
-        unreachable!("nostd is checked by is_parallelism_enabled");
+        unreachable!("nostd is checked by is_update_parallelism_enabled");
 
         #[cfg(feature = "std")]
         // Update subtrie hashes in parallel
@@ -886,14 +906,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
 }
 
 impl ParallelSparseTrie {
-    /// If the trie has fewer than the given number of keys modified via `update_leaf` or
-    /// `remove_leaf` then parallel state root computation won't be enabled.
-    ///
-    /// Sets a threshold which controls when parallelism is used during operations.
-    /// * `reveal_nodes` compares the number of nodes to be revealed against this number.
-    /// * `root` and `update_subtrie_hashes` compare the prefix set lsength against this number.
-    pub const fn with_parallelism_threshold(mut self, parallelism_threshold: usize) -> Self {
-        self.parallelism_threshold = parallelism_threshold;
+    /// Sets the thresholds that control when parallelism is used during operations.
+    pub const fn with_parallelism_thresholds(mut self, thresholds: ParallelismThresholds) -> Self {
+        self.parallelism_thresholds = thresholds;
         self
     }
 
@@ -902,13 +917,22 @@ impl ParallelSparseTrie {
         self.updates.is_some()
     }
 
-    /// Returns true if the given value is at or above the parallelism threshold. Will always return
-    /// false in nostd builds.
-    const fn is_parallelism_enabled(&self, v: usize) -> bool {
+    /// Returns true if parallelism should be enabled for revealing the given number of nodes.
+    /// Will always return false in nostd builds.
+    const fn is_reveal_parallelism_enabled(&self, num_nodes: usize) -> bool {
         #[cfg(not(feature = "std"))]
         return false;
 
-        v >= self.parallelism_threshold
+        num_nodes >= self.parallelism_thresholds.min_revealed_nodes
+    }
+
+    /// Returns true if parallelism should be enabled for updating hashes with the given number
+    /// of changed keys. Will always return false in nostd builds.
+    const fn is_update_parallelism_enabled(&self, num_changed_keys: usize) -> bool {
+        #[cfg(not(feature = "std"))]
+        return false;
+
+        num_changed_keys >= self.parallelism_thresholds.min_updated_nodes
     }
 
     /// Creates a new revealed sparse trie from the given root node.
