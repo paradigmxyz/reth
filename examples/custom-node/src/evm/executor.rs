@@ -1,7 +1,8 @@
 use crate::{
     evm::{
         alloy::{CustomEvm, CustomEvmFactory},
-        env::PaymentTxEnv, CustomEvmConfig, CustomTxEnv,
+        env::PaymentTxEnv,
+        CustomEvmConfig, CustomTxEnv,
     },
     primitives::{CustomTransaction, TxPayment},
 };
@@ -17,7 +18,10 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ExecutionResult, context::TxEnv, database::State};
+use revm::{
+    context::{result::ExecutionResult, TxEnv},
+    database::State,
+};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -80,8 +84,11 @@ where
 
                 // Execute using the EVM's transact_raw method
                 // We need to access the EVM through the block executor
-                // This is a simplified approach - in production you might want more sophisticated handling
-                let result = self.evm_mut().transact_raw(CustomTxEnv::Payment(PaymentTxEnv(tx_env)))
+                // This is a simplified approach - in production you might want more sophisticated
+                // handling
+                let result = self
+                    .evm_mut()
+                    .transact_raw(CustomTxEnv::Payment(PaymentTxEnv(tx_env)))
                     .map_err(|_| BlockExecutionError::msg("Payment transaction failed"))?;
 
                 // Call the commit condition function
