@@ -42,9 +42,9 @@ pub struct FlashBlockService<
     provider: Provider,
     canon_receiver: CanonStateNotifications<N>,
     /// Cached state reads for the current block.
-    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when fb
-    /// received on top of the same block. Avoid redundant I/O across multiple executions within
-    /// the same block.
+    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
+    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
+    /// within the same block.
     cached_state: Option<(B256, CachedReads)>,
 }
 
