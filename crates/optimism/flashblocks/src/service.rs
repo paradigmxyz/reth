@@ -1,7 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
 use alloy_primitives::B256;
-use eyre::{eyre, OptionExt};
+use eyre::OptionExt;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
 use reth_errors::RethError;
@@ -11,7 +11,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock,
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy,
     SignedTransaction,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
@@ -145,14 +145,10 @@ impl<
     }
 
     /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
-    /// [`Self::add_flash_block`].
-    /// Builds a pending block using the configured provider and pool.
+    /// [`Self::add_flash_block`] on top of the latest state.
     ///
-    /// If the origin is the actual pending block, the block is built with withdrawals.
-    ///
-    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
-    /// block contract call using the parent beacon block root received from the CL.
-    pub fn execute(&mut self) -> eyre::Result<PendingBlock<N>> {
+    /// Returns None if the flashblock doesn't attach to the latest header.
+    fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
         let latest = self
             .provider
             .latest_header()?
@@ -166,7 +162,8 @@ impl<
             .ok_or_eyre("Missing base flashblock")?;
 
         if attrs.parent_hash != latest_hash {
-            return Err(eyre!("The base flashblock is old"));
+            // doesn't attach to the latest block
+            return Ok(None)
         }
 
         let state_provider = self.provider.history_by_block_hash(latest.hash())?;
@@ -204,39 +201,14 @@ impl<
         // update cached reads
         self.update_cached_reads(latest_hash, request_cache);
 
-        Ok(PendingBlock::with_executed_block(
+        Ok(Some(PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),
             ExecutedBlock {
                 recovered_block: block.into(),
                 execution_output: Arc::new(execution_outcome),
                 hashed_state: Arc::new(hashed_state),
             },
-        ))
-    }
-
-    /// Compares tip from the last notification of [`CanonStateSubscriptions`] with last computed
-    /// pending block and verifies that the tip is the parent of the pending block.
-    ///
-    /// Returns:
-    /// * `Ok(Some(true))` if tip == parent
-    /// * `Ok(Some(false))` if tip != parent
-    /// * `Ok(None)` if there weren't any new notifications or the pending block is not built
-    /// * `Err` if the cannon state receiver returned an error
-    fn verify_pending_block_integrity(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> eyre::Result<Option<bool>> {
-        let mut tip = None;
-        let fut = self.canon_receiver.recv();
-        pin!(fut);
-
-        while let Poll::Ready(result) = fut.poll_unpin(cx) {
-            tip = result?.tip_checked().map(RecoveredBlock::hash);
-        }
-
-        Ok(tip
-            .zip(self.current.as_ref().map(PendingBlock::parent_hash))
-            .map(|(latest, parent)| latest == parent))
+        )))
     }
 }
 
@@ -259,40 +231,52 @@ impl<
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Consume new flashblocks while they're ready
+        let mut new_flashblock = false;
+        // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
-                Ok(flashblock) => this.add_flash_block(flashblock),
+                Ok(flashblock) => {
+                    new_flashblock = true;
+                    this.add_flash_block(flashblock)
+                }
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
         }
 
-        // Execute block if there are flashblocks but no last pending block
-        let changed = if this.current.is_none() && !this.blocks.is_empty() {
-            match this.execute() {
-                Ok(block) => this.current = Some(block),
-                Err(err) => return Poll::Ready(Some(Err(err))),
-            }
-
-            true
-        } else {
-            false
-        };
-
-        // Verify that pending block is following up to the canonical state
-        match this.verify_pending_block_integrity(cx) {
-            // Integrity check failed: erase last block
-            Ok(Some(false)) => Poll::Ready(Some(Ok(None))),
-            // Integrity check is OK or skipped: output last block
-            Ok(Some(true) | None) => {
-                if changed {
-                    Poll::Ready(Some(Ok(this.current.clone())))
-                } else {
-                    Poll::Pending
+        // advance new canonical message, if any to reset flashblock
+        {
+            let fut = this.canon_receiver.recv();
+            pin!(fut);
+            if fut.poll_unpin(cx).is_ready() {
+                // if we have a new canonical message, we know the currently tracked flashblock is
+                // invalidated
+                if this.current.take().is_some() {
+                    return Poll::Ready(Some(Ok(None)))
                 }
             }
-            // Cannot check integrity: error occurred
-            Err(err) => Poll::Ready(Some(Err(err))),
         }
+
+        if !new_flashblock && this.current.is_none() {
+            // no new flashbblocks received since, block is still unchanged
+            return Poll::Pending
+        }
+
+        // try to build a block on top of latest
+        match this.execute() {
+            Ok(Some(new_pending)) => {
+                // built a new pending block
+                this.current = Some(new_pending.clone());
+                return Poll::Ready(Some(Ok(Some(new_pending))));
+            }
+            Ok(None) => {
+                // nothing to do because tracked flashblock doesn't attach to latest
+            }
+            Err(err) => {
+                // we can ignore this error
+                debug!(%err, "failed to execute flashblock");
+            }
+        }
+
+        Poll::Pending
     }
 }
