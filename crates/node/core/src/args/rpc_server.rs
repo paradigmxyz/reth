@@ -17,6 +17,7 @@ use rand::Rng;
 use reth_cli_util::parse_ether_value;
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+use url::Url;
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
@@ -227,6 +228,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
     pub rpc_pending_block: PendingBlockKind,
 
+    /// Endpoint to forward transactions to.
+    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
+    pub rpc_forwarder: Option<Url>,
+
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
     #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
@@ -260,10 +265,23 @@ impl RpcServerArgs {
         self
     }
 
+    /// Configures modules for WS-RPC server.
+    pub fn with_ws_api(mut self, ws_api: RpcModuleSelection) -> Self {
+        self.ws_api = Some(ws_api);
+        self
+    }
+
     /// Enables the Auth IPC
     pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
+    }
+
+    /// Configures modules for both the HTTP-RPC server and WS-RPC server.
+    ///
+    /// This is the same as calling both [`Self::with_http_api`] and [`Self::with_ws_api`].
+    pub fn with_api(self, api: RpcModuleSelection) -> Self {
+        self.with_http_api(api.clone()).with_ws_api(api)
     }
 
     /// Change rpc port numbers based on the instance number, if provided.
@@ -333,6 +351,14 @@ impl RpcServerArgs {
         self = self.with_ipc_random_path();
         self
     }
+
+    /// Apply a function to the args.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -375,6 +401,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            rpc_forwarder: None,
             builder_disallow: Default::default(),
         }
     }

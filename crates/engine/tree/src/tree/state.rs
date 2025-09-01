@@ -7,7 +7,7 @@ use alloy_primitives::{
     BlockNumber, B256,
 };
 use reth_chain_state::{EthPrimitives, ExecutedBlockWithTrieUpdates};
-use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedBlock};
+use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_trie::updates::TrieUpdates;
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -85,9 +85,12 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.get(&hash)
     }
 
-    /// Returns the block by hash.
-    pub(crate) fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
-        self.blocks_by_hash.get(&hash).map(|b| Arc::new(b.recovered_block().sealed_block().clone()))
+    /// Returns the sealed block header by hash.
+    pub(crate) fn sealed_header_by_hash(
+        &self,
+        hash: &B256,
+    ) -> Option<SealedHeader<N::BlockHeader>> {
+        self.blocks_by_hash.get(hash).map(|b| b.sealed_block().sealed_header().clone())
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from

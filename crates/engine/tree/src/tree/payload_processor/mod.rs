@@ -377,7 +377,6 @@ where
 
         let task =
             SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
-                self.executor.clone(),
                 sparse_trie_rx,
                 proof_task_handle,
                 self.trie_metrics.clone(),
@@ -595,7 +594,7 @@ mod tests {
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.random()).collect();
-        let mut updates = Vec::new();
+        let mut updates = Vec::with_capacity(updates_per_account);
 
         for _ in 0..updates_per_account {
             let num_accounts_in_update = rng.random_range(1..=num_accounts);
