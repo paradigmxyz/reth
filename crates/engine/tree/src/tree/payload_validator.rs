@@ -18,8 +18,8 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::{Bytes, B256};
-use alloy_rlp::Decodable;        use alloy_primitives::U256;
+use alloy_primitives::{Bytes, B256, U256};
+use alloy_rlp::Decodable;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
@@ -49,7 +49,11 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::{HashMap, BTreeSet}, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.

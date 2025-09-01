@@ -321,7 +321,6 @@ where
         let res = Self::new_payload_v5(self, payload).await;
 
         let elapsed = start.elapsed();
-        // TODO: update to V5
         self.inner.metrics.latency.new_payload_v5.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
@@ -426,7 +425,7 @@ where
     ///
     /// This behaves like previous fork choice handlers but validates attributes according to the
     /// Amsterdam rules and forwards the update to the beacon consensus engine.
-    /// 
+    ///
     /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/.md#engine_forkchoiceupdatedv4>
     pub async fn fork_choice_updated_v4(
         &self,
@@ -1059,7 +1058,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
-    
+
     /// Handler for `engine_forkchoiceUpdatedV4`
     ///
     /// See also <https://github.com/jihoonsong/execution-apis/blob/ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#engine_forkchoiceupdatedv4>
@@ -1274,7 +1273,6 @@ where
         info!(target: "rpc::engine", il = %il.len(), "serving getInclusionListV1");
         Ok(il)
     }
-
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
