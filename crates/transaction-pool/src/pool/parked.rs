@@ -315,12 +315,6 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         for id in to_remove {
             if let Some(tx) = self.remove_transaction(&id) {
                 tx_handler(tx);
-            } else {
-                tracing::warn!(
-                    target: "reth::txpool::parked",
-                    ?id,
-                    "Failed to remove transaction during basefee enforcement - possible data structure inconsistency"
-                );
             }
         }
     }
