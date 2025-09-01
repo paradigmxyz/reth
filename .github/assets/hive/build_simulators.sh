@@ -11,10 +11,8 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eest" \
-  -sim.buildarg GIT_URL=https://github.com/fselmo/execution-spec-tests.git \
-  -sim.buildarg GIT_REF=feat/amsterdam-and-block-access-lists \
-  -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eest" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.4.0/fixtures_develop.tar.gz --sim.buildarg branch=v4.4.0 -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
 ./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
