@@ -530,8 +530,6 @@ impl FileReader {
 pub struct ChunkedFileReader {
     /// File reader (either plain or gzip).
     file: FileReader,
-    /// Current file byte length (for plain files) or estimated length (for gzip).
-    file_byte_len: u64,
     /// Bytes that have been read.
     chunk: Vec<u8>,
     /// Max bytes per chunk.
@@ -542,11 +540,6 @@ pub struct ChunkedFileReader {
 }
 
 impl ChunkedFileReader {
-    /// Returns the remaining file length.
-    pub const fn file_len(&self) -> u64 {
-        self.file_byte_len
-    }
-
     /// Opens the file to import from given path. Returns a new instance. If no chunk byte length
     /// is passed, chunks have [`DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE`] (one static file).
     /// Automatically detects gzip files by extension (.gz, .gzip).
@@ -574,28 +567,14 @@ impl ChunkedFileReader {
         chunk_byte_len: u64,
         is_gzip: bool,
     ) -> Result<Self, FileClientError> {
-        let remaining_bytes = if is_gzip {
-            // For gzipped files, we can't know the decompressed size without reading the entire
-            // file Use a very large value to indicate unknown size
-            u64::MAX
-        } else {
-            // Get file len from metadata before reading
-            file.metadata().await?.len()
-        };
-
         let file_reader = if is_gzip {
             FileReader::Gzip(GzipDecoder::new(BufReader::new(file)))
         } else {
+            let remaining_bytes = file.metadata().await?.len();
             FileReader::Plain { file, remaining_bytes }
         };
 
-        Ok(Self {
-            file: file_reader,
-            file_byte_len: remaining_bytes,
-            chunk: vec![],
-            chunk_byte_len,
-            highest_block: None,
-        })
+        Ok(Self { file: file_reader, chunk: vec![], chunk_byte_len, highest_block: None })
     }
 
     /// Reads bytes from file and buffers as next chunk to decode. Returns byte length of next
