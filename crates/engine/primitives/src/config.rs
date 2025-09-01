@@ -14,9 +14,6 @@ pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
-/// Default parallelism threshold for the parallel sparse trie.
-pub const DEFAULT_PARALLEL_SPARSE_TRIE_THRESHOLD: usize = 100;
-
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -70,8 +67,6 @@ pub struct TreeConfig {
     disable_caching_and_prewarming: bool,
     /// Whether to disable the parallel sparse trie state root algorithm.
     disable_parallel_sparse_trie: bool,
-    /// Parallelism threshold for the parallel sparse trie.
-    parallel_sparse_trie_threshold: usize,
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
@@ -114,7 +109,6 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             disable_caching_and_prewarming: false,
             disable_parallel_sparse_trie: false,
-            parallel_sparse_trie_threshold: DEFAULT_PARALLEL_SPARSE_TRIE_THRESHOLD,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
@@ -140,7 +134,6 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         disable_caching_and_prewarming: bool,
         disable_parallel_sparse_trie: bool,
-        parallel_sparse_trie_threshold: usize,
         state_provider_metrics: bool,
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
@@ -160,7 +153,6 @@ impl TreeConfig {
             always_compare_trie_updates,
             disable_caching_and_prewarming,
             disable_parallel_sparse_trie,
-            parallel_sparse_trie_threshold,
             state_provider_metrics,
             cross_block_cache_size,
             has_enough_parallelism,
@@ -221,11 +213,6 @@ impl TreeConfig {
     /// Returns whether or not the parallel sparse trie is disabled.
     pub const fn disable_parallel_sparse_trie(&self) -> bool {
         self.disable_parallel_sparse_trie
-    }
-
-    /// Returns the parallelism threshold for the parallel sparse trie.
-    pub const fn parallel_sparse_trie_threshold(&self) -> usize {
-        self.parallel_sparse_trie_threshold
     }
 
     /// Returns whether or not cross-block caching and parallel prewarming should be used.
@@ -358,15 +345,6 @@ impl TreeConfig {
         disable_parallel_sparse_trie: bool,
     ) -> Self {
         self.disable_parallel_sparse_trie = disable_parallel_sparse_trie;
-        self
-    }
-
-    /// Setter for the parallelism threshold for the parallel sparse trie.
-    pub const fn with_parallel_sparse_trie_threshold(
-        mut self,
-        parallel_sparse_trie_threshold: usize,
-    ) -> Self {
-        self.parallel_sparse_trie_threshold = parallel_sparse_trie_threshold;
         self
     }
 
