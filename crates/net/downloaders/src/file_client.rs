@@ -434,7 +434,6 @@ impl FileReader {
         }
     }
 
-    /// Read next chunk from plain file.
     async fn read_plain_chunk(
         &mut self,
         chunk: &mut Vec<u8>,
@@ -445,47 +444,27 @@ impl FileReader {
         };
 
         if *remaining_bytes == 0 && chunk.is_empty() {
+            // eof
             return Ok(None)
         }
 
         let chunk_target_len = chunk_byte_len.min(*remaining_bytes + chunk.len() as u64);
         let old_bytes_len = chunk.len() as u64;
 
-        if old_bytes_len >= chunk_target_len {
-            return Ok(Some(old_bytes_len))
-        }
+        // calculate reserved space in chunk
+        let new_read_bytes_target_len = chunk_target_len - old_bytes_len;
 
-        let new_read_bytes_target_len = chunk_target_len - chunk.len() as u64;
+        // read new bytes from file
         let prev_read_bytes_len = chunk.len();
-        chunk.resize(chunk_target_len as usize, 0);
+        chunk.extend(std::iter::repeat_n(0, new_read_bytes_target_len as usize));
         let reader = &mut chunk[prev_read_bytes_len..];
 
-        let new_read_bytes_len = match file.read_exact(reader).await {
-            Ok(_) => {
-                *remaining_bytes -= new_read_bytes_target_len;
-                new_read_bytes_target_len
-            }
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                let mut actual_read = 0;
-                while actual_read < new_read_bytes_target_len as usize {
-                    match file.read(&mut reader[actual_read..]).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => actual_read += n,
-                    }
-                }
-                chunk.truncate(prev_read_bytes_len + actual_read);
-
-                if actual_read == 0 && chunk.is_empty() {
-                    return Ok(None)
-                }
-
-                *remaining_bytes = remaining_bytes.saturating_sub(actual_read as u64);
-                actual_read as u64
-            }
-            Err(e) => return Err(e.into()),
-        };
-
+        // actual bytes that have been read
+        let new_read_bytes_len = file.read_exact(reader).await? as u64;
         let next_chunk_byte_len = chunk.len();
+
+        // update remaining file length
+        *remaining_bytes -= new_read_bytes_len;
 
         debug!(target: "downloaders::file",
             max_chunk_byte_len=chunk_byte_len,
