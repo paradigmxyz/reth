@@ -399,32 +399,128 @@ impl<B: FullBlock> BlockClient for FileClient<B> {
 /// File reader type for handling different compression formats.
 #[derive(Debug)]
 enum FileReader {
-    /// Regular uncompressed file.
-    Plain(File),
+    /// Regular uncompressed file with remaining byte tracking.
+    Plain { file: File, remaining_bytes: u64 },
     /// Gzip compressed file.
     Gzip(GzipDecoder<BufReader<File>>),
 }
 
 impl FileReader {
-    /// Returns true if this is a gzip-compressed file reader.
-    const fn is_gzip(&self) -> bool {
-        matches!(self, Self::Gzip(_))
-    }
-
-    /// Read data into the provided buffer.
-    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), io::Error> {
-        match self {
-            Self::Plain(file) => file.read_exact(buf).await?,
-            Self::Gzip(decoder) => decoder.read_exact(buf).await?,
-        };
-        Ok(())
-    }
-
     /// Read some data into the provided buffer, returning the number of bytes read.
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         match self {
-            Self::Plain(file) => file.read(buf).await,
+            Self::Plain { file, .. } => file.read(buf).await,
             Self::Gzip(decoder) => decoder.read(buf).await,
+        }
+    }
+
+    /// Read next chunk from file. Returns the number of bytes read for plain files,
+    /// or a boolean indicating if data is available for gzip files.
+    async fn read_next_chunk(
+        &mut self,
+        chunk: &mut Vec<u8>,
+        chunk_byte_len: u64,
+    ) -> Result<Option<u64>, FileClientError> {
+        match self {
+            Self::Plain { .. } => self.read_plain_chunk(chunk, chunk_byte_len).await,
+            Self::Gzip(_) => {
+                let has_data = self.read_gzip_chunk(chunk, chunk_byte_len).await?;
+                if has_data {
+                    Ok(Some(chunk.len() as u64))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// Read next chunk from plain file.
+    async fn read_plain_chunk(
+        &mut self,
+        chunk: &mut Vec<u8>,
+        chunk_byte_len: u64,
+    ) -> Result<Option<u64>, FileClientError> {
+        let Self::Plain { file, remaining_bytes } = self else {
+            unreachable!("read_plain_chunk should only be called on Plain variant")
+        };
+
+        if *remaining_bytes == 0 && chunk.is_empty() {
+            return Ok(None)
+        }
+
+        let chunk_target_len = chunk_byte_len.min(*remaining_bytes + chunk.len() as u64);
+        let old_bytes_len = chunk.len() as u64;
+
+        if old_bytes_len >= chunk_target_len {
+            return Ok(Some(old_bytes_len))
+        }
+
+        let new_read_bytes_target_len = chunk_target_len - chunk.len() as u64;
+        let prev_read_bytes_len = chunk.len();
+        chunk.resize(chunk_target_len as usize, 0);
+        let reader = &mut chunk[prev_read_bytes_len..];
+
+        let new_read_bytes_len = match file.read_exact(reader).await {
+            Ok(_) => {
+                *remaining_bytes -= new_read_bytes_target_len;
+                new_read_bytes_target_len
+            }
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                let mut actual_read = 0;
+                while actual_read < new_read_bytes_target_len as usize {
+                    match file.read(&mut reader[actual_read..]).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => actual_read += n,
+                    }
+                }
+                chunk.truncate(prev_read_bytes_len + actual_read);
+
+                if actual_read == 0 && chunk.is_empty() {
+                    return Ok(None)
+                }
+
+                *remaining_bytes = remaining_bytes.saturating_sub(actual_read as u64);
+                actual_read as u64
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let next_chunk_byte_len = chunk.len();
+
+        debug!(target: "downloaders::file",
+            max_chunk_byte_len=chunk_byte_len,
+            prev_read_bytes_len,
+            new_read_bytes_target_len,
+            new_read_bytes_len,
+            next_chunk_byte_len,
+            remaining_file_byte_len=*remaining_bytes,
+            "new bytes were read from file"
+        );
+
+        Ok(Some(next_chunk_byte_len as u64))
+    }
+
+    /// Read next chunk from gzipped file.
+    async fn read_gzip_chunk(
+        &mut self,
+        chunk: &mut Vec<u8>,
+        chunk_byte_len: u64,
+    ) -> Result<bool, FileClientError> {
+        loop {
+            if chunk.len() >= chunk_byte_len as usize {
+                return Ok(true)
+            }
+
+            let mut buffer = vec![0u8; 64 * 1024];
+
+            match self.read(&mut buffer).await {
+                Ok(0) => return Ok(!chunk.is_empty()),
+                Ok(n) => {
+                    buffer.truncate(n);
+                    chunk.extend_from_slice(&buffer);
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
     }
 }
@@ -478,7 +574,7 @@ impl ChunkedFileReader {
         chunk_byte_len: u64,
         is_gzip: bool,
     ) -> Result<Self, FileClientError> {
-        let file_byte_len = if is_gzip {
+        let remaining_bytes = if is_gzip {
             // For gzipped files, we can't know the decompressed size without reading the entire
             // file Use a very large value to indicate unknown size
             u64::MAX
@@ -490,158 +586,22 @@ impl ChunkedFileReader {
         let file_reader = if is_gzip {
             FileReader::Gzip(GzipDecoder::new(BufReader::new(file)))
         } else {
-            FileReader::Plain(file)
+            FileReader::Plain { file, remaining_bytes }
         };
 
         Ok(Self {
             file: file_reader,
-            file_byte_len,
+            file_byte_len: remaining_bytes,
             chunk: vec![],
             chunk_byte_len,
             highest_block: None,
         })
     }
 
-    /// Calculates the number of bytes to read from the chain file. Returns a tuple of the chunk
-    /// length and the remaining file length.
-    const fn chunk_len(&self) -> u64 {
-        let Self { chunk_byte_len, file_byte_len, .. } = *self;
-
-        // For gzipped files, we don't know the decompressed size, so always use chunk_byte_len
-        if self.file.is_gzip() {
-            return chunk_byte_len;
-        }
-
-        let file_byte_len = file_byte_len + self.chunk.len() as u64;
-
-        if chunk_byte_len > file_byte_len {
-            // last chunk
-            file_byte_len
-        } else {
-            chunk_byte_len
-        }
-    }
-
     /// Reads bytes from file and buffers as next chunk to decode. Returns byte length of next
     /// chunk to read.
-    async fn read_next_chunk(&mut self) -> Result<Option<u64>, io::Error> {
-        if !self.file.is_gzip() && self.file_byte_len == 0 && self.chunk.is_empty() {
-            // eof for non-gzipped files
-            return Ok(None)
-        }
-
-        let chunk_target_len = self.chunk_len();
-        let old_bytes_len = self.chunk.len() as u64;
-
-        // If we already have enough data in the chunk, return it
-        if old_bytes_len >= chunk_target_len {
-            return Ok(Some(old_bytes_len))
-        }
-
-        // For gzipped files, if we have no data in chunk, try to read some to check EOF
-        if self.file.is_gzip() && self.chunk.is_empty() {
-            // Try to read a small amount to check if we're at EOF
-            let mut buf = vec![0u8; 128];
-            match self.file.read(&mut buf).await {
-                Ok(0) => return Ok(None), // EOF
-                Ok(n) => {
-                    // We read some bytes, put them in the chunk
-                    self.chunk.extend_from_slice(&buf[..n]);
-                    // If we have enough data now, return it
-                    if self.chunk.len() as u64 >= chunk_target_len {
-                        return Ok(Some(chunk_target_len))
-                    }
-                    // Otherwise continue to read more
-                }
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-                Err(e) => return Err(e),
-            }
-        }
-
-        // calculate reserved space in chunk
-        let new_read_bytes_target_len = chunk_target_len - self.chunk.len() as u64;
-
-        // read new bytes from file
-        let prev_read_bytes_len = self.chunk.len();
-        self.chunk.extend(std::iter::repeat_n(0, new_read_bytes_target_len as usize));
-        let reader = &mut self.chunk[prev_read_bytes_len..];
-
-        // For gzipped files, read_exact might fail at EOF, so we handle it gracefully
-        let new_read_bytes_len = match self.file.read_exact(reader).await {
-            Ok(()) => {
-                // update remaining file length (only for non-gzipped files)
-                if !self.file.is_gzip() {
-                    self.file_byte_len -= new_read_bytes_target_len;
-                }
-                new_read_bytes_target_len
-            }
-            Err(e) if self.file.is_gzip() && e.kind() == io::ErrorKind::UnexpectedEof => {
-                // For gzipped files, this indicates we've reached the end
-                // Try to read whatever bytes are available
-                let mut actual_read = 0;
-                while actual_read < new_read_bytes_target_len as usize {
-                    match self.file.read(&mut reader[actual_read..]).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => actual_read += n,
-                    }
-                }
-                self.chunk.truncate(prev_read_bytes_len + actual_read);
-
-                // If no new data was read and we have no data in chunk, we're at EOF
-                if actual_read == 0 && self.chunk.is_empty() {
-                    return Ok(None)
-                }
-
-                actual_read as u64
-            }
-            Err(e) => return Err(e),
-        };
-
-        let next_chunk_byte_len = self.chunk.len();
-
-        debug!(target: "downloaders::file",
-            max_chunk_byte_len=self.chunk_byte_len,
-            prev_read_bytes_len,
-            new_read_bytes_target_len,
-            new_read_bytes_len,
-            next_chunk_byte_len,
-            remaining_file_byte_len=self.file_byte_len,
-            "new bytes were read from file"
-        );
-
-        Ok(Some(next_chunk_byte_len as u64))
-    }
-
-    /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    /// Reads gzipped data until we accumulate at least `chunk_byte_len` bytes.
-    ///
-    /// Returns `Ok(true)` if data was successfully read and we have enough bytes,
-    /// or `Ok(false)` if EOF was reached with no remaining data.
-    async fn read_gzip_chunk(&mut self) -> Result<bool, FileClientError> {
-        loop {
-            // If we already have enough data, return true
-            if self.chunk.len() > self.chunk_byte_len as usize {
-                return Ok(true)
-            }
-
-            // Read more data from the gzipped stream
-            let mut buffer = vec![0u8; 64 * 1024];
-
-            // Note: gzip decoder may not utilize the full buffer size due to internal
-            // limitations
-            match self.file.read(&mut buffer).await {
-                Ok(0) => {
-                    // EOF reached - return whether have any remaining data
-                    return Ok(!self.chunk.is_empty())
-                }
-                Ok(n) => {
-                    buffer.truncate(n);
-                    self.chunk.extend_from_slice(&buffer);
-                    // Continue the loop to check if we have enough data now
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
+    async fn read_next_chunk(&mut self) -> Result<Option<u64>, FileClientError> {
+        self.file.read_next_chunk(&mut self.chunk, self.chunk_byte_len).await
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
@@ -653,15 +613,7 @@ impl ChunkedFileReader {
         consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
-        let chunk_len = if self.file.is_gzip() {
-            if !self.read_gzip_chunk().await? {
-                return Ok(None)
-            }
-            self.chunk.len() as u64
-        } else {
-            let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };
-            chunk_len
-        };
+        let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };
 
         // make new file client from chunk
         let DecodedFileChunk { file_client, remaining_bytes, .. } =
@@ -680,7 +632,13 @@ impl ChunkedFileReader {
     where
         T: FromReceiptReader,
     {
-        let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
+        let Some(next_chunk_byte_len) = self.read_next_chunk().await.map_err(|e| match e {
+            FileClientError::Io(io_err) => T::Error::from(io_err),
+            _ => T::Error::from(io::Error::new(io::ErrorKind::Other, e.to_string())),
+        })?
+        else {
+            return Ok(None)
+        };
 
         // make new file client from chunk
         let DecodedFileChunk { file_client, remaining_bytes, highest_block } =
