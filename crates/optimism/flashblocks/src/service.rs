@@ -289,7 +289,7 @@ where
         self.inner.clear();
     }
 
-    /// Iterator over sequence of exectuabled transactions.
+    /// Iterator over sequence of executable transactions.
     ///
     /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
     /// the sequence
