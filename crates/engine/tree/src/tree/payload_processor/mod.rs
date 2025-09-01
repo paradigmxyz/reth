@@ -73,6 +73,8 @@ where
     pub result: ResultAndState<HaltReasonFor<Evm>>,
     /// Coinbase deltas
     pub coinbase_deltas: CoinbaseDeltas,
+    /// Transaction type for metrics analysis
+    pub tx_type: &'static str,
 }
 
 /// Cache for transaction execution results and state access records.

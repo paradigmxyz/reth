@@ -518,9 +518,13 @@ where
                 "Caching prewarmed execution result"
             );
 
-            // Create cached transaction
-            let cached_tx =
-                super::CachedTransaction { traces: execution_trace, result: res, coinbase_deltas };
+            // Create cached transaction with transaction type
+            let cached_tx = super::CachedTransaction {
+                traces: execution_trace,
+                result: res,
+                coinbase_deltas,
+                tx_type,
+            };
             tx_cache.insert(tx_hash, cached_tx);
         }
 

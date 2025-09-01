@@ -44,6 +44,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm::Database;
+use reth_revm::state::AccountInfo;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
@@ -728,29 +729,88 @@ where
                 cache_result.and_then(|cached_tx| {
                     let validation_start = std::time::Instant::now();
                     let trace_count = cached_tx.traces.len();
+                    let tx_type = cached_tx.tx_type;
 
                     tracing::trace!(
                         target: "engine::cache",
                         ?tx_hash,
                         trace_count,
+                        tx_type,
                         has_coinbase_deltas = cached_tx.coinbase_deltas.is_some(),
                         "Validating cached execution result with chunked validation"
                     );
 
                     // Validate cached accesses against current database state
 
-                    if let Err(err) = validate_prewarm_accesses_against_db(
+                    let validation_result = match validate_prewarm_accesses_against_db(
                         db,
                         &cached_tx.traces,
                         cached_tx.coinbase_deltas,
                     ) {
-                        // Database error during validation
-                        tracing::error!(
-                            target: "engine::cache",
-                            ?tx_hash,
-                            ?err,
-                            "Database error during cache validation"
-                        );
+                        Ok(result) => result,
+                        Err(err) => {
+                            // Database error during validation
+                            tracing::error!(
+                                target: "engine::cache",
+                                ?tx_hash,
+                                ?err,
+                                "Database error during cache validation"
+                            );
+                            return None;
+                        }
+                    };
+
+                    // Track validation performance metrics
+                    metrics::histogram!("tx_cache.dedup_time_us").record(validation_result.dedup_time_us as f64);
+                    metrics::histogram!("tx_cache.db_validation_time_us").record(validation_result.db_validation_time_us as f64);
+                    metrics::histogram!("tx_cache.accesses_before_failure").record(validation_result.accesses_validated as f64);
+
+                    if !validation_result.success {
+                        // Track validation failure with transaction type
+                        metrics::counter!("tx_cache.validation_failures").increment(1);
+                        metrics::counter!("tx_cache.validation_failures", "tx_type" => tx_type).increment(1);
+                        let total_validation_time_us = validation_result.dedup_time_us + validation_result.db_validation_time_us;
+                        metrics::histogram!("tx_cache.validation_failure_time_us").record(total_validation_time_us as f64);
+
+                        // Log failure details
+                        match validation_result.failure_details {
+                            Some(ValidationFailure::AccountMismatch { address, expected, actual }) => {
+                                metrics::counter!("tx_cache.account_validation_failures").increment(1);
+                                metrics::counter!("tx_cache.account_validation_failures", "tx_type" => tx_type).increment(1);
+                                tracing::info!(
+                                    target: "engine::cache::metrics",
+                                    ?tx_hash,
+                                    tx_type,
+                                    ?address,
+                                    expected_nonce = expected.as_ref().map(|a| a.nonce),
+                                    actual_nonce = actual.as_ref().map(|a| a.nonce),
+                                    expected_balance = ?expected.as_ref().map(|a| a.balance),
+                                    actual_balance = ?actual.as_ref().map(|a| a.balance),
+                                    accesses_validated = validation_result.accesses_validated,
+                                    dedup_time_us = validation_result.dedup_time_us,
+                                    db_validation_time_us = validation_result.db_validation_time_us,
+                                    "VALIDATION_FAILED - Account state mismatch"
+                                );
+                            }
+                            Some(ValidationFailure::StorageMismatch { address, index, expected, actual }) => {
+                                metrics::counter!("tx_cache.storage_validation_failures").increment(1);
+                                metrics::counter!("tx_cache.storage_validation_failures", "tx_type" => tx_type).increment(1);
+                                tracing::info!(
+                                    target: "engine::cache::metrics",
+                                    ?tx_hash,
+                                    tx_type,
+                                    ?address,
+                                    ?index,
+                                    ?expected,
+                                    ?actual,
+                                    accesses_validated = validation_result.accesses_validated,
+                                    dedup_time_us = validation_result.dedup_time_us,
+                                    db_validation_time_us = validation_result.db_validation_time_us,
+                                    "VALIDATION_FAILED - Storage state mismatch"
+                                );
+                            }
+                            None => unreachable!("Validation failed but no failure details"),
+                        }
                         return None;
                     }
 
@@ -760,6 +820,7 @@ where
                         ?tx_hash,
                         trace_count,
                         validation_time_us = validation_start.elapsed().as_micros(),
+                        accesses_validated = validation_result.accesses_validated,
                         "Cache validation successful"
                     );
 
@@ -1042,6 +1103,36 @@ where
     }
 }
 
+/// Result of cache validation with detailed failure information
+#[derive(Debug)]
+struct ValidationResult {
+    /// Whether validation succeeded
+    success: bool,
+    /// Number of accesses validated before failure (or total if success)
+    accesses_validated: usize,
+    /// Time spent in deduplication phase
+    dedup_time_us: u64,
+    /// Time spent in database validation phase
+    db_validation_time_us: u64,
+    /// Details about the first mismatch if validation failed
+    failure_details: Option<ValidationFailure>,
+}
+
+#[derive(Debug)]
+enum ValidationFailure {
+    AccountMismatch {
+        address: alloy_primitives::Address,
+        expected: Option<AccountInfo>,
+        actual: Option<AccountInfo>,
+    },
+    StorageMismatch {
+        address: alloy_primitives::Address,
+        index: alloy_primitives::U256,
+        expected: alloy_primitives::U256,
+        actual: alloy_primitives::U256,
+    },
+}
+
 /// Validates that the state read during prewarm is still consistent with the current database.
 ///
 /// This checks the read set recorded during prewarming (accounts and storage slots) against fresh
@@ -1057,10 +1148,12 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
     prewarm_accesses: &[crate::tree::payload_processor::prewarm::AccessRecord],
     coinbase_deltas: Option<(alloy_primitives::Address, u64, alloy_primitives::U256)>,
-) -> Result<(), DB::Error> {
+) -> Result<ValidationResult, DB::Error> {
     use crate::tree::payload_processor::prewarm::AccessRecord;
     use std::collections::HashSet;
 
+    let dedup_start = std::time::Instant::now();
+    
     // Extract coinbase address if we have deltas
     let coinbase_addr = coinbase_deltas.map(|(addr, _, _)| addr);
 
@@ -1092,25 +1185,57 @@ fn validate_prewarm_accesses_against_db<DB: revm::Database>(
         }
     }
 
+    let dedup_time_us = dedup_start.elapsed().as_micros() as u64;
+    let db_validation_start = std::time::Instant::now();
+    let mut accesses_validated = 0;
+
     // Validate unique accesses
     for access in unique_accesses {
         match access {
             AccessRecord::Account { address, result } => {
                 let actual = db.basic(*address)?;
                 if actual != *result {
-                    return Ok(())
+                    return Ok(ValidationResult {
+                        success: false,
+                        accesses_validated,
+                        dedup_time_us,
+                        db_validation_time_us: db_validation_start.elapsed().as_micros() as u64,
+                        failure_details: Some(ValidationFailure::AccountMismatch {
+                            address: *address,
+                            expected: result.clone(),
+                            actual,
+                        }),
+                    })
                 }
             }
             AccessRecord::Storage { address, index, result } => {
                 let actual = db.storage(*address, *index)?;
                 if actual != *result {
-                    return Ok(())
+                    return Ok(ValidationResult {
+                        success: false,
+                        accesses_validated,
+                        dedup_time_us,
+                        db_validation_time_us: db_validation_start.elapsed().as_micros() as u64,
+                        failure_details: Some(ValidationFailure::StorageMismatch {
+                            address: *address,
+                            index: *index,
+                            expected: *result,
+                            actual,
+                        }),
+                    })
                 }
             }
         }
+        accesses_validated += 1;
     }
 
-    Ok(())
+    Ok(ValidationResult {
+        success: true,
+        accesses_validated,
+        dedup_time_us,
+        db_validation_time_us: db_validation_start.elapsed().as_micros() as u64,
+        failure_details: None,
+    })
 }
 
 /// Output of block or payload validation.
