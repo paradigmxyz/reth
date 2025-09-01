@@ -424,12 +424,8 @@ impl FileReader {
         match self {
             Self::Plain { .. } => self.read_plain_chunk(chunk, chunk_byte_len).await,
             Self::Gzip(_) => {
-                let has_data = self.read_gzip_chunk(chunk, chunk_byte_len).await?;
-                if has_data {
-                    Ok(Some(chunk.len() as u64))
-                } else {
-                    Ok(None)
-                }
+                Ok((self.read_gzip_chunk(chunk, chunk_byte_len).await?)
+                    .then_some(chunk.len() as u64))
             }
         }
     }
