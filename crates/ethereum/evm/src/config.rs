@@ -22,6 +22,11 @@ where
     C: EthereumHardforks + EthChainSpec + Hardforks,
 {
     if chain_spec
+        .fork(EthereumHardfork::Eip7805)
+        .active_at_timestamp_or_number(timestamp, block_number)
+    {
+        SpecId::PRAGUE
+    } else if chain_spec
         .fork(EthereumHardfork::Osaka)
         .active_at_timestamp_or_number(timestamp, block_number)
     {

@@ -113,7 +113,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -138,7 +138,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -234,7 +234,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -275,7 +275,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -313,7 +313,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -352,7 +352,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -421,7 +421,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -466,7 +466,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -508,7 +508,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -533,7 +533,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -545,7 +545,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -556,7 +556,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -567,7 +567,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -594,7 +594,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -603,7 +603,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -623,7 +623,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -644,7 +644,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -658,7 +658,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -671,7 +671,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -682,7 +682,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -707,7 +707,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -794,7 +794,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -816,7 +816,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -830,7 +830,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -849,7 +849,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -886,7 +886,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "1.0.23"
-source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#50bdf499ae550542283a7c3f08d447bac7eef449"
+source = "git+https://github.com/pellekrab/alloy?branch=focil_1.0.23#6718885fcd1e5aa25d5b938f1da14f40d97f123c"
 dependencies = [
  "alloy-primitives",
  "darling 0.20.11",
@@ -2246,7 +2246,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2916,7 +2916,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3187,7 +3187,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4449,7 +4449,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4467,7 +4467,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -6785,7 +6785,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -6822,9 +6822,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11210,7 +11210,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12067,7 +12067,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.8",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12713,7 +12713,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "319c70195101a93f56db4c74733e272d720768e13471f400c78406a326b172b0"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

@@ -689,6 +689,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Eip7805.boxed(), genesis.config.eip7805_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
