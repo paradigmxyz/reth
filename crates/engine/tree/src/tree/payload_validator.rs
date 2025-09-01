@@ -19,7 +19,7 @@ use alloy_consensus::{
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::Decodable;
+use alloy_rlp::Decodable;        use alloy_primitives::U256;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
@@ -49,7 +49,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::{HashMap, BTreeSet}, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -939,29 +939,6 @@ where
     where
         S: StateProvider,
     {
-        use alloy_primitives::U256;
-        use std::collections::BTreeSet;
-
-        // Early return if inclusion list is empty - nothing to validate
-        if il.as_ref().is_empty() {
-            return Ok(());
-        }
-
-        // TODO: Replace with actual inclusion list fork when available
-        // For now, only check for blocks with timestamp >= some future timestamp
-        // This prevents inclusion list validation during historical sync
-        // const INCLUSION_LIST_FORK_TIMESTAMP: u64 = 32; // Effectively disabled for now
-
-        // if block.timestamp() < INCLUSION_LIST_FORK_TIMESTAMP {
-        //     return Ok(());
-        // }
-
-        const INCLUSION_LIST_FORK_BLOCK: u64 = 32; // Disable till block 32
-
-        if block.number() < INCLUSION_LIST_FORK_BLOCK {
-            return Ok(());
-        }
-
         // 1) Gather all tx hashes already in the block
         let included: BTreeSet<_> =
             block.transactions_recovered().map(|tx| tx.inner().tx_hash()).collect();

@@ -140,14 +140,13 @@ pub fn validate_payload_timestamp(
         //
         // For `engine_newPayloadV4`:
         //
-        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        // 2. Client software **MUST** return ` -38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Prague fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
-
-    // let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
-    // TODO: Select timestamp for Amsterdam for now turn v5 on by default
-    if version.is_v5() && !is_prague {
+    
+    let is_eip7805 = chain_spec.is_eip7805_active_at_timestamp(timestamp);
+    if version.is_v5() && !is_eip7805 {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
         //
