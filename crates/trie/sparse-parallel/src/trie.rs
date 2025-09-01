@@ -31,7 +31,7 @@ pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// Configuration for controlling when parallelism is enabled in [`ParallelSparseTrie`] operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ParallelismThresholds {
     /// Minimum number of nodes to reveal before parallel processing is enabled.
     /// When `reveal_nodes` has fewer nodes than this threshold, they will be processed serially.
@@ -41,14 +41,6 @@ pub struct ParallelismThresholds {
     /// the updates will be processed serially.
     pub min_updated_nodes: usize,
 }
-
-/// Default parallelism thresholds used by the [`ParallelSparseTrie`].
-///
-/// These values were determined by performing benchmarks using gradually increasing values to judge
-/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
-/// would deteriorate to the point where PST might as well not be used.
-pub const DEFAULT_PARALLELISM_THRESHOLDS: ParallelismThresholds =
-    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
@@ -149,7 +141,7 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
-            parallelism_thresholds: DEFAULT_PARALLELISM_THRESHOLDS,
+            parallelism_thresholds: Default::default(),
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
