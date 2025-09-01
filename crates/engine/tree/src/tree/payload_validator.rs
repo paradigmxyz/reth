@@ -772,7 +772,7 @@ where
                     {
                         // Only clone the result when we need to modify it
                         let mut result = cached_tx.result.clone();
-                        
+
                         if let Some(coinbase_account) = result.state.get_mut(&coinbase) {
                             if let Ok(Some(coinbase_db)) = db.basic(coinbase) {
                                 // Current DB balance includes all fees from previous transactions

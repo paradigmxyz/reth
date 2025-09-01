@@ -22,7 +22,10 @@ use reth_ethereum::{
             NextBlockEnvAttributes, OnStateHook,
         },
         revm::{
-            context::{result::{ExecResultAndState, ExecutionResult}, TxEnv},
+            context::{
+                result::{ExecResultAndState, ExecutionResult},
+                TxEnv,
+            },
             db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,

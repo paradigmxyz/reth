@@ -59,23 +59,24 @@ where
         BlockExecutionError,
     > {
         match tx.tx() {
-            CustomTransaction::Op(op_tx) => self.inner.execute_transaction_without_commit(
-                Recovered::new_unchecked(op_tx, *tx.signer()),
-            ),
+            CustomTransaction::Op(op_tx) => self
+                .inner
+                .execute_transaction_without_commit(Recovered::new_unchecked(op_tx, *tx.signer())),
             CustomTransaction::Payment(..) => todo!(),
         }
     }
 
     fn commit_transaction(
         &mut self,
-        result: revm::context::result::ExecResultAndState<ExecutionResult<<Self::Evm as Evm>::HaltReason>>,
+        result: revm::context::result::ExecResultAndState<
+            ExecutionResult<<Self::Evm as Evm>::HaltReason>,
+        >,
         tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
         match tx.tx() {
-            CustomTransaction::Op(op_tx) => self.inner.commit_transaction(
-                result,
-                Recovered::new_unchecked(op_tx, *tx.signer()),
-            ),
+            CustomTransaction::Op(op_tx) => {
+                self.inner.commit_transaction(result, Recovered::new_unchecked(op_tx, *tx.signer()))
+            }
             CustomTransaction::Payment(..) => todo!(),
         }
     }
