@@ -1271,6 +1271,7 @@ where
             }
         }
 
+        info!(target: "rpc::engine", il = %il.len(), "serving getInclusionListV1");
         Ok(il)
     }
 
