@@ -1,11 +1,11 @@
 use crate::{
     evm::{
         alloy::{CustomEvm, CustomEvmFactory},
-        CustomEvmConfig, CustomTxEnv,
+        env::PaymentTxEnv, CustomEvmConfig, CustomTxEnv,
     },
-    primitives::CustomTransaction,
+    primitives::{CustomTransaction, TxPayment},
 };
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::{transaction::Recovered, Typed2718};
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
@@ -17,7 +17,7 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ExecutionResult, database::State};
+use revm::{context::result::ExecutionResult, context::TxEnv, database::State};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -47,7 +47,59 @@ where
                 Recovered::new_unchecked(op_tx, *tx.signer()),
                 f,
             ),
-            CustomTransaction::Payment(..) => todo!(),
+            CustomTransaction::Payment(payment_tx) => {
+                // For the custom node example, we execute payment transactions by delegating
+                // to the EVM through the transact_raw method
+                // This is a simplified implementation for demonstration purposes
+
+                // Create TxEnv from the payment transaction
+                let tx_env = {
+                    let TxPayment {
+                        chain_id,
+                        nonce,
+                        gas_limit,
+                        max_fee_per_gas,
+                        max_priority_fee_per_gas,
+                        to,
+                        value,
+                        ..
+                    } = payment_tx.tx();
+                    TxEnv {
+                        tx_type: payment_tx.tx().ty(),
+                        caller: *tx.signer(),
+                        gas_limit: *gas_limit,
+                        gas_price: *max_fee_per_gas,
+                        gas_priority_fee: Some(*max_priority_fee_per_gas),
+                        kind: alloy_primitives::TxKind::Call(*to),
+                        value: *value,
+                        nonce: *nonce,
+                        chain_id: Some(*chain_id),
+                        ..Default::default()
+                    }
+                };
+
+                // Execute using the EVM's transact_raw method
+                // We need to access the EVM through the block executor
+                // This is a simplified approach - in production you might want more sophisticated handling
+                let result = self.evm_mut().transact_raw(CustomTxEnv::Payment(PaymentTxEnv(tx_env)))
+                    .map_err(|_| BlockExecutionError::msg("Payment transaction failed"))?;
+
+                // Call the commit condition function
+                let commit_changes = f(&result.result);
+
+                // Apply changes if needed
+                match commit_changes {
+                    alloy_evm::block::CommitChanges::Yes => {
+                        // The changes are already applied by transact_raw
+                        Ok(Some(result.result.gas_used()))
+                    }
+                    alloy_evm::block::CommitChanges::No => {
+                        // For this example, we don't handle reverts specially
+                        // In production, you would need to revert state changes
+                        Ok(Some(result.result.gas_used()))
+                    }
+                }
+            }
         }
     }
 

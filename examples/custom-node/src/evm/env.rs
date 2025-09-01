@@ -289,6 +289,18 @@ impl FromTxWithEncoded<TxPayment> for TxEnv {
     }
 }
 
+impl FromRecoveredTx<PaymentTxEnv> for OpTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &PaymentTxEnv, _sender: Address) -> Self {
+        OpTransaction::new(tx.0.clone())
+    }
+}
+
+impl FromTxWithEncoded<PaymentTxEnv> for OpTransaction<TxEnv> {
+    fn from_encoded_tx(tx: &PaymentTxEnv, _sender: Address, _encoded: Bytes) -> Self {
+        OpTransaction::new(tx.0.clone())
+    }
+}
+
 impl FromRecoveredTx<OpTxEnvelope> for CustomTxEnv {
     fn from_recovered_tx(tx: &OpTxEnvelope, sender: Address) -> Self {
         Self::Op(OpTransaction::from_recovered_tx(tx, sender))
