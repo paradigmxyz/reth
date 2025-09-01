@@ -93,8 +93,7 @@ impl<
         self.cached_state = Some((head, cached_reads));
     }
 
-    /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
-    /// [`Self::add_flash_block`] on top of the latest state.
+    /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received earlier.
     ///
     /// Returns None if the flashblock doesn't attach to the latest header.
     fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
