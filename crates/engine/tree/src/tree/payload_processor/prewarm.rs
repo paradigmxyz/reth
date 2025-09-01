@@ -42,6 +42,9 @@ use tracing::{debug, trace};
 
 use super::TxCache;
 
+// Skip first N transactions to avoid cache invalidation during prewarming
+const SKIP_FIRST_N_TRANSACTIONS: usize = 18;
+
 /// Classifies a transaction based on its characteristics
 fn classify_transaction<T, E>(tx: &T) -> &'static str
 where
@@ -167,10 +170,21 @@ where
             let spawn_time = spawn_start.elapsed();
             metrics::histogram!("prewarm.thread_spawn_ms").record(spawn_time.as_millis() as f64);
             metrics::gauge!("prewarm.worker_count").set(max_concurrency as f64);
+
+            // Skip first N transactions to avoid cache invalidation from early MEV/arbitrage txs
+            let mut skip_count = 0;
+
             let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
+                // Skip first N transactions
+                if skip_count < SKIP_FIRST_N_TRANSACTIONS {
+                    skip_count += 1;
+
+                    continue; // Don't prewarm this transaction
+                }
+
                 let task_idx = executing % max_concurrency;
 
                 if handles.len() <= task_idx {
@@ -191,7 +205,6 @@ where
 
                 executing += 1;
             }
-
             // drop handle and wait for all tasks to finish and drop theirs
             drop(done_tx);
             drop(handles);
