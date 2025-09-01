@@ -322,14 +322,14 @@ pub const fn validate_il_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V1 |
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V4  => {
             if has_il {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))
             }
         }
-        EngineApiMessageVersion::V6 => {
+            EngineApiMessageVersion::V5 |
+            EngineApiMessageVersion::V6 => {
             // NOTE
             //
             // the IL is not part of the execution payload, so we only check for the payload
