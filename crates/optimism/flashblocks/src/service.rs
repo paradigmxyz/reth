@@ -1,7 +1,6 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
 use alloy_primitives::B256;
-use eyre::OptionExt;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock};
 use reth_errors::RethError;
@@ -99,19 +98,21 @@ impl<
     ///
     /// Returns None if the flashblock doesn't attach to the latest header.
     fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
+        trace!("Attempting new flashblock");
+
         let latest = self
             .provider
             .latest_header()?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
         let latest_hash = latest.hash();
 
-        let attrs = self
-            .blocks
-            .base()
-            .and_then(|v| v.base.clone())
-            .ok_or_eyre("Missing base flashblock")?;
+        let Some(attrs) = self.blocks.payload_base() else {
+            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing flashblock payload base");
+            return Ok(None)
+        };
 
         if attrs.parent_hash != latest_hash {
+            trace!(flashblock_parent = ?attrs.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
             return Ok(None)
         }
@@ -162,19 +163,19 @@ impl<
     }
 }
 
-impl<
-        N: NodePrimitives,
-        S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
-        Provider: StateProviderFactory
-            + CanonStateSubscriptions<Primitives = N>
-            + BlockReaderIdExt<
-                Header = HeaderTy<N>,
-                Block = BlockTy<N>,
-                Transaction = N::SignedTx,
-                Receipt = ReceiptTy<N>,
-            > + Unpin,
-    > Stream for FlashBlockService<N, S, EvmConfig, Provider>
+impl<N, S, EvmConfig, Provider> Stream for FlashBlockService<N, S, EvmConfig, Provider>
+where
+    N: NodePrimitives,
+    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
+    Provider: StateProviderFactory
+        + CanonStateSubscriptions<Primitives = N>
+        + BlockReaderIdExt<
+            Header = HeaderTy<N>,
+            Block = BlockTy<N>,
+            Transaction = N::SignedTx,
+            Receipt = ReceiptTy<N>,
+        > + Unpin,
 {
     type Item = eyre::Result<Option<PendingBlock<N>>>;
 
@@ -201,6 +202,7 @@ impl<
                 // if we have a new canonical message, we know the currently tracked flashblock is
                 // invalidated
                 if this.current.take().is_some() {
+                    trace!("Clearing current flashblock on new canonical block");
                     return Poll::Ready(Some(Ok(None)))
                 }
             }
@@ -231,9 +233,13 @@ impl<
     }
 }
 
-/// Simple wrapper around an ordered B-tree to keep track of a sequence of flashblocks by index
+/// Simple wrapper around an ordered B-tree to keep track of a sequence of flashblocks by index.
 #[derive(Debug)]
 struct FlashBlockSequence {
+    /// tracks the individual flashblocks in order
+    ///
+    /// With a blocktime of 2s and flashblock tickrate of ~200ms, we expect 10 or 11 flashblocks
+    /// per slot.
     inner: BTreeMap<u64, FlashBlock>,
 }
 
@@ -256,9 +262,16 @@ impl FlashBlockSequence {
 
         // only insert if we we previously received the same block, assume we received index 0
         if self.block_number() == Some(flashblock.metadata.block_number) {
-            trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len() + 1  ,"Received followup flashblock");
+            trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, flashblock);
+        } else {
+            trace!(number=%flashblock.block_number(), index = %flashblock.index, current=?self.block_number()  ,"Ignoring untracked flashblock following");
         }
+    }
+
+    /// Returns the number of tracked flashblocks.
+    fn count(&self) -> usize {
+        self.inner.len()
     }
 
     /// Returns the first block number
@@ -266,24 +279,29 @@ impl FlashBlockSequence {
         Some(self.inner.values().next()?.metadata.block_number)
     }
 
+    /// Returns the payload base of the first tracked flashblock.
+    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+        self.inner.values().next()?.base.clone()
+    }
+
     fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Return base flashblock
-    /// Base flashblock is the first flashblock of index 0 in the sequence
-    fn base(&self) -> Option<&FlashBlock> {
-        self.inner.get(&0)
-    }
-
     /// Iterator over sequence of ready flashblocks
+    ///
     /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
     /// the sequence
+    ///
+    /// Note: flashblocks start at `index 0`.
     fn iter_ready(&self) -> impl Iterator<Item = &FlashBlock> {
         self.inner
             .values()
             .enumerate()
-            .take_while(|(idx, block)| block.index == *idx as u64)
+            .take_while(|(idx, block)| {
+                // flashblock index 0 is the first flashblock
+                block.index == *idx as u64
+            })
             .map(|(_, block)| block)
     }
 }
