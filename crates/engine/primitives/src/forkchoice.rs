@@ -435,4 +435,22 @@ mod tests {
         // Test with a hash that doesn't match any of the hashes in ForkchoiceState
         assert_eq!(ForkchoiceStateHash::find(&state, non_matching_hash), None);
     }
+    #[test]
+    fn test_forkchoice_status_from_payload() {
+        assert_eq!(ForkchoiceStatus::from(PayloadStatusEnum::Valid), ForkchoiceStatus::Valid);
+        assert_eq!(ForkchoiceStatus::from(PayloadStatusEnum::Accepted), ForkchoiceStatus::Valid);
+        assert_eq!(
+            ForkchoiceStatus::from(PayloadStatusEnum::Invalid { validation_error: String::new() }),
+            ForkchoiceStatus::Invalid
+        );
+        assert_eq!(ForkchoiceStatus::from(PayloadStatusEnum::Syncing), ForkchoiceStatus::Syncing);
+    }
+
+    #[test]
+    fn test_forkchoice_state_hash_as_ref() {
+        let hash = B256::random();
+        assert_eq!(*ForkchoiceStateHash::Head(hash).as_ref(), hash);
+        assert_eq!(*ForkchoiceStateHash::Safe(hash).as_ref(), hash);
+        assert_eq!(*ForkchoiceStateHash::Finalized(hash).as_ref(), hash);
+    }
 }
