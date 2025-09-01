@@ -91,7 +91,7 @@ where
             match msg {
                 Ok(Message::Binary(bytes)) => return Poll::Ready(Some(FlashBlock::decode(bytes))),
                 Ok(Message::Ping(_) | Message::Pong(_)) => {
-                    // can ginore for now
+                    // can ignore for now
                 }
                 Ok(msg) => {
                     debug!("Received unexpected message: {:?}", msg);
@@ -124,7 +124,7 @@ where
 
 impl<S: Debug, C: Debug> Debug for WsFlashBlockStream<S, C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FlashBlockStream")
+        f.debug_struct("WsFlashBlockStream")
             .field("ws_url", &self.ws_url)
             .field("state", &self.state)
             .field("connector", &self.connector)
