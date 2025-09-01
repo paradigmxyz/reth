@@ -588,7 +588,7 @@ where
 /// database.
 fn compute_state_root<Provider>(
     provider: &Provider,
-    mut prefix_sets: Option<TriePrefixSets>,
+    prefix_sets: Option<TriePrefixSets>,
 ) -> Result<B256, InitStorageError>
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
@@ -603,7 +603,7 @@ where
         let mut state_root =
             StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
 
-        if let Some(sets) = prefix_sets.take() {
+        if let Some(sets) = prefix_sets.clone() {
             state_root = state_root.with_prefix_sets(sets);
         }
 
