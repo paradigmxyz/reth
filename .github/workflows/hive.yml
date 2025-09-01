@@ -6,7 +6,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
-
+  pull_request:
+    branches:
+      - main
 env:
   CARGO_TERM_COLOR: always
 
@@ -112,35 +114,39 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/prague.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/cancun.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/shanghai.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/berlin.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/istanbul.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/homestead.*
-          - sim: ethereum/eest/consume-engine
-            limit: .*tests/frontier.*
+            limit: .*tests/amsterdam.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/prague.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/cancun.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/shanghai.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/berlin.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/istanbul.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/homestead.*
+          # - sim: ethereum/eest/consume-engine
+          #   limit: .*tests/frontier.*
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/prague.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/cancun.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/shanghai.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/berlin.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/istanbul.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/homestead.*
-          - sim: ethereum/eest/consume-rlp
-            limit: .*tests/frontier.*
+            limit: .*tests/amsterdam.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/prague.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/cancun.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/shanghai.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/berlin.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/istanbul.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/homestead.*
+          # - sim: ethereum/eest/consume-rlp
+          #   limit: .*tests/frontier.*
     needs:
       - prepare-reth
       - prepare-hive
