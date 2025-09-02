@@ -130,17 +130,16 @@ where
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
-    if header.block_access_list_hash().is_some() &&
-        alloy_primitives::keccak256(alloy_rlp::encode(&body.block_access_list())) !=
-            header.block_access_list_hash().unwrap()
+    if let (Some(expected_hash), Some(body_bal)) =
+        (header.block_access_list_hash(), body.block_access_list())
     {
-        return Err(ConsensusError::BodyBlockAccessListHashDiff(
-            GotExpected {
-                got: alloy_primitives::keccak256(alloy_rlp::encode(body.block_access_list())),
-                expected: header.block_access_list_hash().unwrap(),
-            }
-            .into(),
-        ))
+        let got_hash = alloy_primitives::keccak256(alloy_rlp::encode(body_bal));
+
+        if got_hash != expected_hash {
+            return Err(ConsensusError::BodyBlockAccessListHashDiff(
+                GotExpected { got: got_hash, expected: expected_hash }.into(),
+            ));
+        }
     }
 
     Ok(())

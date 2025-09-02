@@ -198,7 +198,7 @@ pub trait BlockBody:
     }
 
     /// Returns the block access list for the block body.
-    fn block_access_list(&self) -> &BlockAccessList;
+    fn block_access_list(&self) -> Option<&BlockAccessList>;
 }
 
 impl<T, H> BlockBody for alloy_consensus::BlockBody<T, H>
@@ -229,8 +229,8 @@ where
         Some(&self.ommers)
     }
 
-    fn block_access_list(&self) -> &BlockAccessList {
-        self.block_access_list.as_ref().unwrap()
+    fn block_access_list(&self) -> Option<&BlockAccessList> {
+        self.block_access_list.as_ref()
     }
 }
 

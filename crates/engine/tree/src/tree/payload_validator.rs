@@ -596,9 +596,9 @@ where
             ExecutedTrieUpdates::Present(Arc::new(trie_output))
         };
 
-        if let Some(executed_bal) = output.result.block_access_list.as_ref() {
-            let block_bal = block.body().block_access_list();
-
+        if let (Some(executed_bal), Some(block_bal)) =
+            (output.result.block_access_list.as_ref(), block.body().block_access_list())
+        {
             if !validate_block_access_list_against_execution(executed_bal) ||
                 block_bal.as_slice() != executed_bal.as_slice()
             {
