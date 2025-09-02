@@ -186,6 +186,7 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        let mut taken = false;
 
         // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
@@ -193,13 +194,19 @@ where
                 Ok(flashblock) => match this.blocks.insert(flashblock) {
                     Ok(_) => {
                         if this.current.take().is_some() {
-                            return Poll::Ready(None)
+                            taken = true;
                         }
                     }
                     Err(err) => debug!(%err, "Failed to prepare flashblock"),
                 },
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
+        }
+
+        // is current block taken?
+        if taken {
+            // output none to erase it
+            return Poll::Ready(None);
         }
 
         // advance new canonical message, if any to reset flashblock
