@@ -25,14 +25,14 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    block::BlockExecutor, eth::validate_block_access_list_against_execution,
+    execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -595,6 +595,20 @@ where
         } else {
             ExecutedTrieUpdates::Present(Arc::new(trie_output))
         };
+        if !output
+            .result
+            .block_access_list
+            .as_ref()
+            .map_or(true, |access_list| validate_block_access_list_against_execution(access_list)) ||
+            block.body().block_access_list().as_slice() !=
+                output.result.block_access_list.as_ref().unwrap().as_slice()
+        {
+            return Err(InsertBlockError::new(
+                block.into_sealed_block(),
+                ConsensusError::BlockAccessListMismatch.into(),
+            )
+            .into());
+        }
 
         Ok(ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {

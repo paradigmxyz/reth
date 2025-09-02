@@ -408,6 +408,10 @@ pub enum ConsensusError {
     #[error("mismatched block access list hash: {0}")]
     BodyBlockAccessListHashDiff(GotExpectedBoxed<B256>),
 
+    /// Error when the block access list is different from the expected access list.
+    #[error("block access list mismatch")]
+    BlockAccessListMismatch,
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),
