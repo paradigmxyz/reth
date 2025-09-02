@@ -85,7 +85,7 @@ Let's understand how an `EthMessage` is implemented by taking a look at the `Tra
 Transactions (0x02)
 [tx₁, tx₂, ...]
 
-Specify transactions that the peer should make sure is included on its transaction queue.
+Specify transactions that the peer should make sure are included in its transaction queue.
 The items in the list are transactions in the format described in the main Ethereum specification.
 ...
 

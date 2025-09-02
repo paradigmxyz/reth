@@ -76,6 +76,7 @@ members = [
     "crates/optimism/cli",
     "crates/optimism/consensus",
     "crates/optimism/evm/",
+    "crates/optimism/flashblocks/",
     "crates/optimism/hardforks/",
     "crates/optimism/node/",
     "crates/optimism/payload/",
@@ -160,6 +161,7 @@ members = [
     "examples/network-txpool/",
     "examples/network/",
     "examples/network-proxy/",
+    "examples/node-builder-api/",
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
     "examples/op-db-access/",
@@ -430,6 +432,7 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = false }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-optimism-flashblocks = { path = "crates/optimism/flashblocks" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-convert = { path = "crates/rpc/rpc-convert" }
 reth-stages = { path = "crates/stages/stages" }
@@ -456,78 +459,68 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "28.0.1", default-features = false }
-revm-bytecode = { version = "6.0.1", default-features = false }
-revm-database = { version = "7.0.1", default-features = false }
-revm-state = { version = "7.0.1", default-features = false }
-revm-primitives = { version = "20.0.0", default-features = false }
-revm-interpreter = { version = "23.0.1", default-features = false }
-revm-inspector = { version = "8.0.2", default-features = false }
-revm-context = { version = "9.0.1", default-features = false }
-revm-context-interface = { version = "8.0.1", default-features = false }
-revm-database-interface = { version = "7.0.1", default-features = false }
-op-revm = { version = "9.0.1", default-features = false }
-revm-inspectors = "0.28.0"
+revm = { version = "29.0.0", default-features = false }
+revm-bytecode = { version = "6.2.2", default-features = false }
+revm-database = { version = "7.0.5", default-features = false }
+revm-state = { version = "7.0.5", default-features = false }
+revm-primitives = { version = "20.2.1", default-features = false }
+revm-interpreter = { version = "25.0.2", default-features = false }
+revm-inspector = { version = "10.0.0", default-features = false }
+revm-context = { version = "9.0.2", default-features = false }
+revm-context-interface = { version = "10.1.0", default-features = false }
+revm-database-interface = { version = "7.0.5", default-features = false }
+op-revm = { version = "10.0.0", default-features = false }
+revm-inspectors = "0.29.0"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
-alloy-dyn-abi = "1.3.0"
+alloy-dyn-abi = "1.3.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.18", default-features = false, git = "https://github.com/pellekrab/evm", branch = "focil-0.11" }
-alloy-primitives = { version = "1.2.0", default-features = false, features = [
-    "map-foldhash",
-] }
-alloy-rlp = { version = "0.3.10", default-features = false, features = [
-    "core-net",
-] }
-alloy-sol-macro = "1.2.0"
-alloy-sol-types = { version = "1.2.0", default-features = false }
-alloy-trie = { version = "0.9.0", default-features = false }
+alloy-evm = { version = "0.20.1", default-features = false }
+alloy-primitives = { version = "1.3.1", default-features = false, features = ["map-foldhash"] }
+alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
+alloy-sol-macro = "1.3.1"
+alloy-sol-types = { version = "1.3.1", default-features = false }
+alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.2.7"
+alloy-hardforks = "0.3.0"
 
-alloy-consensus = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-contract = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-eips = { default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-genesis = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-json-rpc = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-network = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-network-primitives = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-provider = { version = "1.0.12", features = [
-    "reqwest",
-], default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-pubsub = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-client = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types = { version = "1.0.12", features = [
-    "eth",
-], default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-admin = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-anvil = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-beacon = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-debug = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-engine = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-eth = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-mev = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-trace = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-txpool = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-serde = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-signer = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-signer-local = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport = { version = "1.0.12", git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-http = { version = "1.0.12", features = [
-    "reqwest-rustls-tls",
-], default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-ipc = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-ws = { version = "1.0.12", default-features = false, git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
+alloy-consensus = { version = "1.0.27", default-features = false }
+alloy-contract = { version = "1.0.27", default-features = false }
+alloy-eips = { version = "1.0.27", default-features = false }
+alloy-genesis = { version = "1.0.27", default-features = false }
+alloy-json-rpc = { version = "1.0.27", default-features = false }
+alloy-network = { version = "1.0.27", default-features = false }
+alloy-network-primitives = { version = "1.0.27", default-features = false }
+alloy-provider = { version = "1.0.27", features = ["reqwest"], default-features = false }
+alloy-pubsub = { version = "1.0.27", default-features = false }
+alloy-rpc-client = { version = "1.0.27", default-features = false }
+alloy-rpc-types = { version = "1.0.27", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "1.0.27", default-features = false }
+alloy-rpc-types-anvil = { version = "1.0.27", default-features = false }
+alloy-rpc-types-beacon = { version = "1.0.27", default-features = false }
+alloy-rpc-types-debug = { version = "1.0.27", default-features = false }
+alloy-rpc-types-engine = { version = "1.0.27", default-features = false }
+alloy-rpc-types-eth = { version = "1.0.27", default-features = false }
+alloy-rpc-types-mev = { version = "1.0.27", default-features = false }
+alloy-rpc-types-trace = { version = "1.0.27", default-features = false }
+alloy-rpc-types-txpool = { version = "1.0.27", default-features = false }
+alloy-serde = { version = "1.0.27", default-features = false }
+alloy-signer = { version = "1.0.27", default-features = false }
+alloy-signer-local = { version = "1.0.27", default-features = false }
+alloy-transport = { version = "1.0.27" }
+alloy-transport-http = { version = "1.0.27", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "1.0.27", default-features = false }
+alloy-transport-ws = { version = "1.0.27", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.18", default-features = false, git = "https://github.com/pellekrab/evm", branch = "focil-0.11" }
-alloy-op-hardforks = "0.2.2"
-op-alloy-rpc-types = { version = "0.18.12", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.18.12", default-features = false }
-op-alloy-network = { version = "0.18.12", default-features = false }
-op-alloy-consensus = { version = "0.18.12", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.18.12", default-features = false }
+alloy-op-evm = { version = "0.20.1", default-features = false }
+alloy-op-hardforks = "0.3.0"
+op-alloy-rpc-types = { version = "0.19.0", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.19.0", default-features = false }
+op-alloy-network = { version = "0.19.0", default-features = false }
+op-alloy-consensus = { version = "0.19.0", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.19.0", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
@@ -542,6 +535,7 @@ bincode = "1.3"
 bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
 bytes = { version = "1.5", default-features = false }
+brotli = "8"
 cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"
@@ -627,11 +621,11 @@ discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
-jsonrpsee = "0.25.1"
-jsonrpsee-core = "0.25.1"
-jsonrpsee-server = "0.25.1"
-jsonrpsee-http-client = "0.25.1"
-jsonrpsee-types = "0.25.1"
+jsonrpsee = "0.26.0"
+jsonrpsee-core = "0.26.0"
+jsonrpsee-server = "0.26.0"
+jsonrpsee-http-client = "0.26.0"
+jsonrpsee-types = "0.26.0"
 
 # http
 http = "1.0"
@@ -729,35 +723,36 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
-alloy-consensus = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-contract = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-eips = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-genesis = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-json-rpc = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-network = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-network-primitives = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-provider = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-pubsub = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-client = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-admin = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-anvil = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-beacon = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-debug = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-engine = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-eth = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-mev = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-trace = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-rpc-types-txpool = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-serde = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-signer = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-signer-local = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-http = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-ipc = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
-alloy-transport-ws = { git = "https://github.com/pellekrab/alloy", branch = "focil_1.0.23" }
+alloy-consensus = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-contract = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-eips = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-genesis = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-json-rpc = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-network = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-network-primitives = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-provider = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-pubsub = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-client = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-admin = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-anvil = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-beacon = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-debug = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-engine = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-eth = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-mev = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-trace = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-rpc-types-txpool = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-serde = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-signer = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-signer-local = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-transport = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-transport-http = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-transport-ipc = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-transport-ws = { git = "https://github.com/pellekrab/alloy", branch = "focil-1.0.27" }
+alloy-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil-0.3.0" }
+alloy-evm = { git = "https://github.com/PelleKrab/evm.git", branch = "focil-20.1" }
 
-alloy-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil-0.2.7" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

@@ -461,7 +461,7 @@ mod tests {
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
-    use alloy_primitives::{hex, B256, U256};
+    use alloy_primitives::{b256, hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
@@ -516,10 +516,7 @@ mod tests {
             .chain(Chain::mainnet())
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .earliest_block(Some(1))
             .latest_block(Some(2))
             .total_difficulty(None)
@@ -538,10 +535,7 @@ mod tests {
             .chain(Chain::sepolia())
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xaa, 0xbb, 0xcc, 0xdd]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .total_difficulty(Some(U256::from(42u64)))
             .earliest_block(None)
             .latest_block(None)
@@ -578,10 +572,7 @@ mod tests {
             .chain(Chain::from_named(NamedChain::Mainnet))
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .earliest_block(Some(15_537_394))
             .latest_block(Some(18_000_000))
             .build()
@@ -617,10 +608,7 @@ mod tests {
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .earliest_block(Some(15_537_394))
             .latest_block(Some(18_000_000))
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .build()
             .into_message();
 

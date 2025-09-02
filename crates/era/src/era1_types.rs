@@ -4,6 +4,7 @@
 
 use crate::{
     e2s_types::{Entry, IndexEntry},
+    era_file_ops::EraFileId,
     execution_types::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
 use alloy_primitives::BlockNumber;
@@ -56,12 +57,12 @@ pub struct BlockIndex {
     starting_number: BlockNumber,
 
     /// Offsets to data at each block number
-    offsets: Vec<u64>,
+    offsets: Vec<i64>,
 }
 
 impl BlockIndex {
     /// Get the offset for a specific block number
-    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<u64> {
+    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<i64> {
         if block_number < self.starting_number {
             return None;
         }
@@ -72,7 +73,7 @@ impl BlockIndex {
 }
 
 impl IndexEntry for BlockIndex {
-    fn new(starting_number: u64, offsets: Vec<u64>) -> Self {
+    fn new(starting_number: u64, offsets: Vec<i64>) -> Self {
         Self { starting_number, offsets }
     }
 
@@ -84,7 +85,7 @@ impl IndexEntry for BlockIndex {
         self.starting_number
     }
 
-    fn offsets(&self) -> &[u64] {
+    fn offsets(&self) -> &[i64] {
         &self.offsets
     }
 }
@@ -122,11 +123,37 @@ impl Era1Id {
         self
     }
 
+    // Helper function to calculate the number of eras per era1 file,
+    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
+    // Most of the time it should be 1, but it can never be more than 2 eras per file
+    // as there is a maximum of 8192 blocks per era1 file.
+    const fn calculate_era_count(&self, first_era: u64) -> u64 {
+        // Calculate the actual last block number in the range
+        let last_block = self.start_block + self.block_count as u64 - 1;
+        // Find which era the last block belongs to
+        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
+        // Count how many eras we span
+        last_era - first_era + 1
+    }
+}
+
+impl EraFileId for Era1Id {
+    fn network_name(&self) -> &str {
+        &self.network_name
+    }
+
+    fn start_number(&self) -> u64 {
+        self.start_block
+    }
+
+    fn count(&self) -> u32 {
+        self.block_count
+    }
     /// Convert to file name following the era file naming:
     /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era(1)`
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
-    pub fn to_file_name(&self) -> String {
+    fn to_file_name(&self) -> String {
         // Find which era the first block belongs to
         let era_number = self.start_block / MAX_BLOCKS_PER_ERA1 as u64;
         let era_count = self.calculate_era_count(era_number);
@@ -140,19 +167,6 @@ impl Era1Id {
             // Format: `<config-name>-<era-number>-<era-count>-00000000.era1`
             format!("{}-{:05}-{:05}-00000000.era1", self.network_name, era_number, era_count)
         }
-    }
-
-    // Helper function to calculate the number of eras per era1 file,
-    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
-    // Most of the time it should be 1, but it can never be more than 2 eras per file
-    // as there is a maximum of 8192 blocks per era1 file.
-    const fn calculate_era_count(&self, first_era: u64) -> u64 {
-        // Calculate the actual last block number in the range
-        let last_block = self.start_block + self.block_count as u64 - 1;
-        // Find which era the last block belongs to
-        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
-        // Count how many eras we span
-        last_era - first_era + 1
     }
 }
 

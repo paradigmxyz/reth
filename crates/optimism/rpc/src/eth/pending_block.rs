@@ -9,7 +9,7 @@ use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiError, PendingBlock};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ReceiptProvider,
 };
@@ -30,6 +30,11 @@ where
         self.inner.eth_api.pending_env_builder()
     }
 
+    #[inline]
+    fn pending_block_kind(&self) -> PendingBlockKind {
+        self.inner.eth_api.pending_block_kind()
+    }
+
     /// Returns the locally built pending block
     async fn local_pending_block(
         &self,
@@ -40,6 +45,10 @@ where
         )>,
         Self::Error,
     > {
+        if let Ok(Some(block)) = self.pending_flashblock() {
+            return Ok(Some(block));
+        }
+
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()

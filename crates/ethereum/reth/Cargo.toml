@@ -124,12 +124,14 @@ node = [
     "provider",
     "consensus",
     "evm",
+    "network",
     "node-api",
     "dep:reth-node-ethereum",
     "dep:reth-node-builder",
     "dep:reth-engine-local",
     "rpc",
     "trie-db",
+    "pool",
 ]
 pool = ["dep:reth-transaction-pool"]
 rpc = [

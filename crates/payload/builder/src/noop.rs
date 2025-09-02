@@ -50,12 +50,9 @@ where
                     tx.send(Ok(id)).ok()
                 }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
-                PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::PayloadTimestamp(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Subscribe(_) => None,
-                PayloadServiceCommand::UpdatePayloadWithInclusionList(id, _, tx) => {
-                    tx.send(Ok(id)).ok()
-                }
             };
         }
     }

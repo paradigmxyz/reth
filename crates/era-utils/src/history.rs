@@ -10,6 +10,7 @@ use reth_db_api::{
 use reth_era::{
     e2s_types::E2sError,
     era1_file::{BlockTupleIterator, Era1Reader},
+    era_file_ops::StreamReader,
     execution_types::BlockTuple,
     DecodeCompressed,
 };
