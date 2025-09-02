@@ -37,6 +37,7 @@ pub struct FlashBlockService<
     rx: S,
     current: Option<PendingBlock<N>>,
     blocks: FlashBlockSequence<N::SignedTx>,
+    rebuild: bool,
     evm_config: EvmConfig,
     provider: Provider,
     canon_receiver: CanonStateNotifications<N>,
@@ -71,6 +72,7 @@ where
             canon_receiver: provider.subscribe_to_canonical_state(),
             provider,
             cached_state: None,
+            rebuild: false,
         }
     }
 
@@ -186,27 +188,16 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        let mut taken = false;
 
         // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
                 Ok(flashblock) => match this.blocks.insert(flashblock) {
-                    Ok(_) => {
-                        if this.current.take().is_some() {
-                            taken = true;
-                        }
-                    }
+                    Ok(_) => this.rebuild = true,
                     Err(err) => debug!(%err, "Failed to prepare flashblock"),
                 },
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
-        }
-
-        // is current block taken?
-        if taken {
-            // output none to erase it
-            return Poll::Ready(None);
         }
 
         // advance new canonical message, if any to reset flashblock
@@ -223,9 +214,7 @@ where
             }
         }
 
-        // is current block not taken?
-        if this.current.is_some() {
-            // execution is not needed
+        if !this.rebuild && this.current.is_some() {
             return Poll::Pending;
         }
 
@@ -234,6 +223,7 @@ where
             Ok(Some(new_pending)) => {
                 // built a new pending block
                 this.current = Some(new_pending.clone());
+                this.rebuild = false;
                 return Poll::Ready(Some(Ok(Some(new_pending))));
             }
             Ok(None) => {
