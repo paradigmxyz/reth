@@ -255,7 +255,7 @@ where
         // sorting the reverts vectors.
         //
         // See: https://github.com/bluealloy/revm/pull/1827
-        if bundle_state != output.state {
+        // if bundle_state != output.state {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
                 &output.state,
@@ -273,14 +273,14 @@ where
 
             let diff_path = self.save_diff(filename, &bundle_state_sorted, &output_state_sorted)?;
 
-            warn!(
-                target: "engine::invalid_block_hooks::witness",
-                diff_path = %diff_path.display(),
-                original_path = %original_path.display(),
-                re_executed_path = %re_executed_path.display(),
-                "Bundle state mismatch after re-execution"
-            );
-        }
+            // warn!(
+            //     target: "engine::invalid_block_hooks::witness",
+            //     diff_path = %diff_path.display(),
+            //     original_path = %original_path.display(),
+            //     re_executed_path = %re_executed_path.display(),
+            //     "Bundle state mismatch after re-execution"
+            // );
+        // }
 
         // Calculate the state root and trie updates after re-execution. They should match
         // the original ones.
