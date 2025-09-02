@@ -228,7 +228,7 @@ fn block1(
     );
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
-    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.withdrawals = Some(Withdrawals::new(std::iter::once(Withdrawal::default()).collect()));
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
@@ -285,7 +285,7 @@ fn block2(
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
 
-    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.withdrawals = Some(Withdrawals::new(std::iter::once(Withdrawal::default()).collect()));
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -343,7 +343,7 @@ fn block3(
     let state_root = bundle_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
-    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.withdrawals = Some(Withdrawals::new(std::iter::once(Withdrawal::default()).collect()));
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -426,7 +426,7 @@ fn block4(
     let state_root = bundle_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
-    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.withdrawals = Some(Withdrawals::new(std::iter::once(Withdrawal::default()).collect()));
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -506,7 +506,7 @@ fn block5(
     let state_root = bundle_state_root(&extended);
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
-    body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.withdrawals = Some(Withdrawals::new(std::iter::once(Withdrawal::default()).collect()));
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
