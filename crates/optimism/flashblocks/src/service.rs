@@ -190,14 +190,14 @@ where
         // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
-                Ok(flashblock) => {
-                    if let Err(err) = this.blocks.insert(flashblock) {
-                        debug!(%err, "Failed to prepare flashblock");
+                Ok(flashblock) => match this.blocks.insert(flashblock) {
+                    Ok(_) => {
+                        if this.current.take().is_some() {
+                            return Poll::Ready(None)
+                        }
                     }
-                    if this.current.take().is_some() {
-                        return Poll::Ready(None);
-                    }
-                }
+                    Err(err) => debug!(%err, "Failed to prepare flashblock"),
+                },
                 Err(err) => return Poll::Ready(Some(Err(err))),
             }
         }
@@ -281,11 +281,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// TRUE if there are no flashblocks.
-    fn is_empty(&self) -> bool {
-        self.inner.is_empty()
     }
 
     /// Returns the number of tracked flashblocks.
