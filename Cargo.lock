@@ -8310,9 +8310,11 @@ dependencies = [
 name = "reth-ethereum-consensus"
 version = "1.6.0"
 dependencies = [
+ "alloy-block-access-list",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",

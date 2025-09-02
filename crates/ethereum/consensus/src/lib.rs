@@ -106,7 +106,13 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
+        validate_block_post_execution(
+            block,
+            &self.chain_spec,
+            &result.receipts,
+            &result.requests,
+            &result.block_access_list,
+        )
     }
 }
 
