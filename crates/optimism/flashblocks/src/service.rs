@@ -219,13 +219,14 @@ where
             return Poll::Pending;
         }
 
+        let now = Instant::now();
         // try to build a block on top of latest
         match this.execute() {
             Ok(Some(new_pending)) => {
                 // built a new pending block
                 this.current = Some(new_pending.clone());
                 this.rebuild = false;
-                trace!(parent_hash=%new_pending.block().parent_hash(), block_number=new_pending.block().number(), flash_blocks=this.blocks.count(),  "Clearing current flashblock on new canonical block");
+                trace!(parent_hash=%new_pending.block().parent_hash(), block_number=new_pending.block().number(), flash_blocks=this.blocks.count(), elapsed=?now.elapsed(), "Built new block with flashblocks");
                 return Poll::Ready(Some(Ok(Some(new_pending))));
             }
             Ok(None) => {
