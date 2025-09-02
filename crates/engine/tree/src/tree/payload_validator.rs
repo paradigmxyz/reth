@@ -12,7 +12,7 @@ use crate::tree::{
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
     PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{transaction::Either, TxReceipt};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -482,6 +482,14 @@ where
         }
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        
+        // Create temporary timing context for state root computation
+        let start_time = Instant::now();
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"E1\" event=\"State Root Start\" elapsed_since_start_us=0 total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used=0",
+            block_num_hash.number,
+            block_num_hash.hash
+        );
 
         let root_time = Instant::now();
 
@@ -563,6 +571,15 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+        
+        // Log state root computation complete
+        let elapsed_us = start_time.elapsed().as_micros() as u64;
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"E3\" event=\"State Root Complete\" elapsed_since_start_us={} total_txs=0 cached_txs=0 cache_hits=0 cache_misses=0 db_calls=0 gas_used=0",
+            block_num_hash.number,
+            block_num_hash.hash,
+            elapsed_us
+        );
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -655,6 +672,10 @@ where
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree", block=?num_hash, "Executing block");
+        
+        // Create timing context for this block
+        let mut timing = NewPayloadTiming::new(num_hash.number, num_hash.hash, 0);
+        timing.log_timing("A4", "Block Execution Setup");
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
@@ -683,15 +704,26 @@ where
         }
 
         let execution_start = Instant::now();
+        timing.log_timing("C1", "Transaction Execution Start");
+        
         let state_hook = Box::new(handle.state_hook());
         let output = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
         )?;
+        
+        // Extract gas used from the last receipt
+        if let Some(last_receipt) = output.result.receipts.last() {
+            timing.gas_used = last_receipt.cumulative_gas_used();
+        }
+        timing.log_timing("C4", "Transaction Execution Complete");
+        
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        
+        timing.log_timing("F4", "Block Execution Complete");
         Ok(output)
     }
 
@@ -1039,5 +1071,65 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
         }
+    }
+}
+
+/// Timing infrastructure for comprehensive newPayload performance analysis
+#[derive(Debug)]
+pub struct NewPayloadTiming {
+    /// Block number being processed
+    pub block_number: u64,
+    /// Block hash being processed
+    pub block_hash: B256,
+    /// Start time of the entire process
+    pub process_start: Instant,
+    /// Total number of transactions in this block
+    pub total_txs: usize,
+    /// Number of transactions successfully cached
+    pub cached_txs: usize,
+    /// Number of cache hits during validation
+    pub cache_hits: u32,
+    /// Number of cache misses during validation
+    pub cache_misses: u32,
+    /// Number of database calls made
+    pub db_calls: u32,
+    /// Total gas used in the block
+    pub gas_used: u64,
+}
+
+impl NewPayloadTiming {
+    /// Creates a new timing context for a block
+    pub fn new(block_number: u64, block_hash: B256, total_txs: usize) -> Self {
+        Self {
+            block_number,
+            block_hash,
+            process_start: Instant::now(),
+            total_txs,
+            cached_txs: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            db_calls: 0,
+            gas_used: 0,
+        }
+    }
+    
+    /// Log a timing checkpoint with phase information
+    pub fn log_timing(&self, phase: &str, event: &str) {
+        let elapsed_us = self.process_start.elapsed().as_micros() as u64;
+        
+        info!(
+            "NEWPAYLOAD_TIMING block_number={} block_hash={:?} phase=\"{}\" event=\"{}\" elapsed_since_start_us={} total_txs={} cached_txs={} cache_hits={} cache_misses={} db_calls={} gas_used={}",
+            self.block_number,
+            self.block_hash,
+            phase,
+            event,
+            elapsed_us,
+            self.total_txs,
+            self.cached_txs,
+            self.cache_hits,
+            self.cache_misses,
+            self.db_calls,
+            self.gas_used
+        );
     }
 }
