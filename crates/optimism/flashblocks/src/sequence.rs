@@ -1,20 +1,22 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::BlockNumber;
 use reth_primitives_traits::{Recovered, SignedTransaction};
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 use tracing::trace;
 
-/// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
+/// An ordered B-tree keeping the track of sequences of [`FlashBlock`]s ordered by their block
+/// number and indices. The 'current' sequence is the earliest one.
 #[derive(Debug)]
-pub(crate) struct FlashBlockSequence<T> {
-    /// tracks the individual flashblocks in order
+pub(crate) struct FlashBlockSequences<T> {
+    /// Tracks the individual flashblocks in order of their block number and index.
     ///
     /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
     /// pending block, we expect 11 flashblocks per slot.
-    inner: BTreeMap<u64, PreparedFlashBlock<T>>,
+    inner: BTreeMap<(BlockNumber, u64), PreparedFlashBlock<T>>,
 }
 
-impl<T> FlashBlockSequence<T>
+impl<T> FlashBlockSequences<T>
 where
     T: SignedTransaction,
 {
@@ -22,35 +24,57 @@ where
         Self { inner: BTreeMap::new() }
     }
 
-    /// Inserts a new block into the sequence.
+    /// Inserts a new block into the corresponding sequence.
+    /// Return `true` if the current sequence should be invalidated and built again.
     ///
     /// A [`FlashBlock`] with index 0 resets the set.
-    pub(crate) fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
-        if flashblock.index == 0 {
-            trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
-            // Flash block at index zero resets the whole state
-            self.clear();
-            self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
-            return Ok(())
-        }
+    pub(crate) fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<bool> {
+        match flashblock.block_number().cmp(&self.block_number().unwrap_or(0)) {
+            Ordering::Equal => {
+                trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len(), "Received followup flashblock");
+                self.inner.insert(
+                    (flashblock.block_number(), flashblock.index),
+                    PreparedFlashBlock::new(flashblock)?,
+                );
 
-        // only insert if we we previously received the same block, assume we received index 0
-        if self.block_number() == Some(flashblock.metadata.block_number) {
-            trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
-            self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
-        } else {
-            trace!(number=%flashblock.block_number(), index = %flashblock.index, current=?self.block_number()  ,"Ignoring untracked flashblock following");
-        }
+                // Invalidate current sequence
+                Ok(true)
+            }
+            Ordering::Greater => {
+                if flashblock.index == 0 {
+                    trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
+                    // Flash block at index zero resets the current sequence and move forward
+                    self.clear_current();
+                    self.inner.insert(
+                        (flashblock.block_number(), flashblock.index),
+                        PreparedFlashBlock::new(flashblock)?,
+                    );
 
-        Ok(())
+                    // Invalidate current sequence
+                    Ok(true)
+                } else {
+                    trace!(number=%flashblock.block_number(), "Tracking flashblock with higher number than current block");
+                    self.inner.insert(
+                        (flashblock.block_number(), flashblock.index),
+                        PreparedFlashBlock::new(flashblock)?,
+                    );
+
+                    Ok(false)
+                }
+            }
+            Ordering::Less => {
+                trace!(number=%flashblock.block_number(), index = %flashblock.index, current=?self.block_number(), "Ignoring untracked flashblock following");
+                Ok(false)
+            }
+        }
     }
 
-    /// Returns the first block number
+    /// Returns the block number of the current sequence
     pub(crate) fn block_number(&self) -> Option<u64> {
-        Some(self.inner.values().next()?.block().metadata.block_number)
+        Some(self.inner.keys().next()?.0)
     }
 
-    /// Returns the payload base of the first tracked flashblock.
+    /// Returns the payload base of the current sequence
     pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
         self.inner.values().next()?.block().base.clone()
     }
@@ -65,13 +89,18 @@ where
         &self,
     ) -> impl Iterator<Item = WithEncoded<Recovered<T>>> + '_ {
         self.inner
-            .values()
-            .enumerate()
-            .take_while(|(idx, block)| {
-                // flashblock index 0 is the first flashblock
-                block.block().index == *idx as u64
+            .first_key_value()
+            .map(|(&(current_block_number, _), _)| {
+                self.inner
+                    .range((current_block_number, 0)..=(current_block_number, u64::MAX))
+                    .zip(0u64..) // start from index 0
+                    .take_while(|((&(_, block_idx), block), expected_idx)| {
+                        block_idx == *expected_idx && block.block().index == *expected_idx
+                    })
+                    .flat_map(|((_, block), _)| block.txs.iter().cloned())
             })
-            .flat_map(|(_, block)| block.txs.clone())
+            .into_iter()
+            .flatten()
     }
 
     /// Returns the number of tracked flashblocks.
@@ -79,8 +108,12 @@ where
         self.inner.len()
     }
 
-    fn clear(&mut self) {
-        self.inner.clear();
+    /// Clear the current, earliest sequence.
+    fn clear_current(&mut self) {
+        if let Some(key) = self.inner.keys().next() {
+            trace!(number=%key.0, index=%key.1, "Clearing flashblock sequence");
+            self.inner = self.inner.split_off(&(key.0 + 1, 0));
+        }
     }
 }
 
@@ -130,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_sequence_stops_before_gap() {
-        let mut sequence = FlashBlockSequence::new();
+        let mut sequence = FlashBlockSequences::new();
         let tx = EthereumTxEnvelope::new_unhashed(
             EthereumTypedTransaction::<TxEip1559>::Eip1559(TxEip1559 {
                 chain_id: 4,

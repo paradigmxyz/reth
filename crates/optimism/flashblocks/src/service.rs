@@ -1,4 +1,4 @@
-use crate::{sequence::FlashBlockSequence, ExecutionPayloadBaseV1, FlashBlock};
+use crate::{sequence::FlashBlockSequences, ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
@@ -33,7 +33,7 @@ pub struct FlashBlockService<
 > {
     rx: S,
     current: Option<PendingBlock<N>>,
-    blocks: FlashBlockSequence<N::SignedTx>,
+    blocks: FlashBlockSequences<N::SignedTx>,
     rebuild: bool,
     evm_config: EvmConfig,
     provider: Provider,
@@ -64,7 +64,7 @@ where
         Self {
             rx,
             current: None,
-            blocks: FlashBlockSequence::new(),
+            blocks: FlashBlockSequences::new(),
             evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
             provider,
@@ -192,7 +192,7 @@ where
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
                 Ok(flashblock) => match this.blocks.insert(flashblock) {
-                    Ok(_) => this.rebuild = true,
+                    Ok(rebuild) => this.rebuild = rebuild,
                     Err(err) => debug!(%err, "Failed to prepare flashblock"),
                 },
                 Err(err) => return Poll::Ready(Some(Err(err))),
