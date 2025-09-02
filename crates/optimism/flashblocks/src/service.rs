@@ -187,15 +187,15 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let mut new_flashblock = false;
         // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
             match result {
                 Ok(flashblock) => {
                     if let Err(err) = this.blocks.insert(flashblock) {
                         debug!(%err, "Failed to prepare flashblock");
-                    } else {
-                        new_flashblock = true;
+                    }
+                    if this.current.take().is_some() {
+                        return Poll::Ready(None);
                     }
                 }
                 Err(err) => return Poll::Ready(Some(Err(err))),
@@ -216,9 +216,10 @@ where
             }
         }
 
-        if !new_flashblock && this.current.is_none() {
-            // no new flashbblocks received since, block is still unchanged
-            return Poll::Pending
+        // is current block not taken?
+        if this.current.is_some() {
+            // execution is not needed
+            return Poll::Pending;
         }
 
         // try to build a block on top of latest
@@ -280,6 +281,11 @@ where
         }
 
         Ok(())
+    }
+
+    /// TRUE if there are no flashblocks.
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     /// Returns the number of tracked flashblocks.
