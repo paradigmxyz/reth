@@ -139,6 +139,7 @@ impl EngineApiMetrics {
         let mut cache_hits_in_block = 0u64;
         let mut cache_misses_in_block = 0u64;
         let mut gas_skipped_in_block = 0u64;
+        let mut total_cache_miss_execution_time = std::time::Duration::ZERO;
 
         let f = || {
             executor.apply_pre_execution_changes()?;
@@ -167,12 +168,32 @@ impl EngineApiMetrics {
                 } else {
                     cache_misses_in_block += 1;
                     self.executor.execution_results_cache_misses.increment(1);
+                    
+                    // Track detailed execution timing for cache miss
+                    let execution_start = std::time::Instant::now();
+                    
                     tracing::debug!(
                         target: "reth::evm::metrics",
                         ?tx_hash,
                         "Cache miss, executing transaction"
                     );
-                    executor.execute_transaction(tx)?;
+                    
+                    let gas_used = executor.execute_transaction(tx)?;
+                    let execution_time = execution_start.elapsed();
+                    total_cache_miss_execution_time += execution_time;
+                    
+                    // Record cache miss execution metrics
+                    metrics::histogram!("tx_cache.cache_miss_execution_us").record(execution_time.as_micros() as f64);
+                    metrics::histogram!("tx_cache.cache_miss_gas_used").record(gas_used as f64);
+                    metrics::counter!("tx_cache.cache_miss_evm_executions").increment(1);
+                    
+                    tracing::info!(
+                        target: "engine::cache::metrics",
+                        ?tx_hash,
+                        execution_us = execution_time.as_micros(),
+                        gas_used,
+                        "CACHE_MISS_EXECUTION - Transaction executed via EVM"
+                    );
                 }
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
@@ -193,13 +214,21 @@ impl EngineApiMetrics {
                 0.0
             };
             
+            let avg_cache_miss_execution_us = if cache_misses_in_block > 0 {
+                total_cache_miss_execution_time.as_micros() as f64 / cache_misses_in_block as f64
+            } else {
+                0.0
+            };
+            
             tracing::info!(
-                target: "reth::evm::cache",
+                target: "engine::cache::metrics",
                 cache_hits = cache_hits_in_block,
                 cache_misses = cache_misses_in_block,
                 cache_hit_rate = format!("{:.1}%", cache_hit_rate),
                 gas_skipped = gas_skipped_in_block,
-                "Block execution cache statistics"
+                total_cache_miss_execution_us = total_cache_miss_execution_time.as_micros(),
+                avg_cache_miss_execution_us = avg_cache_miss_execution_us as u64,
+                "BLOCK_CACHE_STATS - Cache performance overview"
             );
         }
 
