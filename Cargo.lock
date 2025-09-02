@@ -9320,6 +9320,7 @@ dependencies = [
 name = "reth-optimism-flashblocks"
 version = "1.6.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
