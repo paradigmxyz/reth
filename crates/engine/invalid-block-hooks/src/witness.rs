@@ -341,6 +341,7 @@ where
 
     fn save_file<T: Serialize>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
+        println!("Saving file {}", path.display());
         File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
 
         Ok(path)
