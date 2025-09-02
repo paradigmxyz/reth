@@ -341,8 +341,6 @@ where
 
     fn save_file<T: Serialize + std::fmt::Debug>(&self, filename: String, value: &T) -> eyre::Result<PathBuf> {
         let path = self.output_directory.join(filename);
-        println!("Saving file {}", path.display());
-        println!("Saving struct {:?}", value);
         File::create(&path)?.write_all(serde_json::to_string(value)?.as_bytes())?;
 
         Ok(path)
