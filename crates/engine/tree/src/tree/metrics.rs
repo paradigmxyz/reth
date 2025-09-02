@@ -19,6 +19,133 @@ use revm::{
     database::{states::bundle_state::BundleRetention, State},
 };
 use std::time::Instant;
+use std::sync::{Arc, Mutex};
+
+/// Detailed transaction timing breakdown for performance analysis
+#[derive(Debug)]
+pub(crate) struct TransactionTiming {
+    pub tx_hash: TxHash,
+    pub tx_index: usize,
+    pub gas_limit: u64,
+    
+    // Timing phases (all in microseconds)
+    pub cache_lookup_us: u64,
+    pub cache_validation_us: u64,
+    pub evm_setup_us: u64,
+    pub evm_execution_us: u64,
+    pub evm_cleanup_us: u64,
+    pub db_reads_us: u64,
+    pub db_writes_us: u64,
+    pub memory_allocations_us: u64,
+    
+    // Gas and result info
+    pub gas_used: u64,
+    pub success: bool,
+    pub cache_hit: bool,
+    pub db_read_count: u32,
+    pub db_write_count: u32,
+    
+    // Total timing
+    pub total_us: u64,
+}
+
+impl TransactionTiming {
+    pub fn new(tx_hash: TxHash, tx_index: usize, gas_limit: u64) -> Self {
+        Self {
+            tx_hash,
+            tx_index,
+            gas_limit,
+            cache_lookup_us: 0,
+            cache_validation_us: 0,
+            evm_setup_us: 0,
+            evm_execution_us: 0,
+            evm_cleanup_us: 0,
+            db_reads_us: 0,
+            db_writes_us: 0,
+            memory_allocations_us: 0,
+            gas_used: 0,
+            success: false,
+            cache_hit: false,
+            db_read_count: 0,
+            db_write_count: 0,
+            total_us: 0,
+        }
+    }
+    
+    pub fn log_detailed_breakdown(&self) {
+        tracing::info!(
+            target: "engine::transaction::timing",
+            tx_hash = ?self.tx_hash,
+            tx_index = self.tx_index,
+            gas_limit = self.gas_limit,
+            gas_used = self.gas_used,
+            success = self.success,
+            cache_hit = self.cache_hit,
+            cache_lookup_us = self.cache_lookup_us,
+            cache_validation_us = self.cache_validation_us,
+            evm_setup_us = self.evm_setup_us,
+            evm_execution_us = self.evm_execution_us,
+            evm_cleanup_us = self.evm_cleanup_us,
+            db_reads_us = self.db_reads_us,
+            db_writes_us = self.db_writes_us,
+            db_read_count = self.db_read_count,
+            db_write_count = self.db_write_count,
+            memory_allocations_us = self.memory_allocations_us,
+            total_us = self.total_us,
+            "TRANSACTION_TIMING_BREAKDOWN - Detailed execution phases"
+        );
+    }
+}
+
+/// Database operation timing tracker shared across transaction execution
+#[derive(Debug, Default, Clone)]
+pub(crate) struct DatabaseTimingTracker {
+    inner: Arc<Mutex<DatabaseTimingInner>>,
+}
+
+#[derive(Debug, Default)]
+struct DatabaseTimingInner {
+    read_operations: u32,
+    write_operations: u32,
+    total_read_time_us: u64,
+    total_write_time_us: u64,
+}
+
+impl DatabaseTimingTracker {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(DatabaseTimingInner::default())),
+        }
+    }
+    
+    pub fn record_read(&self, duration_us: u64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.read_operations += 1;
+            inner.total_read_time_us += duration_us;
+        }
+    }
+    
+    pub fn record_write(&self, duration_us: u64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.write_operations += 1;
+            inner.total_write_time_us += duration_us;
+        }
+    }
+    
+    pub fn get_stats(&self) -> (u32, u32, u64, u64) {
+        if let Ok(inner) = self.inner.lock() {
+            (inner.read_operations, inner.write_operations, inner.total_read_time_us, inner.total_write_time_us)
+        } else {
+            (0, 0, 0, 0)
+        }
+    }
+    
+    pub fn reset(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            *inner = DatabaseTimingInner::default();
+        }
+    }
+}
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -140,47 +267,104 @@ impl EngineApiMetrics {
         let mut cache_misses_in_block = 0u64;
         let mut gas_skipped_in_block = 0u64;
         let mut total_cache_miss_execution_time = std::time::Duration::ZERO;
+        let mut transaction_timings = Vec::new();
+        let db_timing_tracker = DatabaseTimingTracker::new();
 
         let f = || {
             executor.apply_pre_execution_changes()?;
-            for tx in transactions {
+            for (tx_index, tx) in transactions.enumerate() {
                 let tx = tx?;
                 let tx_hash = *tx.tx().tx_hash();
-                if let Some(cached_result) = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash) {
+                let gas_limit = tx.tx().gas_limit();
+                
+                // Create detailed timing tracker for this transaction
+                let mut tx_timing = TransactionTiming::new(tx_hash, tx_index, gas_limit);
+                let tx_start = std::time::Instant::now();
+                
+                // Reset database timing tracker for this transaction
+                db_timing_tracker.reset();
+                
+                tracing::info!(
+                    target: "engine::transaction::timing",
+                    tx_hash = ?tx_hash,
+                    tx_index,
+                    gas_limit,
+                    "TRANSACTION_START - Beginning transaction execution"
+                );
+                
+                // Phase 1: Cache Lookup
+                let cache_lookup_start = std::time::Instant::now();
+                let cached_result = get_cached_tx_result(executor.evm_mut().db_mut(), tx_hash);
+                tx_timing.cache_lookup_us = cache_lookup_start.elapsed().as_micros() as u64;
+                
+                if let Some(cached_result) = cached_result {
+                    // Phase 2: Cache Hit Processing
+                    let cache_commit_start = std::time::Instant::now();
+                    
                     cache_hits_in_block += 1;
+                    tx_timing.cache_hit = true;
                     self.executor.execution_results_cache_hits.increment(1);
                     self.executor.transactions_skipped.increment(1);
 
                     // Track gas skipped
                     let gas_used = cached_result.result.gas_used();
+                    tx_timing.gas_used = gas_used;
+                    tx_timing.success = !cached_result.result.is_halt();
                     gas_skipped_in_block += gas_used;
                     self.executor.gas_skipped.increment(gas_used);
                     self.executor.gas_skipped_per_tx_histogram.record(gas_used as f64);
 
-                    tracing::debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        gas_skipped = gas_used,
-                        "Using cached transaction result"
+                    tracing::info!(
+                        target: "engine::transaction::timing",
+                        tx_hash = ?tx_hash,
+                        tx_index,
+                        gas_used,
+                        cache_lookup_us = tx_timing.cache_lookup_us,
+                        "TRANSACTION_CACHE_HIT - Using cached result"
                     );
+                    
                     // Commit the cached result directly using alloy-evm API (output first, then tx)
                     executor.commit_transaction(cached_result, tx)?;
+                    
+                    tx_timing.evm_execution_us = cache_commit_start.elapsed().as_micros() as u64;
                 } else {
+                    // Phase 3: Cache Miss - Full EVM Execution
                     cache_misses_in_block += 1;
+                    tx_timing.cache_hit = false;
                     self.executor.execution_results_cache_misses.increment(1);
                     
-                    // Track detailed execution timing for cache miss
-                    let execution_start = std::time::Instant::now();
-                    
-                    tracing::debug!(
-                        target: "reth::evm::metrics",
-                        ?tx_hash,
-                        "Cache miss, executing transaction"
+                    tracing::info!(
+                        target: "engine::transaction::timing",
+                        tx_hash = ?tx_hash,
+                        tx_index,
+                        cache_lookup_us = tx_timing.cache_lookup_us,
+                        "TRANSACTION_CACHE_MISS - Executing via EVM"
                     );
                     
+                    // Phase 3.1: EVM Setup
+                    let evm_setup_start = std::time::Instant::now();
+                    // EVM is already set up by executor, but we can track any preparation time
+                    tx_timing.evm_setup_us = evm_setup_start.elapsed().as_micros() as u64;
+                    
+                    // Phase 3.2: EVM Execution  
+                    let evm_execution_start = std::time::Instant::now();
+                    let memory_start = std::time::Instant::now();
+                    
                     let gas_used = executor.execute_transaction(tx)?;
-                    let execution_time = execution_start.elapsed();
+                    
+                    let execution_time = evm_execution_start.elapsed();
+                    // Memory allocation tracking (placeholder - could be enhanced with memory profiling)
+                    tx_timing.memory_allocations_us = memory_start.elapsed().as_micros() as u64;
+                    
+                    tx_timing.evm_execution_us = execution_time.as_micros() as u64;
+                    tx_timing.gas_used = gas_used;
+                    tx_timing.success = true; // If we get here, execution succeeded
                     total_cache_miss_execution_time += execution_time;
+                    
+                    // Phase 3.3: EVM Cleanup (minimal for now)
+                    let evm_cleanup_start = std::time::Instant::now();
+                    // Cleanup happens internally in executor
+                    tx_timing.evm_cleanup_us = evm_cleanup_start.elapsed().as_micros() as u64;
                     
                     // Record cache miss execution metrics
                     metrics::histogram!("tx_cache.cache_miss_execution_us").record(execution_time.as_micros() as f64);
@@ -188,13 +372,28 @@ impl EngineApiMetrics {
                     metrics::counter!("tx_cache.cache_miss_evm_executions").increment(1);
                     
                     tracing::info!(
-                        target: "engine::cache::metrics",
-                        ?tx_hash,
-                        execution_us = execution_time.as_micros(),
+                        target: "engine::transaction::timing",
+                        tx_hash = ?tx_hash,
+                        tx_index,
+                        evm_setup_us = tx_timing.evm_setup_us,
+                        evm_execution_us = tx_timing.evm_execution_us,
+                        evm_cleanup_us = tx_timing.evm_cleanup_us,
                         gas_used,
-                        "CACHE_MISS_EXECUTION - Transaction executed via EVM"
+                        "TRANSACTION_EVM_EXECUTION - Full EVM execution completed"
                     );
                 }
+                
+                // Collect database timing statistics for this transaction
+                let (db_reads, db_writes, db_read_time_us, db_write_time_us) = db_timing_tracker.get_stats();
+                tx_timing.db_read_count = db_reads;
+                tx_timing.db_write_count = db_writes;
+                tx_timing.db_reads_us = db_read_time_us;
+                tx_timing.db_writes_us = db_write_time_us;
+                
+                // Final transaction timing calculation and logging
+                tx_timing.total_us = tx_start.elapsed().as_micros() as u64;
+                tx_timing.log_detailed_breakdown();
+                transaction_timings.push(tx_timing);
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -206,30 +405,68 @@ impl EngineApiMetrics {
             (gas_used, res)
         })?;
 
-        // Log cache statistics for the block
-        if cache_hits_in_block > 0 || cache_misses_in_block > 0 {
-            let cache_hit_rate = if cache_hits_in_block + cache_misses_in_block > 0 {
-                (cache_hits_in_block as f64 / (cache_hits_in_block + cache_misses_in_block) as f64) * 100.0
-            } else {
-                0.0
-            };
+        // Log detailed block-level transaction timing analysis
+        if !transaction_timings.is_empty() {
+            let total_transactions = transaction_timings.len();
+            let successful_transactions = transaction_timings.iter().filter(|t| t.success).count();
             
-            let avg_cache_miss_execution_us = if cache_misses_in_block > 0 {
-                total_cache_miss_execution_time.as_micros() as f64 / cache_misses_in_block as f64
+            // Calculate timing aggregates
+            let total_cache_lookup_us: u64 = transaction_timings.iter().map(|t| t.cache_lookup_us).sum();
+            let total_evm_execution_us: u64 = transaction_timings.iter().map(|t| t.evm_execution_us).sum();
+            let total_evm_setup_us: u64 = transaction_timings.iter().map(|t| t.evm_setup_us).sum();
+            let total_evm_cleanup_us: u64 = transaction_timings.iter().map(|t| t.evm_cleanup_us).sum();
+            let total_db_reads_us: u64 = transaction_timings.iter().map(|t| t.db_reads_us).sum();
+            let total_db_writes_us: u64 = transaction_timings.iter().map(|t| t.db_writes_us).sum();
+            let total_db_operations: u32 = transaction_timings.iter().map(|t| t.db_read_count + t.db_write_count).sum();
+            
+            let avg_cache_lookup_us = total_cache_lookup_us / total_transactions as u64;
+            let avg_evm_execution_us = total_evm_execution_us / total_transactions as u64;
+            
+            let cache_hit_rate = if total_transactions > 0 {
+                (cache_hits_in_block as f64 / total_transactions as f64) * 100.0
             } else {
                 0.0
             };
             
             tracing::info!(
-                target: "engine::cache::metrics",
+                target: "engine::transaction::timing",
+                total_transactions,
+                successful_transactions,
                 cache_hits = cache_hits_in_block,
                 cache_misses = cache_misses_in_block,
                 cache_hit_rate = format!("{:.1}%", cache_hit_rate),
                 gas_skipped = gas_skipped_in_block,
-                total_cache_miss_execution_us = total_cache_miss_execution_time.as_micros(),
-                avg_cache_miss_execution_us = avg_cache_miss_execution_us as u64,
-                "BLOCK_CACHE_STATS - Cache performance overview"
+                total_cache_lookup_us,
+                avg_cache_lookup_us,
+                total_evm_execution_us,
+                avg_evm_execution_us,
+                total_evm_setup_us,
+                total_evm_cleanup_us,
+                total_db_reads_us,
+                total_db_writes_us,
+                total_db_operations,
+                "BLOCK_TRANSACTION_SUMMARY - Aggregated transaction timing analysis"
             );
+            
+            // Log cache statistics for backwards compatibility
+            if cache_hits_in_block > 0 || cache_misses_in_block > 0 {
+                let avg_cache_miss_execution_us = if cache_misses_in_block > 0 {
+                    total_cache_miss_execution_time.as_micros() as f64 / cache_misses_in_block as f64
+                } else {
+                    0.0
+                };
+                
+                tracing::info!(
+                    target: "engine::cache::metrics",
+                    cache_hits = cache_hits_in_block,
+                    cache_misses = cache_misses_in_block,
+                    cache_hit_rate = format!("{:.1}%", cache_hit_rate),
+                    gas_skipped = gas_skipped_in_block,
+                    total_cache_miss_execution_us = total_cache_miss_execution_time.as_micros(),
+                    avg_cache_miss_execution_us = avg_cache_miss_execution_us as u64,
+                    "BLOCK_CACHE_STATS - Cache performance overview"
+                );
+            }
         }
 
         // merge transitions into bundle state
