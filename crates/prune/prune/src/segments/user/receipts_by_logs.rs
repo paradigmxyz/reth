@@ -105,7 +105,10 @@ where
             if block_ranges.is_empty() {
                 let init = last_pruned_block.map(|b| b + 1).unwrap_or_default();
                 if init < *start_block {
-                    block_ranges.push((init, *start_block - 1, 0));
+                    let end = (*start_block - 1).min(to_block);
+                    if init <= end {
+                        block_ranges.push((init, end, 0));
+                    }
                 }
             }
 
