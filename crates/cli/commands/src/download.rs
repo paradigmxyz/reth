@@ -17,7 +17,7 @@ use tokio::task;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://snapshots.merkle.io";
+const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
 #[derive(Debug, Parser)]
