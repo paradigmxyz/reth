@@ -60,13 +60,18 @@ impl EraFileFormat for Era1File {
 impl Era1File {
     /// Get a block by its number, if present in this file
     pub fn get_block_by_number(&self, number: BlockNumber) -> Option<&BlockTuple> {
-        let index = (number - self.group.block_index.starting_number()) as usize;
-        (index < self.group.blocks.len()).then(|| &self.group.blocks[index])
+        let start = self.group.block_index.starting_number();
+        let Some(diff) = number.checked_sub(start) else { return None };
+        let index = diff as usize;
+        self.group.blocks.get(index)
     }
 
     /// Get the range of block numbers contained in this file
     pub fn block_range(&self) -> std::ops::RangeInclusive<BlockNumber> {
         let start = self.group.block_index.starting_number();
+        if self.group.blocks.is_empty() {
+            return start..=start.saturating_sub(1);
+        }
         let end = start + (self.group.blocks.len() as u64) - 1;
         start..=end
     }
@@ -141,13 +146,17 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
                 }
                 execution_types::ACCUMULATOR => {
                     if self.accumulator.is_some() {
-                        return Err(E2sError::Ssz("Multiple accumulator entries found".to_string()));
+                        return Err(E2sError::Ssz(
+                            "Multiple accumulator entries found".to_string(),
+                        ));
                     }
                     self.accumulator = Some(Accumulator::from_entry(&entry)?);
                 }
                 BLOCK_INDEX => {
                     if self.block_index.is_some() {
-                        return Err(E2sError::Ssz("Multiple block index entries found".to_string()));
+                        return Err(E2sError::Ssz(
+                            "Multiple block index entries found".to_string(),
+                        ));
                     }
                     self.block_index = Some(BlockIndex::from_entry(&entry)?);
                 }
@@ -156,10 +165,10 @@ impl<R: Read + Seek> BlockTupleIterator<R> {
                 }
             }
 
-            if !self.headers.is_empty() &&
-                !self.bodies.is_empty() &&
-                !self.receipts.is_empty() &&
-                !self.difficulties.is_empty()
+            if !self.headers.is_empty()
+                && !self.bodies.is_empty()
+                && !self.receipts.is_empty()
+                && !self.difficulties.is_empty()
             {
                 let header = self.headers.pop_front().unwrap();
                 let body = self.bodies.pop_front().unwrap();
@@ -217,9 +226,9 @@ impl<R: Read + Seek> Era1Reader<R> {
         } = iter;
 
         // Ensure we have matching counts for block components
-        if headers.len() != bodies.len() ||
-            headers.len() != receipts.len() ||
-            headers.len() != difficulties.len()
+        if headers.len() != bodies.len()
+            || headers.len() != receipts.len()
+            || headers.len() != difficulties.len()
         {
             return Err(E2sError::Ssz(format!(
                 "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
@@ -294,7 +303,9 @@ impl<W: Write> StreamWriter<W> for Era1Writer<W> {
 
         // Ensure blocks are written before other entries
         if era1_file.group.blocks.len() > MAX_BLOCKS_PER_ERA1 {
-            return Err(E2sError::Ssz("Era1 file cannot contain more than 8192 blocks".to_string()));
+            return Err(E2sError::Ssz(
+                "Era1 file cannot contain more than 8192 blocks".to_string(),
+            ));
         }
 
         // Write all blocks
