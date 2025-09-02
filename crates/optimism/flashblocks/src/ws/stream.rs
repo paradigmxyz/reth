@@ -12,7 +12,7 @@ use std::{
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{Error, Message},
+    tungstenite::{Bytes, Error, Message},
     MaybeTlsStream, WebSocketStream,
 };
 use tracing::debug;
@@ -31,7 +31,6 @@ pub struct WsFlashBlockStream<Stream, Sink, Connector> {
     connect: ConnectFuture<Sink, Stream>,
     stream: Option<Stream>,
     sink: Option<Sink>,
-    pong: Option<Message>,
 }
 
 impl WsFlashBlockStream<WsStream, WsSink, WsConnector> {
@@ -44,7 +43,6 @@ impl WsFlashBlockStream<WsStream, WsSink, WsConnector> {
             connect: Box::pin(async move { Err(Error::ConnectionClosed)? }),
             stream: None,
             sink: None,
-            pong: None,
         }
     }
 }
@@ -59,7 +57,6 @@ impl<Stream, S, C> WsFlashBlockStream<Stream, S, C> {
             connect: Box::pin(async move { Err(Error::ConnectionClosed)? }),
             stream: None,
             sink: None,
-            pong: None,
         }
     }
 }
@@ -75,44 +72,50 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        if this.pong.is_some() {
-            let mut sink = Pin::new(this.sink.as_mut().unwrap());
-            let _ = ready!(sink.as_mut().poll_ready(cx));
-            let pong = this.pong.take().unwrap();
-            let _ = sink.as_mut().start_send(pong);
-        }
+        loop {
+            if this.state == State::Initial {
+                this.connect();
+            }
 
-        if this.state == State::Initial {
-            this.connect();
-        }
+            if this.state == State::Connect {
+                match ready!(this.connect.poll_unpin(cx)) {
+                    Ok((sink, stream)) => this.stream(sink, stream),
+                    Err(err) => {
+                        this.state = State::Initial;
 
-        if this.state == State::Connect {
-            match ready!(this.connect.poll_unpin(cx)) {
-                Ok((sink, stream)) => this.stream(sink, stream),
-                Err(err) => {
-                    this.state = State::Initial;
-
-                    return Poll::Ready(Some(Err(err)));
+                        return Poll::Ready(Some(Err(err)));
+                    }
                 }
             }
-        }
 
-        loop {
-            let Some(msg) = ready!(this
-                .stream
-                .as_mut()
-                .expect("Stream state should be unreachable without stream")
-                .poll_next_unpin(cx))
-            else {
-                return Poll::Ready(None);
-            };
+            while this.state == State::Stream {
+                let Some(msg) = ready!(this
+                    .stream
+                    .as_mut()
+                    .expect("Stream state should be unreachable without stream")
+                    .poll_next_unpin(cx))
+                else {
+                    return Poll::Ready(None);
+                };
 
-            match msg {
-                Ok(Message::Binary(bytes)) => return Poll::Ready(Some(FlashBlock::decode(bytes))),
-                Ok(Message::Ping(bytes)) => this.pong = Some(Message::Pong(bytes)),
-                Ok(Message::Pong(bytes)) => debug!("Received pong: {bytes:?}"),
-                Ok(msg) => debug!("Received unexpected message: {:?}", msg),
-                Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                match msg {
+                    Ok(Message::Binary(bytes)) => {
+                        return Poll::Ready(Some(FlashBlock::decode(bytes)))
+                    }
+                    Ok(Message::Ping(bytes)) => this.ping(bytes),
+                    Ok(msg) => debug!("Received unexpected message: {:?}", msg),
+                    Err(err) => return Poll::Ready(Some(Err(err.into()))),
+                }
+            }
+
+            if let State::Ping(pong) = &mut this.state {
+                let mut sink = Pin::new(this.sink.as_mut().unwrap());
+                let _ = ready!(sink.as_mut().poll_ready(cx));
+                if let Some(pong) = pong.take() {
+                    let _ = sink.as_mut().start_send(pong);
+                }
+                let _ = ready!(sink.as_mut().poll_flush(cx));
+                this.state = State::Stream;
             }
         }
     }
@@ -137,6 +140,10 @@ where
 
         self.state = State::Stream;
     }
+
+    fn ping(&mut self, pong: Bytes) {
+        self.state = State::Ping(Some(Message::Pong(pong)));
+    }
 }
 
 impl<Stream: Debug, S: Debug, C: Debug> Debug for WsFlashBlockStream<Stream, S, C> {
@@ -157,6 +164,7 @@ enum State {
     Initial,
     Connect,
     Stream,
+    Ping(Option<Message>),
 }
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
