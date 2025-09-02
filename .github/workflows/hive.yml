@@ -32,7 +32,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: ethereum/hive
+          repository: Rimeeeeee/hive
           path: hivetests
 
       - uses: actions/setup-go@v5

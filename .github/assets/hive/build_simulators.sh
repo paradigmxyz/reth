@@ -3,7 +3,6 @@ set -eo pipefail
 
 # Create the hive_assets directory
 mkdir hive_assets/
-cp .github/assets/hive/fixtures-amsterdam.tar.gz ./hive_assets/
 
 cd hivetests
 go build .
@@ -14,7 +13,7 @@ go build .
 echo "Building images"
 ./hive -client reth --sim "ethereum/eest" \
   --sim.buildarg fixtures=https://github.com/Soubhik-10/execution-spec-tests/releases/download/0.0.1/fixtures-amsterdam.tar.gz \
-  --sim.buildarg branch=0.0.1 \
+  --sim.buildarg branch=feat/amsterdam-and-block-access-lists \
   --sim.timelimit 1s || true &
 
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
