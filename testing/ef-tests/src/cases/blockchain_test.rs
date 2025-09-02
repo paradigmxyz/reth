@@ -243,8 +243,14 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks after block execution
-        validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        validate_block_post_execution(
+            block,
+            &chain_spec,
+            &output.receipts,
+            &output.requests,
+            &output.block_access_list,
+        )
+        .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Generate the stateless witness
         // TODO: Most of this code is copy-pasted from debug_executionWitness
