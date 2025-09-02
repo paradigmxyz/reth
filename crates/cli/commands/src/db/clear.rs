@@ -21,11 +21,12 @@ impl Command {
     /// Execute `db clear` command
     pub fn execute<N: NodeTypesWithDB>(
         self,
-        provider_factory: ProviderFactory<N>,
+        mut provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {
         match self.subcommand {
             Subcommands::Mdbx { table } => {
-                table.view(&ClearViewer { db: provider_factory.db_ref() })?
+                let mut viewer = ClearViewer { db: provider_factory.db_mut() };
+                table.view(&mut viewer)?
             }
             Subcommands::StaticFile { segment } => {
                 let static_file_provider = provider_factory.static_file_provider();
@@ -52,13 +53,13 @@ enum Subcommands {
 }
 
 struct ClearViewer<'a, DB: Database> {
-    db: &'a DB,
+    db: &'a mut DB,
 }
 
 impl<DB: Database> TableViewer<()> for ClearViewer<'_, DB> {
     type Error = eyre::Report;
 
-    fn view<T: Table>(&self) -> Result<(), Self::Error> {
+    fn view<T: Table>(&mut self) -> Result<(), Self::Error> {
         let tx = self.db.tx_mut()?;
         tx.clear::<T>()?;
         tx.commit()?;
