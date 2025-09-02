@@ -1,1 +1,94 @@
+---
+description: Overview of supported networks and how to choose the right one for your Reth node.
+---
+
 # Networks
+
+Reth supports multiple blockchain networks, allowing you to run nodes on various Ethereum-compatible chains. This guide helps you understand the available options and choose the right network for your needs.
+
+## Supported Network Types
+
+### Ethereum Networks
+- **Mainnet** - The primary Ethereum blockchain with real value
+- **Sepolia** - Ethereum testnet for development and testing
+- **Holesky** - Ethereum testnet for validator testing
+- **Hoodi** - Ethereum testnet for advanced testing
+
+### OP Stack Networks
+- **Base** - Coinbase's L2 solution built on Ethereum
+- **Optimism** - High-performance L2 scaling solution
+- **Zora** - NFT-focused L2 network
+- **Mode** - DeFi-optimized L2 network
+- **And 50+ more** - Full list available in [OP Stack documentation](/run/opstack)
+
+### Private Networks
+- **Dev networks** - Local development environments
+- **Custom testnets** - Private testing networks
+
+## Network Selection Guide
+
+| Use Case | Recommended Network | Reason |
+|----------|-------------------|---------|
+| Production deployment | Ethereum Mainnet | Most secure, real value |
+| Development & testing | Sepolia | Stable testnet, free ETH |
+| Validator testing | Holesky | Designed for staking tests |
+| L2 development | Base Sepolia | Popular L2 testnet |
+| Local development | Dev network | Fast, free, isolated |
+
+## Network Features
+
+### Ethereum Mainnet
+- **Chain ID**: 1
+- **Consensus**: Proof of Stake
+- **Block time**: ~12 seconds
+- **Security**: Highest security level
+- **Cost**: Real ETH required
+
+### Testnets
+- **Sepolia**: Stable, long-running testnet
+- **Holesky**: Modern testnet with latest features
+- **Hoodi**: Advanced testing capabilities
+
+### OP Stack Networks
+- **L2 scaling**: Faster, cheaper transactions
+- **Ethereum security**: Inherits mainnet security
+- **Cross-chain**: Seamless mainnet interaction
+
+## Getting Started
+
+1. **Choose your network** based on your use case
+2. **Install Reth** following the [installation guide](/run/overview)
+3. **Configure your node** using the [configuration guide](/run/configuration)
+4. **Start syncing** with your chosen network
+
+## Network Configuration
+
+Each network has specific configuration requirements:
+
+```bash
+# Ethereum mainnet
+reth node --chain mainnet
+
+# Sepolia testnet
+reth node --chain sepolia
+
+# Base L2
+reth node --chain base
+
+# Custom network
+reth node --chain /path/to/genesis.json
+```
+
+## Bootnodes & Discovery
+
+Reth automatically configures bootnodes for supported networks:
+- **Mainnet**: Ethereum Foundation bootnodes
+- **Testnets**: Dedicated testnet bootnodes
+- **OP Stack**: Optimism Collective bootnodes
+
+## Next Steps
+
+- [Run on Ethereum](/run/ethereum) - Detailed Ethereum setup
+- [Run on OP Stack](/run/opstack) - L2 network configuration
+- [Private Testnets](/run/private-testnets) - Custom network setup
+- [Configuration](/run/configuration) - Advanced network settings
