@@ -72,6 +72,7 @@ human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 lz4.workspace = true
+zstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tar.workspace = true
