@@ -12,13 +12,18 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eest" --sim.buildarg fixtures=../hive_assets/fixtures-amsterdam.tar.gz -sim.timelimit 15s || true &
-./hive -client reth --sim "ethereum/engine" -sim.timelimit 11s || true &
-./hive -client reth --sim "devp2p" -sim.timelimit 11s || true &
-./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 11s || true &
-./hive -client reth --sim "smoke/genesis" -sim.timelimit 11s || true &
-./hive -client reth --sim "smoke/network" -sim.timelimit 11s || true &
-./hive -client reth --sim "ethereum/sync" -sim.timelimit 11s || true &
+./hive -client reth --sim "ethereum/eest" \
+  --sim.buildarg fixtures=https://github.com/Soubhik-10/execution-spec-tests/releases/download/0.0.1/fixtures-amsterdam.tar.gz \
+  --sim.buildarg branch=0.0.1 \
+  --sim.timelimit 1s || true &
+
+./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
+./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
+./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
+./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
+
 wait
 
 # Run docker save in parallel, wait and exit on error
