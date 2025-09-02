@@ -11,11 +11,10 @@ use serde_with::{DisplayFromStr, serde_as};
 
 // Ultra Sound custom types to support per request transaction filtering
 
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[allow(missing_docs)]
 pub enum TransactionFilter {
-    #[default]
     None,
     OFAC,
 }
