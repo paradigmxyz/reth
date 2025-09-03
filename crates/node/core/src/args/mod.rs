@@ -24,6 +24,10 @@ pub use database::DatabaseArgs;
 mod log;
 pub use log::{ColorMode, LogArgs, Verbosity};
 
+/// `MetricsArgs` to export metrics to a certain endpoint
+mod metrics;
+pub use metrics::MetricsArgs;
+
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
 pub use payload_builder::PayloadBuilderArgs;

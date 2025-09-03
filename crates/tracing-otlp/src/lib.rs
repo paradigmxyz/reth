@@ -17,7 +17,7 @@ use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 
-// Reads every 30 seconds the metrics
+// Reads every 30 second-interval the metrics
 const DEFAULT_METRICS_READER_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
@@ -46,7 +46,7 @@ pub fn metrics_provider(service_name: impl Into<Value>) -> SdkMeterProvider {
     let resource = build_resource(service_name);
 
     // No exporter endpoint provided, the metrics will be sent to the default OTLP endpoint through
-    // http
+    // http (and not grpc, with no tls)
     let metric_exporter = MetricExporter::builder().with_http().build().unwrap();
 
     let metrics_reader = PeriodicReader::builder(metric_exporter)
