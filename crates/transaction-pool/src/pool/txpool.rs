@@ -40,7 +40,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use tracing::trace;
+use tracing::{trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -322,7 +322,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             SubPool::BaseFee => {
                                 // This should be unreachable as transactions from BaseFee pool with
                                 // decreased basefee are guaranteed to become Pending
-                                unreachable!("BaseFee transactions should become Pending after basefee decrease");
+                                warn!( target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
                             }
                         }
                     },
