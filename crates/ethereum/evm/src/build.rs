@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use alloy_block_access_list::BlockAccessList;
 use alloy_consensus::{
     proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
@@ -99,12 +98,7 @@ where
                 built_block_access_list = Some(bal);
                 block_access_list_hash = Some(alloy_primitives::keccak256(alloy_rlp::encode(bal)));
             }
-        } else {
-            built_block_access_list = None;
-            block_access_list_hash =
-                Some(alloy_primitives::keccak256(alloy_rlp::encode(&BlockAccessList::default()))); //TODO
         }
-
         // if let Some(err) = bal_error {
         //     return Err(err);
         // }

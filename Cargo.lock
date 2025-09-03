@@ -8445,7 +8445,6 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "1.6.0"
 dependencies = [
- "alloy-block-access-list",
  "alloy-consensus",
  "alloy-eips",
  "alloy-evm",

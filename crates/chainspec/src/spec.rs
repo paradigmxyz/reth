@@ -32,6 +32,10 @@ use reth_network_peers::{
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
+/// The hash of an empty block access list.
+const EMPTY_BLOCK_ACCESS_LIST_HASH: B256 =
+    b256!("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347");
+
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
     // If London is activated at genesis, we set the initial base fee as per EIP-1559.
@@ -66,6 +70,12 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         .active_at_timestamp(genesis.timestamp)
         .then_some(EMPTY_REQUESTS_HASH);
 
+    // If Amsterdam is activated at genesis we set block access list hash empty hash.
+    let block_access_list_hash = hardforks
+        .fork(EthereumHardfork::Amsterdam)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
+
     Header {
         gas_limit: genesis.gas_limit,
         difficulty: genesis.difficulty,
@@ -81,6 +91,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
         blob_gas_used,
         excess_blob_gas,
         requests_hash,
+        block_access_list_hash,
         ..Default::default()
     }
 }
