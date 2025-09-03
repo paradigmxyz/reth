@@ -44,7 +44,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, debug_span, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -654,7 +654,11 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
-        debug!(target: "engine::tree", block=?num_hash, "Executing block");
+
+        let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
+        let _enter = span.enter();
+        debug!(target: "engine::tree", "Executing block");
+
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
