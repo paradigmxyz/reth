@@ -88,7 +88,16 @@ where
                 }
             }
 
-            while this.state == State::Stream {
+            while let State::Stream(pong) = &mut this.state {
+                if pong.is_some() {
+                    let mut sink = Pin::new(this.sink.as_mut().unwrap());
+                    let _ = ready!(sink.as_mut().poll_ready(cx));
+                    if let Some(pong) = pong.take() {
+                        let _ = sink.as_mut().start_send(pong);
+                    }
+                    let _ = ready!(sink.as_mut().poll_flush(cx));
+                }
+
                 let Some(msg) = ready!(this
                     .stream
                     .as_mut()
@@ -106,16 +115,6 @@ where
                     Ok(msg) => debug!("Received unexpected message: {:?}", msg),
                     Err(err) => return Poll::Ready(Some(Err(err.into()))),
                 }
-            }
-
-            if let State::Ping(pong) = &mut this.state {
-                let mut sink = Pin::new(this.sink.as_mut().unwrap());
-                let _ = ready!(sink.as_mut().poll_ready(cx));
-                if let Some(pong) = pong.take() {
-                    let _ = sink.as_mut().start_send(pong);
-                }
-                let _ = ready!(sink.as_mut().poll_flush(cx));
-                this.state = State::Stream;
             }
         }
     }
@@ -138,11 +137,13 @@ where
         self.sink.replace(sink);
         self.stream.replace(stream);
 
-        self.state = State::Stream;
+        self.state = State::Stream(None);
     }
 
     fn ping(&mut self, pong: Bytes) {
-        self.state = State::Ping(Some(Message::Pong(pong)));
+        if let State::Stream(current) = &mut self.state {
+            current.replace(Message::Pong(pong));
+        }
     }
 }
 
@@ -163,8 +164,7 @@ enum State {
     #[default]
     Initial,
     Connect,
-    Stream,
-    Ping(Option<Message>),
+    Stream(Option<Message>),
 }
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
