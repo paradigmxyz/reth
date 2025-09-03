@@ -40,7 +40,7 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use tracing::trace;
+use tracing::{trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -293,19 +293,40 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Ordering::Greater
             }
             Ordering::Less => {
-                // decreased base fee: recheck basefee pool and promote all that are now valid
-                let removed =
-                    self.basefee_pool.enforce_basefee(self.all_transactions.pending_fees.base_fee);
-                for tx in removed {
-                    let to = {
-                        let tx =
+                // Base fee decreased: recheck BaseFee and promote.
+                // Invariants:
+                // - BaseFee contains only non-blob txs (blob txs live in Blob) and they already
+                //   have ENOUGH_BLOB_FEE_CAP_BLOCK.
+                // - PENDING_POOL_BITS = BASE_FEE_POOL_BITS | ENOUGH_FEE_CAP_BLOCK |
+                //   ENOUGH_BLOB_FEE_CAP_BLOCK.
+                // With the lower base fee they gain ENOUGH_FEE_CAP_BLOCK, so we can set the bit and
+                // insert directly into Pending (skip generic routing).
+                self.basefee_pool.enforce_basefee_with(
+                    self.all_transactions.pending_fees.base_fee,
+                    |tx| {
+                        // Update transaction state — guaranteed Pending by the invariants above
+                        let meta =
                             self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                        tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                        tx.subpool = tx.state.into();
-                        tx.subpool
-                    };
-                    self.add_transaction_to_subpool(to, tx);
-                }
+                        meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        meta.subpool = meta.state.into();
+
+                        trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
+                        match meta.subpool {
+                            SubPool::Queued => self.queued_pool.add_transaction(tx),
+                            SubPool::Pending => {
+                                self.pending_pool.add_transaction(tx, self.all_transactions.pending_fees.base_fee);
+                            }
+                            SubPool::Blob => {
+                                self.blob_pool.add_transaction(tx);
+                            }
+                            SubPool::BaseFee => {
+                                // This should be unreachable as transactions from BaseFee pool with
+                                // decreased basefee are guaranteed to become Pending
+                                warn!( target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
+                            }
+                        }
+                    },
+                );
 
                 Ordering::Less
             }
@@ -2952,6 +2973,97 @@ mod tests {
         assert_eq!(pool.basefee_pool.len(), 1);
 
         assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+    }
+
+    #[test]
+    fn basefee_decrease_promotes_affordable_and_keeps_unaffordable() {
+        use alloy_primitives::address;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create transactions that will be in basefee pool (can't afford initial high fee)
+        // Use different senders to avoid nonce gap issues
+        let sender_a = address!("0x000000000000000000000000000000000000000a");
+        let sender_b = address!("0x000000000000000000000000000000000000000b");
+        let sender_c = address!("0x000000000000000000000000000000000000000c");
+
+        let tx1 = MockTransaction::eip1559()
+            .set_sender(sender_a)
+            .set_nonce(0)
+            .set_max_fee(500)
+            .inc_limit();
+        let tx2 = MockTransaction::eip1559()
+            .set_sender(sender_b)
+            .set_nonce(0)
+            .set_max_fee(600)
+            .inc_limit();
+        let tx3 = MockTransaction::eip1559()
+            .set_sender(sender_c)
+            .set_nonce(0)
+            .set_max_fee(400)
+            .inc_limit();
+
+        // Set high initial basefee so transactions go to basefee pool
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 700;
+        pool.set_block_info(block_info);
+
+        let validated1 = f.validated(tx1);
+        let validated2 = f.validated(tx2);
+        let validated3 = f.validated(tx3);
+        let id1 = *validated1.id();
+        let id2 = *validated2.id();
+        let id3 = *validated3.id();
+
+        // Add transactions - they should go to basefee pool due to high basefee
+        // All transactions have nonce 0 from different senders, so on_chain_nonce should be 0 for
+        // all
+        pool.add_transaction(validated1, U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated2, U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated3, U256::from(10_000), 0, None).unwrap();
+
+        // Debug: Check where transactions ended up
+        println!("Basefee pool len: {}", pool.basefee_pool.len());
+        println!("Pending pool len: {}", pool.pending_pool.len());
+        println!("tx1 subpool: {:?}", pool.all_transactions.txs.get(&id1).unwrap().subpool);
+        println!("tx2 subpool: {:?}", pool.all_transactions.txs.get(&id2).unwrap().subpool);
+        println!("tx3 subpool: {:?}", pool.all_transactions.txs.get(&id3).unwrap().subpool);
+
+        // Verify they're in basefee pool
+        assert_eq!(pool.basefee_pool.len(), 3);
+        assert_eq!(pool.pending_pool.len(), 0);
+        assert_eq!(pool.all_transactions.txs.get(&id1).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&id2).unwrap().subpool, SubPool::BaseFee);
+        assert_eq!(pool.all_transactions.txs.get(&id3).unwrap().subpool, SubPool::BaseFee);
+
+        // Now decrease basefee to trigger the zero-allocation optimization
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 450; // tx1 (500) and tx2 (600) can now afford it, tx3 (400) cannot
+        pool.set_block_info(block_info);
+
+        // Verify the optimization worked correctly:
+        // - tx1 and tx2 should be promoted to pending (mathematical certainty)
+        // - tx3 should remain in basefee pool
+        // - All state transitions should be correct
+        assert_eq!(pool.basefee_pool.len(), 1);
+        assert_eq!(pool.pending_pool.len(), 2);
+
+        // tx3 should still be in basefee pool (fee 400 < basefee 450)
+        assert_eq!(pool.all_transactions.txs.get(&id3).unwrap().subpool, SubPool::BaseFee);
+
+        // tx1 and tx2 should be in pending pool with correct state bits
+        let tx1_meta = pool.all_transactions.txs.get(&id1).unwrap();
+        let tx2_meta = pool.all_transactions.txs.get(&id2).unwrap();
+        assert_eq!(tx1_meta.subpool, SubPool::Pending);
+        assert_eq!(tx2_meta.subpool, SubPool::Pending);
+        assert!(tx1_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        assert!(tx2_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+        // Verify that best_transactions returns the promoted transactions
+        let best: Vec<_> = pool.best_transactions().take(3).collect();
+        assert_eq!(best.len(), 2); // Only tx1 and tx2 should be returned
+        assert!(best.iter().any(|tx| tx.id() == &id1));
+        assert!(best.iter().any(|tx| tx.id() == &id2));
     }
 
     #[test]
