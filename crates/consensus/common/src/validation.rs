@@ -68,6 +68,25 @@ pub fn validate_shanghai_withdrawals<B: Block>(
     Ok(())
 }
 
+/// Validate that block access lists are present in Amsterdam
+///
+/// [EIP-7928]: https://eips.ethereum.org/EIPS/eip-7928
+#[inline]
+pub fn validate_amsterdam_block_access_lists<B: Block>(
+    block: &SealedBlock<B>,
+) -> Result<(), ConsensusError> {
+    let bal = block.body().block_access_list().ok_or(ConsensusError::BlockAccessListMissing)?;
+    let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+    let header_bal_hash =
+        block.block_access_list_hash().ok_or(ConsensusError::BlockAccessListHashMissing)?;
+    if bal_hash != *header_bal_hash {
+        return Err(ConsensusError::BodyBlockAccessListHashDiff(
+            GotExpected { got: bal_hash, expected: header_bal_hash }.into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Validate that blob gas is present in the block if Cancun is active.
 ///
 /// See [EIP-4844]: Shard Blob Transactions
@@ -212,6 +231,20 @@ where
             rlp_length: block.rlp_length(),
             max_rlp_length: MAX_RLP_BLOCK_SIZE,
         })
+    }
+
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        // let header_has_bal = block.header().block_access_list_hash().is_some();
+        // let body_has_bal = block.body().block_access_list().is_some();
+
+        // if !header_has_bal {
+        //     return Err(ConsensusError::BlockAccessListHashMissing);
+        // }
+
+        // if !body_has_bal {
+        //     return Err(ConsensusError::BlockAccessListMissing);
+        // }
+        validate_amsterdam_block_access_lists(block)?;
     }
 
     Ok(())

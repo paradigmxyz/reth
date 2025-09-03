@@ -416,6 +416,14 @@ pub enum ConsensusError {
     #[error("block access list mismatch")]
     BlockAccessListMismatch,
 
+    /// Error when the block access list is missing.
+    #[error("block access list missing")]
+    BlockAccessListMissing,
+
+    /// Error when the block access list hash is unexpected.
+    #[error("block access list hash unexpected")]
+    BlockAccessListHashUnexpected,
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),

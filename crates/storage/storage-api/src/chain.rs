@@ -187,6 +187,7 @@ where
                     .map(|(_, stored_ommers)| stored_ommers.ommers)
                     .unwrap_or_default()
             };
+            // TODO: Handle block access list
             bodies.push(alloy_consensus::BlockBody {
                 transactions,
                 ommers,
