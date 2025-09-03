@@ -210,6 +210,8 @@ where
             if header.requests_hash().is_none() {
                 return Err(ConsensusError::RequestsHashMissing)
             }
+        } else if header.requests_hash().is_some() {
+            return Err(ConsensusError::RequestsHashUnexpected)
         }
         if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
             header.block_access_list_hash().is_none()
@@ -219,8 +221,6 @@ where
             header.block_access_list_hash().is_some()
         {
             return Err(ConsensusError::BlockAccessListHashUnexpected)
-        } else if header.requests_hash().is_some() {
-            return Err(ConsensusError::RequestsHashUnexpected)
         }
 
         Ok(())
