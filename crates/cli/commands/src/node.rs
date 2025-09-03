@@ -295,7 +295,8 @@ mod tests {
         );
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics.prometheus", "localhost:9001"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--metrics.prometheus", "localhost:9001"])
+                .unwrap();
         assert_eq!(
             cmd.metrics.prometheus,
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
