@@ -315,17 +315,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let (current_evm_env, prepared_tx) =
                             this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)
                             .map_err(|err| {
-                                Self::Error::from_eth_err(EthApiError::Internal(RethError::msg(format!(
-                                    "call preparation error at bundle {}, tx {}: {}",
-                                    bundle_index, tx_index, err
-                                ))))
+                                Self::Error::from_eth_err(EthApiError::call_many_error(bundle_index, tx_index, err))
                             })?;
                         let res = this.transact(&mut db, current_evm_env, prepared_tx)
                             .map_err(|err| {
-                                Self::Error::from_eth_err(EthApiError::Internal(RethError::msg(format!(
-                                    "call execution error at bundle {}, tx {}: {}",
-                                    bundle_index, tx_index, err
-                                ))))
+                                Self::Error::from_eth_err(EthApiError::call_many_error(bundle_index, tx_index, err))
                             })?;
 
                         match ensure_success::<_, Self::Error>(res.result) {

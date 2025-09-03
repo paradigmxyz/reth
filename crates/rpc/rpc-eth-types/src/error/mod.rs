@@ -173,6 +173,17 @@ pub enum EthApiError {
     /// Error thrown when batch tx send channel fails
     #[error("Batch transaction sender channel closed")]
     BatchTxSendError,
+    /// Error that occurred during call_many execution with bundle and transaction context
+    #[error("call_many error at bundle {bundle_index}, tx {tx_index}: {source}")]
+    CallManyError {
+        /// Bundle index where the error occurred
+        bundle_index: usize,
+        /// Transaction index within the bundle where the error occurred  
+        tx_index: usize,
+        /// The underlying error
+        #[source]
+        source: Box<dyn core::error::Error + Send + Sync>,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -182,6 +193,18 @@ impl EthApiError {
     /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
+    }
+
+    /// Creates a new [`EthApiError::CallManyError`] variant.
+    pub fn call_many_error<E>(bundle_index: usize, tx_index: usize, source: E) -> Self 
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::CallManyError {
+            bundle_index,
+            tx_index,
+            source: Box::new(source),
+        }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -295,6 +318,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
             EthApiError::BatchTxSendError => {
                 internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
+            EthApiError::CallManyError { bundle_index, tx_index, source } => {
+                internal_rpc_err(format!("call_many error at bundle {}, tx {}: {}", bundle_index, tx_index, source))
             }
         }
     }
@@ -1036,6 +1062,32 @@ mod tests {
     fn timed_out_error() {
         let err = EthApiError::ExecutionTimedOut(Duration::from_secs(10));
         assert_eq!(err.to_string(), "execution aborted (timeout = 10s)");
+    }
+
+    #[test]
+    fn call_many_error_display() {
+        // Test the display format of CallManyError
+        let source_error = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let err = EthApiError::call_many_error(2, 5, source_error);
+        
+        // Check the error message format
+        let error_msg = err.to_string();
+        assert!(error_msg.contains("call_many error at bundle 2, tx 5"));
+        assert!(error_msg.contains("test error"));
+    }
+
+    #[test]
+    fn call_many_error_rpc_conversion() {
+        // Test that CallManyError converts properly to RPC error
+        let source_error = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let err = EthApiError::call_many_error(1, 3, source_error);
+        
+        let rpc_error: jsonrpsee_types::error::ErrorObject<'static> = err.into();
+        
+        // Should be an internal error with our custom message
+        assert_eq!(rpc_error.code(), jsonrpsee_types::error::INTERNAL_ERROR_CODE);
+        assert!(rpc_error.message().contains("call_many error at bundle 1, tx 3"));
+        assert!(rpc_error.message().contains("test error"));
     }
 
     #[test]
