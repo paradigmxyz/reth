@@ -723,8 +723,17 @@ where
                 // This validates that the state the transaction read during prewarming
                 // matches the current database state.
                 let cache_lookup_start = std::time::Instant::now();
-                // Use get() instead of remove() to reduce lock contention and allow reuse
-                let cache_result = tx_cache.get(&tx_hash).map(|entry| entry.clone());
+                
+                // Time the DashMap lookup operation separately
+                let dashmap_lookup_start = std::time::Instant::now();
+                let cache_entry = tx_cache.get(&tx_hash);
+                let dashmap_lookup_time = dashmap_lookup_start.elapsed();
+                
+                // Time the clone operation separately (this is the suspected bottleneck)
+                let clone_start = std::time::Instant::now();
+                let cache_result = cache_entry.map(|entry| entry.clone());
+                let clone_time = clone_start.elapsed();
+                
                 let cache_lookup_time = cache_lookup_start.elapsed();
 
                 if cache_result.is_none() {
@@ -738,6 +747,8 @@ where
                     tracing::info!(
                         target: "engine::cache::metrics",
                         ?tx_hash,
+                        dashmap_lookup_us = dashmap_lookup_time.as_micros(),
+                        clone_us = clone_time.as_micros(),
                         cache_lookup_us = cache_lookup_time.as_micros(),
                         total_overhead_us = total_overhead_time.as_micros(),
                         cache_size = tx_cache.len(),
@@ -753,7 +764,10 @@ where
                 tracing::info!(
                     target: "engine::cache::metrics",
                     ?tx_hash,
+                    dashmap_lookup_us = dashmap_lookup_time.as_micros(),
+                    clone_us = clone_time.as_micros(),
                     cache_lookup_us = cache_lookup_time.as_micros(),
+                    cache_size = tx_cache.len(),
                     "CACHE_HIT - Found cached result, starting validation"
                 );
 
@@ -761,6 +775,17 @@ where
                     let validation_start = std::time::Instant::now();
                     let trace_count = cached_tx.traces.len();
                     let tx_type = cached_tx.tx_type;
+                    let cache_entry_size = cached_tx.estimate_size();
+
+                    tracing::info!(
+                        target: "engine::cache::detailed",
+                        ?tx_hash,
+                        trace_count,
+                        tx_type,
+                        cache_entry_size_bytes = cache_entry_size,
+                        has_coinbase_deltas = cached_tx.coinbase_deltas.is_some(),
+                        "CACHE_ENTRY_ANALYSIS - Cache entry size and complexity"
+                    );
 
                     tracing::trace!(
                         target: "engine::cache",
@@ -771,13 +796,24 @@ where
                         "Validating cached execution result with chunked validation"
                     );
 
-                    // Validate cached accesses against current database state
+                    // Validate cached accesses against current database state  
                     let db_validation_start = std::time::Instant::now();
+                    
+                    tracing::debug!(
+                        target: "engine::timing::function",
+                        ?tx_hash,
+                        operation = "db_validation_start",
+                        "FUNCTION_TIMING - Starting database validation"
+                    );
 
-                    let validation_result = match validate_prewarm_accesses_against_db(
-                        db,
-                        &cached_tx.traces,
-                        cached_tx.coinbase_deltas,
+                    let validation_result = match timed_call!(
+                        tx_hash,
+                        "validate_prewarm_accesses_against_db",
+                        validate_prewarm_accesses_against_db(
+                            db,
+                            &cached_tx.traces,
+                            cached_tx.coinbase_deltas,
+                        )
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -1206,6 +1242,24 @@ enum ValidationFailure {
 /// Coinbase handling:
 /// - If `coinbase_deltas` is `Some`, the coinbase account is excluded from validation because its
 ///   nonce and balance will be adjusted after validation using the provided deltas.
+
+/// Macro to time function calls for performance analysis
+macro_rules! timed_call {
+    ($tx_hash:expr, $operation:expr, $call:expr) => {{
+        let start = std::time::Instant::now();
+        let result = $call;
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::debug!(
+            target: "engine::timing::function", 
+            tx_hash = ?$tx_hash,
+            operation = $operation,
+            elapsed_us = elapsed_us,
+            "FUNCTION_TIMING"
+        );
+        result
+    }};
+}
+
 fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
     prewarm_accesses: &[crate::tree::payload_processor::prewarm::AccessRecord],

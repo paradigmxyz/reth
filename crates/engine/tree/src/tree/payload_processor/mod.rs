@@ -77,6 +77,22 @@ where
     pub tx_type: &'static str,
 }
 
+impl<Evm> CachedTransaction<Evm>
+where
+    Evm: ConfigureEvm,
+{
+    /// Estimate the memory size of this cached transaction for performance analysis
+    pub fn estimate_size(&self) -> usize {
+        // Rough size estimation for performance analysis
+        let traces_size = self.traces.len() * std::mem::size_of::<AccessRecord>();
+        let result_size = std::mem::size_of_val(&self.result);
+        let coinbase_deltas_size = std::mem::size_of_val(&self.coinbase_deltas);
+        let base_size = std::mem::size_of::<Self>();
+        
+        traces_size + result_size + coinbase_deltas_size + base_size
+    }
+}
+
 /// Cache for transaction execution results and state access records.
 /// Maps transaction hashes to their cached execution data.
 pub type TxCache<Evm> = Arc<DashMap<TxHash, CachedTransaction<Evm>>>;
