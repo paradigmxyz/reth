@@ -8942,6 +8942,7 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
+ "reth-tracing-otlp",
  "reth-transaction-pool",
  "secp256k1 0.30.0",
  "serde_json",
@@ -10564,6 +10565,7 @@ dependencies = [
 name = "reth-tracing-otlp"
 version = "1.6.0"
 dependencies = [
+ "eyre",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",

@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 /// Telemetry exporters configuration.
 ///
 /// - Prometheus: serves metrics over http.
-/// - OTLP: pushes metrics and spans to an OpenTelemetry collector via http.
+/// - OTLP: pushes metrics to an `OpenTelemetry` collector via http.
 #[derive(Debug, Clone, Default, Parser)]
 pub struct MetricsArgs {
     /// Enable Prometheus metrics.
@@ -16,7 +16,7 @@ pub struct MetricsArgs {
 
     /// Enable OTLP export.
     ///
-    /// The spans and metrics will be exported at the given endpoint - interface and port.
+    /// The metrics will be exported at the given endpoint - interface and port.
     #[arg(long, value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub otlp: Option<SocketAddr>,
 }

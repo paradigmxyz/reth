@@ -81,6 +81,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
+use reth_tracing_otlp::init_metrics_tracing;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, thread::available_parallelism};
 use tokio::sync::{
@@ -620,6 +621,28 @@ where
         Ok(())
     }
 
+    /// This export to an OTLP-collector endpoint.
+    ///
+    /// Convenience function to [`Self::start_otlp_export`]
+    pub async fn with_otlp_collector(self) -> eyre::Result<Self> {
+        self.start_otlp_export().await?;
+        Ok(self)
+    }
+
+    /// Start to export metrics to the OTLP exporter.
+    pub async fn start_otlp_export(&self) -> eyre::Result<()> {
+        if let Some(listen_addr) = self.node_config().metrics.otlp {
+            info!(target: "reth::cli", "Starting metrics OTLP export to {}", listen_addr);
+            
+            let exporter_url = format!("http://{listen_addr}");
+            // Start registry with metrics exporting
+            //TODO: check how much it interfers with the current tracing registry,
+            //ideally it should be merged with the current tracing registry
+            init_metrics_tracing("reth", exporter_url)?;
+        }
+        Ok(())
+    }
+
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
         init_genesis(self.provider_factory())?;
@@ -882,9 +905,9 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism() &&
-            !self.is_dev() &&
-            self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism()
+            && !self.is_dev()
+            && self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
@@ -892,7 +915,7 @@ where
                 error!(
                     "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
                 );
-                return Err(ProviderError::BestBlockNotFound)
+                return Err(ProviderError::BestBlockNotFound);
             }
         }
 
