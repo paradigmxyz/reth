@@ -29,7 +29,7 @@ pub fn count_log_values_in_block<R: Receipt>(receipts: &[R]) -> u64 {
     })
 }
 
-/// Return an Iterator over all log values in a single block's receipts.
+/// Return an Iterator over all log values in a slice of receipts.
 ///
 /// The log values include the address value and all topic values for each log in the block's
 /// receipts.

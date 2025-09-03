@@ -21,6 +21,7 @@ pub enum StageId {
     TransactionLookup,
     IndexStorageHistory,
     IndexAccountHistory,
+    IndexLogs,
     Prune,
     Finish,
     /// Other custom stage with a provided string identifier.
@@ -29,7 +30,7 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Era,
         Self::Headers,
         Self::Bodies,
@@ -43,12 +44,13 @@ impl StageId {
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::IndexLogs,
         Self::Prune,
         Self::Finish,
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [Self; 9] = [
+    pub const STATE_REQUIRED: [Self; 10] = [
         Self::Execution,
         Self::PruneSenderRecovery,
         Self::MerkleUnwind,
@@ -57,6 +59,7 @@ impl StageId {
         Self::MerkleExecute,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::IndexLogs,
         Self::Prune,
     ];
 
@@ -78,6 +81,7 @@ impl StageId {
             Self::TransactionLookup => "TransactionLookup",
             Self::IndexAccountHistory => "IndexAccountHistory",
             Self::IndexStorageHistory => "IndexStorageHistory",
+            Self::IndexLogs => "IndexLogs",
             Self::Prune => "Prune",
             Self::Finish => "Finish",
             Self::Other(s) => s,
@@ -123,6 +127,7 @@ mod tests {
         assert_eq!(StageId::MerkleExecute.to_string(), "MerkleExecute");
         assert_eq!(StageId::IndexAccountHistory.to_string(), "IndexAccountHistory");
         assert_eq!(StageId::IndexStorageHistory.to_string(), "IndexStorageHistory");
+        assert_eq!(StageId::IndexLogs.to_string(), "IndexLogs");
         assert_eq!(StageId::TransactionLookup.to_string(), "TransactionLookup");
         assert_eq!(StageId::Finish.to_string(), "Finish");
 

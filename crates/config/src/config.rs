@@ -125,6 +125,8 @@ pub struct StageConfig {
     pub index_account_history: IndexHistoryConfig,
     /// Index Storage History stage configuration.
     pub index_storage_history: IndexHistoryConfig,
+    /// Index Logs stage configuration.
+    pub index_logs: IndexHistoryConfig, // TODO: separate config with filter params?
     /// Common ETL related configuration.
     pub etl: EtlConfig,
 }

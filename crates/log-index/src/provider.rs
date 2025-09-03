@@ -3,10 +3,7 @@
 //! This module defines the storage representations of filter maps data
 //! that can be stored in the database.
 
-use crate::{
-    types::{BlockBoundary, FilterMapMeta, FilterResult},
-    FilterMapRowEntry,
-};
+use crate::types::{BlockBoundary, FilterMapMeta, FilterResult};
 use alloy_primitives::{BlockNumber, B256};
 use std::ops::RangeBounds;
 
@@ -31,7 +28,7 @@ pub struct MapValueRows {
 
 /// Provider trait for reading filter map data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait FilterMapsReader: Send + Sync {
+pub trait LogIndexProvider: Send + Sync {
     /// Get filter map metadata.
     fn get_metadata(&self) -> FilterResult<Option<FilterMapMeta>>;
 
@@ -78,16 +75,4 @@ pub trait FilterMapsReader: Send + Sync {
         &self,
         block_range: impl RangeBounds<BlockNumber>,
     ) -> FilterResult<Vec<BlockBoundary>>;
-}
-
-/// Provider trait for writing filter map data.
-pub trait FilterMapsWriter: Send + Sync {
-    /// Store filter map metadata.
-    fn store_meta(&self, metadata: FilterMapMeta) -> FilterResult<()>;
-
-    /// Store filter map rows.
-    fn store_filter_map_rows_batch(&self, rows: Vec<FilterMapRowEntry>) -> FilterResult<()>;
-
-    /// Batch store log value indices for multiple blocks.
-    fn store_log_value_indices_batch(&self, indices: Vec<BlockBoundary>) -> FilterResult<()>;
 }

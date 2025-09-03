@@ -226,6 +226,34 @@ impl FilterMapParams {
         results.dedup();
         results
     }
+
+    /// Extract the row index from a map_row_index.
+    /// This reverses the map_row_index calculation.
+    pub fn extract_row_index(&self, map_row_index: u64, map_index: u32) -> u32 {
+        // Reverse of map_row_index calculation:
+        // map_row_index = ((epoch * map_height + row) * maps_per_epoch) + map_in_epoch
+        let epoch = map_index >> self.log_maps_per_epoch;
+        let map_in_epoch = map_index & ((1 << self.log_maps_per_epoch) - 1);
+
+        // Solve for row
+        let temp = (map_row_index - map_in_epoch as u64) >> self.log_maps_per_epoch;
+        (temp - ((epoch as u64) << self.log_map_height)) as u32
+    }
+
+    /// Determine which layer a row belongs to based on its current fill count.
+    /// Returns the first layer where the row could fit, or MAX_LAYERS-1 if it doesn't fit anywhere.
+    pub fn determine_layer(&self, fill_count: usize) -> usize {
+        use crate::MAX_LAYERS;
+
+        // Find the first layer where this row could fit
+        for layer in 0..MAX_LAYERS {
+            if fill_count <= self.max_row_length(layer as u32) as usize {
+                return layer as usize;
+            }
+        }
+        // If it doesn't fit in any layer, return the last layer
+        (MAX_LAYERS - 1) as usize
+    }
 }
 
 #[cfg(test)]

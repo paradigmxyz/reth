@@ -38,7 +38,7 @@
 //!     }
 //! }
 //!
-//! // Query logs using filter maps (requires a FilterMapsReader implementation)
+//! // Query logs using filter maps (requires a LogIndexProvider implementation)
 //! // let filter = Filter::new().address(address).topic0(topic);
 //! // let results = query_logs_in_block_range(provider, &params, &filter, from_block, to_block)?;
 //! ```
@@ -52,6 +52,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod constants;
+pub mod log_indexer;
 pub mod log_values;
 mod params;
 mod provider;
@@ -62,5 +63,5 @@ pub mod utils;
 pub use constants::{DEFAULT_PARAMS, EXPECTED_MATCHES, MAX_LAYERS, RANGE_TEST_PARAMS};
 pub use log_values::LogValueIterator;
 pub use params::FilterMapParams;
-pub use provider::{FilterMapsReader, FilterMapsWriter, MapValueRows};
+pub use provider::{LogIndexProvider, MapValueRows};
 pub use types::*;

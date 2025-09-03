@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     utils::{address_value, topic_value},
-    BlockBoundary, FilterError, FilterMapParams, FilterMapsReader, FilterResult, MapValueRows,
+    BlockBoundary, FilterError, FilterMapParams, FilterResult, LogIndexProvider, MapValueRows,
 };
 use alloy_primitives::{map::HashMap, B256};
 use alloy_rpc_types_eth::Filter;
@@ -23,7 +23,7 @@ pub struct FilterMapQueryResult {
 }
 
 /// Fetch log indices for the block range
-fn fetch_block_boundaries<P: FilterMapsReader>(
+fn fetch_block_boundaries<P: LogIndexProvider>(
     provider: &P,
     from_block: u64,
     to_block: u64,
@@ -89,7 +89,7 @@ fn build_constraints(filter: &Filter) -> Vec<(u64, Vec<B256>)> {
     constraints
 }
 
-fn fetch_filter_rows<P: FilterMapsReader>(
+fn fetch_filter_rows<P: LogIndexProvider>(
     provider: &P,
     map_start: u32,
     map_end: u32,
@@ -229,7 +229,7 @@ pub fn query_logs_in_block_range<P>(
     to_block: u64,
 ) -> FilterResult<Vec<FilterMapQueryResult>>
 where
-    P: FilterMapsReader,
+    P: LogIndexProvider,
 {
     let log_value_indices = fetch_block_boundaries(provider, from_block, to_block)?;
     let (first_map, last_map) =

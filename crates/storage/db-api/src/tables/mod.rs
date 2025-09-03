@@ -29,7 +29,9 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_log_index::{FilterMapMeta as FilterMapMetadata, FilterMapRowEntry};
+use reth_log_index::{
+    FilterMapColumns, FilterMapMeta as FilterMapMetadata, LogValueIndex, MapRowIndex,
+};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -534,15 +536,15 @@ tables! {
     /// Stores filter map rows containing column indices for log values.
     /// Key is map_row_index (epoch-based organization for efficient access).
     table FilterMapRows {
-        type Key = u64;
-        type Value = FilterMapRowEntry;
+        type Key = MapRowIndex;
+        type Value = FilterMapColumns;
     }
 
     /// Stores log value indices for block boundaries.
     /// Maps block number to the starting log value index for that block.
     table LogValueIndices {
         type Key = BlockNumber;
-        type Value = u64;
+        type Value = LogValueIndex;
     }
 
     // table FilterMapBlockIndices {

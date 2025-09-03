@@ -5,6 +5,22 @@ use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
 
+/// Type alias for Map Index
+/// This represents the index of a filter map.
+pub type MapIndex = u32;
+
+/// Type alias for Map Row Index
+/// This represents the index of a row in the filter map.
+pub type MapRowIndex = u64;
+
+/// Type alias for column index
+/// This represents the index of a column in the filter map row.
+pub type ColumnIndex = u32;
+
+/// Type alias for Log Value Index
+/// This represents the index of a log value in the log index.
+pub type LogValueIndex = u64;
+
 /// Metadata for tracking the state of log indexing and filter map generation.
 ///
 /// This struct maintains information about which blocks have been indexed and which filter maps
@@ -23,17 +39,16 @@ pub struct FilterMapMeta {
     /// TODO: need to impl this in the crate. This can be used to get the indexed range.
     pub is_last_indexed_block_complete: bool,
 
-    /// The index of the first complete filter map that has been generated.
+    /// The index of the first complete filter map that has been stored.
     /// Filter maps before this index may be incomplete or missing.
     pub first_map_index: u32,
 
-    /// The index of the last complete filter map that has been generated.
-    /// This tracks how many filter maps have been fully constructed.
+    /// The index of the last complete filter map that has been stored.
     pub last_map_index: u32,
 
-    /// The next log value index that needs to be processed.
+    /// The last indexed log value index.
     /// Used to resume log indexing from where it left off previously.
-    pub next_log_value_index: u64,
+    pub last_log_value_index: u64,
 
     /// The number of maps in the oldest epoch. This is used to be pruning-aware.
     /// When pruning is enabled, we need to know how many maps were created in the oldest epoch
@@ -42,26 +57,22 @@ pub struct FilterMapMeta {
     /// TODO: need to implement pruning logic in the crate.
     pub oldest_epoch_map_count: u32,
 }
-/// A row in a filter map stored in the database.
-///
-/// Each row contains column indices where log values are stored.
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
-pub struct FilterMapRowEntry {
+pub struct FilterMapRow {
     pub map_row_index: u64,
-    pub columns: Vec<u32>,
+    pub columns: FilterMapColumns,
 }
 
-impl FilterMapRowEntry {
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.columns.is_empty()
-    }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
+pub struct FilterMapColumns {
+    pub indices: Vec<u32>,
 }
 
 /// Represents the block boundaries for log value indices.
 ///
 /// Each entry indicates the starting log value index for a specific block number.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Compact)]
 pub struct BlockBoundary {
     pub block_number: BlockNumber,
     pub log_value_index: u64,

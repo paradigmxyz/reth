@@ -1,6 +1,9 @@
 use alloy_primitives::{map::HashMap, B256};
 
-use crate::{FilterError, FilterMapParams, MAX_LAYERS};
+use crate::{
+    ColumnIndex, FilterError, FilterMapColumns, FilterMapParams, LogValueIndex, MapIndex,
+    MapRowIndex, MAX_LAYERS,
+};
 
 /// Type alias for count of filled entries in a row
 pub type Count = u32;
@@ -12,13 +15,13 @@ const ROW_CACHE_CAP: usize = 64 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowCell {
     /// The map index this log value belongs to
-    pub map: u32,
+    pub map: MapIndex,
     /// The row within the map
-    pub map_row: u64,
+    pub map_row_index: MapRowIndex,
     /// The column within the row
-    pub col: u32,
+    pub column_index: ColumnIndex,
     /// The global log value index
-    pub index: u64,
+    pub index: LogValueIndex,
 }
 
 /// An iterator that yields (log_value_index, map_row_index, column_index) for each log value.
@@ -28,7 +31,7 @@ pub struct RowCell {
 #[derive(Debug, Clone)]
 pub struct LogValueIterator<I> {
     inner: I,
-    index: u64,                          // current log value index
+    index: LogValueIndex,                // current log value index
     params: FilterMapParams,             // filter map parameters
     fills: Vec<HashMap<u32, Count>>,     // fill levels per layer. [layer] row_idx -> count
     row_cache: HashMap<(u8, B256), u32>, // cache for row. (layer, value) -> row_idx
@@ -49,6 +52,42 @@ impl<I> LogValueIterator<I> {
         }
     }
 
+    /// Create a LogValueIterator resuming from existing state.
+    /// This is useful for resuming indexing from an incomplete map.
+    pub fn from_state(
+        inner: I,
+        starting_index: u64,
+        params: FilterMapParams,
+        pending_rows: &HashMap<MapRowIndex, FilterMapColumns>,
+    ) -> Self {
+        let log_values_mask = params.values_per_map() - 1;
+        let current_map = (starting_index >> params.log_values_per_map) as u32;
+
+        // Rebuild fills from pending_rows
+        let mut fills: Vec<HashMap<u32, Count>> =
+            (0..MAX_LAYERS).map(|_| HashMap::default()).collect();
+
+        for (map_row_index, columns) in pending_rows {
+            // Extract row_index from map_row_index using params method
+            let row_index = params.extract_row_index(*map_row_index, current_map);
+
+            // Determine which layer this row belongs to using params method
+            let layer = params.determine_layer(columns.indices.len());
+
+            // Update fill level
+            fills[layer].insert(row_index, columns.indices.len() as u32);
+        }
+
+        Self {
+            inner,
+            index: starting_index,
+            params,
+            fills,
+            row_cache: HashMap::default(),
+            log_values_mask,
+        }
+    }
+
     /// Get the current map index based on the log value index.
     /// This is calculated as index >> log_values_per_map.
     #[inline]
@@ -56,10 +95,10 @@ impl<I> LogValueIterator<I> {
         (self.index >> self.params.log_values_per_map) as u32
     }
 
-    /// Get the cutoff index for the current map.
+    /// Get the cutoff log value index for the current map.
     /// This is helpful for writing map boundaries.
     #[inline]
-    pub fn cutoff_index(&self) -> u64 {
+    pub fn cutoff_log_value_index(&self) -> u64 {
         (self.current_map() as u64) << self.params.log_values_per_map
     }
 
@@ -101,13 +140,13 @@ impl<I: Iterator<Item = B256>> Iterator for LogValueIterator<I> {
 
             let fill_level = *self.fills[layer as usize].get(&row_index).unwrap_or(&0);
             if fill_level < self.params.max_row_length(layer as u32) {
-                let map_row = self.params.map_row_index(map, row_index);
-                let col_index = self.params.column_index(self.index, &value);
+                let map_row_index = self.params.map_row_index(map, row_index);
+                let column_index = self.params.column_index(self.index, &value);
 
                 // Update fill level
                 self.fills[layer as usize].insert(row_index, fill_level + 1);
 
-                let cell = RowCell { map, map_row, col: col_index, index: self.index };
+                let cell = RowCell { map, map_row_index, column_index, index: self.index };
 
                 // Increment the global log value index
                 self.index = self.index.saturating_add(1);

@@ -45,8 +45,8 @@ use reth_db_api::{
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_log_index::{
-    BlockBoundary, FilterError, FilterMapMeta, FilterMapParams, FilterMapRowEntry,
-    FilterMapsReader, FilterMapsWriter, FilterResult, MapValueRows,
+    BlockBoundary, FilterError, FilterMapMeta, FilterMapParams, FilterResult, LogIndexProvider,
+    MapValueRows,
 };
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
@@ -3172,7 +3172,7 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
     }
 }
 
-impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX, N> {
     fn get_metadata(&self) -> FilterResult<Option<FilterMapMeta>> {
         self.tx_ref()
             .get::<tables::FilterMapMeta>(tables::FilterMapMetaKey)
@@ -3209,8 +3209,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX,
         let mut results = vec![Vec::new(); (map_end - map_start + 1) as usize];
 
         for entry in walker {
-            let (map_row_idx, row_entry) =
-                entry.map_err(|e| FilterError::Database(e.to_string()))?;
+            let (map_row_idx, columns) = entry.map_err(|e| FilterError::Database(e.to_string()))?;
 
             // Calculate which map this belongs to
             // Reverse the map_row_index formula to get map_index
@@ -3220,7 +3219,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX,
             // Place in correct position
             let position = (map_index - map_start) as usize;
             if position < results.len() {
-                results[position] = row_entry.columns;
+                results[position] = columns.indices;
             }
         }
 
@@ -3243,7 +3242,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX,
                 .tx_ref()
                 .get::<tables::FilterMapRows>(map_row_index)
                 .map_err(|e| FilterError::Database(e.to_string()))?
-                .map(|entry| entry.columns)
+                .map(|columns| columns.indices)
                 .unwrap_or_default();
 
             let max_len = params.max_row_length(layer as u32) as usize;
@@ -3308,33 +3307,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> FilterMapsReader for DatabaseProvider<TX,
         }
 
         Ok(boundaries)
-    }
-}
-
-impl<TX: DbTxMut, N: NodeTypes> FilterMapsWriter for DatabaseProvider<TX, N> {
-    fn store_meta(&self, metadata: FilterMapMeta) -> FilterResult<()> {
-        self.tx
-            .put::<tables::FilterMapMeta>(tables::FilterMapMetaKey, metadata)
-            .map_err(|e| FilterError::Database(e.to_string()))
-    }
-
-    fn store_filter_map_rows_batch(&self, rows: Vec<FilterMapRowEntry>) -> FilterResult<()> {
-        for FilterMapRowEntry { map_row_index, columns } in rows {
-            let entry = FilterMapRowEntry { map_row_index, columns };
-            self.tx
-                .put::<tables::FilterMapRows>(map_row_index, entry)
-                .map_err(|e| FilterError::Database(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn store_log_value_indices_batch(&self, indices: Vec<BlockBoundary>) -> FilterResult<()> {
-        for boundary in indices {
-            self.tx
-                .put::<tables::LogValueIndices>(boundary.block_number, boundary.log_value_index)
-                .map_err(|e| FilterError::Database(e.to_string()))?;
-        }
-        Ok(())
     }
 }
 
