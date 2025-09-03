@@ -48,6 +48,23 @@ use reth_revm::state::AccountInfo;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
+/// Macro to time function calls for performance analysis
+macro_rules! timed_call {
+    ($tx_hash:expr, $operation:expr, $call:expr) => {{
+        let start = std::time::Instant::now();
+        let result = $call;
+        let elapsed_us = start.elapsed().as_micros() as u64;
+        tracing::debug!(
+            target: "engine::timing::function", 
+            tx_hash = ?$tx_hash,
+            operation = $operation,
+            elapsed_us = elapsed_us,
+            "FUNCTION_TIMING"
+        );
+        result
+    }};
+}
+
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -1243,22 +1260,6 @@ enum ValidationFailure {
 /// - If `coinbase_deltas` is `Some`, the coinbase account is excluded from validation because its
 ///   nonce and balance will be adjusted after validation using the provided deltas.
 
-/// Macro to time function calls for performance analysis
-macro_rules! timed_call {
-    ($tx_hash:expr, $operation:expr, $call:expr) => {{
-        let start = std::time::Instant::now();
-        let result = $call;
-        let elapsed_us = start.elapsed().as_micros() as u64;
-        tracing::debug!(
-            target: "engine::timing::function", 
-            tx_hash = ?$tx_hash,
-            operation = $operation,
-            elapsed_us = elapsed_us,
-            "FUNCTION_TIMING"
-        );
-        result
-    }};
-}
 
 fn validate_prewarm_accesses_against_db<DB: revm::Database>(
     db: &mut DB,
