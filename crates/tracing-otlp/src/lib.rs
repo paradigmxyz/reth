@@ -26,13 +26,13 @@ const DEFAULT_METRICS_READER_INTERVAL: Duration = Duration::from_secs(30);
 ///
 /// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
 /// with OTLP export.
-pub fn layer<S>(service_name: impl Into<Value>) -> OpenTelemetryLayer<S, SdkTracer>
+pub fn span_layer<S>(service_name: impl Into<Value>) -> OpenTelemetryLayer<S, SdkTracer>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
 {
-    let span_exporter = SpanExporter::builder().with_http().build().unwrap();
-
     let resource = build_resource(service_name);
+
+    let span_exporter = SpanExporter::builder().with_http().build().unwrap();
 
     let provider = SdkTracerProvider::builder()
         .with_resource(resource)
@@ -64,7 +64,11 @@ pub fn create_metrics_provider(
 /// Inits metrics tracing with an OTLP metrics exporter.
 pub fn init_metrics_tracing(service_name: impl Into<Value>, endpoint: String) -> eyre::Result<()> {
     let meter_provider = create_metrics_provider(service_name, endpoint);
-    tracing_subscriber::registry().with(MetricsLayer::new(meter_provider)).try_init()?;
+
+    tracing_subscriber::registry()
+        .with(MetricsLayer::new(meter_provider))
+        .try_init()
+        .map_err(|e| eyre::eyre!("Failed to initialize metrics tracing: {}", e))?;
 
     Ok(())
 }

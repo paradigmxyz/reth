@@ -636,7 +636,7 @@ where
 
             let exporter_url = format!("http://{listen_addr}");
             // Start registry with metrics exporting
-            //TODO: check how much it interfers with the current tracing registry,
+            //TODO: check how much it interferes with the current tracing registry,
             //ideally it should be merged with the current tracing registry
             init_metrics_tracing("reth", exporter_url)?;
         }
