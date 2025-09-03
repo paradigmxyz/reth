@@ -885,7 +885,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: false,
 
             // amsterdam not yet activated
-            amsterdam: false,
+            amsterdam: true,
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
