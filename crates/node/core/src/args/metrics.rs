@@ -2,14 +2,13 @@ use clap::Parser;
 use reth_cli_util::parse_socket_address;
 use std::net::SocketAddr;
 
-/// Endpoints configuration, metrics and spans can be exported
+/// Telemetry exporters configuration.
 ///
-/// Either to prometheus endpoint either to an OTLP endpoint.
-///
-/// Only http is supported.
+/// - Prometheus: serves metrics over http.
+/// - OTLP: pushes metrics and spans to an OpenTelemetry collector via http.
 #[derive(Debug, Clone, Default, Parser)]
 pub struct MetricsArgs {
-    /// Enable Prometheus metrics export.
+    /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
@@ -17,7 +16,7 @@ pub struct MetricsArgs {
 
     /// Enable OTLP export.
     ///
-    /// The metrics (and spans) will be exported to the given endpoint - interface and port.
+    /// The spans and metrics will be exported at the given endpoint - interface and port.
     #[arg(long, value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub otlp: Option<SocketAddr>,
 }
