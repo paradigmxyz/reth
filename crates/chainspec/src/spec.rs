@@ -686,7 +686,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
             (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
             (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
-            (EthereumHardfork::Amsterdam.boxed(), Some(0)),
+            (EthereumHardfork::Amsterdam.boxed(), genesis.config.amsterdam_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
