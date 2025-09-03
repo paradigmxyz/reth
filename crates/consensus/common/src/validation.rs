@@ -79,7 +79,7 @@ pub fn validate_amsterdam_block_access_lists<B: Block>(
     let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
     let header_bal_hash =
         block.block_access_list_hash().ok_or(ConsensusError::BlockAccessListHashMissing)?;
-    if bal_hash != *header_bal_hash {
+    if bal_hash != header_bal_hash {
         return Err(ConsensusError::BodyBlockAccessListHashDiff(
             GotExpected { got: bal_hash, expected: header_bal_hash }.into(),
         ));

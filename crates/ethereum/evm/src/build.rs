@@ -7,10 +7,7 @@ use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_evm::{
-    eth::validate_block_access_list_against_execution,
-    execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError},
-};
+use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::logs_bloom;
 
@@ -96,27 +93,16 @@ where
 
         let mut built_block_access_list = None;
         let mut block_access_list_hash = None;
-        let mut bal_error = None;
         if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
             if let Some(bal) = block_access_list {
-                if validate_block_access_list_against_execution(bal) {
-                    built_block_access_list = Some(bal);
-                    block_access_list_hash =
-                        Some(alloy_primitives::keccak256(alloy_rlp::encode(bal)));
-                } else {
-                    bal_error = Some(BlockExecutionError::Validation(
-                        reth_evm::block::BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                            transaction_gas_limit: 2_500_000,
-                            block_available_gas: 1_500_000,// placeholder error for now
-                        },
-                    ));
-                }
+                built_block_access_list = Some(bal);
+                block_access_list_hash = Some(alloy_primitives::keccak256(alloy_rlp::encode(bal)));
             }
         }
 
-        if let Some(err) = bal_error {
-            return Err(err);
-        }
+        // if let Some(err) = bal_error {
+        //     return Err(err);
+        // }
 
         let header = Header {
             parent_hash: ctx.parent_hash,

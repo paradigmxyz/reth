@@ -18,7 +18,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     receipts: &[R],
     requests: &Requests,
-    block_access_list: &Option<BlockAccessList>,
+    _block_access_list: &Option<BlockAccessList>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -66,20 +66,20 @@ where
     }
 
     // Validate bal hash matches the calculated hash
-    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
-        let Some(header_block_access_list_hash) = block.header().block_access_list_hash() else {
-            return Err(ConsensusError::BlockAccessListHashMissing)
-        };
-        if let Some(bal) = block_access_list {
-            let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+    // if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+    //     let Some(header_block_access_list_hash) = block.header().block_access_list_hash() else {
+    //         return Err(ConsensusError::BlockAccessListHashMissing)
+    //     };
+    //     if let Some(bal) = block_access_list {
+    //         let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
 
-            if bal_hash != header_block_access_list_hash {
-                return Err(ConsensusError::BodyBlockAccessListHashDiff(
-                    GotExpected::new(bal_hash, header_block_access_list_hash).into(),
-                ))
-            }
-        }
-    }
+    //         if bal_hash != header_block_access_list_hash {
+    //             return Err(ConsensusError::BodyBlockAccessListHashDiff(
+    //                 GotExpected::new(bal_hash, header_block_access_list_hash).into(),
+    //             ))
+    //         }
+    //     }
+    // }
 
     Ok(())
 }
