@@ -1,25 +1,18 @@
-use crate::{sequence::FlashBlockSequence, ExecutionPayloadBaseV1, FlashBlock};
-use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::B256;
+use crate::{
+    sequence::FlashBlockSequence,
+    worker::{BuildArgs, FlashBlockBuilder},
+    ExecutionPayloadBaseV1, FlashBlock,
+};
 use futures_util::{FutureExt, Stream, StreamExt};
-use reth_chain_state::{
-    CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions, ExecutedBlock,
-};
-use reth_errors::RethError;
-use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
-};
-use reth_execution_types::ExecutionOutcome;
+use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
+use reth_rpc_eth_types::PendingBlock;
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::pin;
 use tracing::{debug, trace, warn};
@@ -37,14 +30,8 @@ pub struct FlashBlockService<
     current: Option<PendingBlock<N>>,
     blocks: FlashBlockSequence<N::SignedTx>,
     rebuild: bool,
-    evm_config: EvmConfig,
-    provider: Provider,
+    builder: FlashBlockBuilder<EvmConfig, Provider>,
     canon_receiver: CanonStateNotifications<N>,
-    /// Cached state reads for the current block.
-    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
-    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
-    /// within the same block.
-    cached_state: Option<(B256, CachedReads)>,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -67,10 +54,8 @@ where
             rx,
             current: None,
             blocks: FlashBlockSequence::new(),
-            evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
-            provider,
-            cached_state: None,
+            builder: FlashBlockBuilder::new(evm_config, provider),
             rebuild: false,
         }
     }
@@ -88,86 +73,21 @@ where
         warn!("Flashblock service has stopped");
     }
 
-    /// Returns the cached reads at the given head hash.
-    ///
-    /// Returns a new cache instance if this is new `head` hash.
-    fn cached_reads(&mut self, head: B256) -> CachedReads {
-        if let Some((tracked, cache)) = self.cached_state.take() {
-            if tracked == head {
-                return cache
-            }
-        }
-
-        // instantiate a new cache instance
-        CachedReads::default()
-    }
-
-    /// Updates the cached reads at the given head hash
-    fn update_cached_reads(&mut self, head: B256, cached_reads: CachedReads) {
-        self.cached_state = Some((head, cached_reads));
-    }
-
-    /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received earlier.
+    /// Returns the [`PendingBlock`] made purely out of [`FlashBlock`]s that were received earlier.
     ///
     /// Returns None if the flashblock doesn't attach to the latest header.
     fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
-        trace!("Attempting new flashblock");
+        let Some(base) = self.blocks.payload_base() else {
+            trace!(
+                flashblock_number = ?self.blocks.block_number(),
+                count = %self.blocks.count(),
+                "Missing flashblock payload base"
+            );
 
-        let latest = self
-            .provider
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
-        let latest_hash = latest.hash();
-
-        let Some(attrs) = self.blocks.payload_base() else {
-            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing flashblock payload base");
             return Ok(None)
         };
 
-        if attrs.parent_hash != latest_hash {
-            trace!(flashblock_parent = ?attrs.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
-            // doesn't attach to the latest block
-            return Ok(None)
-        }
-
-        let state_provider = self.provider.history_by_block_hash(latest.hash())?;
-
-        let mut request_cache = self.cached_reads(latest_hash);
-        let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
-        let mut state = State::builder().with_database(cached_db).with_bundle_update().build();
-
-        let mut builder = self
-            .evm_config
-            .builder_for_next_block(&mut state, &latest, attrs.into())
-            .map_err(RethError::other)?;
-
-        builder.apply_pre_execution_changes()?;
-
-        for tx in self.blocks.ready_transactions() {
-            let _gas_used = builder.execute_transaction(tx)?;
-        }
-
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(NoopProvider::default())?;
-
-        let execution_outcome = ExecutionOutcome::new(
-            state.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
-        );
-
-        // update cached reads
-        self.update_cached_reads(latest_hash, request_cache);
-
-        Ok(Some(PendingBlock::with_executed_block(
-            Instant::now() + Duration::from_secs(1),
-            ExecutedBlock {
-                recovered_block: block.into(),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
-            },
-        )))
+        self.builder.execute(BuildArgs { base, transactions: self.blocks.ready_transactions() })
     }
 
     /// Takes out `current` [`PendingBlock`] if `state` is not preceding it.
