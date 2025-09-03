@@ -52,8 +52,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod constants;
-pub mod log_indexer;
-pub mod log_values;
+pub mod indexer;
 mod params;
 mod provider;
 pub mod query;
@@ -61,7 +60,6 @@ mod types;
 pub mod utils;
 
 pub use constants::{DEFAULT_PARAMS, EXPECTED_MATCHES, MAX_LAYERS, RANGE_TEST_PARAMS};
-pub use log_values::LogValueIterator;
 pub use params::FilterMapParams;
 pub use provider::{LogIndexProvider, MapValueRows};
 pub use types::*;

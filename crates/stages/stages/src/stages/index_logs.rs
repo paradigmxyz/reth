@@ -11,10 +11,9 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_log_index::{
-    log_indexer::{LogIndexer, ProcessBatchResult},
+    indexer::{LogIndexer, ProcessBatchResult},
     utils::{count_log_values_in_block, log_values_from_receipts},
-    FilterMapColumns, FilterMapParams, LogIndexProvider, LogValueIndex, LogValueIterator,
-    MapRowIndex,
+    FilterMapColumns, FilterMapParams, LogIndexProvider, LogValueIndex, MapRowIndex,
 };
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter, ReceiptProvider,
@@ -531,7 +530,7 @@ mod tests {
 
         let (previous_stage, stage_progress) = (500, 0);
         let mut rng = generators::rng();
-        let tx_count: u64 = 100; // Number of transactions in a non-empty block
+        let tx_count: u64 = 190; // Number of transactions in a non-empty block
         let logs_count: u64 = 1;
         let topic_count: u64 = 3;
 
@@ -576,7 +575,6 @@ mod tests {
 
         runner.db.insert_receipts(receipts).expect("insert receipts");
 
-        let values_per_block = topic_count * logs_count * tx_count;
         let total_values = total_log_values;
         let expected_maps = total_values / runner.params.values_per_map();
         let total_values_in_complete_maps = expected_maps * runner.params.values_per_map();
