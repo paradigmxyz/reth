@@ -39,10 +39,15 @@ Options:
           Print help (see a summary with '-h')
 
 Metrics:
-      --metrics <SOCKET>
+      --prometheus <PROMETHEUS>
           Enable Prometheus metrics.
 
           The metrics will be served at the given interface and port.
+
+      --otlp <OTLP>
+          Enable OTLP export.
+
+          The metrics will be exported at the given endpoint - interface and port.
 
 Datadir:
       --datadir <DATA_DIR>
