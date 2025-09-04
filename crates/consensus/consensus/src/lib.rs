@@ -409,7 +409,7 @@ pub enum ConsensusError {
     BodyBlockAccessListHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when the block access list hash is missing.
-    #[error("block access list missing")]
+    #[error("block access list hash missing")]
     BlockAccessListHashMissing,
 
     /// Error when the block access list is different from the expected access list.

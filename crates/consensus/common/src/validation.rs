@@ -234,16 +234,6 @@ where
     }
 
     if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
-        // let header_has_bal = block.header().block_access_list_hash().is_some();
-        // let body_has_bal = block.body().block_access_list().is_some();
-
-        // if !header_has_bal {
-        //     return Err(ConsensusError::BlockAccessListHashMissing);
-        // }
-
-        // if !body_has_bal {
-        //     return Err(ConsensusError::BlockAccessListMissing);
-        // }
         validate_amsterdam_block_access_lists(block)?;
     }
 
