@@ -21,6 +21,7 @@ alloy-eips = { workspace = true, optional = true, features = ["serde"] }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-trie = { workspace = true, optional = true }
+alloy-block-access-list = { workspace = true, features = ["arbitrary"] }
 
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
