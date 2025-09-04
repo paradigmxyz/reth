@@ -86,38 +86,38 @@ use tracing::trace;
 /// ```
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
-    sender_info: FxHashMap<SenderId, SenderInfo>,
+    pub sender_info: FxHashMap<SenderId, SenderInfo>,
     /// pending subpool
     ///
     /// Holds transactions that are ready to be executed on the current state.
-    pending_pool: PendingPool<T>,
+    pub pending_pool: PendingPool<T>,
     /// Pool settings to enforce limits etc.
-    config: PoolConfig,
+    pub config: PoolConfig,
     /// queued subpool
     ///
     /// Holds all parked transactions that depend on external changes from the sender:
     ///
     ///    - blocked by missing ancestor transaction (has nonce gaps)
     ///    - sender lacks funds to pay for this transaction.
-    queued_pool: ParkedPool<QueuedOrd<T::Transaction>>,
+    pub queued_pool: ParkedPool<QueuedOrd<T::Transaction>>,
     /// base fee subpool
     ///
     /// Holds all parked transactions that currently violate the dynamic fee requirement but could
     /// be moved to pending if the base fee changes in their favor (decreases) in future blocks.
-    basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
+    pub basefee_pool: ParkedPool<BasefeeOrd<T::Transaction>>,
     /// Blob transactions in the pool that are __not pending__.
     ///
     /// This means they either do not satisfy the dynamic fee requirement or the blob fee
     /// requirement. These transactions can be moved to pending if the base fee or blob fee changes
     /// in their favor (decreases) in future blocks. The transaction may need both the base fee and
     /// blob fee to decrease to become executable.
-    blob_pool: BlobTransactions<T::Transaction>,
+    pub blob_pool: BlobTransactions<T::Transaction>,
     /// All transactions in the pool.
-    all_transactions: AllTransactions<T::Transaction>,
+    pub all_transactions: AllTransactions<T::Transaction>,
     /// Transaction pool metrics
-    metrics: TxPoolMetrics,
+    pub metrics: TxPoolMetrics,
     /// The last update kind that was applied to the pool.
-    latest_update_kind: Option<PoolUpdateKind>,
+    pub latest_update_kind: Option<PoolUpdateKind>,
 }
 
 // === impl TxPool ===
@@ -1214,7 +1214,8 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 ///
 /// This is the sole entrypoint that's guarding all sub-pools, all sub-pool actions are always
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
-pub(crate) struct AllTransactions<T: PoolTransaction> {
+#[derive(Debug)]
+pub struct AllTransactions<T: PoolTransaction> {
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
@@ -2137,7 +2138,7 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
 
 /// Stores relevant context about a sender.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct SenderInfo {
+pub struct SenderInfo {
     /// current nonce of the sender.
     pub(crate) state_nonce: u64,
     /// Balance of the sender at the current point.

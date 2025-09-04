@@ -1,3 +1,5 @@
+//! Pending transactions
+
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::{
@@ -28,26 +30,26 @@ use tokio::sync::broadcast;
 #[derive(Debug, Clone)]
 pub struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
-    ordering: T,
+    pub ordering: T,
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions were submitted to the pool.
-    submission_id: u64,
+    pub submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
-    by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
+    pub by_id: BTreeMap<TransactionId, PendingTransaction<T>>,
     /// The highest nonce transactions for each sender - like the `independent` set, but the
     /// highest instead of lowest nonce.
-    highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
+    pub highest_nonces: FxHashMap<SenderId, PendingTransaction<T>>,
     /// Independent transactions that can be included directly and don't require other
     /// transactions.
-    independent_transactions: FxHashMap<SenderId, PendingTransaction<T>>,
+    pub independent_transactions: FxHashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
-    size_of: SizeTracker,
+    pub size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
-    new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
+    pub new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
 // === impl PendingPool ===
@@ -569,18 +571,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
-pub(crate) struct PendingTransaction<T: TransactionOrdering> {
+pub struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
-    pub(crate) submission_id: u64,
+    pub submission_id: u64,
     /// Actual transaction.
-    pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// The priority value assigned by the used `Ordering` function.
-    pub(crate) priority: Priority<T::PriorityValue>,
+    pub priority: Priority<T::PriorityValue>,
 }
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// The next transaction of the sender: `nonce + 1`
-    pub(crate) fn unlocks(&self) -> TransactionId {
+    pub fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
     }
 }
