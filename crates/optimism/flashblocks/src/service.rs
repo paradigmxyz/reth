@@ -1,5 +1,5 @@
 use crate::{
-    sequence::{FlashBlockPendingSequence, FlashBlockSequence},
+    sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
     ExecutionPayloadBaseV1, FlashBlock,
 };
