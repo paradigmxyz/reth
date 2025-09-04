@@ -138,12 +138,12 @@ impl PruneModes {
             (
                 self.account_history,
                 HistoryType::AccountHistory,
-                checkpoints.iter().find(|(sgement, _)| sgement.is_account_history()),
+                checkpoints.iter().find(|(segment, _)| segment.is_account_history()),
             ),
             (
                 self.storage_history,
                 HistoryType::StorageHistory,
-                checkpoints.iter().find(|(sgement, _)| sgement.is_storage_history()),
+                checkpoints.iter().find(|(segment, _)| segment.is_storage_history()),
             ),
         ] {
             if let Some(PruneMode::Distance(limit)) = prune_mode {
