@@ -10632,6 +10632,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
+ "assert_matches",
  "auto_impl",
  "codspeed-criterion-compat",
  "itertools 0.14.0",
@@ -10651,6 +10652,7 @@ dependencies = [
  "reth-trie-sparse",
  "revm-database",
  "revm-state",
+ "serde",
  "tracing",
  "triehash",
 ]
