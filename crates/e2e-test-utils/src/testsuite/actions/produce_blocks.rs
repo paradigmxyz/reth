@@ -256,8 +256,8 @@ where
                 debug!("No payload ID returned, generating fresh payload attributes for forking");
 
                 let fresh_payload_attributes = PayloadAttributes {
-                    timestamp: env.active_node_state()?.latest_header_time +
-                        env.block_timestamp_increment,
+                    timestamp: env.active_node_state()?.latest_header_time
+                        + env.block_timestamp_increment,
                     prev_randao: B256::random(),
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
@@ -591,11 +591,19 @@ where
                 if !accepted_check {
                     accepted_check = true;
                     // save the header in Env
-                    env.active_node_state_mut()?.latest_header_time = next_new_payload.timestamp;
+                    env.set_current_block_info(BlockInfo {
+                        hash: rpc_latest_header.hash,
+                        number: rpc_latest_header.inner.number,
+                        timestamp: rpc_latest_header.inner.timestamp,
+                    })?;
 
-                    // add it to header history
+                    // align latest header time and forkchoice state with the accepted canonical head
+                    env.active_node_state_mut()?.latest_header_time =
+                        rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
+
+                    // update local copy for any further usage in this scope
                     latest_block.hash = rpc_latest_header.hash;
                     latest_block.number = rpc_latest_header.inner.number;
                 }
