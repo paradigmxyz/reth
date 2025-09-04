@@ -1,19 +1,9 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
+use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
 use tracing::trace;
-
-pub(crate) trait FlashBlockSequence {
-    /// Returns the first block number
-    fn block_number(&self) -> Option<u64>;
-
-    /// Returns the payload base of the first tracked flashblock.
-    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1>;
-
-    /// Returns the number of tracked flashblocks.
-    fn count(&self) -> usize;
-}
 
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
@@ -78,44 +68,66 @@ where
     fn clear(&mut self) {
         self.inner.clear();
     }
-}
 
-impl<T> FlashBlockSequence for FlashBlockPendingSequence<T>
-where
-    T: SignedTransaction,
-{
-    fn block_number(&self) -> Option<u64> {
+    /// Returns the first block number
+    pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
     }
 
-    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+    /// Returns the payload base of the first tracked flashblock.
+    pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
         self.inner.values().next()?.block().base.clone()
     }
 
-    fn count(&self) -> usize {
+    /// Returns the number of tracked flashblocks.
+    pub(crate) fn count(&self) -> usize {
         self.inner.len()
     }
 }
 
-pub(crate) type FlashBlockCompleteSequence = Vec<FlashBlock>;
+pub(crate) struct FlashBlockCompleteSequence(Vec<FlashBlock>);
 
-impl FlashBlockSequence for FlashBlockCompleteSequence {
-    fn block_number(&self) -> Option<u64> {
-        Some(self.first()?.metadata.block_number)
+impl FlashBlockCompleteSequence {
+    fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
+        let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
+
+        // Ensure that first flashblock have base
+        first_block.base.as_ref().ok_or_eyre("Flashblock at index 0 has no base")?;
+
+        // Ensure that index are successive from 0, have same block number and payload id
+        if !blocks.iter().enumerate().all(|(idx, block)| {
+            idx == block.index as usize &&
+                block.payload_id == first_block.payload_id &&
+                block.metadata.block_number == first_block.metadata.block_number
+        }) {
+            bail!("Flashblock inconsistencies detected in sequence");
+        }
+
+        Ok(Self(blocks))
     }
 
-    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
-        self.first()?.base.clone()
+    /// Returns the block number
+    fn block_number(&self) -> u64 {
+        self.0.first().unwrap().metadata.block_number
     }
 
-    fn count(&self) -> usize {
-        self.len()
+    /// Returns the payload base of the first flashblock.
+    fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
+        self.0.first().unwrap().base.as_ref().unwrap()
+    }
+
+    /// Returns the number of flashblocks in the sequence.
+    const fn count(&self) -> usize {
+        self.0.len()
     }
 }
 
-impl<T> From<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
-    fn from(sequence: FlashBlockPendingSequence<T>) -> Self {
-        sequence.inner.into_values().map(|block| block.block().clone()).collect()
+impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
+    type Error = eyre::Error;
+    fn try_from(sequence: FlashBlockPendingSequence<T>) -> Result<Self, Self::Error> {
+        Self::new(
+            sequence.inner.into_values().map(|block| block.block().clone()).collect::<Vec<_>>(),
+        )
     }
 }
 

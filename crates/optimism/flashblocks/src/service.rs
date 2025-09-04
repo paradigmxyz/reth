@@ -1,7 +1,4 @@
-use crate::{
-    sequence::{FlashBlockPendingSequence, FlashBlockSequence},
-    ExecutionPayloadBaseV1, FlashBlock,
-};
+use crate::{sequence::FlashBlockPendingSequence, ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
