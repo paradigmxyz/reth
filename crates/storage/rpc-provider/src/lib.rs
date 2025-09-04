@@ -796,6 +796,10 @@ where
         self.latest()
     }
 
+    fn maybe_pending(&self) -> Result<Option<StateProviderBox>, ProviderError> {
+        self.latest().map(|latest| Some(latest))
+    }
+
     fn pending_state_by_hash(
         &self,
         _block_hash: B256,
@@ -1808,6 +1812,10 @@ where
 
     fn pending(&self) -> Result<StateProviderBox, ProviderError> {
         Ok(Box::new(self.clone()))
+    }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(Some(Box::new(self.clone())))
     }
 
     fn pending_state_by_hash(
