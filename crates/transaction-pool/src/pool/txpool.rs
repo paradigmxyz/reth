@@ -3997,4 +3997,51 @@ mod tests {
         assert!(tx_non_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(tx_non_4844_meta.subpool, SubPool::Pending);
     }
+
+    #[test]
+    fn test_basefee_decrease_preserves_non_4844_blob_fee_bit() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create non-4844 transaction with fee that initially can't afford high basefee
+        let non_4844_tx = MockTransaction::eip1559()
+            .with_sender(address!("0x000000000000000000000000000000000000000a"))
+            .set_max_fee(500) // Can't afford basefee of 600
+            .inc_limit();
+
+        // Set high basefee so transaction goes to BaseFee pool initially
+        pool.update_basefee(600);
+
+        let validated = f.validated(non_4844_tx);
+        let tx_id = *validated.id();
+        pool.add_transaction(validated, U256::from(10_000), 0, None).unwrap();
+
+        // Initially should be in BaseFee pool but STILL have blob fee bit (critical invariant)
+        let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
+        assert_eq!(tx_meta.subpool, SubPool::BaseFee);
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "Non-4844 tx in BaseFee pool must retain ENOUGH_BLOB_FEE_CAP_BLOCK bit"
+        );
+
+        // Decrease basefee - transaction should be promoted to Pending
+        // This is where PR #18215 bug would manifest: blob fee bit incorrectly removed
+        pool.update_basefee(400);
+
+        // After basefee decrease: should be promoted to Pending with blob fee bit preserved
+        let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
+        assert_eq!(
+            tx_meta.subpool,
+            SubPool::Pending,
+            "Non-4844 tx should be promoted from BaseFee to Pending after basefee decrease"
+        );
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "Non-4844 tx must NEVER lose ENOUGH_BLOB_FEE_CAP_BLOCK bit during basefee promotion"
+        );
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
+        );
+    }
 }
