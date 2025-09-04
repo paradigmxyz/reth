@@ -3960,7 +3960,8 @@ mod tests {
 
             // Add transaction to a new pool with sufficient balance and fees
             let mut pool_instance = TxPool::new(MockOrdering::default(), Default::default());
-            let result = pool_instance.add_transaction(validated.clone(), U256::from(10_000), 0, None);
+            let result =
+                pool_instance.add_transaction(validated.clone(), U256::from(10_000), 0, None);
 
             // Transaction should be successfully added
             assert!(result.is_ok(), "Non-4844 transaction should be added successfully");
