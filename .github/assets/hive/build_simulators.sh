@@ -12,8 +12,8 @@ go build .
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
 ./hive -client reth --sim "ethereum/eest" \
-  --sim.buildarg fixtures=https://github.com/Soubhik-10/execution-spec-tests/releases/download/0.0.4/fixtures-amsterdam.tar.gz \
-  --sim.buildarg branch=feat/amsterdam-and-block-access-lists \
+  --sim.buildarg fixtures=https://github.com/Soubhik-10/execution-spec-tests/releases/download/0.0.5/fixtures-amsterdam.tar.gz \
+  --sim.buildarg branch=main \
   --sim.timelimit 1s || true &
 
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
