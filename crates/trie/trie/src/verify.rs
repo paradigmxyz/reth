@@ -11,6 +11,7 @@ use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::updates::StorageTrieUpdates;
 use std::cmp::Ordering;
+use tracing::trace;
 
 /// Used by [`StateRootBranchNodesIter`] to iterate over branch nodes in a state root.
 #[derive(Debug)]
@@ -92,10 +93,6 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
                 // sort nodes in reverse order, so that when they are popped off the Vec they are
                 // popped in ascending order.
                 storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0).reverse());
-
-                // reverse the `storage_updates` so that when we pop updates off of it later
-                // they will be in the original order.
-                storage_updates.reverse();
 
                 self.curr_storage = Some((account, storage_updates));
                 continue;
@@ -240,6 +237,7 @@ impl<C: TrieCursor> SingleVerifier<C> {
             }
 
             let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
+            trace!(target: "trie::verify", account=?self.account, ?curr_path, ?path);
 
             match path.cmp(curr_path) {
                 Ordering::Less => {
@@ -340,18 +338,22 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                 self.complete = true;
             }
             Some(BranchNode::Account(path, node)) => {
+                trace!(target: "trie::verify", ?path, "Account node");
                 self.account.next(&mut self.inconsistencies, path, node)?
             }
-            Some(BranchNode::Storage(account, path, node)) => match self.storage.as_mut() {
-                None => self.new_storage(account, path, node)?,
-                Some((prev_account, storage)) if *prev_account == account => {
-                    storage.next(&mut self.inconsistencies, path, node)?;
+            Some(BranchNode::Storage(account, path, node)) => {
+                trace!(target: "trie::verify", ?account, ?path, "Storage node");
+                match self.storage.as_mut() {
+                    None => self.new_storage(account, path, node)?,
+                    Some((prev_account, storage)) if *prev_account == account => {
+                        storage.next(&mut self.inconsistencies, path, node)?;
+                    }
+                    Some((_, storage)) => {
+                        storage.finalize(&mut self.inconsistencies)?;
+                        self.new_storage(account, path, node)?;
+                    }
                 }
-                Some((_, storage)) => {
-                    storage.finalize(&mut self.inconsistencies)?;
-                    self.new_storage(account, path, node)?;
-                }
-            },
+            }
         }
 
         // If any inconsistencies were appended we want to reverse them, so they are popped off
