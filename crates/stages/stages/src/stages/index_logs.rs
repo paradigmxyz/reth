@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use alloy_primitives::{map::HashMap, BlockNumber};
+use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_db::{
@@ -13,7 +13,7 @@ use reth_etl::Collector;
 use reth_log_index::{
     indexer::{LogIndexer, ProcessBatchResult},
     utils::{count_log_values_in_block, log_values_from_receipts},
-    FilterMapColumns, FilterMapParams, LogIndexProvider, LogValueIndex, MapRowIndex,
+    FilterMapColumns, FilterMapMeta, FilterMapParams, LogIndexProvider, LogValueIndex, MapRowIndex,
 };
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter, ReceiptProvider,
@@ -78,6 +78,47 @@ impl IndexLogsStage {
         }
         Ok(provider.save_stage_checkpoint_progress(StageId::IndexLogs, buf)?)
     }
+
+    /// Writes to db and updates metadata
+    fn write_indices(
+        &self,
+        provider: &impl DBProvider<Tx: DbTxMut>,
+        row_collector: &mut Collector<MapRowIndex, FilterMapColumns>,
+        boundary_collector: &mut Collector<BlockNumber, LogValueIndex>,
+        meta: FilterMapMeta,
+    ) -> Result<(), StageError> {
+        info!(
+            target: "sync::stages::index_logs",
+            total_rows = row_collector.len(),
+            total_boundaries = boundary_collector.len(),
+            "Writing to database"
+        );
+        // Write to database
+        let mut filter_rows_cursor =
+            provider.tx_ref().cursor_write::<tables::RawTable<tables::FilterMapRows>>()?;
+        let mut log_indices_cursor =
+            provider.tx_ref().cursor_write::<tables::RawTable<tables::LogValueIndices>>()?;
+
+        // Write filter map rows
+        for entry in row_collector.iter()? {
+            let (map_row_index_bytes, columns_bytes) = entry?;
+            filter_rows_cursor.insert(
+                RawKey::<MapRowIndex>::from_vec(map_row_index_bytes),
+                &RawValue::<FilterMapColumns>::from_vec(columns_bytes),
+            )?;
+        }
+
+        for entry in boundary_collector.iter()? {
+            let (block_num, log_value_idx) = entry?;
+            log_indices_cursor.insert(
+                RawKey::<BlockNumber>::from_vec(block_num),
+                &RawValue::<LogValueIndex>::from_vec(log_value_idx),
+            )?;
+        }
+
+        provider.tx_ref().put::<tables::FilterMapMeta>(FilterMapMetaKey, meta)?;
+        Ok(())
+    }
 }
 
 impl Default for IndexLogsStage {
@@ -123,14 +164,16 @@ where
             Err(e) => return Err(StageError::Fatal(Box::new(e))),
         };
 
-        // if metadata is empty and this is the first run, initialise it
-        // to the starting block of the input range
-        if meta.first_indexed_block == 0 && meta.last_indexed_block == 0 {
-            meta.first_indexed_block = *range.start();
-            meta.last_indexed_block = *range.start();
-        }
+        let is_first_run = meta.last_log_value_index == 0;
 
-        let checkpoint = self.get_execution_checkpoint(provider)?;
+        let mut checkpoint = self.get_execution_checkpoint(provider)?;
+
+        // if first run and checkpoint exists, then we need to delete the checkpoint as it is
+        // corrupted
+        if is_first_run && checkpoint.is_some() {
+            self.save_execution_checkpoint(provider, None)?;
+            checkpoint = None;
+        }
 
         let mut entities_checkpoint = input
             .checkpoint()
@@ -138,7 +181,7 @@ where
             .unwrap_or(EntitiesCheckpoint { processed: 0, total: 0 });
 
         // Create the log indexer with checkpoint recovery if needed
-        let starting_index = if meta.last_log_value_index == 0 && meta.first_indexed_block == 0 {
+        let starting_index = if is_first_run {
             // First time indexing, start from 0
             0
         } else {
@@ -173,13 +216,25 @@ where
         }
 
         // Restore block boundaries from checkpoint
-        let mut block_boundaries: VecDeque<(BlockNumber, LogValueIndex)> = if let Some(cp) =
-            checkpoint
-        {
-            cp.pending_boundaries.into_iter().map(|b| (b.block_number, b.log_value_index)).collect()
-        } else {
-            VecDeque::new()
-        };
+        let mut block_boundaries: VecDeque<(BlockNumber, LogValueIndex)> =
+            if let Some(cp) = checkpoint {
+                cp.pending_boundaries
+                    .into_iter()
+                    .map(|b| (b.block_number, b.log_value_index))
+                    .filter(|&(block_num, _)| block_num < *range.end())
+                    .collect()
+            } else {
+                VecDeque::new()
+            };
+        // print the latest block boundary if any
+        if let Some((bn, lvi)) = block_boundaries.back() {
+            info!(
+                target: "sync::stages::index_logs",
+                block_number = bn,
+                log_value_index = lvi,
+                "Latest restored block boundary"
+            );
+        }
 
         info!(
             target: "sync::stages::index_logs",
@@ -208,7 +263,7 @@ where
             range
         );
 
-        let mut end_block = *range.end(); // Track what we've actually written to storage
+        let end_block = *range.end(); // Track what we've actually written to storage
         let mut last_written_block = meta.last_indexed_block;
         let mut last_written_log_value = Some(meta.last_log_value_index);
 
@@ -235,7 +290,7 @@ where
 
             // Pre-calculate block boundaries and collect log values
             //
-            let mut log_value_index_start = log_indexer.current_index().saturating_add(1);
+            let mut log_value_index_start = log_indexer.current_index();
 
             for (block_num, block_receipts) in block_range.clone().zip(&receipts) {
                 block_boundaries.push_back((block_num, log_value_index_start));
@@ -285,6 +340,12 @@ where
 
             // Write block boundaries for completed maps only
             let cutoff = log_indexer.completed_maps_cutoff();
+            info!(
+                target: "sync::stages::index_logs",
+                cutoff,
+                boundaries_pending = block_boundaries.len(),
+                "Flushing block boundaries"
+            );
             while let Some((_, lv_index)) = block_boundaries.front() {
                 if *lv_index < cutoff {
                     let (bn, lvi) = block_boundaries.pop_front().unwrap();
@@ -301,47 +362,21 @@ where
             input.checkpoint = Some(StageCheckpoint::new(end_block));
 
             if is_final_range {
-                info!(
-                    target: "sync::stages::index_logs",
-                    total_rows = row_collector.len(),
-                    total_boundaries = boundary_collector.len(),
-                    pending_rows = log_indexer.pending_rows().len(),
-                    "Writing to database"
-                );
-                // Write to database
-                let mut filter_rows_cursor =
-                    provider.tx_ref().cursor_write::<tables::RawTable<tables::FilterMapRows>>()?;
-                let mut log_indices_cursor = provider
-                    .tx_ref()
-                    .cursor_write::<tables::RawTable<tables::LogValueIndices>>()?;
-
-                // Write filter map rows
-                for entry in row_collector.iter()? {
-                    let (map_row_index_bytes, columns_bytes) = entry?;
-                    filter_rows_cursor.insert(
-                        RawKey::<MapRowIndex>::from_vec(map_row_index_bytes),
-                        &RawValue::<FilterMapColumns>::from_vec(columns_bytes),
-                    )?;
-                }
-
-                for entry in boundary_collector.iter()? {
-                    let (block_num, log_value_idx) = entry?;
-                    log_indices_cursor.insert(
-                        RawKey::<BlockNumber>::from_vec(block_num),
-                        &RawValue::<LogValueIndex>::from_vec(log_value_idx),
-                    )?;
-                }
-
-                if let Some(last_log_value) = last_written_log_value {
-                    meta.last_indexed_block = last_written_block;
-                    meta.last_log_value_index = last_log_value;
-                    meta.is_last_indexed_block_complete = true;
-                    meta.last_map_index =
-                        log_indexer.last_completed_map().unwrap_or(meta.last_map_index);
-                }
-
-                provider.tx_ref().put::<tables::FilterMapMeta>(FilterMapMetaKey, meta)?;
-
+                let meta = FilterMapMeta {
+                    first_indexed_block: meta.first_indexed_block,
+                    last_indexed_block: last_written_block,
+                    is_last_indexed_block_complete: end_block <= last_written_block,
+                    first_map_index: 0,
+                    last_map_index: if let Some(lv) = last_written_log_value {
+                        (lv >> self.params.log_values_per_map) as u32
+                    } else {
+                        meta.last_map_index
+                    },
+                    last_log_value_index: last_written_log_value
+                        .unwrap_or(meta.last_log_value_index),
+                    oldest_epoch_map_count: meta.oldest_epoch_map_count,
+                };
+                self.write_indices(provider, &mut row_collector, &mut boundary_collector, meta)?;
                 // Check if we need to save checkpoint
                 if !log_indexer.pending_rows().is_empty() || !block_boundaries.is_empty() {
                     let checkpoint = IndexLogsCheckpoint::new(

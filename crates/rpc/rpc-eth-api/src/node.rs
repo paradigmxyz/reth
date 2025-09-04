@@ -3,6 +3,7 @@
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
+use reth_log_index::LogIndexProvider;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
@@ -37,6 +38,7 @@ pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Self::Primitives>
         + StageCheckpointReader
+        + LogIndexProvider
         + Send
         + Sync
         + Clone
@@ -130,6 +132,7 @@ where
         > + StateProviderFactory
         + CanonStateSubscriptions<Primitives = Evm::Primitives>
         + StageCheckpointReader
+        + LogIndexProvider
         + Send
         + Sync
         + Unpin

@@ -555,6 +555,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_log_index::LogIndexProvider;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
@@ -577,6 +578,7 @@ mod tests {
                 Header = alloy_consensus::Header,
                 Transaction = reth_ethereum_primitives::TransactionSigned,
             > + BlockReader
+            + LogIndexProvider
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>

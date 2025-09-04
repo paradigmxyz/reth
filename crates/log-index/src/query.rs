@@ -6,7 +6,6 @@ use crate::{
 };
 use alloy_primitives::{map::HashMap, B256};
 use alloy_rpc_types_eth::Filter;
-use tracing::info;
 
 const ADDRESS_OFFSET: u64 = 0;
 const TOPIC_OFFSET_BASE: u64 = 1;
@@ -121,11 +120,7 @@ fn get_matches_for_constraint(
         if let Some(rows) = rows_by_map.get(&(map_index, *value)) {
             let matches = params.potential_matches(&rows.layers, map_index, value);
 
-            // Adjust indices to point to log start (address position)
-            let adjusted: Vec<u64> =
-                matches.into_iter().filter_map(|m| m.checked_sub(position_offset)).collect();
-
-            all_matches.extend(adjusted);
+            all_matches.extend(matches);
         }
     }
 
@@ -146,15 +141,20 @@ fn resolve_to_blocks(
         let block_idx =
             match log_value_indices.binary_search_by_key(&log_index, |lv| lv.log_value_index) {
                 Ok(idx) => idx,
-                Err(0) => continue,  // Before first block
-                Err(idx) => idx - 1, // Log belongs to previous block
+                Err(0) => {
+                    continue;
+                }
+                Err(idx) => {
+                    idx - 1 // Log might belong to previous block TODO: We can continue here, if we
+                            // are sure that the log index we are searching for is outside of the
+                            // range of the log indices we are searching for
+                }
             };
 
         let block_number = log_value_indices[block_idx].block_number;
 
         // Verify block is in requested range
         if block_number < from_block || block_number > to_block {
-            info!("Skipping log_index {} in block {} (outside range)", log_index, block_number);
             continue;
         }
 
@@ -181,7 +181,7 @@ fn query_maps_range(
     }
 
     // Start with first constraint as baseline
-    let Some((first_offset, first_values)) = constraints.first() else {
+    let Some((first_offset, first_values)) = constraints.first().cloned() else {
         return Ok(Vec::new()); // This should never happen
     };
     let first_values = first_values.clone();
@@ -189,14 +189,7 @@ fn query_maps_range(
     let mut candidates: BTreeSet<u64> = first_values
         .iter()
         .flat_map(|value| {
-            get_matches_for_constraint(
-                params,
-                value,
-                *first_offset,
-                map_start,
-                map_end,
-                rows_by_map,
-            )
+            get_matches_for_constraint(params, value, first_offset, map_start, map_end, rows_by_map)
         })
         .collect();
 
@@ -213,8 +206,11 @@ fn query_maps_range(
             })
             .collect();
 
-        // Intersect in-place
-        candidates.retain(|candidate| current_matches.contains(candidate));
+        // Intersect
+        let delta = offset - first_offset;
+        candidates.retain(|&c| {
+            c.checked_add(delta).map_or(false, |shifted| current_matches.contains(&shifted))
+        });
     }
 
     Ok(candidates.into_iter().collect())

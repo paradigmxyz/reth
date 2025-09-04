@@ -36,6 +36,8 @@ serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 sha2.workspace = true
 fnv.workspace = true
+tokio.workspace = true
+futures.workspace = true
 
 # codecs
 

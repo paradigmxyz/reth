@@ -15,6 +15,7 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_log_index::{query::query_logs_in_block_range, FilterMapParams, LogIndexProvider};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -31,8 +32,9 @@ use reth_storage_api::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use revm_primitives::HashSet;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fmt,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
@@ -44,7 +46,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -430,6 +432,12 @@ struct EthFilterInner<Eth: EthApiTypes> {
     stale_filter_ttl: Duration,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Seg {
+    Legacy(u64, u64),
+    Indexed(u64, u64),
+}
+
 impl<Eth> EthFilterInner<Eth>
 where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
@@ -532,6 +540,30 @@ where
         Ok(id)
     }
 
+    fn split_into_segments(self: Arc<Self>, from: u64, to: u64) -> Option<Vec<Seg>> {
+        let meta = self.provider().get_metadata().ok().flatten()?;
+        let first = meta.first_indexed_block;
+        let last = meta.last_indexed_block;
+
+        if to < first || from > last {
+            return Some(vec![Seg::Legacy(from, to)]);
+        }
+
+        let mut segs = Vec::with_capacity(3);
+        if from < first {
+            segs.push(Seg::Legacy(from, first.saturating_sub(1)));
+        }
+        let mid_from = from.max(first);
+        let mid_to = to.min(last);
+        if mid_from <= mid_to {
+            segs.push(Seg::Indexed(mid_from, mid_to));
+        }
+        if to > last {
+            segs.push(Seg::Legacy(last.saturating_add(1), to));
+        }
+        Some(segs)
+    }
+
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
@@ -544,8 +576,6 @@ where
         to_block: u64,
         limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
-        trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
-
         // perform boundary checks first
         if to_block < from_block {
             return Err(EthFilterError::InvalidBlockRangeParams)
@@ -560,12 +590,173 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking(Box::pin(async move {
-            let res =
-                this.get_logs_in_block_range_inner(&filter, from_block, to_block, limits).await;
-            let _ = tx.send(res);
+            // let bloom_res = this
+            //     .clone()
+            //     .get_logs_in_block_range_inner(&filter, from_block, to_block, limits)
+            //     .await;
+            let index_res = this.logs_with_index_split(&filter, from_block, to_block, limits).await;
+            // let bloom_logs = bloom_res.unwrap_or_default();
+            // let index_logs = index_res.as_ref().unwrap();
+
+            let _ = tx.send(index_res);
         }));
 
         rx.await.map_err(|_| EthFilterError::InternalError)?
+    }
+
+    async fn logs_with_index_split(
+        self: Arc<Self>,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+        limits: QueryLimits,
+    ) -> Result<Vec<Log>, EthFilterError> {
+        let this = self.clone();
+        let Some(segs) = this.split_into_segments(from_block, to_block) else {
+            return Ok(Vec::new());
+        };
+
+        // If there's only one Legacy segment spanning the whole range, let caller fall back.
+        if matches!(segs.as_slice(), [Seg::Legacy(a, b)] if *a == from_block && *b == to_block) {
+            return Ok(Vec::new());
+        }
+
+        let mut out = Vec::new();
+        let mut remaining = limits.max_logs_per_response;
+
+        let this = self.clone();
+        for seg in segs {
+            let this = this.clone();
+            match seg {
+                Seg::Legacy(a, b) => {
+                    // Pass down remaining quota so inner path won’t overshoot.
+                    let sub_limits = QueryLimits {
+                        max_blocks_per_filter: limits.max_blocks_per_filter,
+                        max_logs_per_response: remaining,
+                    };
+                    let chunk =
+                        this.get_logs_in_block_range_inner(&filter, a, b, sub_limits).await?;
+                    if let Some(rem) = remaining.as_mut() {
+                        let used = chunk.len().min(*rem);
+                        *rem = rem.saturating_sub(used);
+                    }
+                    out.extend(chunk);
+                }
+                Seg::Indexed(a, b) => {
+                    let chunk = this.logs_via_index(&filter, a, b, limits).await?;
+                    if let Some(rem) = remaining.as_mut() {
+                        let used = chunk.len().min(*rem);
+                        *rem = rem.saturating_sub(used);
+                    }
+                    out.extend(chunk);
+                }
+            }
+        }
+
+        Ok(out)
+    }
+
+    async fn logs_via_index(
+        self: Arc<Self>,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+        limits: QueryLimits,
+    ) -> Result<Vec<alloy_rpc_types_eth::Log>, EthFilterError> {
+        let chain_tip = self.provider().best_block_number()?;
+        // Fast exit if no constraints (index can’t help)
+        let has_constraints =
+            !filter.address.is_empty() || filter.topics.iter().any(|t| !t.is_empty());
+        if !has_constraints {
+            return Ok(Vec::new());
+        }
+
+        // If your index was built with custom params, thread them in instead of default.
+        let params = FilterMapParams::default();
+
+        let start = Instant::now();
+        let hits =
+            match query_logs_in_block_range(self.provider(), &params, filter, from_block, to_block)
+            {
+                Ok(v) => v,
+                Err(_) => return Ok(Vec::new()), // fallback will cover it
+            };
+        if hits.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let elapsed = start.elapsed();
+        info!(target: "reth::rpc::eth::filter", "Elapsed time for matching logs: {:?}", elapsed);
+
+        // Group hits by block
+        let mut by_block: BTreeMap<u64, Vec<_>> = BTreeMap::new();
+        for h in hits {
+            by_block.entry(h.block_number).or_default().push(h);
+        }
+
+        let mut all_logs = Vec::new();
+
+        let mut matching_headers = Vec::new();
+
+        for (bn, _block_hits) in by_block {
+            // Header -> hash -> receipts
+            let header = match self.provider().header_by_number(bn)? {
+                Some(h) => h,
+                None => continue,
+            };
+            let block_hash = header.hash_slow();
+            matching_headers.push(SealedHeader::new(header, block_hash));
+        }
+
+        // initialize the appropriate range mode based on collected headers
+        let mut range_mode = RangeMode::new(
+            self.clone(),
+            matching_headers,
+            from_block,
+            to_block,
+            self.max_headers_range,
+            chain_tip,
+        );
+
+        // iterate through the range mode to get receipts and blocks
+        while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
+            range_mode.next().await?
+        {
+            let num_hash = header.num_hash();
+            append_matching_block_logs(
+                &mut all_logs,
+                recovered_block
+                    .map(ProviderOrBlock::Block)
+                    .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
+                filter,
+                num_hash,
+                &receipts,
+                false,
+                header.timestamp(),
+            )?;
+
+            // size check but only if range is multiple blocks, so we always return all
+            // logs of a single block
+            let is_multi_block_range = from_block != to_block;
+            if let Some(max_logs_per_response) = limits.max_logs_per_response {
+                if is_multi_block_range && all_logs.len() > max_logs_per_response {
+                    debug!(
+                        target: "rpc::eth::filter",
+                        logs_found = all_logs.len(),
+                        max_logs_per_response,
+                        from_block,
+                        to_block = num_hash.number.saturating_sub(1),
+                        "Query exceeded max logs per response limit"
+                    );
+                    return Err(EthFilterError::QueryExceedsMaxResults {
+                        max_logs: max_logs_per_response,
+                        from_block,
+                        to_block: num_hash.number.saturating_sub(1),
+                    });
+                }
+            }
+        }
+        Ok(all_logs)
     }
 
     /// Returns all logs in the given _inclusive_ range that match the filter

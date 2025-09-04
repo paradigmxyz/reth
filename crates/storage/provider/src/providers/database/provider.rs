@@ -79,7 +79,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -3186,41 +3186,59 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         value: &B256,
     ) -> FilterResult<Vec<Vec<u32>>> {
         let params = FilterMapParams::default();
-        if params.map_epoch(map_start) != params.map_epoch(map_end) {
-            return Err(FilterError::InvalidBaseBand);
-        }
 
-        let first_epoch_map = params.first_epoch_map(params.map_epoch(map_start));
-        let row_index = params.row_index(first_epoch_map, 0, value);
-
-        // First map's row key
-        let start_key = params.map_row_index(map_start, row_index);
-        // Last map's row key
-        let end_key = params.map_row_index(map_end, row_index);
+        let total = (map_end - map_start + 1) as usize;
+        let mut results = vec![Vec::new(); total];
 
         let mut cursor = self
             .tx_ref()
             .cursor_read::<tables::FilterMapRows>()
             .map_err(|e| FilterError::Database(e.to_string()))?;
-        let walker = cursor
-            .walk_range(start_key..=end_key)
-            .map_err(|e| FilterError::Database(e.to_string()))?;
 
-        let mut results = vec![Vec::new(); (map_end - map_start + 1) as usize];
+        // Epoch geometry
+        let epoch_size: u32 = 1u32 << params.log_maps_per_epoch;
 
-        for entry in walker {
-            let (map_row_idx, columns) = entry.map_err(|e| FilterError::Database(e.to_string()))?;
+        // Walk the requested range by epoch-aligned segments.
+        let mut seg_start = map_start;
+        while seg_start <= map_end {
+            let epoch = params.map_epoch(seg_start);
+            let first_epoch = params.first_epoch_map(epoch);
+            let seg_end = std::cmp::min(map_end, first_epoch + epoch_size - 1);
 
-            // Calculate which map this belongs to
-            // Reverse the map_row_index formula to get map_index
-            let map_in_epoch = (map_row_idx & ((1 << params.log_maps_per_epoch) - 1)) as u32;
-            let map_index = first_epoch_map + map_in_epoch;
+            // For the base layer, the row index is keyed to the *first map of this epoch*.
+            let row_index = params.row_index(seg_start, 0, value);
 
-            // Place in correct position
-            let position = (map_index - map_start) as usize;
-            if position < results.len() {
-                results[position] = columns.indices;
+            // Scan only the row for this (epoch, value) across the segment.
+            let start_key = params.map_row_index(seg_start, row_index);
+            let end_key = params.map_row_index(seg_end, row_index);
+
+            let walker = cursor
+                .walk_range(start_key..=end_key)
+                .map_err(|e| FilterError::Database(e.to_string()))?;
+
+            for entry in walker {
+                let (map_row_idx, columns) =
+                    entry.map_err(|e| FilterError::Database(e.to_string()))?;
+
+                // Decode map index within this epoch, then rebase to absolute map index.
+                let in_epoch_mask = (1u64 << params.log_maps_per_epoch) - 1;
+                let map_in_epoch = (map_row_idx & in_epoch_mask) as u32;
+                let map_index = first_epoch + map_in_epoch;
+
+                // Sanity (should always hold if keys are well-formed)
+                if map_index < seg_start || map_index > seg_end {
+                    continue;
+                }
+
+                // Place into the result slot for this absolute map.
+                let pos = (map_index - map_start) as usize;
+                if pos < results.len() {
+                    results[pos] = columns.indices;
+                }
             }
+
+            // Advance to next epoch slice
+            seg_start = seg_end.saturating_add(1);
         }
 
         Ok(results)
@@ -3264,6 +3282,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_end: u32,
         values: &[B256],
     ) -> FilterResult<Vec<MapValueRows>> {
+        info!(
+            "Getting rows until short row for maps {map_start} to {map_end} and values {values:?}",
+            map_start = map_start,
+            map_end = map_end,
+            values = values,
+        );
         let mut results = Vec::new();
 
         for value in values {
