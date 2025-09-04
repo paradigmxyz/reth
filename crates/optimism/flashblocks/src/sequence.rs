@@ -4,9 +4,20 @@ use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
 use tracing::trace;
 
+pub(crate) trait FlashBlockSequence {
+    /// Returns the first block number
+    fn block_number(&self) -> Option<u64>;
+
+    /// Returns the payload base of the first tracked flashblock.
+    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1>;
+
+    /// Returns the number of tracked flashblocks.
+    fn count(&self) -> usize;
+}
+
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
-pub(crate) struct FlashBlockSequence<T> {
+pub(crate) struct FlashBlockPendingSequence<T> {
     /// tracks the individual flashblocks in order
     ///
     /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
@@ -14,7 +25,7 @@ pub(crate) struct FlashBlockSequence<T> {
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
 }
 
-impl<T> FlashBlockSequence<T>
+impl<T> FlashBlockPendingSequence<T>
 where
     T: SignedTransaction,
 {
@@ -45,16 +56,6 @@ where
         Ok(())
     }
 
-    /// Returns the first block number
-    pub(crate) fn block_number(&self) -> Option<u64> {
-        Some(self.inner.values().next()?.block().metadata.block_number)
-    }
-
-    /// Returns the payload base of the first tracked flashblock.
-    pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
-        self.inner.values().next()?.block().base.clone()
-    }
-
     /// Iterator over sequence of executable transactions.
     ///
     /// A flashblocks is not ready if there's missing previous flashblocks, i.e. there's a gap in
@@ -74,13 +75,47 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
-    /// Returns the number of tracked flashblocks.
-    pub(crate) fn count(&self) -> usize {
-        self.inner.len()
-    }
-
     fn clear(&mut self) {
         self.inner.clear();
+    }
+}
+
+impl<T> FlashBlockSequence for FlashBlockPendingSequence<T>
+where
+    T: SignedTransaction,
+{
+    fn block_number(&self) -> Option<u64> {
+        Some(self.inner.values().next()?.block().metadata.block_number)
+    }
+
+    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+        self.inner.values().next()?.block().base.clone()
+    }
+
+    fn count(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+pub(crate) type FlashBlockCompleteSequence = Vec<FlashBlock>;
+
+impl FlashBlockSequence for FlashBlockCompleteSequence {
+    fn block_number(&self) -> Option<u64> {
+        Some(self.first()?.metadata.block_number)
+    }
+
+    fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
+        self.first()?.base.clone()
+    }
+
+    fn count(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<T> From<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
+    fn from(sequence: FlashBlockPendingSequence<T>) -> Self {
+        sequence.inner.into_values().map(|block| block.block().clone()).collect()
     }
 }
 
@@ -130,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_sequence_stops_before_gap() {
-        let mut sequence = FlashBlockSequence::new();
+        let mut sequence = FlashBlockPendingSequence::new();
         let tx = EthereumTxEnvelope::new_unhashed(
             EthereumTypedTransaction::<TxEip1559>::Eip1559(TxEip1559 {
                 chain_id: 4,
