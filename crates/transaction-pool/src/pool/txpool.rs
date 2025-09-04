@@ -3959,7 +3959,7 @@ mod tests {
     }
 
     #[test]
-    fn test_blob_fee_bit_guarding_4844_vs_non_4844() {
+    fn test_blob_fee_enforcement_only_applies_to_eip4844() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
@@ -3989,11 +3989,11 @@ mod tests {
         let tx_4844_meta = pool.all_transactions.txs.get(validated_4844.id()).unwrap();
         let tx_non_4844_meta = pool.all_transactions.txs.get(validated_non_4844.id()).unwrap();
 
-        // EIP-4844: blob fee bit conditional (false when insufficient blob fee)
+        // EIP-4844: blob fee enforcement applies - insufficient blob fee removes bit
         assert!(!tx_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(tx_4844_meta.subpool, SubPool::Blob);
 
-        // Non-4844: blob fee bit always true (invariant)
+        // Non-4844: blob fee enforcement does NOT apply - bit always remains true
         assert!(tx_non_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(tx_non_4844_meta.subpool, SubPool::Pending);
     }
