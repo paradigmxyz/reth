@@ -8,25 +8,23 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
-use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, HeaderTy, RecoveredBlock, SealedHeader,
-};
+use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockKind, EthApiError, PendingBlock, PendingBlockEnv,
-    PendingBlockEnvOrigin,
+    builder::config::PendingBlockKind, pending_block::PendingBlockAndReceipts, EthApiError,
+    PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderFactory,
+    ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
@@ -117,33 +115,43 @@ pub trait LoadPendingBlock:
         Ok(self.pending_env_builder().pending_env_attributes(parent)?)
     }
 
-    /// Returns the locally built pending block
-    #[expect(clippy::type_complexity)]
-    fn local_pending_block(
+    /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
+    fn local_pending_state(
         &self,
-    ) -> impl Future<
-        Output = Result<
-            Option<(
-                Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
-                Arc<Vec<ProviderReceipt<Self::Provider>>>,
-            )>,
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<Option<StateProviderBox>, Self::Error>> + Send
     where
         Self: SpawnBlocking,
-        Self::Pool:
-            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
-            if self.pending_block_kind() == PendingBlockKind::None {
+            let Some(pending_block) = self.pool_pending_block().await? else {
+                return Ok(None);
+            };
+
+            let latest_historical = self
+                .provider()
+                .history_by_block_hash(pending_block.block().parent_hash())
+                .map_err(Self::Error::from_eth_err)?;
+
+            let state = BlockState::from(pending_block);
+
+            Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
+        }
+    }
+
+    /// Returns a mem-pool built pending block.
+    fn pool_pending_block(
+        &self,
+    ) -> impl Future<Output = Result<Option<PendingBlock<Self::Primitives>>, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        async move {
+            if self.pending_block_kind().is_none() {
                 return Ok(None);
             }
             let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
-                PendingBlockEnvOrigin::ActualPending(block, receipts) => {
-                    return Ok(Some((block, receipts)));
-                }
+                PendingBlockEnvOrigin::ActualPending(..) => return Ok(None),
                 PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
             };
 
@@ -152,18 +160,17 @@ pub trait LoadPendingBlock:
 
             let now = Instant::now();
 
-            // check if the block is still good
+            // Is the pending block cached?
             if let Some(pending_block) = lock.as_ref() {
-                // this is guaranteed to be the `latest` header
-                if pending.evm_env.block_env.number == U256::from(pending_block.block.number()) &&
-                    parent.hash() == pending_block.block.parent_hash() &&
+                // Is the cached block not expired and latest is its parent?
+                if pending.evm_env.block_env.number == U256::from(pending_block.block().number()) &&
+                    parent.hash() == pending_block.block().parent_hash() &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
+                    return Ok(Some(pending_block.clone()));
                 }
             }
 
-            // no pending block from the CL yet, so we need to build it ourselves via txpool
             let executed_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
@@ -178,20 +185,40 @@ pub trait LoadPendingBlock:
                 }
             };
 
-            let block = executed_block.recovered_block;
-
-            let pending = PendingBlock::new(
+            let pending = PendingBlock::with_executed_block(
                 Instant::now() + Duration::from_secs(1),
-                block.clone(),
-                Arc::new(
-                    executed_block.execution_output.receipts.iter().flatten().cloned().collect(),
-                ),
+                executed_block,
             );
-            let receipts = pending.receipts.clone();
 
-            *lock = Some(pending);
+            *lock = Some(pending.clone());
 
-            Ok(Some((block, receipts)))
+            Ok(Some(pending))
+        }
+    }
+
+    /// Returns the locally built pending block
+    fn local_pending_block(
+        &self,
+    ) -> impl Future<Output = Result<Option<PendingBlockAndReceipts<Self::Primitives>>, Self::Error>>
+           + Send
+    where
+        Self: SpawnBlocking,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+    {
+        async move {
+            if self.pending_block_kind().is_none() {
+                return Ok(None);
+            }
+
+            let pending = self.pending_block_env_and_cfg()?;
+
+            Ok(match pending.origin {
+                PendingBlockEnvOrigin::ActualPending(block, receipts) => Some((block, receipts)),
+                PendingBlockEnvOrigin::DerivedFromLatest(..) => {
+                    self.pool_pending_block().await?.map(PendingBlock::into_block_and_receipts)
+                }
+            })
         }
     }
 

@@ -34,10 +34,9 @@
 
         cargoTOML = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         packageVersion = cargoTOML.workspace.package.version;
-        rustVersion = cargoTOML.workspace.package."rust-version";
 
         rustStable = fenix.packages.${system}.stable.withComponents [
-          "cargo" "rustc" "rust-src"
+          "cargo" "rustc" "rust-src" "clippy"
         ];
 
         rustNightly = fenix.packages.${system}.latest;
@@ -118,8 +117,8 @@
         in craneLib.devShell (composeAttrOverrides {
           packages = nativeBuildInputs ++ [
             rustNightly.rust-analyzer
-            rustNightly.clippy
             rustNightly.rustfmt
+            pkgs.cargo-nextest
           ];
         } overrides);
       }

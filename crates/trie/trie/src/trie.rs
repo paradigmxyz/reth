@@ -15,9 +15,10 @@ use crate::{
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
-use tracing::{debug, trace, trace_span};
+use tracing::{debug, instrument, trace};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -172,7 +173,7 @@ where
 
             // resume account trie iteration
             let mut hash_builder = account_root_state.hash_builder.with_updates(retain_updates);
-            let walker = TrieWalker::state_trie_from_stack(
+            let walker = TrieWalker::<_>::state_trie_from_stack(
                 trie_cursor,
                 account_root_state.walker_stack,
                 self.prefix_sets.account_prefix_set,
@@ -355,9 +356,9 @@ impl StateRootContext {
 
     /// Creates a [`StateRootProgress`] when the threshold is hit, from the state of the current
     /// [`TrieNodeIter`], [`HashBuilder`], last hashed key and any storage root intermediate state.
-    fn create_progress_state<C, H>(
+    fn create_progress_state<C, H, K>(
         mut self,
-        account_node_iter: TrieNodeIter<C, H>,
+        account_node_iter: TrieNodeIter<C, H, K>,
         hash_builder: HashBuilder,
         last_hashed_key: B256,
         storage_state: Option<IntermediateStorageRootState>,
@@ -365,6 +366,7 @@ impl StateRootContext {
     where
         C: TrieCursor,
         H: HashedCursor,
+        K: AsRef<AddedRemovedKeys>,
     {
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
         self.trie_updates.removed_nodes.extend(walker_deleted_keys);
@@ -382,14 +384,15 @@ impl StateRootContext {
     }
 
     /// Calculates the total number of updated nodes.
-    fn total_updates_len<C, H>(
+    fn total_updates_len<C, H, K>(
         &self,
-        account_node_iter: &TrieNodeIter<C, H>,
+        account_node_iter: &TrieNodeIter<C, H, K>,
         hash_builder: &HashBuilder,
     ) -> u64
     where
         C: TrieCursor,
         H: HashedCursor,
+        K: AsRef<AddedRemovedKeys>,
     {
         (self.updated_storage_nodes +
             account_node_iter.walker.removed_keys_len() +
@@ -608,10 +611,8 @@ where
     ///
     /// The storage root, number of walked entries and trie updates
     /// for a given address if requested.
+    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address))]
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
-        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
-        let _enter = span.enter();
-
         trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =
@@ -634,7 +635,7 @@ where
         let (mut hash_builder, mut storage_node_iter) = match self.previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
-                let walker = TrieWalker::storage_trie_from_stack(
+                let walker = TrieWalker::<_>::storage_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_set,

@@ -212,7 +212,7 @@ ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 reth-bench: ## Build the reth-bench binary into the `target` directory.
 	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
 
-.PHONY: install-reth-bech
+.PHONY: install-reth-bench
 install-reth-bench: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
 	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
 		--features "$(FEATURES)" \
@@ -420,7 +420,7 @@ lint-typos: ensure-typos
 
 ensure-typos:
 	@if ! command -v typos &> /dev/null; then \
-		echo "typos not found. Please install it by running the command `cargo install typos-cli` or refer to the following link for more information: https://github.com/crate-ci/typos" \
+		echo "typos not found. Please install it by running the command 'cargo install typos-cli' or refer to the following link for more information: https://github.com/crate-ci/typos"; \
 		exit 1; \
     fi
 
@@ -439,7 +439,7 @@ lint-toml: ensure-dprint
 
 ensure-dprint:
 	@if ! command -v dprint &> /dev/null; then \
-		echo "dprint not found. Please install it by running the command `cargo install --locked dprint` or refer to the following link for more information: https://github.com/dprint/dprint" \
+		echo "dprint not found. Please install it by running the command 'cargo install --locked dprint' or refer to the following link for more information: https://github.com/dprint/dprint"; \
 		exit 1; \
     fi
 

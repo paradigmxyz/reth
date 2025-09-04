@@ -8,9 +8,6 @@ rpc-compat:
 
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
   - eth_getStorageAt/get-storage-invalid-key (reth)
-  - eth_getTransactionReceipt/get-access-list (reth)
-  - eth_getTransactionReceipt/get-blob-tx (reth)
-  - eth_getTransactionReceipt/get-dynamic-fee (reth)
   - eth_getTransactionReceipt/get-legacy-contract (reth)
   - eth_getTransactionReceipt/get-legacy-input (reth)
   - eth_getTransactionReceipt/get-legacy-receipt (reth)

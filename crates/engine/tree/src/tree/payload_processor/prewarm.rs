@@ -14,7 +14,7 @@ use metrics::{Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
-use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -53,7 +53,7 @@ where
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
@@ -88,7 +88,7 @@ where
         let max_concurrency = self.max_concurrency;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::new();
+            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
@@ -175,6 +175,7 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
+                    trace!(target: "engine::tree::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
                     if finished_execution {
@@ -183,6 +184,7 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                    trace!(target: "engine::tree::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
@@ -195,6 +197,8 @@ where
                 }
             }
         }
+
+        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -226,7 +230,7 @@ where
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
-    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating

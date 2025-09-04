@@ -989,8 +989,8 @@ mod tests {
         // populate some targets
         let (addr1, addr2) = (B256::random(), B256::random());
         let (slot1, slot2) = (B256::random(), B256::random());
-        targets.insert(addr1, vec![slot1].into_iter().collect());
-        targets.insert(addr2, vec![slot2].into_iter().collect());
+        targets.insert(addr1, std::iter::once(slot1).collect());
+        targets.insert(addr2, std::iter::once(slot2).collect());
 
         let mut retained = targets.clone();
         retained.retain_difference(&Default::default());

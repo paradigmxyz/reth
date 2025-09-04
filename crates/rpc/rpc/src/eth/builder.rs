@@ -12,7 +12,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
     receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
-    FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -42,6 +42,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     next_env: NextEnv,
     max_batch_size: usize,
     pending_block_kind: PendingBlockKind,
+    raw_tx_forwarder: ForwardConfig,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -82,6 +83,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -100,6 +102,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 }
@@ -129,6 +132,7 @@ where
             next_env: Default::default(),
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -165,6 +169,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -183,6 +188,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -208,6 +214,7 @@ where
             next_env: _,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -226,6 +233,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -309,6 +317,12 @@ where
         self
     }
 
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: ForwardConfig) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -339,6 +353,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
 
         let provider = components.provider().clone();
@@ -377,6 +392,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder.forwarder_client(),
         )
     }
 
