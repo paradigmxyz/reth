@@ -26,10 +26,7 @@ use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
-use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
-};
+use reth_transaction_pool::{error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context_interface::Block;
 use std::{
     sync::Arc,
@@ -269,7 +266,9 @@ pub trait LoadPendingBlock:
                 self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                     block_env.basefee,
                     block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-                ));
+                ))
+                    // freeze to get a block as fast as possible
+                    .without_updates();
 
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction
