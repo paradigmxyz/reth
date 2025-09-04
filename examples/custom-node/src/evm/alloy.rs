@@ -57,7 +57,11 @@ where
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         match tx {
             CustomTxEnv::Op(tx) => self.inner.transact_raw(tx),
-            CustomTxEnv::Payment(..) => todo!(),
+            CustomTxEnv::Payment(payment_tx_env) => {
+                // Create OpTransaction from PaymentTxEnv using its inner TxEnv
+                let op_tx = OpTransaction::new(payment_tx_env.0.clone());
+                self.inner.transact_raw(op_tx)
+            }
         }
     }
 
