@@ -7393,6 +7393,8 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-context-interface 8.0.1",
+ "revm-database",
+ "revm-state",
  "tracing",
 ]
 

@@ -1,3 +1,5 @@
+use alloy_consensus::Transaction;
+
 use alloy_primitives::{bytes, address, Address, B256, U256};
 #[cfg(test)]
 mod tests {
@@ -26,7 +28,7 @@ mod tests {
         use serde_json::to_string;
 
         fn signer() -> Address {
-            address!("0x00000000000000000000000000000000000a4b05")
+            address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
         }
 
         fn dummy_info() -> alloy_rpc_types_eth::TransactionInfo {
@@ -181,13 +183,16 @@ use alloy_rpc_types_eth::{Transaction as EthTransaction, TransactionInfo};
 use alloy_serde::{OtherFields, WithOtherFields};
 use reth_arbitrum_primitives::{ArbTransactionSigned, ArbTypedTransaction};
 use reth_primitives_traits::Recovered;
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_convert::transaction::FromConsensusTx;
 
 pub fn arb_tx_with_other_fields(
     tx: &ArbTransactionSigned,
     signer: Address,
-    tx_info: TransactionInfo,
+    mut tx_info: TransactionInfo,
 ) -> WithOtherFields<EthTransaction<ArbTransactionSigned>> {
+    tx_info.hash = Some(*tx.tx_hash());
+
     let inner = EthTransaction::from_transaction(Recovered::new_unchecked(tx.clone(), signer), tx_info);
 
     let mut out = WithOtherFields::new(inner);
@@ -197,6 +202,10 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x6a]));
             let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
             let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("input".to_string(), tx.input().clone());
+            let sys_addr = address!("0x00000000000000000000000000000000000a4b05");
+            let _ = out.other.insert_value("from".to_string(), sys_addr);
+            let _ = out.other.insert_value("to".to_string(), sys_addr);
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
@@ -224,6 +233,87 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("maxRefund".to_string(), r.max_refund);
             let _ = out.other.insert_value("submissionFeeRefund".to_string(), r.submission_fee_refund);
             let _ = out.other.insert_value("refundTo".to_string(), r.refund_to);
+        }
+        ArbTypedTransaction::Eip2930(tx2930) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x01]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx2930.gas_limit));
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::from(tx2930.gas_price));
+            if !tx2930.access_list.0.is_empty() {
+                let _ = out.other.insert_value("accessList".to_string(), tx2930.access_list.clone());
+            }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
+        }
+        ArbTypedTransaction::Eip1559(tx1559) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x02]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx1559.gas_limit));
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx1559.max_fee_per_gas));
+            let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx1559.max_priority_fee_per_gas));
+            if !tx1559.access_list.0.is_empty() {
+                let _ = out.other.insert_value("accessList".to_string(), tx1559.access_list.clone());
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
+            }
+        }
+        ArbTypedTransaction::Eip4844(tx4844) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x03]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx4844.gas_limit()));
+            let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx4844.max_fee_per_gas()));
+            if let Some(mp) = tx4844.max_priority_fee_per_gas() {
+                let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
+            }
+            if let Some(b) = tx4844.blob_versioned_hashes() {
+                let _ = out.other.insert_value("blobVersionedHashes".to_string(), b.clone());
+            }
+            if let Some(ac) = tx4844.access_list() {
+                if !ac.0.is_empty() {
+                    let _ = out.other.insert_value("accessList".to_string(), ac.clone());
+                }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
+            }
+        }
+        ArbTypedTransaction::Eip7702(tx7702) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x04]));
+            let _ = out.other.insert_value("gas".to_string(), U256::from(tx7702.gas_limit()));
+            if let Some(gp) = tx7702.gas_price() {
+                let _ = out.other.insert_value("gasPrice".to_string(), U256::from(gp));
+            }
+            {
+                let mf = tx7702.max_fee_per_gas();
+                let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(mf));
+            }
+            if let Some(mp) = tx7702.max_priority_fee_per_gas() {
+                let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(mp));
+            }
+            if let Some(ac) = tx7702.access_list() {
+                if !ac.0.is_empty() {
+                    let _ = out.other.insert_value("accessList".to_string(), ac.clone());
+                }
+            }
+            if let Some(auth) = tx7702.authorization_list() {
+                if !auth.is_empty() {
+                    let _ = out.other.insert_value("authorizationList".to_string(), auth.to_vec());
+                }
+            if let Some(sig) = tx.signature() {
+                let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
+                let _ = out.other.insert_value("r".to_string(), U256::from_be_bytes(sig.r().into()));
+                let _ = out.other.insert_value("s".to_string(), U256::from_be_bytes(sig.s().into()));
+            }
+
+            }
         }
         _ => {}
     }
