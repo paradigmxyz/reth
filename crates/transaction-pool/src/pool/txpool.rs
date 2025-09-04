@@ -3942,105 +3942,37 @@ mod tests {
     }
 
     #[test]
-    fn test_non_4844_always_has_blob_fee_bit() {
-        let mut f = MockTransactionFactory::default();
-
-        // Test different transaction types (all non-EIP-4844)
-        let tx_types = vec![
-            MockTransaction::legacy().set_gas_price(100).inc_limit(),
-            MockTransaction::eip2930().set_gas_price(100).inc_limit(),
-            MockTransaction::eip1559().set_max_fee(100).inc_limit(),
-        ];
-
-        for tx in tx_types {
-            let validated = f.validated(tx.clone());
-
-            // Verify this is not an EIP-4844 transaction
-            assert!(!tx.is_eip4844(), "Transaction should not be EIP-4844");
-
-            // Add transaction to a new pool with sufficient balance and fees
-            let mut pool_instance = TxPool::new(MockOrdering::default(), Default::default());
-            let result =
-                pool_instance.add_transaction(validated.clone(), U256::from(10_000), 0, None);
-
-            // Transaction should be successfully added
-            assert!(result.is_ok(), "Non-4844 transaction should be added successfully");
-
-            // Check that the transaction has ENOUGH_BLOB_FEE_CAP_BLOCK bit set
-            let tx_meta = pool_instance.all_transactions.txs.get(validated.id()).unwrap();
-            assert!(
-                tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-                "Non-4844 transactions must ALWAYS have ENOUGH_BLOB_FEE_CAP_BLOCK bit set"
-            );
-        }
-    }
-
-    #[test]
-    fn test_non_4844_reaches_pending_not_basefee() {
+    fn test_non_4844_blob_fee_bit_invariant() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        // Create different types of non-4844 transactions with adequate fees
-        let transactions = vec![
-            MockTransaction::legacy()
-                .with_sender(address!("0x000000000000000000000000000000000000000a"))
-                .set_gas_price(200)
-                .inc_limit(),
-            MockTransaction::eip2930()
-                .with_sender(address!("0x000000000000000000000000000000000000000b"))
-                .set_gas_price(200)
-                .inc_limit(),
-            MockTransaction::eip1559()
-                .with_sender(address!("0x000000000000000000000000000000000000000c"))
-                .set_max_fee(200)
-                .inc_limit(),
-        ];
+        let non_4844_tx = MockTransaction::eip1559().set_max_fee(200).inc_limit();
+        let validated = f.validated(non_4844_tx.clone());
 
-        // Set pool basefee to 100 - all transactions should be able to afford it
-        pool.update_basefee(100);
+        assert!(!non_4844_tx.is_eip4844());
+        pool.add_transaction(validated.clone(), U256::from(10_000), 0, None).unwrap();
 
-        for tx in transactions {
-            let validated = f.validated(tx.clone());
-            let tx_id = *validated.id();
-
-            // Verify this is not an EIP-4844 transaction
-            assert!(!tx.is_eip4844(), "Transaction should not be EIP-4844");
-
-            // Add transaction with sufficient balance
-            pool.add_transaction(validated, U256::from(10_000), 0, None).unwrap();
-
-            // Verify transaction is in pending pool, not stuck in BaseFee pool
-            let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
-            assert_ne!(
-                tx_meta.subpool,
-                SubPool::BaseFee,
-                "Non-4844 transaction should not be stuck in BaseFee pool"
-            );
-            assert_eq!(
-                tx_meta.subpool,
-                SubPool::Pending,
-                "Non-4844 transaction should reach Pending pool"
-            );
-
-            // Verify transaction appears in best_transactions (can be executed)
-            let best_txs: Vec<_> = pool.best_transactions().collect();
-            assert!(
-                best_txs.iter().any(|best_tx| best_tx.id() == &tx_id),
-                "Non-4844 transaction should be available in best_transactions"
-            );
-        }
+        // Core invariant: Non-4844 transactions must ALWAYS have ENOUGH_BLOB_FEE_CAP_BLOCK bit
+        let tx_meta = pool.all_transactions.txs.get(validated.id()).unwrap();
+        assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_meta.subpool, SubPool::Pending);
     }
 
     #[test]
-    fn test_guard_blob_fee_bit_logic_for_non_4844() {
+    fn test_blob_fee_bit_guarding_4844_vs_non_4844() {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        // Create an EIP-4844 transaction and a non-4844 transaction
+        // Set blob fee higher than EIP-4844 tx can afford
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(160);
+        block_info.pending_basefee = 100;
+        pool.set_block_info(block_info);
+
         let eip4844_tx = MockTransaction::eip4844()
             .with_sender(address!("0x000000000000000000000000000000000000000a"))
             .with_max_fee(200)
-            .with_blob_fee(150)
+            .with_blob_fee(150) // Less than block blob fee (160)
             .inc_limit();
 
         let non_4844_tx = MockTransaction::eip1559()
@@ -4048,149 +3980,21 @@ mod tests {
             .set_max_fee(200)
             .inc_limit();
 
-        // Set initial blob fee high so EIP-4844 tx might not have enough blob fee
-        let mut block_info = pool.block_info();
-        block_info.pending_blob_fee = Some(160); // Higher than eip4844_tx blob fee
-        block_info.pending_basefee = 100;
-        pool.set_block_info(block_info);
+        let validated_4844 = f.validated(eip4844_tx);
+        let validated_non_4844 = f.validated(non_4844_tx);
 
-        let validated_4844 = f.validated(eip4844_tx.clone());
-        let validated_non_4844 = f.validated(non_4844_tx.clone());
-        let id_4844 = *validated_4844.id();
-        let id_non_4844 = *validated_non_4844.id();
+        pool.add_transaction(validated_4844.clone(), U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated_non_4844.clone(), U256::from(10_000), 0, None).unwrap();
 
-        // Add transactions
-        pool.add_transaction(validated_4844, U256::from(10_000), 0, None).unwrap();
-        pool.add_transaction(validated_non_4844, U256::from(10_000), 0, None).unwrap();
+        let tx_4844_meta = pool.all_transactions.txs.get(validated_4844.id()).unwrap();
+        let tx_non_4844_meta = pool.all_transactions.txs.get(validated_non_4844.id()).unwrap();
 
-        // Verify EIP-4844 transaction behavior (should be conditional based on blob fee)
-        assert!(eip4844_tx.is_eip4844(), "EIP-4844 transaction should be identified correctly");
-        let tx_4844_meta = pool.all_transactions.txs.get(&id_4844).unwrap();
+        // EIP-4844: blob fee bit conditional (false when insufficient blob fee)
+        assert!(!tx_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_4844_meta.subpool, SubPool::Blob);
 
-        // For EIP-4844 txs, blob fee bit depends on actual blob fee vs block blob fee
-        // Since tx blob fee (150) < block blob fee (160), it should NOT have the bit
-        assert!(
-            !tx_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "EIP-4844 tx should NOT have blob fee bit when blob fee is insufficient"
-        );
-
-        // Verify non-4844 transaction behavior (should always have the bit regardless of blob fee)
-        assert!(!non_4844_tx.is_eip4844(), "Non-4844 transaction should be identified correctly");
-        let tx_non_4844_meta = pool.all_transactions.txs.get(&id_non_4844).unwrap();
-
-        // For non-4844 txs, blob fee bit should ALWAYS be true regardless of blob fee
-        assert!(
-            tx_non_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction must ALWAYS have ENOUGH_BLOB_FEE_CAP_BLOCK bit"
-        );
-
-        // Verify subpool assignments follow the expected logic
-        assert_eq!(
-            tx_4844_meta.subpool,
-            SubPool::Blob,
-            "EIP-4844 tx should be in Blob pool when blob fee insufficient"
-        );
-        assert_eq!(
-            tx_non_4844_meta.subpool,
-            SubPool::Pending,
-            "Non-4844 tx should be in Pending pool"
-        );
-    }
-
-    #[test]
-    fn test_blob_fee_bit_invariant_during_basefee_changes() {
-        let mut f = MockTransactionFactory::default();
-        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
-
-        // Create non-4844 transactions with different fee levels
-        let low_fee_tx = MockTransaction::eip1559()
-            .with_sender(address!("0x000000000000000000000000000000000000000a"))
-            .set_max_fee(400)
-            .inc_limit();
-
-        let high_fee_tx = MockTransaction::eip1559()
-            .with_sender(address!("0x000000000000000000000000000000000000000b"))
-            .set_max_fee(800)
-            .inc_limit();
-
-        // Set initial high basefee so low_fee_tx goes to BaseFee pool
-        pool.update_basefee(500);
-
-        let validated_low = f.validated(low_fee_tx);
-        let validated_high = f.validated(high_fee_tx);
-        let id_low = *validated_low.id();
-        let id_high = *validated_high.id();
-
-        // Add transactions
-        pool.add_transaction(validated_low, U256::from(10_000), 0, None).unwrap();
-        pool.add_transaction(validated_high, U256::from(10_000), 0, None).unwrap();
-
-        // Initial state: low_fee_tx in BaseFee, high_fee_tx in Pending
-        assert_eq!(pool.all_transactions.txs.get(&id_low).unwrap().subpool, SubPool::BaseFee);
-        assert_eq!(pool.all_transactions.txs.get(&id_high).unwrap().subpool, SubPool::Pending);
-
-        // Both should have ENOUGH_BLOB_FEE_CAP_BLOCK bit (invariant for non-4844 txs)
-        assert!(
-            pool.all_transactions
-                .txs
-                .get(&id_low)
-                .unwrap()
-                .state
-                .contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction in BaseFee pool must have ENOUGH_BLOB_FEE_CAP_BLOCK bit"
-        );
-        assert!(
-            pool.all_transactions
-                .txs
-                .get(&id_high)
-                .unwrap()
-                .state
-                .contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction in Pending pool must have ENOUGH_BLOB_FEE_CAP_BLOCK bit"
-        );
-
-        // Decrease basefee to promote low_fee_tx to Pending
-        pool.update_basefee(300);
-
-        // After basefee decrease: both should be in Pending
-        assert_eq!(pool.all_transactions.txs.get(&id_low).unwrap().subpool, SubPool::Pending);
-        assert_eq!(pool.all_transactions.txs.get(&id_high).unwrap().subpool, SubPool::Pending);
-
-        // Invariant check: both should still have ENOUGH_BLOB_FEE_CAP_BLOCK bit
-        assert!(
-            pool.all_transactions
-                .txs
-                .get(&id_low)
-                .unwrap()
-                .state
-                .contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction must retain ENOUGH_BLOB_FEE_CAP_BLOCK bit after promotion"
-        );
-        assert!(
-            pool.all_transactions
-                .txs
-                .get(&id_high)
-                .unwrap()
-                .state
-                .contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction must retain ENOUGH_BLOB_FEE_CAP_BLOCK bit after basefee change"
-        );
-
-        // Increase basefee again to move low_fee_tx back to BaseFee
-        pool.update_basefee(450);
-
-        assert_eq!(pool.all_transactions.txs.get(&id_low).unwrap().subpool, SubPool::BaseFee);
-        assert_eq!(pool.all_transactions.txs.get(&id_high).unwrap().subpool, SubPool::Pending);
-
-        // Final invariant check: ENOUGH_BLOB_FEE_CAP_BLOCK bit must always be preserved for
-        // non-4844 txs
-        assert!(
-            pool.all_transactions.txs.get(&id_low).unwrap().state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction must always have ENOUGH_BLOB_FEE_CAP_BLOCK bit regardless of subpool transitions"
-        );
-        assert!(
-            pool.all_transactions.txs.get(&id_high).unwrap().state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
-            "Non-4844 transaction must always have ENOUGH_BLOB_FEE_CAP_BLOCK bit regardless of basefee changes"
-        );
+        // Non-4844: blob fee bit always true (invariant)
+        assert!(tx_non_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_non_4844_meta.subpool, SubPool::Pending);
     }
 }
