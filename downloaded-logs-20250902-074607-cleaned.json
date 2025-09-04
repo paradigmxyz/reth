@@ -1,0 +1,104 @@
+[2m2025-09-02T02:19:00.576208Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272421 [3mhash[0m[2m=[0m0x0e9b836beda0d3e2f41da5d69b27771f940df287d09d64b8d2d8315f3016dd45
+
+[2m2025-09-02T02:19:00.640582Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0x11b163f0f56e3b1d1cd6d17a4df3928ea5739b2f7353fc3888ca23d369cd12a8 [3melapsed[0m[2m=[0m28.98043ms
+
+[2m2025-09-02T02:19:00.640948Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272421 [3mhash[0m[2m=[0m0x0e9b836beda0d3e2f41da5d69b27771f940df287d09d64b8d2d8315f3016dd45 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m225 [3mgas[0m[2m=[0m18.78 Mgas [3mgas_throughput[0m[2m=[0m291.65 Mgas/second [3mgas_limit[0m[2m=[0m45.04 Mgas [3mfull[0m[2m=[0m41.7% [3mbase_fee[0m[2m=[0m0.33gwei [3mblobs[0m[2m=[0m4 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m64.398263ms
+
+[2m2025-09-02T02:19:00.965106Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272421 [3mhash[0m[2m=[0m0x0e9b836beda0d3e2f41da5d69b27771f940df287d09d64b8d2d8315f3016dd45 [3melapsed[0m[2m=[0m709.951µs
+
+[2m2025-09-02T02:19:12.949294Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272422 [3mhash[0m[2m=[0m0xd4f4f0cf3752208ec49193a1ea3af72d5e99646b868e71f0f6ee047f571a8e74
+
+[2m2025-09-02T02:19:13.043832Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xe70204b4ead4ca93ad32aeb0c88cad7159b9961ed1edb4b7bd4b6b64b6c51479 [3melapsed[0m[2m=[0m52.33484ms
+
+[2m2025-09-02T02:19:13.044310Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272422 [3mhash[0m[2m=[0m0xd4f4f0cf3752208ec49193a1ea3af72d5e99646b868e71f0f6ee047f571a8e74 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m317 [3mgas[0m[2m=[0m24.47 Mgas [3mgas_throughput[0m[2m=[0m258.73 Mgas/second [3mgas_limit[0m[2m=[0m45.00 Mgas [3mfull[0m[2m=[0m54.4% [3mbase_fee[0m[2m=[0m0.33gwei [3mblobs[0m[2m=[0m0 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m94.570917ms
+
+[2m2025-09-02T02:19:13.392242Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272422 [3mhash[0m[2m=[0m0xd4f4f0cf3752208ec49193a1ea3af72d5e99646b868e71f0f6ee047f571a8e74 [3melapsed[0m[2m=[0m1.034949ms
+
+[2m2025-09-02T02:19:24.949616Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272423 [3mhash[0m[2m=[0m0x7e7119897f942a506f44531ab46b119d6cec8ec410a88877276856bfd1299729
+
+[2m2025-09-02T02:19:25.000578Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xf9c51f9d1d20d2368d95e1149429bb593e4335f2cf3b89963bd4f1a56a53e6fe [3melapsed[0m[2m=[0m19.852697ms
+
+[2m2025-09-02T02:19:25.000883Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272423 [3mhash[0m[2m=[0m0x7e7119897f942a506f44531ab46b119d6cec8ec410a88877276856bfd1299729 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m175 [3mgas[0m[2m=[0m15.72 Mgas [3mgas_throughput[0m[2m=[0m309.22 Mgas/second [3mgas_limit[0m[2m=[0m44.96 Mgas [3mfull[0m[2m=[0m35.0% [3mbase_fee[0m[2m=[0m0.33gwei [3mblobs[0m[2m=[0m3 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m50.834559ms
+
+[2m2025-09-02T02:19:25.307892Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272423 [3mhash[0m[2m=[0m0x7e7119897f942a506f44531ab46b119d6cec8ec410a88877276856bfd1299729 [3melapsed[0m[2m=[0m465.673µs
+
+[2m2025-09-02T02:19:38.155426Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272424 [3mhash[0m[2m=[0m0x451546379c3fb7c01d201f41ccd2cd153b0d7076ab86f870bd919580f5d5e2d2
+
+[2m2025-09-02T02:19:38.202032Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0x8c2925e2608e9b284c19e4993f02300f20aaaacdd70c9927c1aaa00de6788a17 [3melapsed[0m[2m=[0m25.148841ms
+
+[2m2025-09-02T02:19:38.202329Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272424 [3mhash[0m[2m=[0m0x451546379c3fb7c01d201f41ccd2cd153b0d7076ab86f870bd919580f5d5e2d2 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m156 [3mgas[0m[2m=[0m12.14 Mgas [3mgas_throughput[0m[2m=[0m260.62 Mgas/second [3mgas_limit[0m[2m=[0m44.91 Mgas [3mfull[0m[2m=[0m27.0% [3mbase_fee[0m[2m=[0m0.32gwei [3mblobs[0m[2m=[0m4 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m46.567183ms
+
+[2m2025-09-02T02:19:38.516632Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272424 [3mhash[0m[2m=[0m0x451546379c3fb7c01d201f41ccd2cd153b0d7076ab86f870bd919580f5d5e2d2 [3melapsed[0m[2m=[0m495.438µs
+
+[2m2025-09-02T02:19:48.869146Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272425 [3mhash[0m[2m=[0m0x5362b33221284ad26d5d5e55c28d48aa9860e5706bec8e652a8e701c3ea97be7
+
+[2m2025-09-02T02:19:48.968904Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0x9859bd0edaec2acea6c07a89ca8d5dd8c74bc078195abb72bf19c26e32eff867 [3melapsed[0m[2m=[0m27.424034ms
+
+[2m2025-09-02T02:19:48.969337Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272425 [3mhash[0m[2m=[0m0x5362b33221284ad26d5d5e55c28d48aa9860e5706bec8e652a8e701c3ea97be7 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m236 [3mgas[0m[2m=[0m29.98 Mgas [3mgas_throughput[0m[2m=[0m300.05 Mgas/second [3mgas_limit[0m[2m=[0m44.87 Mgas [3mfull[0m[2m=[0m66.8% [3mbase_fee[0m[2m=[0m0.30gwei [3mblobs[0m[2m=[0m6 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m99.922874ms
+
+[2m2025-09-02T02:19:49.261992Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272425 [3mhash[0m[2m=[0m0x5362b33221284ad26d5d5e55c28d48aa9860e5706bec8e652a8e701c3ea97be7 [3melapsed[0m[2m=[0m885.439µs
+
+[2m2025-09-02T02:20:00.932909Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272426 [3mhash[0m[2m=[0m0x668fa8fbe1d64b62cee3e54a391ff6cff9037c80dd829be641207ec2c08d5696
+
+[2m2025-09-02T02:20:01.009355Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0x7d13b7422ef18e459a10f7bd1f857463ff9f7e7653642f52303e8f495f6f9e86 [3melapsed[0m[2m=[0m36.603563ms
+
+[2m2025-09-02T02:20:01.009807Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272426 [3mhash[0m[2m=[0m0x668fa8fbe1d64b62cee3e54a391ff6cff9037c80dd829be641207ec2c08d5696 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m245 [3mgas[0m[2m=[0m23.37 Mgas [3mgas_throughput[0m[2m=[0m305.59 Mgas/second [3mgas_limit[0m[2m=[0m44.91 Mgas [3mfull[0m[2m=[0m52.0% [3mbase_fee[0m[2m=[0m0.31gwei [3mblobs[0m[2m=[0m3 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m76.460142ms
+
+[2m2025-09-02T02:20:01.293165Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272426 [3mhash[0m[2m=[0m0x668fa8fbe1d64b62cee3e54a391ff6cff9037c80dd829be641207ec2c08d5696 [3melapsed[0m[2m=[0m1.034829ms
+
+[2m2025-09-02T02:20:14.159995Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272427 [3mhash[0m[2m=[0m0xcab98ac6afa8461e2e9f29bd155e1e22d989cdf91f49ab67293af331767dcdaa
+
+[2m2025-09-02T02:20:14.226144Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xbdc140354b0027f1c111e77376ce993d5c49f3d9f739910ffac114fd65f29caa [3melapsed[0m[2m=[0m34.047194ms
+
+[2m2025-09-02T02:20:14.226707Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272427 [3mhash[0m[2m=[0m0xcab98ac6afa8461e2e9f29bd155e1e22d989cdf91f49ab67293af331767dcdaa [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m261 [3mgas[0m[2m=[0m16.61 Mgas [3mgas_throughput[0m[2m=[0m250.40 Mgas/second [3mgas_limit[0m[2m=[0m44.96 Mgas [3mfull[0m[2m=[0m37.0% [3mbase_fee[0m[2m=[0m0.31gwei [3mblobs[0m[2m=[0m0 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m66.33986ms
+
+[2m2025-09-02T02:20:14.548311Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272427 [3mhash[0m[2m=[0m0xcab98ac6afa8461e2e9f29bd155e1e22d989cdf91f49ab67293af331767dcdaa [3melapsed[0m[2m=[0m497.191µs
+
+[2m2025-09-02T02:20:26.295172Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272428 [3mhash[0m[2m=[0m0x2eb1fcafd864aafe21f2cb66310a869b8945231330f0da80c9e9b77861b56fca
+
+[2m2025-09-02T02:20:26.341810Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xe63490ae5341dbf7e422fd72449c48e4e1b97c8f2042c9df0fbfedeaac1d203c [3melapsed[0m[2m=[0m28.695537ms
+
+[2m2025-09-02T02:20:26.342109Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272428 [3mhash[0m[2m=[0m0x2eb1fcafd864aafe21f2cb66310a869b8945231330f0da80c9e9b77861b56fca [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m153 [3mgas[0m[2m=[0m10.83 Mgas [3mgas_throughput[0m[2m=[0m232.30 Mgas/second [3mgas_limit[0m[2m=[0m45.00 Mgas [3mfull[0m[2m=[0m24.1% [3mbase_fee[0m[2m=[0m0.30gwei [3mblobs[0m[2m=[0m6 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m46.617627ms
+
+[2m2025-09-02T02:20:26.661487Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272428 [3mhash[0m[2m=[0m0x2eb1fcafd864aafe21f2cb66310a869b8945231330f0da80c9e9b77861b56fca [3melapsed[0m[2m=[0m543.328µs
+
+[2m2025-09-02T02:20:37.995166Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272429 [3mhash[0m[2m=[0m0xf22a532525f37cca74e5195812bf0536e0c4f6cca82f482cc7b2d649aeeef9cc
+
+[2m2025-09-02T02:20:38.055592Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xac8fe257dce511bb488f110964b94f99060554f7792556c6062651db58ddc234 [3melapsed[0m[2m=[0m27.520875ms
+
+[2m2025-09-02T02:20:38.055900Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272429 [3mhash[0m[2m=[0m0xf22a532525f37cca74e5195812bf0536e0c4f6cca82f482cc7b2d649aeeef9cc [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m226 [3mgas[0m[2m=[0m17.14 Mgas [3mgas_throughput[0m[2m=[0m283.46 Mgas/second [3mgas_limit[0m[2m=[0m44.96 Mgas [3mfull[0m[2m=[0m38.1% [3mbase_fee[0m[2m=[0m0.28gwei [3mblobs[0m[2m=[0m0 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m60.4585ms
+
+[2m2025-09-02T02:20:38.332355Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272429 [3mhash[0m[2m=[0m0xf22a532525f37cca74e5195812bf0536e0c4f6cca82f482cc7b2d649aeeef9cc [3melapsed[0m[2m=[0m637.204µs
+
+[2m2025-09-02T02:20:49.055596Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272430 [3mhash[0m[2m=[0m0xec07459d94211226e2a26606601d44c120bbb6fab379014f27f3b91c7bdd967f
+
+[2m2025-09-02T02:20:49.168408Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xd91bc107fa816cbbe550f699d5b34b36f16e1aaf75f2ed4cf7001da8392994df [3melapsed[0m[2m=[0m26.857543ms
+
+[2m2025-09-02T02:20:49.168839Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272430 [3mhash[0m[2m=[0m0xec07459d94211226e2a26606601d44c120bbb6fab379014f27f3b91c7bdd967f [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m273 [3mgas[0m[2m=[0m37.84 Mgas [3mgas_throughput[0m[2m=[0m335.06 Mgas/second [3mgas_limit[0m[2m=[0m45.00 Mgas [3mfull[0m[2m=[0m84.1% [3mbase_fee[0m[2m=[0m0.27gwei [3mblobs[0m[2m=[0m6 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m112.926889ms
+
+[2m2025-09-02T02:20:49.502039Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272430 [3mhash[0m[2m=[0m0xec07459d94211226e2a26606601d44c120bbb6fab379014f27f3b91c7bdd967f [3melapsed[0m[2m=[0m1.709684ms
+
+[2m2025-09-02T02:21:01.903511Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272431 [3mhash[0m[2m=[0m0xf7e8a9103ab6704ccd00f378d1a72f6bb6ae1f6f33001d9d2a1d3f26b4effa6b
+
+[2m2025-09-02T02:21:01.997180Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0x6dc85929a505f9c5cf400d0957a398605da086660a2f62c63d9733651fb5aea4 [3melapsed[0m[2m=[0m41.78382ms
+
+[2m2025-09-02T02:21:01.997986Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272431 [3mhash[0m[2m=[0m0xf7e8a9103ab6704ccd00f378d1a72f6bb6ae1f6f33001d9d2a1d3f26b4effa6b [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m361 [3mgas[0m[2m=[0m26.54 Mgas [3mgas_throughput[0m[2m=[0m281.95 Mgas/second [3mgas_limit[0m[2m=[0m45.00 Mgas [3mfull[0m[2m=[0m59.0% [3mbase_fee[0m[2m=[0m0.30gwei [3mblobs[0m[2m=[0m6 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m94.139518ms
+
+[2m2025-09-02T02:21:02.289890Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272431 [3mhash[0m[2m=[0m0xf7e8a9103ab6704ccd00f378d1a72f6bb6ae1f6f33001d9d2a1d3f26b4effa6b [3melapsed[0m[2m=[0m959.478µs
+
+[2m2025-09-02T02:21:14.767989Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272432 [3mhash[0m[2m=[0m0xc8c01d73688c13fb08c32b1ac6093cb0242541bf3c47a2567920611b10c5e629
+
+[2m2025-09-02T02:21:14.831452Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xfa1da304ece749e5982b243aec6c8ec4a84c237f976dcaa8ddea4959268cf622 [3melapsed[0m[2m=[0m26.288917ms
+
+[2m2025-09-02T02:21:14.832004Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272432 [3mhash[0m[2m=[0m0xc8c01d73688c13fb08c32b1ac6093cb0242541bf3c47a2567920611b10c5e629 [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m199 [3mgas[0m[2m=[0m18.42 Mgas [3mgas_throughput[0m[2m=[0m289.42 Mgas/second [3mgas_limit[0m[2m=[0m44.96 Mgas [3mfull[0m[2m=[0m41.0% [3mbase_fee[0m[2m=[0m0.30gwei [3mblobs[0m[2m=[0m8 [3mexcess_blobs[0m[2m=[0m0 [3melapsed[0m[2m=[0m63.642065ms
+
+[2m2025-09-02T02:21:15.134219Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272432 [3mhash[0m[2m=[0m0xc8c01d73688c13fb08c32b1ac6093cb0242541bf3c47a2567920611b10c5e629 [3melapsed[0m[2m=[0m690.223µs
+
+[2m2025-09-02T02:21:24.813940Z[0m [32m INFO[0m Received block from consensus engine [3mnumber[0m[2m=[0m23272433 [3mhash[0m[2m=[0m0x0ee871912db698dc8cc33ab6cd530ce6a0d1b7b3e7e9f11fe290ae517dfad99e
+
+[2m2025-09-02T02:21:24.836470Z[0m [32m INFO[0m State root task finished [3mstate_root[0m[2m=[0m0xa0ebbe8b9e31491f5bc4ef743cc84df9e9ebbd82701e8b91946fda6732c3cf62 [3melapsed[0m[2m=[0m13.690772ms
+
+[2m2025-09-02T02:21:24.836727Z[0m [32m INFO[0m Block added to canonical chain [3mnumber[0m[2m=[0m23272433 [3mhash[0m[2m=[0m0x0ee871912db698dc8cc33ab6cd530ce6a0d1b7b3e7e9f11fe290ae517dfad99e [3mpeers[0m[2m=[0m100 [3mtxs[0m[2m=[0m130 [3mgas[0m[2m=[0m4.77 Mgas [3mgas_throughput[0m[2m=[0m211.84 Mgas/second [3mgas_limit[0m[2m=[0m44.91 Mgas [3mfull[0m[2m=[0m10.6% [3mbase_fee[0m[2m=[0m0.30gwei [3mblobs[0m[2m=[0m0 [3mexcess_blobs[0m[2m=[0m2 [3melapsed[0m[2m=[0m22.527169ms
+
+[2m2025-09-02T02:21:25.210269Z[0m [32m INFO[0m Canonical chain committed [3mnumber[0m[2m=[0m23272433 [3mhash[0m[2m=[0m0x0ee871912db698dc8cc33ab6cd530ce6a0d1b7b3e7e9f11fe290ae517dfad99e [3melapsed[0m[2m=[0m409.156µs
+
