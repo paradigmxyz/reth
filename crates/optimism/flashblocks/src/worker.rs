@@ -122,3 +122,13 @@ where
         )))
     }
 }
+
+impl<EvmConfig: Clone, Provider: Clone> Clone for FlashBlockBuilder<EvmConfig, Provider> {
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            provider: self.provider.clone(),
+            cached_state: self.cached_state.clone(),
+        }
+    }
+}

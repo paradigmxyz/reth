@@ -3,18 +3,22 @@ use crate::{
     worker::{BuildArgs, FlashBlockBuilder},
     ExecutionPayloadBaseV1, FlashBlock,
 };
+use alloy_eips::eip2718::WithEncoded;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
+use reth_primitives_traits::{
+    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
+};
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_tasks::TaskExecutor;
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::pin;
+use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
@@ -32,13 +36,17 @@ pub struct FlashBlockService<
     rebuild: bool,
     builder: FlashBlockBuilder<EvmConfig, Provider>,
     canon_receiver: CanonStateNotifications<N>,
+    spawner: TaskExecutor,
+    job: Option<BuildJob<N>>,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
 where
     N: NodePrimitives,
-    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
+    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+        + Clone
+        + 'static,
     Provider: StateProviderFactory
         + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
@@ -46,10 +54,12 @@ where
             Block = BlockTy<N>,
             Transaction = N::SignedTx,
             Receipt = ReceiptTy<N>,
-        > + Unpin,
+        > + Unpin
+        + Clone
+        + 'static,
 {
     /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
-    pub fn new(rx: S, evm_config: EvmConfig, provider: Provider) -> Self {
+    pub fn new(rx: S, evm_config: EvmConfig, provider: Provider, spawner: TaskExecutor) -> Self {
         Self {
             rx,
             current: None,
@@ -57,6 +67,8 @@ where
             canon_receiver: provider.subscribe_to_canonical_state(),
             builder: FlashBlockBuilder::new(evm_config, provider),
             rebuild: false,
+            spawner,
+            job: None,
         }
     }
 
@@ -73,10 +85,12 @@ where
         warn!("Flashblock service has stopped");
     }
 
-    /// Returns the [`PendingBlock`] made purely out of [`FlashBlock`]s that were received earlier.
+    /// Returns the [`BuildArgs`] made purely out of [`FlashBlock`]s that were received earlier.
     ///
-    /// Returns None if the flashblock doesn't attach to the latest header.
-    fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
+    /// Returns `None` if the flashblock have no `base`.
+    fn build_args(
+        &self,
+    ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
                 flashblock_number = ?self.blocks.block_number(),
@@ -84,10 +98,10 @@ where
                 "Missing flashblock payload base"
             );
 
-            return Ok(None)
+            return None
         };
 
-        self.builder.execute(BuildArgs { base, transactions: self.blocks.ready_transactions() })
+        Some(BuildArgs { base, transactions: self.blocks.ready_transactions().collect::<Vec<_>>() })
     }
 
     /// Takes out `current` [`PendingBlock`] if `state` is not preceding it.
@@ -100,8 +114,10 @@ where
 impl<N, S, EvmConfig, Provider> Stream for FlashBlockService<N, S, EvmConfig, Provider>
 where
     N: NodePrimitives,
-    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
+    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>
+        + Clone
+        + 'static,
     Provider: StateProviderFactory
         + CanonStateSubscriptions<Primitives = N>
         + BlockReaderIdExt<
@@ -109,12 +125,50 @@ where
             Block = BlockTy<N>,
             Transaction = N::SignedTx,
             Receipt = ReceiptTy<N>,
-        > + Unpin,
+        > + Unpin
+        + Clone
+        + 'static,
 {
     type Item = eyre::Result<Option<PendingBlock<N>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
+        let result = if let Some((now, rx)) = &mut this.job {
+            let result = ready!(rx.poll_unpin(cx)).unwrap();
+            Some((*now, result))
+        } else {
+            None
+        };
+
+        if let Some((now, result)) = result {
+            this.job.take();
+
+            match result {
+                Ok(Some(new_pending)) => {
+                    // built a new pending block
+                    this.current = Some(new_pending.clone());
+                    this.rebuild = false;
+
+                    trace!(
+                        parent_hash = %new_pending.block().parent_hash(),
+                        block_number = new_pending.block().number(),
+                        flash_blocks = this.blocks.count(),
+                        elapsed = ?now.elapsed(),
+                        "Built new block with flashblocks"
+                    );
+
+                    return Poll::Ready(Some(Ok(Some(new_pending))));
+                }
+                Ok(None) => {
+                    // nothing to do because tracked flashblock doesn't attach to latest
+                }
+                Err(err) => {
+                    // we can ignore this error
+                    debug!(%err, "failed to execute flashblock");
+                }
+            }
+        }
 
         // consume new flashblocks while they're ready
         while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
@@ -147,25 +201,21 @@ where
             return Poll::Pending
         }
 
-        let now = Instant::now();
         // try to build a block on top of latest
-        match this.execute() {
-            Ok(Some(new_pending)) => {
-                // built a new pending block
-                this.current = Some(new_pending.clone());
-                this.rebuild = false;
-                trace!(parent_hash=%new_pending.block().parent_hash(), block_number=new_pending.block().number(), flash_blocks=this.blocks.count(), elapsed=?now.elapsed(), "Built new block with flashblocks");
-                return Poll::Ready(Some(Ok(Some(new_pending))));
-            }
-            Ok(None) => {
-                // nothing to do because tracked flashblock doesn't attach to latest
-            }
-            Err(err) => {
-                // we can ignore this error
-                debug!(%err, "failed to execute flashblock");
-            }
+        if let Some(args) = this.build_args() {
+            let now = Instant::now();
+
+            let (tx, rx) = oneshot::channel();
+            let mut builder = this.builder.clone();
+
+            this.spawner.spawn_blocking(async move {
+                let _ = tx.send(builder.execute(args));
+            });
+            this.job.replace((now, rx));
         }
 
         Poll::Pending
     }
 }
+
+type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<PendingBlock<N>>>>);
