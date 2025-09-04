@@ -469,7 +469,7 @@ where
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
             );
-            ctx.components.task_executor().spawn_blocking(Box::pin(service.run(tx)));
+            ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
             Some(rx)
         } else {
             None
