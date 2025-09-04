@@ -145,7 +145,6 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 /// ([`HashedCursorFactory`]) with that of the trie tables ([`TrieCursorFactory`]). The hashed
 /// tables are considered the source of truth; inconsistencies are on the part of the trie tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Inconsistency {
     /// An extra account node was found.
     AccountExtra(Nibbles, BranchNodeCompact),
