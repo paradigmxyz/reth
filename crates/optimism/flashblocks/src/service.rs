@@ -4,12 +4,14 @@ use crate::{
     ExecutionPayloadBaseV1, FlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
 use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
 };
+use reth_revm::cached::CachedReads;
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
@@ -38,6 +40,11 @@ pub struct FlashBlockService<
     canon_receiver: CanonStateNotifications<N>,
     spawner: TaskExecutor,
     job: Option<BuildJob<N>>,
+    /// Cached state reads for the current block.
+    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
+    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
+    /// within the same block.
+    cached_state: Option<(B256, CachedReads)>,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -69,6 +76,7 @@ where
             rebuild: false,
             spawner,
             job: None,
+            cached_state: None,
         }
     }
 
@@ -89,7 +97,7 @@ where
     ///
     /// Returns `None` if the flashblock have no `base`.
     fn build_args(
-        &self,
+        &mut self,
     ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
@@ -101,7 +109,11 @@ where
             return None
         };
 
-        Some(BuildArgs { base, transactions: self.blocks.ready_transactions().collect::<Vec<_>>() })
+        Some(BuildArgs {
+            base,
+            transactions: self.blocks.ready_transactions().collect::<Vec<_>>(),
+            cached_state: self.cached_state.take(),
+        })
     }
 
     /// Takes out `current` [`PendingBlock`] if `state` is not preceding it.
@@ -145,9 +157,10 @@ where
             this.job.take();
 
             match result {
-                Ok(Some(new_pending)) => {
+                Ok(Some((new_pending, cached_reads))) => {
                     // built a new pending block
                     this.current = Some(new_pending.clone());
+                    this.cached_state = Some((new_pending.block().hash(), cached_reads));
                     this.rebuild = false;
 
                     trace!(
@@ -206,7 +219,7 @@ where
             let now = Instant::now();
 
             let (tx, rx) = oneshot::channel();
-            let mut builder = this.builder.clone();
+            let builder = this.builder.clone();
 
             this.spawner.spawn_blocking(async move {
                 let _ = tx.send(builder.execute(args));
@@ -218,4 +231,5 @@ where
     }
 }
 
-type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<PendingBlock<N>>>>);
+type BuildJob<N> =
+    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
