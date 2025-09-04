@@ -797,7 +797,7 @@ where
     }
 
     fn maybe_pending(&self) -> Result<Option<StateProviderBox>, ProviderError> {
-        self.latest().map(|latest| Some(latest))
+        self.latest().map(Some)
     }
 
     fn pending_state_by_hash(
