@@ -2,14 +2,17 @@ use crate::{
     hashed_cursor::HashedCursorFactory,
     progress::{IntermediateStateRootState, StateRootProgress},
     trie::StateRoot,
-    trie_cursor::{noop::NoopTrieCursorFactory, TrieCursor, TrieCursorFactory},
+    trie_cursor::{
+        depth_first::{self, DepthFirstTrieIterator},
+        noop::NoopTrieCursorFactory,
+        TrieCursor, TrieCursorFactory,
+    },
     Nibbles,
 };
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::StateRootError;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::updates::StorageTrieUpdates;
 use std::cmp::Ordering;
 use tracing::trace;
 
@@ -35,7 +38,7 @@ enum BranchNode {
 struct StateRootBranchNodesIter<H> {
     hashed_cursor_factory: H,
     account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-    storage_tries: B256Map<StorageTrieUpdates>,
+    storage_tries: Vec<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
     curr_storage: Option<(B256, Vec<(Nibbles, BranchNodeCompact)>)>,
     intermediate_state: Option<Box<IntermediateStateRootState>>,
     complete: bool,
@@ -52,6 +55,15 @@ impl<H> StateRootBranchNodesIter<H> {
             complete: false,
         }
     }
+
+    /// Sorts a Vec of updates such that it is ready to be yielded from the `next` method. We yield
+    /// by popping off of the account/storage vecs, so we sort them in reverse order.
+    ///
+    /// Depth-first sorting is used because this is the order that the `HashBuilder` computes
+    /// branch nodes internally, even if it produces them as `B256Map`s.
+    fn sort_updates(updates: &mut [(Nibbles, BranchNodeCompact)]) {
+        updates.sort_unstable_by(|a, b| depth_first::cmp(&b.0, &a.0));
+    }
 }
 
 impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
@@ -62,37 +74,16 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
             // If we already started iterating through a storage trie's updates, continue doing
             // so.
             if let Some((account, storage_updates)) = self.curr_storage.as_mut() {
-                let (path, node) = storage_updates.pop().expect("updates aren't empty");
-                let node = BranchNode::Storage(*account, path, node);
-
-                if storage_updates.is_empty() {
-                    self.curr_storage = None;
+                if let Some((path, node)) = storage_updates.pop() {
+                    let node = BranchNode::Storage(*account, path, node);
+                    return Some(Ok(node))
                 }
-
-                return Some(Ok(node))
             }
 
             // If there's not a storage trie already being iterated over than check if there's a
             // storage trie we could start iterating over.
-            if let Some(account) = self
-                .storage_tries
-                .iter()
-                .filter_map(|(account, t)| (!t.storage_nodes.is_empty()).then_some(account))
-                .copied()
-                .next()
-            {
-                let mut storage_updates: Vec<_> = self
-                    .storage_tries
-                    .remove(&account)
-                    .expect("account exists")
-                    .storage_nodes
-                    .into_iter()
-                    .collect();
+            if let Some((account, storage_updates)) = self.storage_tries.pop() {
                 debug_assert!(!storage_updates.is_empty());
-
-                // sort nodes in reverse order, so that when they are popped off the Vec they are
-                // popped in ascending order.
-                storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0).reverse());
 
                 self.curr_storage = Some((account, storage_updates));
                 continue;
@@ -129,9 +120,28 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
             // collect account updates and sort them in descending order, so that when we pop them
             // off the Vec they are popped in ascending order.
             self.account_nodes.extend(updates.account_nodes);
-            self.account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0).reverse());
+            Self::sort_updates(&mut self.account_nodes);
 
-            self.storage_tries = updates.storage_tries;
+            self.storage_tries = updates
+                .storage_tries
+                .into_iter()
+                .filter_map(|(account, t)| {
+                    (!t.storage_nodes.is_empty()).then(|| {
+                        let mut storage_nodes = t.storage_nodes.into_iter().collect::<Vec<_>>();
+                        Self::sort_updates(&mut storage_nodes);
+                        (account, storage_nodes)
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            // `root_with_progress` will output storage updates ordered by their account hash. If
+            // `root_with_progress` only returns a partial result then it will pick up with where
+            // it left off in the storage trie on the next run.
+            //
+            // By sorting by the account we ensure that we continue with the partially processed
+            // trie (the last of the previous run) first. We sort in reverse order because we pop
+            // off of this Vec.
+            self.storage_tries.sort_unstable_by(|a, b| b.0.cmp(&a.0));
 
             // loop back to the top.
         }
@@ -176,16 +186,18 @@ pub enum Inconsistency {
 /// Verifies the contents of a trie table against some other data source which is able to produce
 /// stored trie nodes.
 #[derive(Debug)]
-struct SingleVerifier<C> {
+struct SingleVerifier<I> {
     account: Option<B256>, // None for accounts trie
-    trie_cursor: C,
+    trie_iter: I,
     curr: Option<(Nibbles, BranchNodeCompact)>,
 }
 
-impl<C: TrieCursor> SingleVerifier<C> {
-    fn new(account: Option<B256>, mut trie_cursor: C) -> Result<Self, DatabaseError> {
-        let curr = trie_cursor.seek(Nibbles::default())?;
-        Ok(Self { account, trie_cursor, curr })
+impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
+    fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
+        let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
+        // The iterator loads all nodes upfront, get the first one
+        let curr = trie_iter.next().transpose()?;
+        Ok(Self { account, trie_iter, curr })
     }
 
     const fn inconsistency_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Inconsistency {
@@ -221,7 +233,7 @@ impl<C: TrieCursor> SingleVerifier<C> {
     /// append to the given `inconsistencies` Vec if walking the trie cursor produces data
     /// inconsistent with that given.
     ///
-    /// `next` must be called with paths in ascending order.
+    /// `next` must be called with paths in depth-first order.
     fn next(
         &mut self,
         inconsistencies: &mut Vec<Inconsistency>,
@@ -229,7 +241,7 @@ impl<C: TrieCursor> SingleVerifier<C> {
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
         loop {
-            // `curr` is None only if the end of the cursor has been reached. Any further nodes
+            // `curr` is None only if the end of the iterator has been reached. Any further nodes
             // found must be considered missing.
             if self.curr.is_none() {
                 inconsistencies.push(self.inconsistency_missing(path, node));
@@ -237,19 +249,21 @@ impl<C: TrieCursor> SingleVerifier<C> {
             }
 
             let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
-            trace!(target: "trie::verify", account=?self.account, ?curr_path, ?path);
+            trace!(target: "trie::verify", account=?self.account, ?curr_path, ?path, "Current cursor node");
 
-            match path.cmp(curr_path) {
+            // Use depth-first ordering for comparison
+            match depth_first::cmp(&path, curr_path) {
                 Ordering::Less => {
-                    // If the given path is prior to the cursor's current path, then the given path
-                    // was not produced by the cursor.
+                    // If the given path comes before the cursor's current path in depth-first
+                    // order, then the given path was not produced by the
+                    // cursor.
                     inconsistencies.push(self.inconsistency_missing(path, node));
                     return Ok(())
                 }
                 Ordering::Equal => {
                     // If the the current path matches the given one (happy path) but the nodes
                     // aren't equal then we produce a wrong node. Either way we want to move the
-                    // trie cursor forward.
+                    // iterator forward.
                     if *curr_node != node {
                         inconsistencies.push(self.inconsistency_wrong(
                             path,
@@ -257,15 +271,15 @@ impl<C: TrieCursor> SingleVerifier<C> {
                             curr_node.clone(),
                         ))
                     }
-                    self.curr = self.trie_cursor.next()?;
+                    self.curr = self.trie_iter.next().transpose()?;
                     return Ok(())
                 }
                 Ordering::Greater => {
-                    // If the current path is less than the given path it means the cursor's path
-                    // was not found by the caller (otherwise it would have hit
-                    // the equal case) and so is extraneous.
+                    // If the given path comes after the current path in depth-first order,
+                    // it means the cursor's path was not found by the caller (otherwise it would
+                    // have hit the equal case) and so is extraneous.
                     inconsistencies.push(self.inconsistency_extra(*curr_path, curr_node.clone()));
-                    self.curr = self.trie_cursor.next()?;
+                    self.curr = self.trie_iter.next().transpose()?;
                     // back to the top of the loop to check the latest `self.curr` value against the
                     // given path/node.
                 }
@@ -274,12 +288,12 @@ impl<C: TrieCursor> SingleVerifier<C> {
     }
 
     /// Must be called once there are no more calls to `next` to made. All further nodes produced
-    /// by the `TrieCursor` will be considered extraneous.
+    /// by the iterator will be considered extraneous.
     fn finalize(&mut self, inconsistencies: &mut Vec<Inconsistency>) -> Result<(), DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
                 inconsistencies.push(self.inconsistency_extra(curr_path, curr_node));
-                self.curr = self.trie_cursor.next()?;
+                self.curr = self.trie_iter.next().transpose()?;
             } else {
                 return Ok(())
             }
@@ -295,8 +309,8 @@ pub struct Verifier<T: TrieCursorFactory, H> {
     trie_cursor_factory: T,
     branch_node_iter: StateRootBranchNodesIter<H>,
     inconsistencies: Vec<Inconsistency>,
-    account: SingleVerifier<T::AccountTrieCursor>,
-    storage: Option<(B256, SingleVerifier<T::StorageTrieCursor>)>,
+    account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor>>,
+    storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor>>)>,
     complete: bool,
 }
 
@@ -338,11 +352,11 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                 self.complete = true;
             }
             Some(BranchNode::Account(path, node)) => {
-                trace!(target: "trie::verify", ?path, "Account node");
+                trace!(target: "trie::verify", ?path, "Account node from state root");
                 self.account.next(&mut self.inconsistencies, path, node)?
             }
             Some(BranchNode::Storage(account, path, node)) => {
-                trace!(target: "trie::verify", ?account, ?path, "Storage node");
+                trace!(target: "trie::verify", ?account, ?path, "Storage node from state root");
                 match self.storage.as_mut() {
                     None => self.new_storage(account, path, node)?,
                     Some((prev_account, storage)) if *prev_account == account => {
@@ -669,11 +683,14 @@ mod tests {
     #[test]
     fn test_single_verifier_next_extra() {
         // Test when trie has extra nodes not in expected
-        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node2 = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
-        let node3 = test_branch_node(0b1010, 0b0010, 0b1000, vec![B256::from([3u8; 32])]);
+        // Create a proper trie structure with root
+        let node_root = test_branch_node(0b1110, 0, 0b1110, vec![]); // root has children at 1, 2, 3
+        let node1 = test_branch_node(0b0001, 0, 0b0001, vec![]);
+        let node2 = test_branch_node(0b0010, 0, 0b0010, vec![]);
+        let node3 = test_branch_node(0b0100, 0, 0b0100, vec![]);
 
         let trie_nodes = BTreeMap::from([
+            (Nibbles::new(), node_root.clone()),
             (Nibbles::from_nibbles([0x1]), node1.clone()),
             (Nibbles::from_nibbles([0x2]), node2.clone()),
             (Nibbles::from_nibbles([0x3]), node3.clone()),
@@ -683,52 +700,72 @@ mod tests {
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
         let mut inconsistencies = Vec::new();
 
-        // Skip over node at path 0x1 and 0x2, go straight to 0x3
+        // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
+        // We only provide 0x1 and 0x3, skipping 0x2 and root
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
         verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x3]), node3).unwrap();
+        verifier.finalize(&mut inconsistencies).unwrap();
 
-        // Should have two "extra" inconsistencies for the skipped nodes
+        // Should have two "extra" inconsistencies for nodes in the trie that we skipped
+        if inconsistencies.len() != 2 {
+            eprintln!("Expected 2 inconsistencies, got {}:", inconsistencies.len());
+            for inc in &inconsistencies {
+                eprintln!("  {:?}", inc);
+            }
+        }
         assert_eq!(inconsistencies.len(), 2);
         assert_matches!(
             &inconsistencies[0],
             Inconsistency::AccountExtra(path, node)
-                if *path == Nibbles::from_nibbles([0x1]) && *node == node1
+                if *path == Nibbles::from_nibbles([0x2]) && *node == node2
         );
         assert_matches!(
             &inconsistencies[1],
             Inconsistency::AccountExtra(path, node)
-                if *path == Nibbles::from_nibbles([0x2]) && *node == node2
+                if *path == Nibbles::new() && *node == node_root
         );
     }
 
     #[test]
     fn test_single_verifier_finalize() {
         // Test finalize marks all remaining nodes as extra
-        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node2 = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
-        let node3 = test_branch_node(0b1010, 0b0010, 0b1000, vec![B256::from([3u8; 32])]);
+        let node_root = test_branch_node(0b1110, 0, 0b1110, vec![]); // root has children at 1, 2, 3
+        let node1 = test_branch_node(0b0001, 0, 0b0001, vec![]);
+        let node2 = test_branch_node(0b0010, 0, 0b0010, vec![]);
+        let node3 = test_branch_node(0b0100, 0, 0b0100, vec![]);
 
         let trie_nodes = BTreeMap::from([
+            (Nibbles::new(), node_root.clone()),
             (Nibbles::from_nibbles([0x1]), node1.clone()),
-            (Nibbles::from_nibbles([0x2]), node2),
-            (Nibbles::from_nibbles([0x3]), node3),
+            (Nibbles::from_nibbles([0x2]), node2.clone()),
+            (Nibbles::from_nibbles([0x3]), node3.clone()),
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
         let mut inconsistencies = Vec::new();
 
-        // Process first node correctly
+        // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
+        // Process first two nodes correctly
         verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
         assert!(inconsistencies.is_empty());
 
-        // Finalize - should mark remaining nodes as extra
+        // Finalize - should mark remaining nodes (0x3 and root) as extra
         verifier.finalize(&mut inconsistencies).unwrap();
 
         // Should have two extra nodes
         assert_eq!(inconsistencies.len(), 2);
-        for inconsistency in &inconsistencies {
-            assert!(matches!(inconsistency, Inconsistency::AccountExtra(_, _)));
-        }
+        assert_matches!(
+            &inconsistencies[0],
+            Inconsistency::AccountExtra(path, node)
+                if *path == Nibbles::from_nibbles([0x3]) && *node == node3
+        );
+        assert_matches!(
+            &inconsistencies[1],
+            Inconsistency::AccountExtra(path, node)
+                if *path == Nibbles::new() && *node == node_root
+        );
     }
 
     #[test]
@@ -779,28 +816,138 @@ mod tests {
     }
 
     #[test]
-    fn test_single_verifier_ordering() {
-        // Test that nodes must be provided in ascending order
-        let node1 = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        let node2 = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
-        let node3 = test_branch_node(0b1010, 0b0010, 0b1000, vec![B256::from([3u8; 32])]);
+    fn test_single_verifier_depth_first_ordering() {
+        // Test that nodes must be provided in depth-first order
+        // Create nodes with proper parent-child relationships
+        let node_root = test_branch_node(0b0110, 0, 0b0110, vec![]); // root has children at 1 and 2
+        let node1 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x1 has children at 1 and 2
+        let node11 = test_branch_node(0b0001, 0, 0b0001, vec![]); // 0x11 is a leaf
+        let node12 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x12 is a leaf
+        let node2 = test_branch_node(0b0100, 0, 0b0100, vec![]); // 0x2 is a leaf
 
+        // The depth-first iterator will iterate from the root in this order:
+        // root -> 0x1 -> 0x11, 0x12 (children of 0x1), then 0x2
+        // But because of depth-first, we get: root, 0x1, 0x11, 0x12, 0x2
         let trie_nodes = BTreeMap::from([
-            (Nibbles::from_nibbles([0x1]), node1.clone()),
-            (Nibbles::from_nibbles([0x2]), node2.clone()),
-            (Nibbles::from_nibbles([0x3]), node3.clone()),
+            (Nibbles::new(), node_root.clone()),                 // root
+            (Nibbles::from_nibbles([0x1]), node1.clone()),       // 0x1
+            (Nibbles::from_nibbles([0x1, 0x1]), node11.clone()), // 0x11
+            (Nibbles::from_nibbles([0x1, 0x2]), node12.clone()), // 0x12
+            (Nibbles::from_nibbles([0x2]), node2.clone()),       // 0x2
         ]);
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
         let mut inconsistencies = Vec::new();
 
-        // Process in correct order
+        // The depth-first iterator produces nodes in post-order (children before parents)
+        // Order: 0x11, 0x12, 0x1, 0x2, root
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
         verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
         verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x3]), node3).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut inconsistencies).unwrap();
 
         // All should match, no inconsistencies
+        if !inconsistencies.is_empty() {
+            eprintln!(
+                "Test test_single_verifier_depth_first_ordering failed with {} inconsistencies:",
+                inconsistencies.len()
+            );
+            for inc in &inconsistencies {
+                eprintln!("  {:?}", inc);
+            }
+        }
+        assert!(inconsistencies.is_empty());
+    }
+
+    #[test]
+    fn test_single_verifier_wrong_depth_first_order() {
+        // Test that providing nodes in wrong order produces inconsistencies
+        // Create a trie with parent-child relationship
+        let node_root = test_branch_node(0b0010, 0, 0b0010, vec![]); // root has child at 1
+        let node1 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x1 has child at 1
+        let node11 = test_branch_node(0b0001, 0, 0b0001, vec![]); // 0x11 is a leaf
+
+        let trie_nodes = BTreeMap::from([
+            (Nibbles::new(), node_root.clone()),
+            (Nibbles::from_nibbles([0x1]), node1.clone()),
+            (Nibbles::from_nibbles([0x1, 0x1]), node11.clone()),
+        ]);
+
+        let cursor = create_mock_cursor(trie_nodes);
+        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut inconsistencies = Vec::new();
+
+        // Process in WRONG order (skip root, provide child before processing all nodes correctly)
+        // The iterator will produce: root, 0x1, 0x11
+        // But we provide: 0x11, root, 0x1 (completely wrong order)
+        verifier
+            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11.clone())
+            .unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::new(), node_root.clone()).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1.clone()).unwrap();
+
+        // Should have inconsistencies since we provided them in wrong order
+        assert!(!inconsistencies.is_empty());
+    }
+
+    #[test]
+    fn test_single_verifier_complex_depth_first() {
+        // Test a complex tree structure with depth-first ordering
+        // Build a tree structure with proper parent-child relationships
+        let node_root = test_branch_node(0b0110, 0, 0b0110, vec![]); // root: children at nibbles 1 and 2
+        let node1 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x1: children at nibbles 1 and 2
+        let node11 = test_branch_node(0b0110, 0, 0b0110, vec![]); // 0x11: children at nibbles 1 and 2
+        let node111 = test_branch_node(0b0001, 0, 0b0001, vec![]); // 0x111: leaf
+        let node112 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x112: leaf
+        let node12 = test_branch_node(0b0100, 0, 0b0100, vec![]); // 0x12: leaf
+        let node2 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x2: child at nibble 1
+        let node21 = test_branch_node(0b0001, 0, 0b0001, vec![]); // 0x21: leaf
+
+        // Create the trie structure
+        let trie_nodes = BTreeMap::from([
+            (Nibbles::new(), node_root.clone()),
+            (Nibbles::from_nibbles([0x1]), node1.clone()),
+            (Nibbles::from_nibbles([0x1, 0x1]), node11.clone()),
+            (Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111.clone()),
+            (Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112.clone()),
+            (Nibbles::from_nibbles([0x1, 0x2]), node12.clone()),
+            (Nibbles::from_nibbles([0x2]), node2.clone()),
+            (Nibbles::from_nibbles([0x2, 0x1]), node21.clone()),
+        ]);
+
+        let cursor = create_mock_cursor(trie_nodes);
+        let mut verifier = SingleVerifier::new(None, cursor).unwrap();
+        let mut inconsistencies = Vec::new();
+
+        // The depth-first iterator produces nodes in post-order (children before parents)
+        // Order: 0x111, 0x112, 0x11, 0x12, 0x1, 0x21, 0x2, root
+        verifier
+            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111)
+            .unwrap();
+        verifier
+            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112)
+            .unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2, 0x1]), node21).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut inconsistencies, Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut inconsistencies).unwrap();
+
+        // All should match, no inconsistencies
+        if !inconsistencies.is_empty() {
+            eprintln!(
+                "Test test_single_verifier_complex_depth_first failed with {} inconsistencies:",
+                inconsistencies.len()
+            );
+            for inc in &inconsistencies {
+                eprintln!("  {:?}", inc);
+            }
+        }
         assert!(inconsistencies.is_empty());
     }
 }
