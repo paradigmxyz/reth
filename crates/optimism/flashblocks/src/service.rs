@@ -1,4 +1,7 @@
-use crate::{sequence::FlashBlockSequence, ExecutionPayloadBaseV1, FlashBlock};
+use crate::{
+    sequence::{FlashBlockPendingSequence, FlashBlockSequence},
+    ExecutionPayloadBaseV1, FlashBlock,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
@@ -35,7 +38,7 @@ pub struct FlashBlockService<
 > {
     rx: S,
     current: Option<PendingBlock<N>>,
-    blocks: FlashBlockSequence<N::SignedTx>,
+    blocks: FlashBlockPendingSequence<N::SignedTx>,
     rebuild: bool,
     evm_config: EvmConfig,
     provider: Provider,
@@ -66,7 +69,7 @@ where
         Self {
             rx,
             current: None,
-            blocks: FlashBlockSequence::new(),
+            blocks: FlashBlockPendingSequence::new(),
             evm_config,
             canon_receiver: provider.subscribe_to_canonical_state(),
             provider,
