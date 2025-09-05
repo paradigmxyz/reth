@@ -7,6 +7,3 @@ license.workspace = true
 
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli", "test-utils"] }
-reth-tracing.workspace = true
-
-eyre.workspace = true
