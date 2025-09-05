@@ -31,9 +31,7 @@ pub use produce_blocks::{
     UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
-pub use transactions::{
-    create_approve_tx, create_test_approve_tx, create_transfer_tx, ProduceBlockWithTransactions,
-};
+pub use transactions::{create_approve_tx, create_transfer_tx, ProduceBlockWithTransactions};
 
 /// An action that can be performed on an instance.
 ///
