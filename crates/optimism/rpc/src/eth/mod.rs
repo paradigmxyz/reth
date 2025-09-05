@@ -75,12 +75,14 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     pub fn new(
         eth_api: EthApiNodeBackend<N, Rpc>,
         sequencer_client: Option<SequencerClient>,
+        enable_txpool_admission: bool,
         min_suggested_priority_fee: U256,
         flashblocks_rx: Option<FlashBlockRx<N::Primitives>>,
     ) -> Self {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
             sequencer_client,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             flashblocks_rx,
         });
@@ -346,8 +348,8 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApiInner<N, Rpc> {
         self.sequencer_client.as_ref()
     }
 
-    /// Returns whether transaction pool admission is enabled.
-    const fn enable_txpool_admission(&self) -> bool {
+    /// Returns `true` transaction pool admission is enabled.
+    const fn is_txpool_admission_enabled(&self) -> bool {
         self.enable_txpool_admission
     }
 }
@@ -458,6 +460,7 @@ where
         let Self {
             sequencer_url,
             sequencer_headers,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             flashblocks_url,
             ..
@@ -468,7 +471,7 @@ where
 
         let sequencer_client = if let Some(url) = &sequencer_url {
             Some(
-                SequencerClient::new_with_headers(&url, sequencer_headers)
+                SequencerClient::new_with_headers(url, sequencer_headers)
                     .await
                     .wrap_err_with(|| format!("Failed to init sequencer client with: {url}"))?,
             )
@@ -496,6 +499,7 @@ where
         Ok(OpEthApi::new(
             eth_api,
             sequencer_client,
+            enable_txpool_admission,
             U256::from(min_suggested_priority_fee),
             flashblocks_rx,
         ))

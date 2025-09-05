@@ -677,6 +677,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             historical_rpc: None,
             da_config: None,
             enable_tx_conditional: false,
+            enable_txpool_admission: false,
             min_suggested_priority_fee: 1_000_000,
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
@@ -713,6 +714,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     /// Configure if transaction pool submission should be enabled.
     pub const fn with_enable_txpool_admission(mut self, enable_txpool_admission: bool) -> Self {
         self.enable_txpool_admission = enable_txpool_admission;
+        self
+    }
 
     /// Configure the minimum priority fee (tip)
     pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
@@ -742,6 +745,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             historical_rpc,
             da_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             tokio_runtime,
             _nt,
@@ -754,6 +758,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             historical_rpc,
             da_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             _nt,
             rpc_middleware,
@@ -786,12 +791,13 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             sequencer_headers,
             da_config,
             enable_tx_conditional,
+            enable_txpool_admission,
             min_suggested_priority_fee,
             historical_rpc,
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
-            disable_tx_pool_admission,
+            ..
         } = self;
 
         OpAddOns::new(
@@ -801,7 +807,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                     .with_sequencer_headers(sequencer_headers.clone())
                     .with_min_suggested_priority_fee(min_suggested_priority_fee)
                     .with_flashblocks(flashblocks_url)
-                    .with_enable_txpool_admission(!disable_tx_pool_admission),
+                    .with_enable_txpool_admission(enable_txpool_admission),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),
