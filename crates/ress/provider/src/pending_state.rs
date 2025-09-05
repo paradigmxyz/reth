@@ -104,7 +104,7 @@ pub async fn maintain_pending_state<P>(
             ConsensusEngineEvent::CanonicalBlockAdded(block, _) |
             ConsensusEngineEvent::ForkBlockAdded(block, _) => {
                 trace!(target: "reth::ress_provider", block = ? block.recovered_block().num_hash(), "Insert block into pending state");
-                pending_state.insert_block(block);
+                pending_state.insert_block(*block);
             }
             ConsensusEngineEvent::InvalidBlock(block) => {
                 if let Ok(block) = block.try_recover() {
