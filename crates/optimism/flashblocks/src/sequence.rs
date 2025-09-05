@@ -96,9 +96,6 @@ impl FlashBlockCompleteSequence {
     /// * vector is not empty
     /// * first flashblock have the base payload
     /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
-    ///
-    /// Also see [`TryFrom`] implementation of `FlashBlockCompleteSequence` for
-    /// [`FlashBlockPendingSequence`]
     pub fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
