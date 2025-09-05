@@ -18,7 +18,7 @@ use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    StageCheckpointReader,
+    HeaderProvider, StageCheckpointReader,
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
