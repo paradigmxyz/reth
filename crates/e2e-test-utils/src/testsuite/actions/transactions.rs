@@ -74,11 +74,9 @@ where
 
             debug!("Sending {} transactions to node {}", self.transactions.len(), node_idx);
 
-            // Send transactions to the node via RPC
             let mut tx_hashes = Vec::new();
 
             for (idx, tx_bytes) in self.transactions.iter().enumerate() {
-                // Send raw transaction using eth_sendRawTransaction
                 let tx_hash = EthApiClient::<
                     TransactionRequest,
                     Transaction,
@@ -92,29 +90,22 @@ where
                 debug!("Sent transaction {}: hash {}", idx + 1, tx_hash);
             }
 
-            // Wait a bit for transactions to be in the pool
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-            // Now produce a block that includes these transactions
-            // We use ProduceBlocks which will trigger block production
             debug!("Producing block to include transactions");
             let mut produce = ProduceBlocks::<Engine>::new(1);
             produce.execute(env).await?;
 
-            // Make the block canonical
             let mut make_canonical = MakeCanonical::new();
             make_canonical.execute(env).await?;
 
-            // Capture the block with our tag
             let mut capture = CaptureBlock::new(&self.block_tag);
             capture.execute(env).await?;
 
-            // Verify transactions were included
             let (block_info, _) = *env.block_registry.get(&self.block_tag).ok_or_else(|| {
                 eyre::eyre!("Block tag '{}' not found in registry", self.block_tag)
             })?;
 
-            // Get the block to check transactions
             let block = EthApiClient::<
                 TransactionRequest,
                 Transaction,
@@ -131,7 +122,6 @@ where
                 block.transactions.len()
             );
 
-            // Check if our transactions were included
             let block_tx_hashes: Vec<B256> = block.transactions.hashes().collect();
             let mut included_count = 0;
             for tx_hash in &tx_hashes {
@@ -155,8 +145,6 @@ where
     }
 }
 
-// Transaction creation utilities
-
 /// Create a transaction that calls `approve()` on a token contract.
 /// This modifies storage in a way that can trigger trie node creation/deletion.
 pub async fn create_approve_tx(
@@ -166,40 +154,33 @@ pub async fn create_approve_tx(
     nonce: u64,
     chain_id: u64,
 ) -> Result<Bytes> {
-    // The approve(address spender, uint256 amount) selector: 0x095ea7b3
     let mut data = Vec::with_capacity(68);
-    data.extend_from_slice(&[0x09, 0x5e, 0xa7, 0xb3]); // approve selector
-    data.extend_from_slice(&[0u8; 12]); // padding for address
-    data.extend_from_slice(spender.as_slice()); // spender address (20 bytes)
+    data.extend_from_slice(&[0x09, 0x5e, 0xa7, 0xb3]);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(spender.as_slice());
 
-    // Encode amount as 32 bytes
     let amount_bytes = amount.to_be_bytes::<32>();
     data.extend_from_slice(&amount_bytes);
 
-    // Get test wallet (funded account from genesis)
     let wallet = Wallet::new(1).with_chain_id(chain_id);
     let signers = wallet.wallet_gen();
     let signer =
         signers.into_iter().next().ok_or_else(|| eyre::eyre!("Failed to create test signer"))?;
 
-    // Create transaction calling the contract
     let mut tx = TxLegacy {
         chain_id: Some(chain_id),
         nonce,
-        gas_price: 20_000_000_000, // 20 gwei
+        gas_price: 20_000_000_000,
         gas_limit: 100_000,
         to: TxKind::Call(token_address),
-        value: U256::ZERO, // No ETH sent
+        value: U256::ZERO,
         input: data.into(),
     };
 
-    // Sign the transaction
     let signature = signer.sign_transaction_sync(&mut tx)?;
 
-    // Build the signed transaction
     let signed = TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, B256::ZERO));
 
-    // Encode to bytes
     let mut encoded = Vec::new();
     signed.encode_2718(&mut encoded);
 
@@ -213,7 +194,6 @@ pub async fn create_transfer_tx(
     nonce: u64,
     chain_id: u64,
 ) -> Result<Bytes> {
-    // Get test wallet (funded account from genesis)
     let wallet = Wallet::new(1).with_chain_id(chain_id);
     let signers = wallet.wallet_gen();
     let signer =
@@ -223,20 +203,17 @@ pub async fn create_transfer_tx(
     let mut tx = TxLegacy {
         chain_id: Some(chain_id),
         nonce,
-        gas_price: 20_000_000_000, // 20 gwei
-        gas_limit: 21_000,         // Standard gas for transfer
+        gas_price: 20_000_000_000,
+        gas_limit: 21_000,
         to: TxKind::Call(to),
         value,
-        input: Bytes::new(), // Empty data for simple transfer
+        input: Bytes::new(),
     };
 
-    // Sign the transaction
     let signature = signer.sign_transaction_sync(&mut tx)?;
 
-    // Build the signed transaction
     let signed = TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, B256::ZERO));
 
-    // Encode to bytes
     let mut encoded = Vec::new();
     signed.encode_2718(&mut encoded);
 
