@@ -257,8 +257,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
             match depth_first::cmp(&path, curr_path) {
                 Ordering::Less => {
                     // If the given path comes before the cursor's current path in depth-first
-                    // order, then the given path was not produced by the
-                    // cursor.
+                    // order, then the given path was not produced by the cursor.
                     outputs.push(self.output_missing(path, node));
                     return Ok(())
                 }
@@ -371,21 +370,23 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                 return Ok(())
             };
 
-            if curr_account > next_account || (end_inclusive && curr_account == next_account) {
-                return Ok(())
-            }
+            if curr_account < next_account || (end_inclusive && curr_account == next_account) {
+                println!("Verifying account {curr_account:?}");
+                trace!(target: "trie::verify", account = ?curr_account, "Verying account has empty storage");
 
-            trace!(target: "trie::verify", account = ?curr_account, "Verying account has empty storage");
-
-            let mut storage_cursor = self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
-            let mut seeked = false;
-            while let Some((path, node)) = if seeked {
-                storage_cursor.next()?
+                let mut storage_cursor =
+                    self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
+                let mut seeked = false;
+                while let Some((path, node)) = if seeked {
+                    storage_cursor.next()?
+                } else {
+                    seeked = true;
+                    storage_cursor.seek(Nibbles::new())?
+                } {
+                    self.outputs.push(Output::StorageExtra(curr_account, path, node));
+                }
             } else {
-                seeked = true;
-                storage_cursor.seek(Nibbles::new())?
-            } {
-                self.outputs.push(Output::StorageExtra(curr_account, path, node));
+                return Ok(())
             }
         }
     }
