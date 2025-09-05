@@ -94,4 +94,4 @@ for result in "${sorted_results[@]}"; do
 done
 
 # Exit with a non-zero status if any command fails
-exit $any_failed 
+exit $any_failed
