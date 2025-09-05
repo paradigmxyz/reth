@@ -748,8 +748,8 @@ where
 
         let parent_num_hash = |hash: B256| -> ProviderResult<NumHash> {
             let parent_num_hash =
-                if let Some(parent_header) = ctx.state().tree_state.sealed_header_by_hash(&hash) {
-                    Some(parent_header.num_hash())
+                if let Some(header) = ctx.state().tree_state.sealed_header_by_hash(&hash) {
+                    Some(header.parent_num_hash())
                 } else {
                     provider.sealed_header_by_hash(hash)?.map(|header| header.parent_num_hash())
                 };
