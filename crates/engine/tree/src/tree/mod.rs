@@ -93,6 +93,12 @@ pub mod state;
 /// backfill this gap.
 pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
+/// The max number of blocks to persist in batch.
+/// Memory is released after blocks are persisted in a batch, so limiting the batch size
+/// prevents memory accumulation and ensures timely cleanup in high-throughput scenarios.
+/// The default value of 8 provides a good balance between memory efficiency and I/O performance.
+const MAX_BLOCKS_TO_PERSIST: u64 = 8;
+
 /// A builder for creating state providers that can be used across threads.
 #[derive(Clone, Debug)]
 pub struct StateProviderBuilder<N: NodePrimitives, P> {
@@ -1585,8 +1591,9 @@ where
 
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        let target_number =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let target_number = canonical_head_number
+            .saturating_sub(self.config.memory_block_buffer_target())
+            .min(last_persisted_number + MAX_BLOCKS_TO_PERSIST);
 
         debug!(target: "engine::tree", ?last_persisted_number, ?canonical_head_number, ?target_number, ?current_hash, "Returning canonical blocks to persist");
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
@@ -2781,7 +2788,7 @@ where
 /// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
 /// variant.
 ///
-/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
 /// is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
