@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#033e7af01cdf5db1b8d78ded96fd1eb03de3a745"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#e3909408fa439947ea12685b5889d387a4a43c4e"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -381,7 +381,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#033e7af01cdf5db1b8d78ded96fd1eb03de3a745"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#e3909408fa439947ea12685b5889d387a4a43c4e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -1759,7 +1759,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap 2.11.0",
  "once_cell",
- "phf",
+ "phf 0.11.3",
  "rustc-hash 2.1.1",
  "static_assertions",
 ]
@@ -6188,7 +6188,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "auto_impl",
  "revm",
@@ -6444,8 +6444,18 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
- "phf_macros",
- "phf_shared",
+ "phf_macros 0.11.3",
+ "phf_shared 0.11.3",
+]
+
+[[package]]
+name = "phf"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
+dependencies = [
+ "phf_macros 0.13.1",
+ "phf_shared 0.13.1",
  "serde",
 ]
 
@@ -6455,8 +6465,18 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
- "phf_shared",
+ "phf_shared 0.11.3",
  "rand 0.8.5",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135ace3a761e564ec88c03a77317a7c6b80bb7f7135ef2544dbe054243b89737"
+dependencies = [
+ "fastrand 2.3.0",
+ "phf_shared 0.13.1",
 ]
 
 [[package]]
@@ -6465,8 +6485,21 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
 dependencies = [
- "phf_generator",
- "phf_shared",
+ "phf_generator 0.11.3",
+ "phf_shared 0.11.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
+dependencies = [
+ "phf_generator 0.13.1",
+ "phf_shared 0.13.1",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -6477,6 +6510,15 @@ name = "phf_shared"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
 ]
@@ -10821,7 +10863,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "29.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10839,10 +10881,10 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.2.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "bitvec",
- "phf",
+ "phf 0.13.1",
  "revm-primitives",
  "serde",
 ]
@@ -10850,7 +10892,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "9.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10866,7 +10908,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "10.1.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10881,7 +10923,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10894,7 +10936,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "auto_impl",
  "either",
@@ -10906,7 +10948,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10924,7 +10966,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "auto_impl",
  "either",
@@ -10961,18 +11003,19 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "25.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
  "revm-primitives",
+ "revm-state",
  "serde",
 ]
 
 [[package]]
 name = "revm-precompile"
 version = "27.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10997,7 +11040,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11008,7 +11051,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#4135638c745bf7ea42042022289ab3a21ba970cd"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#c699b798cc27023b913c314c8e0245f5378da5bf"
 dependencies = [
  "bitflags 2.9.4",
  "revm-bytecode",
