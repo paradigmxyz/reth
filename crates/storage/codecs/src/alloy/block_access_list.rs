@@ -7,7 +7,7 @@ use alloy_block_access_list::{
     code_change::CodeChange as AlloyCodeChange, nonce_change::NonceChange as AlloyNonceChange,
     AccountChanges as AlloyAccountChanges, SlotChanges as AlloySlotChange,
 };
-use alloy_primitives::{Address, Bytes, StorageKey, B256, U256};
+use alloy_primitives::{Address, Bytes, StorageKey, U256};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// AccountChanges acts as bridge which simplifies Compact implementation for `AlloyAccountChanges`.
@@ -93,7 +93,7 @@ pub(crate) struct NonceChange {
 #[add_arbitrary_tests(crate, compact)]
 pub(crate) struct SlotChanges {
     /// The storage slot key being modified.
-    pub slot: B256,
+    pub slot: U256,
     /// A list of write operations to this slot, ordered by transaction index.
     pub changes: Vec<StorageChange>,
 }

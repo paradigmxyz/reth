@@ -23,7 +23,7 @@ alloy-eips.workspace = true
 alloy-block-access-list.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
-alloy-rlp.workspace = true
+# alloy-rlp.workspace = true
 
 tracing.workspace = true
 
@@ -40,7 +40,7 @@ std = [
     "reth-execution-types/std",
     "reth-primitives-traits/std",
     "tracing/std",
-    "alloy-rlp/std",
+    # "alloy-rlp/std",
     "alloy-block-access-list/std",
 ]
 
