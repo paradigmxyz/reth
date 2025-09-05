@@ -79,6 +79,7 @@ mod tests {
                 ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
                 max_price: DEFAULT_MAX_GAS_PRICE.to(),
                 percentile: DEFAULT_GAS_PRICE_PERCENTILE,
+                default_suggested_fee: None,
             }
         );
     }
