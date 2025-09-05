@@ -128,6 +128,10 @@ pub enum FilterError {
     /// Provider error occurred.
     #[error("provider error: {0}")]
     Provider(String),
+
+    /// Task error occurred.
+    #[error("task error: {0}")]
+    Task(String),
 }
 
 /// Result type for `FilterMaps` operations.

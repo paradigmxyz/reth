@@ -8672,6 +8672,7 @@ dependencies = [
  "bytes",
  "fnv",
  "futures",
+ "itertools 0.14.0",
  "modular-bitfield",
  "rand 0.9.2",
  "reth-codecs",

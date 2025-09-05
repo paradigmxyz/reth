@@ -38,6 +38,7 @@ sha2.workspace = true
 fnv.workspace = true
 tokio.workspace = true
 futures.workspace = true
+itertools.workspace = true
 
 # codecs
 

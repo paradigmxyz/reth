@@ -6,7 +6,6 @@ use fnv::FnvHasher;
 
 use sha2::{Digest, Sha256};
 use std::hash::Hasher;
-use tracing::info;
 
 use crate::constants::{DEFAULT_PARAMS, RANGE_TEST_PARAMS};
 

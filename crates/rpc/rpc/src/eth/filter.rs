@@ -13,9 +13,12 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
-use jsonrpsee::{core::RpcResult, server::IdProvider};
+use jsonrpsee::{
+    core::{params, RpcResult},
+    server::IdProvider,
+};
 use reth_errors::ProviderError;
-use reth_log_index::{query::query_logs_in_block_range, FilterMapParams, LogIndexProvider};
+use reth_log_index::{query::spawn_query_logs_tasks, FilterMapParams, LogIndexProvider};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -32,13 +35,13 @@ use reth_storage_api::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
-use revm_primitives::HashSet;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
     pin::Pin,
+    result,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -594,11 +597,11 @@ where
             //     .clone()
             //     .get_logs_in_block_range_inner(&filter, from_block, to_block, limits)
             //     .await;
-            let index_res = this.logs_with_index_split(&filter, from_block, to_block, limits).await;
+            let res = this.logs_with_index_split(&filter, from_block, to_block, limits).await;
             // let bloom_logs = bloom_res.unwrap_or_default();
             // let index_logs = index_res.as_ref().unwrap();
 
-            let _ = tx.send(index_res);
+            let _ = tx.send(res);
         }));
 
         rx.await.map_err(|_| EthFilterError::InternalError)?
@@ -663,6 +666,7 @@ where
         to_block: u64,
         limits: QueryLimits,
     ) -> Result<Vec<alloy_rpc_types_eth::Log>, EthFilterError> {
+        let mut all_logs = Vec::new();
         let chain_tip = self.provider().best_block_number()?;
         // Fast exit if no constraints (index can’t help)
         let has_constraints =
@@ -671,43 +675,42 @@ where
             return Ok(Vec::new());
         }
 
-        // If your index was built with custom params, thread them in instead of default.
         let params = FilterMapParams::default();
 
-        let start = Instant::now();
-        let hits =
-            match query_logs_in_block_range(self.provider(), &params, filter, from_block, to_block)
-            {
-                Ok(v) => v,
-                Err(_) => return Ok(Vec::new()), // fallback will cover it
-            };
-        if hits.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let elapsed = start.elapsed();
-        info!(target: "reth::rpc::eth::filter", "Elapsed time for matching logs: {:?}", elapsed);
-
-        // Group hits by block
-        let mut by_block: BTreeMap<u64, Vec<_>> = BTreeMap::new();
-        for h in hits {
-            by_block.entry(h.block_number).or_default().push(h);
-        }
-
-        let mut all_logs = Vec::new();
+        let provider_arc: Arc<_> = Arc::new(self.provider().clone());
+        let mut tasks = match spawn_query_logs_tasks(
+            provider_arc,
+            params.clone(),
+            filter.clone(),
+            from_block,
+            to_block,
+            DEFAULT_PARALLEL_CONCURRENCY,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(_) => return Ok(Vec::new()),
+        };
 
         let mut matching_headers = Vec::new();
 
-        for (bn, _block_hits) in by_block {
-            // Header -> hash -> receipts
-            let header = match self.provider().header_by_number(bn)? {
-                Some(h) => h,
-                None => continue,
-            };
-            let block_hash = header.hash_slow();
-            matching_headers.push(SealedHeader::new(header, block_hash));
-        }
+        while let Some(Ok(results)) = tasks.next().await {
+            info!("results length: {}", results.len());
 
+            // group results by block number
+            let mut results_by_block: BTreeMap<u64, Vec<_>> = BTreeMap::new();
+            for result in results {
+                results_by_block.entry(result.block_number).or_default().push(result);
+            }
+            for (block_number, _) in results_by_block {
+                let header = match self.provider().header_by_number(block_number)? {
+                    Some(h) => h,
+                    None => continue,
+                };
+                let block_hash = header.hash_slow();
+                matching_headers.push(SealedHeader::new(header, block_hash));
+            }
+        }
         // initialize the appropriate range mode based on collected headers
         let mut range_mode = RangeMode::new(
             self.clone(),
@@ -756,6 +759,9 @@ where
                 }
             }
         }
+
+        info!("Logs len: {}", all_logs.len());
+
         Ok(all_logs)
     }
 
