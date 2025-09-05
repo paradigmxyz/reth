@@ -391,6 +391,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, V::Transaction)>,
     ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
+        if transactions.len() == 1 {
+            let (origin, tx) = transactions.into_iter().next().unwrap();
+            let res = self.pool.validator().validate_transaction(origin, tx).await;
+            return vec![(origin, res)]
+        }
         let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
         let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
         origins.into_iter().zip(tx_outcomes).collect()
