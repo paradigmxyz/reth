@@ -47,7 +47,7 @@ impl Command {
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
 
-        let mut repair_count = 0;
+        let mut inconsistent_nodes = 0;
         let start_time = Instant::now();
         let mut last_progress_time = Instant::now();
 
@@ -58,14 +58,14 @@ impl Command {
             if let Output::Progress(path) = output {
                 // Output progress every 5 seconds
                 if last_progress_time.elapsed() > Duration::from_secs(5) {
-                    output_progress(path, start_time);
+                    output_progress(path, start_time, inconsistent_nodes);
                     last_progress_time = Instant::now();
                 }
                 continue
             };
 
             warn!("Inconsistency found: {output:?}");
-            repair_count += 1;
+            inconsistent_nodes += 1;
 
             if self.dry_run {
                 continue;
@@ -118,11 +118,11 @@ impl Command {
             }
         }
 
-        if repair_count > 0 {
+        if inconsistent_nodes > 0 {
             if self.dry_run {
-                info!("Found {} inconsistencies (dry run - no changes made)", repair_count);
+                info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
             } else {
-                info!("Repaired {} inconsistencies", repair_count);
+                info!("Repaired {} inconsistencies", inconsistent_nodes);
                 tx.commit()?;
                 info!("Changes committed to database");
             }
@@ -134,8 +134,8 @@ impl Command {
     }
 }
 
-/// Output progress information based on the last seen account path
-fn output_progress(last_account: Nibbles, start_time: Instant) {
+/// Output progress information based on the last seen account path.
+fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_nodes: u64) {
     // Calculate percentage based on position in the trie path space
     // For progress estimation, we'll use the first few nibbles as an approximation
 
@@ -163,9 +163,19 @@ fn output_progress(last_account: Nibbles, start_time: Instant) {
     let remaining_time = estimated_total_time - elapsed_secs;
     let eta_duration = Duration::from_secs(remaining_time as u64);
 
-    info!(
-        progress_percent = progress_percent_str,
-        eta = %humantime::format_duration(eta_duration),
-        "Verifying trie tables",
-    );
+    if let Some(inconsistent_nodes) = inconsistent_nodes {
+        info!(
+            progress_percent = progress_percent_str,
+            eta = %humantime::format_duration(eta_duration),
+            inconsistent_nodes,
+            "Repairing trie tables",
+        );
+    } else {
+        info!(
+            progress_percent = progress_percent_str,
+            eta = %humantime::format_duration(eta_duration),
+            inconsistent_nodes,
+            "Verifying trie tables",
+        );
+    }
 }
