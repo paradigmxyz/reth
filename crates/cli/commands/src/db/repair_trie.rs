@@ -8,7 +8,7 @@ use reth_db_api::{
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::ProviderFactory;
 use reth_trie::{
-    verify::{Inconsistency, Verifier},
+    verify::{Output, Verifier},
     Nibbles,
 };
 use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
@@ -52,10 +52,10 @@ impl Command {
         let mut last_progress_time = Instant::now();
 
         // Iterate over the verifier and repair inconsistencies
-        for inconsistency_result in verifier {
-            let inconsistency = inconsistency_result?;
+        for output_result in verifier {
+            let output = output_result?;
 
-            if let Inconsistency::Progress(path) = inconsistency {
+            if let Output::Progress(path) = output {
                 // Output progress every 5 seconds
                 if last_progress_time.elapsed() > Duration::from_secs(5) {
                     output_progress(path, start_time);
@@ -64,22 +64,22 @@ impl Command {
                 continue
             };
 
-            warn!("Inconsistency found: {inconsistency:?}");
+            warn!("Inconsistency found: {output:?}");
             repair_count += 1;
 
             if self.dry_run {
                 continue;
             }
 
-            match inconsistency {
-                Inconsistency::AccountExtra(path, _node) => {
+            match output {
+                Output::AccountExtra(path, _node) => {
                     // Extra account node in trie, remove it
                     let nibbles = StoredNibbles(path);
                     if account_trie_cursor.seek_exact(nibbles)?.is_some() {
                         account_trie_cursor.delete_current()?;
                     }
                 }
-                Inconsistency::StorageExtra(account, path, _node) => {
+                Output::StorageExtra(account, path, _node) => {
                     // Extra storage node in trie, remove it
                     let nibbles = StoredNibblesSubKey(path);
                     if storage_trie_cursor
@@ -90,29 +90,29 @@ impl Command {
                         storage_trie_cursor.delete_current()?;
                     }
                 }
-                Inconsistency::AccountWrong { path, expected, .. } => {
+                Output::AccountWrong { path, expected, .. } => {
                     // Wrong account node value, update it
                     let nibbles = StoredNibbles(path);
                     account_trie_cursor.upsert(nibbles, &expected)?;
                 }
-                Inconsistency::StorageWrong { account, path, expected, .. } => {
+                Output::StorageWrong { account, path, expected, .. } => {
                     // Wrong storage node value, update it
                     let nibbles = StoredNibblesSubKey(path);
                     let entry = StorageTrieEntry { nibbles, node: expected };
                     storage_trie_cursor.upsert(account, &entry)?;
                 }
-                Inconsistency::AccountMissing(path, node) => {
+                Output::AccountMissing(path, node) => {
                     // Missing account node, add it
                     let nibbles = StoredNibbles(path);
                     account_trie_cursor.upsert(nibbles, &node)?;
                 }
-                Inconsistency::StorageMissing(account, path, node) => {
+                Output::StorageMissing(account, path, node) => {
                     // Missing storage node, add it
                     let nibbles = StoredNibblesSubKey(path);
                     let entry = StorageTrieEntry { nibbles, node };
                     storage_trie_cursor.upsert(account, &entry)?;
                 }
-                Inconsistency::Progress(_) => {
+                Output::Progress(_) => {
                     unreachable!()
                 }
             }
@@ -152,25 +152,20 @@ fn output_progress(last_account: Nibbles, start_time: Instant) {
     }
 
     let progress_percent = current_value as f64 / u64::MAX as f64 * 100.0;
+    let progress_percent_str = format!("{progress_percent:.2}");
 
     // Calculate ETA based on current speed
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();
 
-    if progress_percent > 0.0 && elapsed_secs > 0.0 {
-        let estimated_total_time = elapsed_secs / (progress_percent / 100.0);
-        let remaining_time = estimated_total_time - elapsed_secs;
-        let eta_duration = Duration::from_secs_f64(remaining_time);
+    let estimated_total_time =
+        if progress_percent > 0.0 { elapsed_secs / (progress_percent / 100.0) } else { 0.0 };
+    let remaining_time = estimated_total_time - elapsed_secs;
+    let eta_duration = Duration::from_secs(remaining_time as u64);
 
-        let eta_hours = eta_duration.as_secs() / 3600;
-        let eta_minutes = (eta_duration.as_secs() % 3600) / 60;
-        let eta_seconds = eta_duration.as_secs() % 60;
-
-        info!(
-            "Progress: {:.2}% | ETA: {:02}:{:02}:{:02}",
-            progress_percent, eta_hours, eta_minutes, eta_seconds
-        );
-    } else {
-        info!("Progress: {:.2}%", progress_percent);
-    }
+    info!(
+        progress_percent = progress_percent_str,
+        eta = %humantime::format_duration(eta_duration),
+        "Verifying trie tables",
+    );
 }

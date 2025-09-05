@@ -148,11 +148,11 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
     }
 }
 
-/// Inconsistency describes an inconsistency found when comparing the hashed state tables
+/// Output describes an inconsistency found when comparing the hashed state tables
 /// ([`HashedCursorFactory`]) with that of the trie tables ([`TrieCursorFactory`]). The hashed
-/// tables are considered the source of truth; inconsistencies are on the part of the trie tables.
+/// tables are considered the source of truth; outputs are on the part of the trie tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Inconsistency {
+pub enum Output {
     /// An extra account node was found.
     AccountExtra(Nibbles, BranchNodeCompact),
     /// A extra storage node was found.
@@ -202,43 +202,43 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
         Ok(Self { account, trie_iter, curr })
     }
 
-    const fn inconsistency_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Inconsistency {
+    const fn output_extra(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
         if let Some(account) = self.account {
-            Inconsistency::StorageExtra(account, path, node)
+            Output::StorageExtra(account, path, node)
         } else {
-            Inconsistency::AccountExtra(path, node)
+            Output::AccountExtra(path, node)
         }
     }
 
-    const fn inconsistency_wrong(
+    const fn output_wrong(
         &self,
         path: Nibbles,
         expected: BranchNodeCompact,
         found: BranchNodeCompact,
-    ) -> Inconsistency {
+    ) -> Output {
         if let Some(account) = self.account {
-            Inconsistency::StorageWrong { account, path, expected, found }
+            Output::StorageWrong { account, path, expected, found }
         } else {
-            Inconsistency::AccountWrong { path, expected, found }
+            Output::AccountWrong { path, expected, found }
         }
     }
 
-    const fn inconsistency_missing(&self, path: Nibbles, node: BranchNodeCompact) -> Inconsistency {
+    const fn output_missing(&self, path: Nibbles, node: BranchNodeCompact) -> Output {
         if let Some(account) = self.account {
-            Inconsistency::StorageMissing(account, path, node)
+            Output::StorageMissing(account, path, node)
         } else {
-            Inconsistency::AccountMissing(path, node)
+            Output::AccountMissing(path, node)
         }
     }
 
     /// Called with the next path and node in the canonical sequence of stored trie nodes. Will
-    /// append to the given `inconsistencies` Vec if walking the trie cursor produces data
+    /// append to the given `outputs` Vec if walking the trie cursor produces data
     /// inconsistent with that given.
     ///
     /// `next` must be called with paths in depth-first order.
     fn next(
         &mut self,
-        inconsistencies: &mut Vec<Inconsistency>,
+        outputs: &mut Vec<Output>,
         path: Nibbles,
         node: BranchNodeCompact,
     ) -> Result<(), DatabaseError> {
@@ -246,7 +246,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
             // `curr` is None only if the end of the iterator has been reached. Any further nodes
             // found must be considered missing.
             if self.curr.is_none() {
-                inconsistencies.push(self.inconsistency_missing(path, node));
+                outputs.push(self.output_missing(path, node));
                 return Ok(())
             }
 
@@ -259,7 +259,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the given path comes before the cursor's current path in depth-first
                     // order, then the given path was not produced by the
                     // cursor.
-                    inconsistencies.push(self.inconsistency_missing(path, node));
+                    outputs.push(self.output_missing(path, node));
                     return Ok(())
                 }
                 Ordering::Equal => {
@@ -267,7 +267,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // aren't equal then we produce a wrong node. Either way we want to move the
                     // iterator forward.
                     if *curr_node != node {
-                        inconsistencies.push(self.inconsistency_wrong(
+                        outputs.push(self.output_wrong(
                             path,
                             node,
                             curr_node.clone(),
@@ -280,7 +280,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the given path comes after the current path in depth-first order,
                     // it means the cursor's path was not found by the caller (otherwise it would
                     // have hit the equal case) and so is extraneous.
-                    inconsistencies.push(self.inconsistency_extra(*curr_path, curr_node.clone()));
+                    outputs.push(self.output_extra(*curr_path, curr_node.clone()));
                     self.curr = self.trie_iter.next().transpose()?;
                     // back to the top of the loop to check the latest `self.curr` value against the
                     // given path/node.
@@ -291,10 +291,10 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
     /// Must be called once there are no more calls to `next` to made. All further nodes produced
     /// by the iterator will be considered extraneous.
-    fn finalize(&mut self, inconsistencies: &mut Vec<Inconsistency>) -> Result<(), DatabaseError> {
+    fn finalize(&mut self, outputs: &mut Vec<Output>) -> Result<(), DatabaseError> {
         loop {
             if let Some((curr_path, curr_node)) = self.curr.take() {
-                inconsistencies.push(self.inconsistency_extra(curr_path, curr_node));
+                outputs.push(self.output_extra(curr_path, curr_node));
                 self.curr = self.trie_iter.next().transpose()?;
             } else {
                 return Ok(())
@@ -305,12 +305,12 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 
 /// Checks that data stored in the trie database is consistent, using hashed accounts/storages
 /// database tables as the source of truth. This will iteratively re-compute the entire trie based
-/// on the hashed state, and produce any discovered [`Inconsistency`]s via the `next` method.
+/// on the hashed state, and produce any discovered [`Output`]s via the `next` method.
 #[derive(Debug)]
 pub struct Verifier<T: TrieCursorFactory, H> {
     trie_cursor_factory: T,
     branch_node_iter: StateRootBranchNodesIter<H>,
-    inconsistencies: Vec<Inconsistency>,
+    outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor>>,
     storage: Option<(B256, SingleVerifier<DepthFirstTrieIterator<T::StorageTrieCursor>>)>,
     complete: bool,
@@ -322,7 +322,7 @@ impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Verifier<T, H
         Ok(Self {
             trie_cursor_factory: trie_cursor_factory.clone(),
             branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
-            inconsistencies: Default::default(),
+            outputs: Default::default(),
             account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
             storage: None,
             complete: false,
@@ -339,7 +339,7 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
     ) -> Result<(), DatabaseError> {
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(account)?;
         let mut storage = SingleVerifier::new(Some(account), trie_cursor)?;
-        storage.next(&mut self.inconsistencies, path, node)?;
+        storage.next(&mut self.outputs, path, node)?;
         self.storage = Some((account, storage));
         Ok(())
     }
@@ -347,18 +347,18 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
     fn try_next(&mut self) -> Result<(), StateRootError> {
         match self.branch_node_iter.next().transpose()? {
             None => {
-                self.account.finalize(&mut self.inconsistencies)?;
+                self.account.finalize(&mut self.outputs)?;
                 if let Some((_, storage)) = self.storage.as_mut() {
-                    storage.finalize(&mut self.inconsistencies)?;
+                    storage.finalize(&mut self.outputs)?;
                 }
                 self.complete = true;
             }
             Some(BranchNode::Account(path, node)) => {
                 trace!(target: "trie::verify", ?path, "Account node from state root");
-                self.account.next(&mut self.inconsistencies, path, node)?;
+                self.account.next(&mut self.outputs, path, node)?;
                 // Push progress indicator
                 if !path.is_empty() {
-                    self.inconsistencies.push(Inconsistency::Progress(path));
+                    self.outputs.push(Output::Progress(path));
                 }
             }
             Some(BranchNode::Storage(account, path, node)) => {
@@ -366,30 +366,30 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                 match self.storage.as_mut() {
                     None => self.new_storage(account, path, node)?,
                     Some((prev_account, storage)) if *prev_account == account => {
-                        storage.next(&mut self.inconsistencies, path, node)?;
+                        storage.next(&mut self.outputs, path, node)?;
                     }
                     Some((_, storage)) => {
-                        storage.finalize(&mut self.inconsistencies)?;
+                        storage.finalize(&mut self.outputs)?;
                         self.new_storage(account, path, node)?;
                     }
                 }
             }
         }
 
-        // If any inconsistencies were appended we want to reverse them, so they are popped off
+        // If any outputs were appended we want to reverse them, so they are popped off
         // in the same order they were appended.
-        self.inconsistencies.reverse();
+        self.outputs.reverse();
         Ok(())
     }
 }
 
 impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Verifier<T, H> {
-    type Item = Result<Inconsistency, StateRootError>;
+    type Item = Result<Output, StateRootError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(inconsistency) = self.inconsistencies.pop() {
-                return Some(Ok(inconsistency))
+            if let Some(output) = self.outputs.pop() {
+                return Some(Ok(output))
             }
 
             if self.complete {
@@ -625,13 +625,13 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Call next with the exact node that exists
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
 
-        // Should have no inconsistencies
-        assert!(inconsistencies.is_empty());
+        // Should have no outputs
+        assert!(outputs.is_empty());
     }
 
     #[test]
@@ -644,18 +644,18 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Call next with different node value
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node_expected.clone())
+            .next(&mut outputs, Nibbles::from_nibbles([0x1]), node_expected.clone())
             .unwrap();
 
-        // Should have one "wrong" inconsistency
-        assert_eq!(inconsistencies.len(), 1);
+        // Should have one "wrong" output
+        assert_eq!(outputs.len(), 1);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::AccountWrong { path, expected, found }
+            &outputs[0],
+            Output::AccountWrong { path, expected, found }
                 if *path == Nibbles::from_nibbles([0x1]) && *expected == node_expected && *found == node_in_trie
         );
     }
@@ -670,18 +670,18 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Call next with a node that comes before any in the trie
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node_missing.clone())
+            .next(&mut outputs, Nibbles::from_nibbles([0x1]), node_missing.clone())
             .unwrap();
 
-        // Should have one "missing" inconsistency
-        assert_eq!(inconsistencies.len(), 1);
+        // Should have one "missing" output
+        assert_eq!(outputs.len(), 1);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::AccountMissing(path, node)
+            &outputs[0],
+            Output::AccountMissing(path, node)
                 if *path == Nibbles::from_nibbles([0x1]) && *node == node_missing
         );
     }
@@ -704,30 +704,30 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
         // We only provide 0x1 and 0x3, skipping 0x2 and root
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x3]), node3).unwrap();
-        verifier.finalize(&mut inconsistencies).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x3]), node3).unwrap();
+        verifier.finalize(&mut outputs).unwrap();
 
-        // Should have two "extra" inconsistencies for nodes in the trie that we skipped
-        if inconsistencies.len() != 2 {
-            eprintln!("Expected 2 inconsistencies, got {}:", inconsistencies.len());
-            for inc in &inconsistencies {
+        // Should have two "extra" outputs for nodes in the trie that we skipped
+        if outputs.len() != 2 {
+            eprintln!("Expected 2 outputs, got {}:", outputs.len());
+            for inc in &outputs {
                 eprintln!("  {:?}", inc);
             }
         }
-        assert_eq!(inconsistencies.len(), 2);
+        assert_eq!(outputs.len(), 2);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::AccountExtra(path, node)
+            &outputs[0],
+            Output::AccountExtra(path, node)
                 if *path == Nibbles::from_nibbles([0x2]) && *node == node2
         );
         assert_matches!(
-            &inconsistencies[1],
-            Inconsistency::AccountExtra(path, node)
+            &outputs[1],
+            Output::AccountExtra(path, node)
                 if *path == Nibbles::new() && *node == node_root
         );
     }
@@ -749,27 +749,27 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // The depth-first iterator produces in post-order: 0x1, 0x2, 0x3, root
         // Process first two nodes correctly
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        assert!(inconsistencies.is_empty());
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        assert!(outputs.is_empty());
 
         // Finalize - should mark remaining nodes (0x3 and root) as extra
-        verifier.finalize(&mut inconsistencies).unwrap();
+        verifier.finalize(&mut outputs).unwrap();
 
         // Should have two extra nodes
-        assert_eq!(inconsistencies.len(), 2);
+        assert_eq!(outputs.len(), 2);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::AccountExtra(path, node)
+            &outputs[0],
+            Output::AccountExtra(path, node)
                 if *path == Nibbles::from_nibbles([0x3]) && *node == node3
         );
         assert_matches!(
-            &inconsistencies[1],
-            Inconsistency::AccountExtra(path, node)
+            &outputs[1],
+            Output::AccountExtra(path, node)
                 if *path == Nibbles::new() && *node == node_root
         );
     }
@@ -784,19 +784,19 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(Some(account), cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Call next with missing node
         let missing_node = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x0]), missing_node.clone())
+            .next(&mut outputs, Nibbles::from_nibbles([0x0]), missing_node.clone())
             .unwrap();
 
         // Should produce StorageMissing, not AccountMissing
-        assert_eq!(inconsistencies.len(), 1);
+        assert_eq!(outputs.len(), 1);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::StorageMissing(acc, path, node)
+            &outputs[0],
+            Output::StorageMissing(acc, path, node)
                 if *acc == account && *path == Nibbles::from_nibbles([0x0]) && *node == missing_node
         );
     }
@@ -807,16 +807,16 @@ mod tests {
         let trie_nodes = BTreeMap::new();
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Any node should be marked as missing
         let node = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([1u8; 32])]);
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node.clone()).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node.clone()).unwrap();
 
-        assert_eq!(inconsistencies.len(), 1);
+        assert_eq!(outputs.len(), 1);
         assert_matches!(
-            &inconsistencies[0],
-            Inconsistency::AccountMissing(path, n)
+            &outputs[0],
+            Output::AccountMissing(path, n)
                 if *path == Nibbles::from_nibbles([0x1]) && *n == node
         );
     }
@@ -844,33 +844,33 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
         // Order: 0x11, 0x12, 0x1, 0x2, root
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut inconsistencies).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut outputs).unwrap();
 
-        // All should match, no inconsistencies
-        if !inconsistencies.is_empty() {
+        // All should match, no outputs
+        if !outputs.is_empty() {
             eprintln!(
-                "Test test_single_verifier_depth_first_ordering failed with {} inconsistencies:",
-                inconsistencies.len()
+                "Test test_single_verifier_depth_first_ordering failed with {} outputs:",
+                outputs.len()
             );
-            for inc in &inconsistencies {
+            for inc in &outputs {
                 eprintln!("  {:?}", inc);
             }
         }
-        assert!(inconsistencies.is_empty());
+        assert!(outputs.is_empty());
     }
 
     #[test]
     fn test_single_verifier_wrong_depth_first_order() {
-        // Test that providing nodes in wrong order produces inconsistencies
+        // Test that providing nodes in wrong order produces outputs
         // Create a trie with parent-child relationship
         let node_root = test_branch_node(0b0010, 0, 0b0010, vec![]); // root has child at 1
         let node1 = test_branch_node(0b0010, 0, 0b0010, vec![]); // 0x1 has child at 1
@@ -884,19 +884,19 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // Process in WRONG order (skip root, provide child before processing all nodes correctly)
         // The iterator will produce: root, 0x1, 0x11
         // But we provide: 0x11, root, 0x1 (completely wrong order)
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11.clone())
+            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11)
             .unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::new(), node_root.clone()).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1.clone()).unwrap();
+        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
 
-        // Should have inconsistencies since we provided them in wrong order
-        assert!(!inconsistencies.is_empty());
+        // Should have outputs since we provided them in wrong order
+        assert!(!outputs.is_empty());
     }
 
     #[test]
@@ -926,34 +926,34 @@ mod tests {
 
         let cursor = create_mock_cursor(trie_nodes);
         let mut verifier = SingleVerifier::new(None, cursor).unwrap();
-        let mut inconsistencies = Vec::new();
+        let mut outputs = Vec::new();
 
         // The depth-first iterator produces nodes in post-order (children before parents)
         // Order: 0x111, 0x112, 0x11, 0x12, 0x1, 0x21, 0x2, root
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111)
+            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111)
             .unwrap();
         verifier
-            .next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112)
+            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112)
             .unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x1]), node1).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2, 0x1]), node21).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::from_nibbles([0x2]), node2).unwrap();
-        verifier.next(&mut inconsistencies, Nibbles::new(), node_root).unwrap();
-        verifier.finalize(&mut inconsistencies).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2, 0x1]), node21).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x2]), node2).unwrap();
+        verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
+        verifier.finalize(&mut outputs).unwrap();
 
-        // All should match, no inconsistencies
-        if !inconsistencies.is_empty() {
+        // All should match, no outputs
+        if !outputs.is_empty() {
             eprintln!(
-                "Test test_single_verifier_complex_depth_first failed with {} inconsistencies:",
-                inconsistencies.len()
+                "Test test_single_verifier_complex_depth_first failed with {} outputs:",
+                outputs.len()
             );
-            for inc in &inconsistencies {
+            for inc in &outputs {
                 eprintln!("  {:?}", inc);
             }
         }
-        assert!(inconsistencies.is_empty());
+        assert!(outputs.is_empty());
     }
 }

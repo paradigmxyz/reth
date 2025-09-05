@@ -7417,6 +7417,7 @@ dependencies = [
  "fdlimit",
  "futures",
  "human_bytes",
+ "humantime",
  "itertools 0.14.0",
  "lz4",
  "proptest",
