@@ -591,6 +591,14 @@ where
             ensure_ok!(self.block_connects_to_last_persisted(ctx, &block));
         let should_discard_trie_updates =
             !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
+        debug!(
+            target: "engine::tree",
+            block = ?block_num_hash,
+            connects_to_last_persisted,
+            has_ancestors_with_missing_trie_updates,
+            should_discard_trie_updates,
+            "Checking if should discard trie updates"
+        );
         let trie_updates = if should_discard_trie_updates {
             ExecutedTrieUpdates::Missing
         } else {
@@ -762,7 +770,17 @@ where
             parent_block = parent_num_hash(parent_block.hash)?;
         }
 
-        Ok(parent_block == last_persisted)
+        let connects = parent_block == last_persisted;
+
+        debug!(
+            target: "engine::tree",
+            num_hash = ?block.num_hash(),
+            ?last_persisted,
+            ?parent_block,
+            "Checking if block connects to last persisted block"
+        );
+
+        Ok(connects)
     }
 
     /// Check if the given block has any ancestors with missing trie updates.
