@@ -177,7 +177,7 @@ fn query_maps_range(
     let Some((first_offset, first_values)) = constraints.first().cloned() else {
         return Ok(Vec::new()); // This should never happen
     };
-    let first_values = first_values.clone();
+    let first_values = first_values;
 
     let mut candidates: BTreeSet<u64> = first_values
         .iter()
@@ -202,7 +202,7 @@ fn query_maps_range(
         // Intersect
         let delta = offset - first_offset;
         candidates.retain(|&c| {
-            c.checked_add(delta).map_or(false, |shifted| current_matches.contains(&shifted))
+            c.checked_add(delta).is_some_and(|shifted| current_matches.contains(&shifted))
         });
     }
 
@@ -307,7 +307,7 @@ where
                 }
 
                 let matches = query_maps_range(&params, map_start, map_end, &filter, &rows_by_map)
-                    .unwrap_or(Vec::new());
+                    .unwrap_or_default();
                 resolve_to_blocks(matches, &log_value_indices, from_block, to_block)
             });
 

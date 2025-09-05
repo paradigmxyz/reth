@@ -297,7 +297,7 @@ pub struct IndexHistoryCheckpoint {
 pub struct IndexLogsCheckpoint {
     /// Current map being processed
     pub current_map: u32,
-    /// Pending rows not yet written (map_row_index -> column indices)
+    /// Pending rows not yet written (`map_row_index` -> column indices)
     pub pending_rows: Vec<FilterMapRow>,
     /// Pending block boundaries
     pub pending_boundaries: Vec<BlockBoundary>,
@@ -306,7 +306,7 @@ pub struct IndexLogsCheckpoint {
 }
 
 impl IndexLogsCheckpoint {
-    /// Creates a new IndexLogsCheckpoint from the given state.
+    /// Creates a new `IndexLogsCheckpoint` from the given state.
     pub fn new(
         current_map: u32,
         next_log_value_index: u64,

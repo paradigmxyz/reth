@@ -3,7 +3,6 @@ use crate::{
     MapRowIndex, MAX_LAYERS,
 };
 use alloy_primitives::{map::HashMap, B256};
-use tracing::info;
 
 /// Type alias for count of filled entries in a row
 pub type Count = u32;
@@ -30,23 +29,23 @@ pub enum ProcessBatchResult {
 
 impl ProcessBatchResult {
     /// Check if any maps were completed
-    pub fn has_completed_maps(&self) -> bool {
-        matches!(self, ProcessBatchResult::MapsCompleted { .. })
+    pub const fn has_completed_maps(&self) -> bool {
+        matches!(self, Self::MapsCompleted { .. })
     }
 
     /// Get completed maps if any
     pub fn completed_maps(self) -> Vec<CompletedMap> {
         match self {
-            ProcessBatchResult::MapsCompleted { completed_maps, .. } => completed_maps,
-            ProcessBatchResult::NoMapsCompleted { .. } => Vec::new(),
+            Self::MapsCompleted { completed_maps, .. } => completed_maps,
+            Self::NoMapsCompleted { .. } => Vec::new(),
         }
     }
 
     /// Get the number of values processed
-    pub fn values_processed(&self) -> usize {
+    pub const fn values_processed(&self) -> usize {
         match self {
-            ProcessBatchResult::NoMapsCompleted { values_processed } |
-            ProcessBatchResult::MapsCompleted { values_processed, .. } => *values_processed,
+            Self::NoMapsCompleted { values_processed } |
+            Self::MapsCompleted { values_processed, .. } => *values_processed,
         }
     }
 }
@@ -84,9 +83,9 @@ pub struct LogIndexer {
     index: LogValueIndex,
     /// Filter map parameters
     params: FilterMapParams,
-    /// Fill levels per layer. [layer] row_idx -> count
+    /// Fill levels per layer. [layer] `row_idx` -> count
     fills: Vec<HashMap<u32, Count>>,
-    /// Cache for row calculation. (layer, value) -> row_idx
+    /// Cache for row calculation. (layer, value) -> `row_idx`
     row_cache: HashMap<(u8, B256), u32>,
     /// Current map we're indexing
     current_map: MapIndex,
@@ -101,7 +100,7 @@ pub struct LogIndexer {
 }
 
 impl LogIndexer {
-    /// Create a new LogIndexer starting from the given index
+    /// Create a new `LogIndexer` starting from the given index
     pub fn new(starting_index: LogValueIndex, params: FilterMapParams) -> Self {
         let current_map = (starting_index >> params.log_values_per_map) as u32;
         let current_map_start_index = (current_map as u64) << params.log_values_per_map;
@@ -119,7 +118,7 @@ impl LogIndexer {
         }
     }
 
-    /// Create a LogIndexer resuming from existing state (checkpoint recovery)
+    /// Create a `LogIndexer` resuming from existing state (checkpoint recovery)
     pub fn from_checkpoint(
         starting_index: LogValueIndex,
         params: FilterMapParams,
@@ -264,27 +263,27 @@ impl LogIndexer {
     }
 
     /// Get the current map index
-    pub fn current_map(&self) -> MapIndex {
+    pub const fn current_map(&self) -> MapIndex {
         self.current_map
     }
 
     /// Get the current log value index
-    pub fn current_index(&self) -> LogValueIndex {
+    pub const fn current_index(&self) -> LogValueIndex {
         self.index
     }
 
     /// Get the last completed map index
-    pub fn last_completed_map(&self) -> Option<MapIndex> {
+    pub const fn last_completed_map(&self) -> Option<MapIndex> {
         self.last_completed_map
     }
 
     /// Get the last log value index of the last completed map
-    pub fn last_completed_log_value_index(&self) -> Option<LogValueIndex> {
+    pub const fn last_completed_log_value_index(&self) -> Option<LogValueIndex> {
         self.last_completed_log_value_index
     }
 
     /// Get pending rows
-    pub fn pending_rows(&self) -> &HashMap<MapRowIndex, FilterMapColumns> {
+    pub const fn pending_rows(&self) -> &HashMap<MapRowIndex, FilterMapColumns> {
         &self.pending_rows
     }
 
@@ -295,7 +294,7 @@ impl LogIndexer {
 
     /// Get the cutoff log value index for completed maps
     /// This is useful for determining which block boundaries can be written
-    pub fn completed_maps_cutoff(&self) -> LogValueIndex {
+    pub const fn completed_maps_cutoff(&self) -> LogValueIndex {
         self.current_map_start_index
     }
 }

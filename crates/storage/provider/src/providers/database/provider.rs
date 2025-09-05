@@ -79,7 +79,7 @@ use std::{
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;

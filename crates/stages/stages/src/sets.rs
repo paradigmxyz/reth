@@ -455,7 +455,7 @@ where
             ))
             .add_stage(IndexLogsStage::new(
                 self.stages_config.index_logs.commit_threshold,
-                self.stages_config.etl.clone(),
+                self.stages_config.etl,
                 FilterMapParams::default(),
                 None, // TODO: add prune mode
             ))

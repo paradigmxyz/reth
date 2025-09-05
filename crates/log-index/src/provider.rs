@@ -9,7 +9,7 @@ use std::ops::RangeBounds;
 
 /// Rows for a specific map
 #[derive(Debug, Clone)]
-pub struct MapRow {
+pub(crate) struct MapRow {
     pub map_row_index: u64,
     pub rows: Vec<u32>,
 }
@@ -22,7 +22,7 @@ pub struct MapValueRows {
     /// The value hash these rows are for
     pub value: B256,
     /// Rows across all layers for this (map, value) pair
-    /// Ordered by layer (1..MAX_LAYERS)
+    /// Ordered by layer (`1..MAX_LAYERS`)
     pub layers: Vec<Vec<u32>>,
 }
 
@@ -51,8 +51,8 @@ pub trait LogIndexProvider: Send + Sync {
         value: &B256,
     ) -> FilterResult<Vec<Vec<u32>>>;
 
-    /// Fetch overflow rows for (map_index, value), starting at layer 1, inclusive.
-    /// Continues layer-by-layer until a row with length < max_row_length(layer) or an empty row.
+    /// Fetch overflow rows for (`map_index`, value), starting at layer 1, inclusive.
+    /// Continues layer-by-layer until a row with length < `max_row_length(layer)` or an empty row.
     /// Returns only layers >= 1 (layer 0 is *not* included).
     fn fetch_more_layers_for_map(
         &self,
@@ -70,7 +70,7 @@ pub trait LogIndexProvider: Send + Sync {
     ) -> FilterResult<Vec<MapValueRows>>;
 
     /// Get log value indices for a range of blocks.
-    /// Returns ordered vec of (block_number, log_value_index).
+    /// Returns ordered vec of (`block_number`, `log_value_index`).
     fn get_log_value_indices_range(
         &self,
         block_range: impl RangeBounds<BlockNumber>,

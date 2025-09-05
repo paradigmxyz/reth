@@ -14,7 +14,7 @@ use futures::{
 };
 use itertools::Itertools;
 use jsonrpsee::{
-    core::{params, RpcResult},
+    core::RpcResult,
     server::IdProvider,
 };
 use reth_errors::ProviderError;
@@ -36,12 +36,11 @@ use reth_storage_api::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     fmt,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
     pin::Pin,
-    result,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -49,7 +48,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -637,7 +636,7 @@ where
                         max_logs_per_response: remaining,
                     };
                     let chunk =
-                        this.get_logs_in_block_range_inner(&filter, a, b, sub_limits).await?;
+                        this.get_logs_in_block_range_inner(filter, a, b, sub_limits).await?;
                     if let Some(rem) = remaining.as_mut() {
                         let used = chunk.len().min(*rem);
                         *rem = rem.saturating_sub(used);
@@ -645,7 +644,7 @@ where
                     out.extend(chunk);
                 }
                 Seg::Indexed(a, b) => {
-                    let chunk = this.logs_via_index(&filter, a, b, limits).await?;
+                    let chunk = this.logs_via_index(filter, a, b, limits).await?;
                     if let Some(rem) = remaining.as_mut() {
                         let used = chunk.len().min(*rem);
                         *rem = rem.saturating_sub(used);

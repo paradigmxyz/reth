@@ -553,7 +553,7 @@ tables! {
     // }
 }
 
-/// Singleton key for the FilterMapMeta table.
+/// Singleton key for the `FilterMapMeta` table.
 #[derive(
     Clone, Copy, Debug, Default, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize, Hash,
 )]

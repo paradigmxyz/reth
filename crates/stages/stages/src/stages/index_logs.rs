@@ -26,7 +26,7 @@ use reth_stages_api::{
 };
 use tracing::{info, trace};
 
-/// Log indexing stage, following EIP-7745 (https://eips.ethereum.org/EIPS/eip-7745)
+/// Log indexing stage, following EIP-7745 (<https://eips.ethereum.org/EIPS/eip-7745>)
 ///
 /// This stage indexes logs from blocks and stores them in a separate table for efficient querying.
 /// It processes blocks in batches, extracts logs, and inserts them into db.
@@ -36,7 +36,7 @@ pub struct IndexLogsStage {
     pub commit_threshold: u64,
     /// ETL configuration for buffering
     pub etl_config: EtlConfig,
-    /// FilterMap parameters
+    /// `FilterMap` parameters
     pub params: FilterMapParams,
     /// Prune mode configuration
     pub prune_mode: Option<PruneMode>,
@@ -158,7 +158,7 @@ where
 
         let range = input.next_block_range();
 
-        let mut meta = match provider.get_metadata() {
+        let meta = match provider.get_metadata() {
             Ok(Some(meta)) => meta,
             Ok(None) => Default::default(),
             Err(e) => return Err(StageError::Fatal(Box::new(e))),
@@ -295,7 +295,7 @@ where
             for (block_num, block_receipts) in block_range.clone().zip(&receipts) {
                 block_boundaries.push_back((block_num, log_value_index_start));
 
-                let log_value_count = count_log_values_in_block(&block_receipts);
+                let log_value_count = count_log_values_in_block(block_receipts);
                 log_value_index_start += log_value_count;
                 entities_checkpoint.total += log_value_count;
             }
@@ -452,7 +452,7 @@ where
                 })
         };
         let unwind_to_map = (unwind_to_log_value_index >> self.params.log_values_per_map) as u32;
-        let current_map = (meta.last_log_value_index + 1 >> self.params.log_values_per_map) as u32;
+        let current_map = ((meta.last_log_value_index + 1) >> self.params.log_values_per_map) as u32;
 
         // Find the block that starts this map (or the closest block before it)
         let mut effective_unwind_to = unwind_to;
@@ -541,19 +541,16 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use num_traits::ToPrimitive;
+    
     use reth_db_api::transaction::DbTx;
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::{InMemorySize, SealedBlock};
-    use reth_provider::{
-        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
-        StaticFileProviderFactory, StatsReader,
-    };
+    use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::{EntitiesCheckpoint, StageUnitCheckpoint};
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_log, random_receipt, BlockParams,
+        self, random_block, random_block_range, random_receipt, BlockParams,
         BlockRangeParams,
     };
 
@@ -595,7 +592,7 @@ mod tests {
         let mut total_log_values = 0;
         for block in &blocks {
             receipts.reserve_exact(block.body().size());
-            for (_, transaction) in block.body().transactions.iter().enumerate() {
+            for transaction in block.body().transactions.iter() {
                 let receipt = random_receipt(
                     &mut rng,
                     transaction,
@@ -696,7 +693,7 @@ mod tests {
 
         fn validate_execution(
             &self,
-            mut input: ExecInput,
+            input: ExecInput,
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
             Ok(())

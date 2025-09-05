@@ -35,7 +35,7 @@ impl Default for FilterMapParams {
 impl FilterMapParams {
     /// Test parameters that put one log value per epoch, ensuring block exact tail unindexing for
     /// testing
-    pub fn range_test() -> Self {
+    pub const fn range_test() -> Self {
         RANGE_TEST_PARAMS
     }
 
@@ -63,7 +63,7 @@ impl FilterMapParams {
         1u64 << self.log_values_per_map
     }
 
-    /// (2^log_values_per_map) - 1
+    /// (`2^log_values_per_map`) - 1
     #[inline]
     pub const fn values_per_map_mask(&self) -> u64 {
         (1u64 << self.log_values_per_map) - 1
@@ -71,34 +71,34 @@ impl FilterMapParams {
 
     #[inline]
     /// Get the base row length
-    pub fn base_row_length(&self) -> u32 {
+    pub const fn base_row_length(&self) -> u32 {
         ((self.values_per_map() * self.base_row_length_ratio as u64) / self.map_height() as u64)
             as u32
     }
 
     #[inline]
     /// Get the epoch of the given map index
-    pub fn map_epoch(&self, index: u32) -> u32 {
+    pub const fn map_epoch(&self, index: u32) -> u32 {
         index >> self.log_maps_per_epoch
     }
 
     /// Get the first map index for the given epoch
     #[inline]
-    pub fn first_epoch_map(&self, epoch: u32) -> u32 {
+    pub const fn first_epoch_map(&self, epoch: u32) -> u32 {
         epoch << self.log_maps_per_epoch
     }
 
     /// Get the last map index for the given epoch
     #[inline]
-    pub fn last_epoch_map(&self, epoch: u32) -> u32 {
+    pub const fn last_epoch_map(&self, epoch: u32) -> u32 {
         ((epoch + 1) << self.log_maps_per_epoch) - 1
     }
 
     /// Calculate the row index following EIP-7745 epoch-based organization.
-    /// This ensures rows with the same row_index across an epoch are stored together.
+    /// This ensures rows with the same `row_index` across an epoch are stored together.
     ///
-    /// Layout: (epoch * map_height + row) * maps_per_epoch + map_in_epoch
-    pub fn map_row_index(&self, map_index: u32, row_index: u32) -> u64 {
+    /// Layout: (epoch * `map_height` + row) * `maps_per_epoch` + `map_in_epoch`
+    pub const fn map_row_index(&self, map_index: u32, row_index: u32) -> u64 {
         let epoch_index = map_index >> self.log_maps_per_epoch;
         let map_sub_index = map_index & ((1 << self.log_maps_per_epoch) - 1);
 
@@ -113,7 +113,7 @@ impl FilterMapParams {
     /// On layer zero the mapping changes once per epoch, then the frequency of
     /// re-mapping increases with every new layer until it reaches the frequency
     /// where it is different for every mapIndex.
-    pub fn masked_map_index(&self, map_index: u32, layer_index: u32) -> u32 {
+    pub const fn masked_map_index(&self, map_index: u32, layer_index: u32) -> u32 {
         let mut log_layer = (layer_index as u64 * self.log_layer_diff as u64) as u32;
         if log_layer > self.log_maps_per_epoch {
             log_layer = self.log_maps_per_epoch;
@@ -139,7 +139,7 @@ impl FilterMapParams {
         let mut enc = [0u8; 8];
         enc[..4].copy_from_slice(&masked.to_le_bytes());
         enc[4..].copy_from_slice(&layer_index.to_le_bytes());
-        hasher.update(&enc);
+        hasher.update(enc);
 
         let digest = hasher.finalize();
 
@@ -169,7 +169,7 @@ impl FilterMapParams {
     }
 
     #[inline]
-    pub fn max_row_length(&self, layer_index: u32) -> u32 {
+    pub const fn max_row_length(&self, layer_index: u32) -> u32 {
         let mut log_layer = (layer_index as u64 * self.log_layer_diff as u64) as u32;
         if log_layer > self.log_maps_per_epoch {
             log_layer = self.log_maps_per_epoch;
@@ -197,7 +197,7 @@ impl FilterMapParams {
         let mut results = Vec::new();
         let map_first = (map_index as u64) << self.log_values_per_map;
 
-        for row in rows.iter() {
+        for row in rows {
             for j in 0..row.len() {
                 let col = row[j];
                 // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
@@ -216,9 +216,9 @@ impl FilterMapParams {
         results
     }
 
-    /// Extract the row index from a map_row_index.
-    /// This reverses the map_row_index calculation.
-    pub fn extract_row_index(&self, map_row_index: u64, map_index: u32) -> u32 {
+    /// Extract the row index from a `map_row_index`.
+    /// This reverses the `map_row_index` calculation.
+    pub const fn extract_row_index(&self, map_row_index: u64, map_index: u32) -> u32 {
         // Reverse of map_row_index calculation:
         // map_row_index = ((epoch * map_height + row) * maps_per_epoch) + map_in_epoch
         let epoch = map_index >> self.log_maps_per_epoch;
@@ -249,7 +249,7 @@ impl FilterMapParams {
 mod tests {
     use super::*;
     use alloy_primitives::b256;
-    use rand::{rng, Rng};
+    
 
     #[test]
     fn test_row_index_distribution() {
