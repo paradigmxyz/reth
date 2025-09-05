@@ -1,5 +1,7 @@
 //! Example tests using the test suite framework.
 
+mod trie_corruption_test;
+
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
@@ -157,7 +159,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                 prev_randao: B256::random(),
                 suggested_fee_recipient: Address::random(),
                 withdrawals: None,
-                parent_beacon_block_root: None,
+                parent_beacon_block_root: Some(B256::ZERO),
             },
         ));
 

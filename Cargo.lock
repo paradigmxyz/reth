@@ -7868,6 +7868,7 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
+ "reth-trie-common",
  "revm",
  "serde_json",
  "tempfile",
