@@ -45,6 +45,7 @@ reth-primitives.workspace = true
 reth-prune-types.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 tempfile.workspace = true

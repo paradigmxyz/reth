@@ -349,6 +349,148 @@ fn block_to_payload_v3(block: Block) -> ExecutionPayloadV3 {
     }
 }
 
+/// Action to load and send a payload from embedded JSON data
+#[derive(Debug)]
+pub struct SendPayloadFromJson<Engine> {
+    /// JSON payload data as string (can be from include_str! or dynamic)
+    pub payload_json: String,
+    /// Node index to send to
+    pub node_idx: Option<usize>,
+    /// Expected payload status
+    pub expected_status: ExpectedPayloadStatus,
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> SendPayloadFromJson<Engine> {
+    /// Create a new `SendPayloadFromJson` action from embedded JSON string
+    pub fn new(payload_json: impl Into<String>) -> Self {
+        Self {
+            payload_json: payload_json.into(),
+            node_idx: None,
+            expected_status: ExpectedPayloadStatus::Valid,
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Create a new `SendPayloadFromJson` action from a file path (alternative to embedded)
+    pub fn from_file(payload_file: impl Into<String>) -> Result<Self> {
+        let payload_data = std::fs::read_to_string(payload_file.into())?;
+        Ok(Self {
+            payload_json: payload_data,
+            node_idx: None,
+            expected_status: ExpectedPayloadStatus::Valid,
+            _phantom: Default::default(),
+        })
+    }
+
+    /// Set the target node index
+    pub fn with_node_idx(mut self, idx: usize) -> Self {
+        self.node_idx = Some(idx);
+        self
+    }
+
+    /// Set expected status for the payload
+    pub fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
+        self.expected_status = status;
+        self
+    }
+}
+
+impl<Engine> Action<Engine> for SendPayloadFromJson<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Parse the JSON directly from the embedded string
+            let json_value: serde_json::Value = serde_json::from_str(&self.payload_json)
+                .map_err(|e| eyre::eyre!("Failed to parse payload JSON: {}", e))?;
+
+            // Debug: print the JSON structure
+            debug!("JSON payload loaded from embedded data");
+
+            // Extract block data - handle both array and object formats
+            let (block_json, versioned_hashes) = if json_value.is_array() {
+                // Array format: [block, versionedHashes, parentBeaconBlockRoot,
+                // executionRequestsHash]
+                let payload_array = json_value.as_array().unwrap();
+                if payload_array.len() < 2 {
+                    return Err(eyre::eyre!(
+                        "Payload must contain at least block data and versioned hashes"
+                    ));
+                }
+                let block_json = &payload_array[0];
+                let versioned_hashes_json = &payload_array[1];
+                let versioned_hashes: Vec<alloy_primitives::B256> =
+                    serde_json::from_value(versioned_hashes_json.clone())
+                        .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
+                (block_json.clone(), versioned_hashes)
+            } else {
+                // Object format: block object
+                let block_json = json_value;
+
+                // For now, assume no versioned hashes for object format
+                let versioned_hashes: Vec<alloy_primitives::B256> = vec![];
+
+                (block_json, versioned_hashes)
+            };
+
+            // Convert JSON to ExecutionPayloadV3
+            let payload = json_to_payload_v3(&block_json)?;
+
+            let node_idx = self.node_idx.unwrap_or(env.active_node_idx);
+            if node_idx >= env.node_clients.len() {
+                return Err(eyre::eyre!("Node index {} out of bounds", node_idx));
+            }
+
+            // Send the payload to the target node
+            let target_engine = env.node_clients[node_idx].engine.http_client();
+            let result = EngineApiClient::<Engine>::new_payload_v3(
+                &target_engine,
+                payload,
+                versioned_hashes,
+                alloy_primitives::B256::ZERO, // parent_beacon_block_root
+            )
+            .await?;
+
+            debug!(
+                "Node {}: new_payload from embedded JSON response - status: {:?}, latest_valid_hash: {:?}",
+                node_idx, result.status, result.latest_valid_hash
+            );
+
+            // Validate the response based on expectations
+            match (&result.status, &self.expected_status) {
+                (PayloadStatusEnum::Valid, ExpectedPayloadStatus::Valid) => {
+                    debug!("Node {}: Payload validation successful", node_idx);
+                }
+                (
+                    PayloadStatusEnum::Accepted | PayloadStatusEnum::Syncing,
+                    ExpectedPayloadStatus::SyncingOrAccepted,
+                ) => {
+                    debug!("Node {}: Payload accepted for processing", node_idx);
+                }
+                _ => {
+                    if let Some(ref latest_valid_hash) = result.latest_valid_hash {
+                        return Err(eyre::eyre!(
+                            "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}, Latest valid hash: {:?}",
+                            node_idx, self.expected_status, result.status, latest_valid_hash
+                        ));
+                    } else {
+                        return Err(eyre::eyre!(
+                            "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}",
+                            node_idx,
+                            self.expected_status,
+                            result.status
+                        ));
+                    }
+                }
+            }
+
+            Ok(())
+        })
+    }
+}
+
 /// Action to load and send a payload from a JSON file
 #[derive(Debug)]
 pub struct SendPayloadFromFile<Engine> {
@@ -391,24 +533,55 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // Load the payload from JSON file
-            let payload_data = std::fs::read_to_string(&self.payload_file)
-                .map_err(|e| eyre::eyre!("Failed to read payload file {}: {}", self.payload_file, e))?;
+            // Load the payload from JSON file with path resolution
+            let payload_path = if self.payload_file.starts_with("crates/") {
+                // Relative to workspace root - try multiple possible locations
+                let candidates = vec![
+                    std::path::Path::new(&self.payload_file).to_path_buf(),
+                    std::path::Path::new("../../..").join(&self.payload_file),
+                    std::path::Path::new("../../../..").join(&self.payload_file),
+                ];
+
+                let mut found_path = None;
+                for candidate in candidates {
+                    if candidate.exists() {
+                        found_path = Some(candidate);
+                        break;
+                    }
+                }
+
+                found_path.ok_or_else(|| {
+                    eyre::eyre!(
+                        "Could not find payload file {} in any expected location",
+                        self.payload_file
+                    )
+                })?
+            } else {
+                std::path::Path::new(&self.payload_file).to_path_buf()
+            };
+
+            let payload_data = std::fs::read_to_string(&payload_path).map_err(|e| {
+                eyre::eyre!("Failed to read payload file {}: {}", payload_path.display(), e)
+            })?;
 
             // Parse the JSON - try array format first, then fall back to object format
             let json_value: serde_json::Value = serde_json::from_str(&payload_data)
                 .map_err(|e| eyre::eyre!("Failed to parse payload JSON: {}", e))?;
 
             let (block_json, versioned_hashes) = if json_value.is_array() {
-                // Array format: [block, versionedHashes, parentBeaconBlockRoot, executionRequestsHash]
+                // Array format: [block, versionedHashes, parentBeaconBlockRoot,
+                // executionRequestsHash]
                 let payload_array = json_value.as_array().unwrap();
                 if payload_array.len() < 2 {
-                    return Err(eyre::eyre!("Payload file must contain at least block data and versioned hashes"));
+                    return Err(eyre::eyre!(
+                        "Payload file must contain at least block data and versioned hashes"
+                    ));
                 }
                 let block_json = &payload_array[0];
                 let versioned_hashes_json = &payload_array[1];
-                let versioned_hashes: Vec<alloy_primitives::B256> = serde_json::from_value(versioned_hashes_json.clone())
-                    .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
+                let versioned_hashes: Vec<alloy_primitives::B256> =
+                    serde_json::from_value(versioned_hashes_json.clone())
+                        .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
                 (block_json.clone(), versioned_hashes)
             } else {
                 // Object format: block object
@@ -423,7 +596,10 @@ where
             };
 
             // Debug: print the block_json structure
-            debug!("Block JSON keys: {:?}", block_json.as_object().map(|obj| obj.keys().collect::<Vec<_>>()));
+            debug!(
+                "Block JSON keys: {:?}",
+                block_json.as_object().map(|obj| obj.keys().collect::<Vec<_>>())
+            );
 
             // Convert JSON to ExecutionPayloadV3
             let payload = json_to_payload_v3(&block_json)?;
@@ -438,14 +614,14 @@ where
             let result = EngineApiClient::<Engine>::new_payload_v3(
                 &target_engine,
                 payload,
-                versioned_hashes, // Use extracted versioned hashes
+                versioned_hashes,             // Use extracted versioned hashes
                 alloy_primitives::B256::ZERO, // parent_beacon_block_root
             )
             .await?;
 
             debug!(
                 "Node {}: new_payload from file {} response - status: {:?}, latest_valid_hash: {:?}",
-                node_idx, self.payload_file, result.status, result.latest_valid_hash
+                node_idx, payload_path.display(), result.status, result.latest_valid_hash
             );
 
             // Validate the response based on expectations
@@ -495,98 +671,113 @@ fn json_to_payload_v3(block_json: &serde_json::Value) -> Result<ExecutionPayload
 
     // Extract fields from JSON
     let parent_hash: B256 = serde_json::from_value(
-        block_json.get("parentHash").cloned().ok_or_else(|| eyre::eyre!("Missing parentHash"))?
+        block_json.get("parentHash").cloned().ok_or_else(|| eyre::eyre!("Missing parentHash"))?,
     )?;
     let fee_recipient: Address = serde_json::from_value(
-        block_json.get("feeRecipient")
+        block_json
+            .get("feeRecipient")
             .or_else(|| block_json.get("miner"))
             .cloned()
-            .ok_or_else(|| eyre::eyre!("Missing feeRecipient or miner"))?
+            .ok_or_else(|| eyre::eyre!("Missing feeRecipient or miner"))?,
     )?;
     let state_root: B256 = serde_json::from_value(
-        block_json.get("stateRoot").cloned().ok_or_else(|| eyre::eyre!("Missing stateRoot"))?
+        block_json.get("stateRoot").cloned().ok_or_else(|| eyre::eyre!("Missing stateRoot"))?,
     )?;
     let receipts_root: B256 = serde_json::from_value(
-        block_json.get("receiptsRoot").cloned().ok_or_else(|| eyre::eyre!("Missing receiptsRoot"))?
+        block_json
+            .get("receiptsRoot")
+            .cloned()
+            .ok_or_else(|| eyre::eyre!("Missing receiptsRoot"))?,
     )?;
     let logs_bloom: alloy_primitives::Bloom = serde_json::from_value(
-        block_json.get("logsBloom").cloned().ok_or_else(|| eyre::eyre!("Missing logsBloom"))?
+        block_json.get("logsBloom").cloned().ok_or_else(|| eyre::eyre!("Missing logsBloom"))?,
     )?;
     let prev_randao: B256 = serde_json::from_value(
-        block_json.get("prevRandao")
+        block_json
+            .get("prevRandao")
             .or_else(|| block_json.get("mixHash"))
             .cloned()
-            .ok_or_else(|| eyre::eyre!("Missing prevRandao or mixHash"))?
+            .ok_or_else(|| eyre::eyre!("Missing prevRandao or mixHash"))?,
     )?;
-    // Parse hex strings to u64 for numeric fields - handle both Engine API and standard block formats
-    let block_number_str = block_json.get("blockNumber")
+    // Parse hex strings to u64 for numeric fields - handle both Engine API and standard block
+    // formats
+    let block_number_str = block_json
+        .get("blockNumber")
         .or_else(|| block_json.get("number"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| eyre::eyre!("Missing or invalid blockNumber/number"))?;
     let block_number = u64::from_str_radix(&block_number_str[2..], 16)
         .map_err(|e| eyre::eyre!("Failed to parse blockNumber '{}': {}", block_number_str, e))?;
 
-    let gas_limit_str = block_json.get("gasLimit")
+    let gas_limit_str = block_json
+        .get("gasLimit")
         .and_then(|v| v.as_str())
         .ok_or_else(|| eyre::eyre!("Missing or invalid gasLimit"))?;
     let gas_limit = u64::from_str_radix(&gas_limit_str[2..], 16)
         .map_err(|e| eyre::eyre!("Failed to parse gasLimit '{}': {}", gas_limit_str, e))?;
 
-    let gas_used_str = block_json.get("gasUsed")
+    let gas_used_str = block_json
+        .get("gasUsed")
         .and_then(|v| v.as_str())
         .ok_or_else(|| eyre::eyre!("Missing or invalid gasUsed"))?;
     let gas_used = u64::from_str_radix(&gas_used_str[2..], 16)
         .map_err(|e| eyre::eyre!("Failed to parse gasUsed '{}': {}", gas_used_str, e))?;
 
-    let timestamp_str = block_json.get("timestamp")
+    let timestamp_str = block_json
+        .get("timestamp")
         .and_then(|v| v.as_str())
         .ok_or_else(|| eyre::eyre!("Missing or invalid timestamp"))?;
     let timestamp = u64::from_str_radix(&timestamp_str[2..], 16)
         .map_err(|e| eyre::eyre!("Failed to parse timestamp '{}': {}", timestamp_str, e))?;
     let extra_data: alloy_primitives::Bytes = serde_json::from_value(
-        block_json.get("extraData").cloned().ok_or_else(|| eyre::eyre!("Missing extraData"))?
+        block_json.get("extraData").cloned().ok_or_else(|| eyre::eyre!("Missing extraData"))?,
     )?;
     let base_fee_per_gas: U256 = serde_json::from_value(
-        block_json.get("baseFeePerGas").cloned().ok_or_else(|| eyre::eyre!("Missing baseFeePerGas"))?
+        block_json
+            .get("baseFeePerGas")
+            .cloned()
+            .ok_or_else(|| eyre::eyre!("Missing baseFeePerGas"))?,
     )?;
     let block_hash: B256 = serde_json::from_value(
-        block_json.get("blockHash")
+        block_json
+            .get("blockHash")
             .or_else(|| block_json.get("hash"))
             .cloned()
-            .ok_or_else(|| eyre::eyre!("Missing blockHash or hash"))?
+            .ok_or_else(|| eyre::eyre!("Missing blockHash or hash"))?,
     )?;
 
     // Extract transactions - handle both Engine API (hex strings) and block format (objects)
-    let transactions: Vec<alloy_primitives::Bytes> = if let Some(tx_json) = block_json.get("transactions") {
-        if tx_json.is_array() {
-            let tx_array = tx_json.as_array().unwrap();
-            debug!("Transactions is array with {} items", tx_array.len());
+    let transactions: Vec<alloy_primitives::Bytes> =
+        if let Some(tx_json) = block_json.get("transactions") {
+            if tx_json.is_array() {
+                let tx_array = tx_json.as_array().unwrap();
+                debug!("Transactions is array with {} items", tx_array.len());
 
-            if tx_array.is_empty() {
-                vec![]
-            } else if tx_array[0].is_string() {
-                // Engine API format: transactions as hex strings
-                debug!("Transactions are hex strings (Engine API format)");
-                serde_json::from_value(tx_json.clone())?
-            } else if tx_array[0].is_object() {
-                // Block format: transactions as objects - return empty for now
-                debug!("Transactions are objects (block format) - using empty array");
+                if tx_array.is_empty() {
+                    vec![]
+                } else if tx_array[0].is_string() {
+                    // Engine API format: transactions as hex strings
+                    debug!("Transactions are hex strings (Engine API format)");
+                    serde_json::from_value(tx_json.clone())?
+                } else if tx_array[0].is_object() {
+                    // Block format: transactions as objects - return empty for now
+                    debug!("Transactions are objects (block format) - using empty array");
+                    vec![]
+                } else {
+                    return Err(eyre::eyre!("Unknown transaction array element type"));
+                }
+            } else if tx_json.is_string() {
+                // Standard block format: transactions as single hex string
+                debug!("Transactions is string format");
                 vec![]
             } else {
-                return Err(eyre::eyre!("Unknown transaction array element type"));
+                debug!("Transactions format: {:?}", tx_json);
+                return Err(eyre::eyre!("Invalid transactions format: {:?}", tx_json));
             }
-        } else if tx_json.is_string() {
-            // Standard block format: transactions as single hex string
-            debug!("Transactions is string format");
-            vec![]
         } else {
-            debug!("Transactions format: {:?}", tx_json);
-            return Err(eyre::eyre!("Invalid transactions format: {:?}", tx_json));
-        }
-    } else {
-        debug!("No transactions field found");
-        vec![]
-    };
+            debug!("No transactions field found");
+            vec![]
+        };
 
     // Create ExecutionPayloadV3
     let payload = ExecutionPayloadV3 {
@@ -609,7 +800,7 @@ fn json_to_payload_v3(block_json: &serde_json::Value) -> Result<ExecutionPayload
             },
             withdrawals: vec![], // No withdrawals in these payloads
         },
-        blob_gas_used: 0, // Not present in these payloads
+        blob_gas_used: 0,   // Not present in these payloads
         excess_blob_gas: 0, // Not present in these payloads
     };
 

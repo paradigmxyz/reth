@@ -18,7 +18,10 @@ pub mod reorg;
 pub mod transactions;
 
 pub use custom_fcu::{BlockReference, FinalizeBlock, SendForkchoiceUpdate};
-pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads, SendPayloadFromFile};
+pub use engine_api::{
+    ExpectedPayloadStatus, SendNewPayload, SendNewPayloads, SendPayloadFromFile,
+    SendPayloadFromJson,
+};
 pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
 pub use node_ops::{
     AssertChainTip, CaptureBlockOnNode, CompareNodeChainTips, SelectActiveNode, ValidateBlockTag,
