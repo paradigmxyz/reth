@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set +e  # Disable immediate exit on error
 
+# Check if target argument is provided
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <target>"
+    echo "Example: $0 riscv64imac-unknown-none-elf"
+    exit 1
+fi
+
+TARGET="$1"
+
 # Array of crates to check
 crates_to_check=(
     reth-codecs-derive
@@ -44,7 +53,7 @@ results=()
 any_failed=0
 
 for crate in "${crates_to_check[@]}"; do
-  cmd="cargo +stable build -p $crate --target riscv32imac-unknown-none-elf --no-default-features"
+  cmd="cargo +stable build -p $crate --target $TARGET --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
@@ -76,7 +85,7 @@ IFS=$'\n' sorted_results=($(sort <<<"${results[*]}"))
 unset IFS
 
 # Print summary
-echo -e "\nSummary of build results:"
+echo -e "\nSummary of build results for target $TARGET:"
 for result in "${sorted_results[@]}"; do
   status="${result#*:}"
   status="${status%%:*}"
@@ -85,4 +94,4 @@ for result in "${sorted_results[@]}"; do
 done
 
 # Exit with a non-zero status if any command fails
-exit $any_failed
+exit $any_failed 

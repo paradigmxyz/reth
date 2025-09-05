@@ -89,7 +89,7 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V checks
-        run: .github/assets/check_rv32imac.sh
+        run: .github/assets/check_target.sh riscv32imac-unknown-none-elf
 
   riscv64:
     runs-on: ubuntu-latest
@@ -106,7 +106,7 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run RISC-V 64-bit checks
-        run: .github/assets/check_rv64imac.sh
+        run: .github/assets/check_target.sh riscv64imac-unknown-none-elf
 
   crate-checks:
     runs-on: ubuntu-latest
