@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#8c4ada954352c68b79d2f2d11849f183d6bbbdee"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#033e7af01cdf5db1b8d78ded96fd1eb03de3a745"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -381,7 +381,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#8c4ada954352c68b79d2f2d11849f183d6bbbdee"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#033e7af01cdf5db1b8d78ded96fd1eb03de3a745"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
