@@ -88,6 +88,7 @@ toml = { workspace = true, features = ["display"] }
 # tui
 comfy-table.workspace = true
 crossterm.workspace = true
+indicatif = "0.18"
 ratatui = { workspace = true, features = ["crossterm"] }
 
 # reth test-vectors
