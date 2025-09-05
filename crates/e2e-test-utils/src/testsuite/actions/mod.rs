@@ -15,9 +15,10 @@ pub mod fork;
 pub mod node_ops;
 pub mod produce_blocks;
 pub mod reorg;
+pub mod transactions;
 
 pub use custom_fcu::{BlockReference, FinalizeBlock, SendForkchoiceUpdate};
-pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads};
+pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads, SendPayloadFromFile};
 pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
 pub use node_ops::{
     AssertChainTip, CaptureBlockOnNode, CompareNodeChainTips, SelectActiveNode, ValidateBlockTag,
@@ -30,6 +31,7 @@ pub use produce_blocks::{
     UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
+pub use transactions::ProduceBlockWithTransactions;
 
 /// An action that can be performed on an instance.
 ///

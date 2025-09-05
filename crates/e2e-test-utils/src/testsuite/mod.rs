@@ -13,6 +13,7 @@ use reth_payload_builder::PayloadId;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
+pub mod transaction_utils;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -53,6 +54,11 @@ impl NodeClient {
     /// Check if the node is ready by attempting to get the latest block
     pub async fn is_ready(&self) -> bool {
         self.get_block_by_number(alloy_eips::BlockNumberOrTag::Latest).await.is_ok()
+    }
+
+    /// Get the alloy provider for direct access to node data
+    pub fn provider(&self) -> Arc<dyn Provider + Send + Sync> {
+        self.provider.clone()
     }
 }
 
