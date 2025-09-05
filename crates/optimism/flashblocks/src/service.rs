@@ -1,4 +1,7 @@
-use crate::{sequence::FlashBlockPendingSequence, ExecutionPayloadBaseV1, FlashBlock};
+use crate::{
+    sequence::{FlashBlockCompleteSequence, FlashBlockPendingSequence},
+    ExecutionPayloadBaseV1, FlashBlock,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
@@ -21,7 +24,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::pin;
+use tokio::{pin, sync::broadcast};
 use tracing::{debug, trace, warn};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
@@ -75,6 +78,11 @@ where
         }
     }
 
+    /// Returns a subscriber to the flashblock sequence.
+    pub fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence> {
+        self.blocks.subscribe_block_sequence()
+    }
+
     /// Drives the services and sends new blocks to the receiver
     ///
     /// Note: this should be spawned
@@ -111,7 +119,7 @@ where
     ///
     /// Returns None if the flashblock doesn't attach to the latest header.
     fn execute(&mut self) -> eyre::Result<Option<PendingBlock<N>>> {
-        trace!("Attempting new flashblock");
+        trace!(target: "flashblocks", "Attempting new flashblock");
 
         let latest = self
             .provider
@@ -120,12 +128,12 @@ where
         let latest_hash = latest.hash();
 
         let Some(attrs) = self.blocks.payload_base() else {
-            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing flashblock payload base");
+            trace!(target: "flashblocks", flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing flashblock payload base");
             return Ok(None)
         };
 
         if attrs.parent_hash != latest_hash {
-            trace!(flashblock_parent = ?attrs.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
+            trace!(target: "flashblocks", flashblock_parent = ?attrs.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
             return Ok(None)
         }
@@ -214,6 +222,7 @@ where
         } {
             if let Some(current) = this.on_new_tip(state) {
                 trace!(
+                    target: "flashblocks",
                     parent_hash = %current.block().parent_hash(),
                     block_number = current.block().number(),
                     "Clearing current flashblock on new canonical block"
@@ -234,7 +243,7 @@ where
                 // built a new pending block
                 this.current = Some(new_pending.clone());
                 this.rebuild = false;
-                trace!(parent_hash=%new_pending.block().parent_hash(), block_number=new_pending.block().number(), flash_blocks=this.blocks.count(), elapsed=?now.elapsed(), "Built new block with flashblocks");
+                trace!(target: "flashblocks", parent_hash=%new_pending.block().parent_hash(), block_number=new_pending.block().number(), flash_blocks=this.blocks.count(), elapsed=?now.elapsed(), "Built new block with flashblocks");
                 return Poll::Ready(Some(Ok(Some(new_pending))));
             }
             Ok(None) => {
@@ -242,7 +251,7 @@ where
             }
             Err(err) => {
                 // we can ignore this error
-                debug!(%err, "failed to execute flashblock");
+                debug!(target: "flashblocks", %err, "failed to execute flashblock");
             }
         }
 

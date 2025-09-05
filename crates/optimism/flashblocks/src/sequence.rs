@@ -1,9 +1,14 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
+use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
-use tracing::trace;
+use tokio::sync::broadcast;
+use tracing::{trace, warn};
+
+/// The size of the broadcast channel for completed flashblock sequences.
+const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
 
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
@@ -13,14 +18,51 @@ pub(crate) struct FlashBlockPendingSequence<T> {
     /// With a blocktime of 2s and flashblock tick-rate of 200ms plus one extra flashblock per new
     /// pending block, we expect 11 flashblocks per slot.
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
+    /// Broadcasts flashblocks to subscribers.
+    block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
 }
 
 impl<T> FlashBlockPendingSequence<T>
 where
     T: SignedTransaction,
 {
-    pub(crate) const fn new() -> Self {
-        Self { inner: BTreeMap::new() }
+    pub(crate) fn new() -> Self {
+        // Note: if the channel is full, send will not block but rather overwrite the oldest
+        // messages. Order is preserved.
+        let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
+        Self { inner: BTreeMap::new(), block_broadcaster: tx }
+    }
+
+    /// Gets a subscriber to the flashblock sequences produced.
+    pub(crate) fn subscribe_block_sequence(
+        &self,
+    ) -> broadcast::Receiver<FlashBlockCompleteSequence> {
+        self.block_broadcaster.subscribe()
+    }
+
+    // Clears the state and broadcasts the blocks produced to subscribers.
+    fn clear_and_broadcast_blocks(&mut self) {
+        let flashblocks = mem::take(&mut self.inner);
+
+        // If there are any subscribers, send the flashblocks to them.
+        if self.block_broadcaster.receiver_count() > 0 {
+            let flashblocks = match FlashBlockCompleteSequence::new(
+                flashblocks.into_iter().map(|block| block.1.into()).collect(),
+            ) {
+                Ok(flashblocks) => flashblocks,
+                Err(err) => {
+                    warn!(target: "flashblocks", error = ?err, "Failed to create flashblock complete sequence");
+                    return;
+                }
+            };
+
+            // Note: this should only ever fail if there are no receivers. This can happen if
+            // there is a race condition between the clause right above and this
+            // one. We can simply warn the user and continue.
+            if let Err(err) = self.block_broadcaster.send(flashblocks) {
+                warn!(target: "flashblocks", error = ?err, "Failed to send flashblocks to subscribers");
+            }
+        }
     }
 
     /// Inserts a new block into the sequence.
@@ -29,13 +71,15 @@ where
     pub(crate) fn insert(&mut self, flashblock: FlashBlock) -> eyre::Result<()> {
         if flashblock.index == 0 {
             trace!(number=%flashblock.block_number(), "Tracking new flashblock sequence");
-            // Flash block at index zero resets the whole state
-            self.clear();
+
+            // Flash block at index zero resets the whole state.
+            self.clear_and_broadcast_blocks();
+
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
             return Ok(())
         }
 
-        // only insert if we we previously received the same block, assume we received index 0
+        // only insert if we previously received the same block, assume we received index 0
         if self.block_number() == Some(flashblock.metadata.block_number) {
             trace!(number=%flashblock.block_number(), index = %flashblock.index, block_count = self.inner.len()  ,"Received followup flashblock");
             self.inner.insert(flashblock.index, PreparedFlashBlock::new(flashblock)?);
@@ -65,10 +109,6 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
-    fn clear(&mut self) {
-        self.inner.clear();
-    }
-
     /// Returns the first block number
     pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
@@ -85,7 +125,8 @@ where
     }
 }
 
-pub(crate) struct FlashBlockCompleteSequence(Vec<FlashBlock>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
 
 impl FlashBlockCompleteSequence {
     fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
@@ -145,6 +186,12 @@ impl<T> PreparedFlashBlock<T> {
     }
 }
 
+impl<T> From<PreparedFlashBlock<T>> for FlashBlock {
+    fn from(val: PreparedFlashBlock<T>) -> Self {
+        val.block
+    }
+}
+
 impl<T> PreparedFlashBlock<T>
 where
     T: SignedTransaction,
@@ -174,6 +221,7 @@ mod tests {
     };
     use alloy_eips::Encodable2718;
     use alloy_primitives::{hex, Signature, TxKind, U256};
+    use tokio::sync::broadcast::error::TryRecvError;
 
     #[test]
     fn test_sequence_stops_before_gap() {
@@ -229,5 +277,51 @@ mod tests {
         let expected_txs = vec![WithEncoded::new(tx.encoded_2718().into(), tx)];
 
         assert_eq!(actual_txs, expected_txs);
+    }
+
+    #[test]
+    fn test_sequence_sends_flashblocks_to_subscribers() {
+        let mut sequence = FlashBlockPendingSequence::<EthereumTxEnvelope<TxEip1559>>::new();
+        let mut subscriber = sequence.subscribe_block_sequence();
+
+        for idx in 0..10 {
+            sequence
+                .insert(FlashBlock {
+                    payload_id: Default::default(),
+                    index: idx,
+                    base: None,
+                    diff: Default::default(),
+                    metadata: Default::default(),
+                })
+                .unwrap();
+        }
+
+        assert_eq!(sequence.count(), 10);
+
+        // We receive first an empty flashblock when we start building the sequence
+        let empty_flashblock = subscriber.try_recv().unwrap();
+        assert_eq!(empty_flashblock.count(), 0);
+
+        // Then we don't receive anything until we insert a new flashblock
+        let no_flashblock = subscriber.try_recv();
+        assert_eq!(no_flashblock, Err(TryRecvError::Empty));
+
+        // Let's insert a new flashblock with index 0
+        sequence
+            .insert(FlashBlock {
+                payload_id: Default::default(),
+                index: 0,
+                base: None,
+                diff: Default::default(),
+                metadata: Default::default(),
+            })
+            .unwrap();
+
+        let flashblocks = subscriber.try_recv().unwrap();
+        assert_eq!(flashblocks.count(), 10);
+
+        for (idx, block) in flashblocks.0.iter().enumerate() {
+            assert_eq!(block.index, idx as u64);
+        }
     }
 }
