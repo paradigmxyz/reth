@@ -10,7 +10,7 @@ use pin_project::pin_project;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -44,6 +44,7 @@ where
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
     max_batch_size: usize,
+    buf: Vec<BatchTxRequest<Pool::Transaction>>,
     #[pin]
     request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
 }
@@ -59,7 +60,7 @@ where
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
 
-        let processor = Self { pool, max_batch_size, request_rx };
+        let processor = Self { pool, max_batch_size, buf: Vec::with_capacity(1), request_rx };
 
         (processor, request_tx)
     }
@@ -88,21 +89,15 @@ where
 
         loop {
             // Drain all available requests from the receiver
-            let mut batch = Vec::with_capacity(1);
-            while let Poll::Ready(Some(request)) = this.request_rx.poll_recv(cx) {
-                batch.push(request);
+            ready!(this.request_rx.poll_recv_many(cx, this.buf, *this.max_batch_size));
 
-                // Check if the max batch size threshold has been reached
-                if batch.len() >= *this.max_batch_size {
-                    break;
-                }
-            }
-
-            if !batch.is_empty() {
+            if !this.buf.is_empty() {
+                let batch = std::mem::take(this.buf);
                 let pool = this.pool.clone();
                 tokio::spawn(async move {
                     Self::process_batch(&pool, batch).await;
                 });
+                this.buf.reserve(1);
 
                 continue;
             }
