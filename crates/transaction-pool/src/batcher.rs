@@ -64,8 +64,19 @@ where
         (processor, request_tx)
     }
 
+    async fn process_request(pool: &Pool, req: BatchTxRequest<Pool::Transaction>) {
+        let BatchTxRequest { pool_tx, response_tx } = req;
+        let pool_result = pool.add_transaction(TransactionOrigin::Local, pool_tx).await;
+        let _ = response_tx.send(pool_result);
+    }
+
     /// Process a batch of transaction requests, grouped by origin
-    async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+    async fn process_batch(pool: &Pool, mut batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+        if batch.len() == 1 {
+            Self::process_request(pool, batch.remove(0)).await;
+            return
+        }
+
         let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =
             batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
 
