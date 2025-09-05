@@ -1,3 +1,7 @@
+use alloc::vec::Vec;
+#[cfg(feature = "std")]
+use std::{collections::HashMap, sync::OnceLock};
+
 /// Stage IDs for all known stages.
 ///
 /// For custom stages, use [`StageId::Other`]
@@ -26,6 +30,12 @@ pub enum StageId {
     /// Other custom stage with a provided string identifier.
     Other(&'static str),
 }
+
+/// One-time-allocated stage ids encoded as raw Vecs, useful for database
+/// clients to reference them for queries instead of encoding anew per query
+/// (sad heap allocation required).
+#[cfg(feature = "std")]
+static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
 
 impl StageId {
     /// All supported Stages
@@ -97,6 +107,25 @@ impl StageId {
     /// Returns true indicating if it's the finish stage [`StageId::Finish`]
     pub const fn is_finish(&self) -> bool {
         matches!(self, Self::Finish)
+    }
+
+    /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
+    /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
+    pub fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
+        #[cfg(not(feature = "std"))]
+        {
+            None
+        }
+        #[cfg(feature = "std")]
+        ENCODED_STAGE_IDS
+            .get_or_init(|| {
+                let mut map = HashMap::with_capacity(Self::ALL.len());
+                for stage_id in Self::ALL {
+                    map.insert(stage_id, stage_id.to_string().into_bytes());
+                }
+                map
+            })
+            .get(self)
     }
 }
 

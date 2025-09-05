@@ -3940,4 +3940,108 @@ mod tests {
         assert_eq!(t2.id(), tx2.id());
         assert_eq!(t3.id(), tx3.id());
     }
+
+    #[test]
+    fn test_non_4844_blob_fee_bit_invariant() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let non_4844_tx = MockTransaction::eip1559().set_max_fee(200).inc_limit();
+        let validated = f.validated(non_4844_tx.clone());
+
+        assert!(!non_4844_tx.is_eip4844());
+        pool.add_transaction(validated.clone(), U256::from(10_000), 0, None).unwrap();
+
+        // Core invariant: Non-4844 transactions must ALWAYS have ENOUGH_BLOB_FEE_CAP_BLOCK bit
+        let tx_meta = pool.all_transactions.txs.get(validated.id()).unwrap();
+        assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_meta.subpool, SubPool::Pending);
+    }
+
+    #[test]
+    fn test_blob_fee_enforcement_only_applies_to_eip4844() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Set blob fee higher than EIP-4844 tx can afford
+        let mut block_info = pool.block_info();
+        block_info.pending_blob_fee = Some(160);
+        block_info.pending_basefee = 100;
+        pool.set_block_info(block_info);
+
+        let eip4844_tx = MockTransaction::eip4844()
+            .with_sender(address!("0x000000000000000000000000000000000000000a"))
+            .with_max_fee(200)
+            .with_blob_fee(150) // Less than block blob fee (160)
+            .inc_limit();
+
+        let non_4844_tx = MockTransaction::eip1559()
+            .with_sender(address!("0x000000000000000000000000000000000000000b"))
+            .set_max_fee(200)
+            .inc_limit();
+
+        let validated_4844 = f.validated(eip4844_tx);
+        let validated_non_4844 = f.validated(non_4844_tx);
+
+        pool.add_transaction(validated_4844.clone(), U256::from(10_000), 0, None).unwrap();
+        pool.add_transaction(validated_non_4844.clone(), U256::from(10_000), 0, None).unwrap();
+
+        let tx_4844_meta = pool.all_transactions.txs.get(validated_4844.id()).unwrap();
+        let tx_non_4844_meta = pool.all_transactions.txs.get(validated_non_4844.id()).unwrap();
+
+        // EIP-4844: blob fee enforcement applies - insufficient blob fee removes bit
+        assert!(!tx_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_4844_meta.subpool, SubPool::Blob);
+
+        // Non-4844: blob fee enforcement does NOT apply - bit always remains true
+        assert!(tx_non_4844_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert_eq!(tx_non_4844_meta.subpool, SubPool::Pending);
+    }
+
+    #[test]
+    fn test_basefee_decrease_preserves_non_4844_blob_fee_bit() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create non-4844 transaction with fee that initially can't afford high basefee
+        let non_4844_tx = MockTransaction::eip1559()
+            .with_sender(address!("0x000000000000000000000000000000000000000a"))
+            .set_max_fee(500) // Can't afford basefee of 600
+            .inc_limit();
+
+        // Set high basefee so transaction goes to BaseFee pool initially
+        pool.update_basefee(600);
+
+        let validated = f.validated(non_4844_tx);
+        let tx_id = *validated.id();
+        pool.add_transaction(validated, U256::from(10_000), 0, None).unwrap();
+
+        // Initially should be in BaseFee pool but STILL have blob fee bit (critical invariant)
+        let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
+        assert_eq!(tx_meta.subpool, SubPool::BaseFee);
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "Non-4844 tx in BaseFee pool must retain ENOUGH_BLOB_FEE_CAP_BLOCK bit"
+        );
+
+        // Decrease basefee - transaction should be promoted to Pending
+        // This is where PR #18215 bug would manifest: blob fee bit incorrectly removed
+        pool.update_basefee(400);
+
+        // After basefee decrease: should be promoted to Pending with blob fee bit preserved
+        let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
+        assert_eq!(
+            tx_meta.subpool,
+            SubPool::Pending,
+            "Non-4844 tx should be promoted from BaseFee to Pending after basefee decrease"
+        );
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK),
+            "Non-4844 tx must NEVER lose ENOUGH_BLOB_FEE_CAP_BLOCK bit during basefee promotion"
+        );
+        assert!(
+            tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK),
+            "Non-4844 tx should gain ENOUGH_FEE_CAP_BLOCK bit after basefee decrease"
+        );
+    }
 }

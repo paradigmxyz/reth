@@ -12,7 +12,7 @@ use std::{
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{Bytes, Error, Message},
+    tungstenite::{protocol::CloseFrame, Bytes, Error, Message},
     MaybeTlsStream, WebSocketStream,
 };
 use tracing::debug;
@@ -72,7 +72,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        loop {
+        'start: loop {
             if this.state == State::Initial {
                 this.connect();
             }
@@ -88,11 +88,11 @@ where
                 }
             }
 
-            while let State::Stream(pong) = &mut this.state {
-                if pong.is_some() {
+            while let State::Stream(msg) = &mut this.state {
+                if msg.is_some() {
                     let mut sink = Pin::new(this.sink.as_mut().unwrap());
                     let _ = ready!(sink.as_mut().poll_ready(cx));
-                    if let Some(pong) = pong.take() {
+                    if let Some(pong) = msg.take() {
                         let _ = sink.as_mut().start_send(pong);
                     }
                     let _ = ready!(sink.as_mut().poll_flush(cx));
@@ -104,7 +104,9 @@ where
                     .expect("Stream state should be unreachable without stream")
                     .poll_next_unpin(cx))
                 else {
-                    return Poll::Ready(None);
+                    this.state = State::Initial;
+
+                    continue 'start;
                 };
 
                 match msg {
@@ -115,6 +117,7 @@ where
                         return Poll::Ready(Some(FlashBlock::decode(bytes.into())))
                     }
                     Ok(Message::Ping(bytes)) => this.ping(bytes),
+                    Ok(Message::Close(frame)) => this.close(frame),
                     Ok(msg) => debug!("Received unexpected message: {:?}", msg),
                     Err(err) => return Poll::Ready(Some(Err(err.into()))),
                 }
@@ -146,6 +149,12 @@ where
     fn ping(&mut self, pong: Bytes) {
         if let State::Stream(current) = &mut self.state {
             current.replace(Message::Pong(pong));
+        }
+    }
+
+    fn close(&mut self, frame: Option<CloseFrame>) {
+        if let State::Stream(current) = &mut self.state {
+            current.replace(Message::Close(frame));
         }
     }
 }
@@ -225,7 +234,10 @@ mod tests {
     use alloy_primitives::bytes::Bytes;
     use brotli::enc::BrotliEncoderParams;
     use std::{future, iter};
-    use tokio_tungstenite::tungstenite::{protocol::frame::Frame, Error};
+    use tokio_tungstenite::tungstenite::{
+        protocol::frame::{coding::CloseCode, Frame},
+        Error,
+    };
 
     /// A `FakeConnector` creates [`FakeStream`].
     ///
@@ -243,6 +255,14 @@ mod tests {
     /// Simulates a websocket stream while using a preprogrammed set of messages instead.
     #[derive(Default)]
     struct FakeStream(Vec<Result<Message, Error>>);
+
+    impl FakeStream {
+        fn new(mut messages: Vec<Result<Message, Error>>) -> Self {
+            messages.reverse();
+
+            Self(messages)
+        }
+    }
 
     impl Clone for FakeStream {
         fn clone(&self) -> Self {
@@ -353,7 +373,7 @@ mod tests {
 
     impl<T: IntoIterator<Item = Result<Message, Error>>> From<T> for FakeConnector {
         fn from(value: T) -> Self {
-            Self(FakeStream(value.into_iter().collect()))
+            Self(FakeStream::new(value.into_iter().collect()))
         }
     }
 
@@ -371,7 +391,7 @@ mod tests {
 
     impl<T: IntoIterator<Item = Result<Message, Error>>> From<T> for FakeConnectorWithSink {
         fn from(value: T) -> Self {
-            Self(FakeStream(value.into_iter().collect()))
+            Self(FakeStream::new(value.into_iter().collect()))
         }
     }
 
@@ -391,8 +411,21 @@ mod tests {
         }
     }
 
-    fn to_json_message(block: &FlashBlock) -> Result<Message, Error> {
-        Ok(Message::Binary(Bytes::from(serde_json::to_vec(block).unwrap())))
+    fn to_json_message<B: TryFrom<Bytes, Error: Debug>, F: Fn(B) -> Message>(
+        wrapper_f: F,
+    ) -> impl Fn(&FlashBlock) -> Result<Message, Error> + use<F, B> {
+        move |block| to_json_message_using(block, &wrapper_f)
+    }
+
+    fn to_json_binary_message(block: &FlashBlock) -> Result<Message, Error> {
+        to_json_message_using(block, Message::Binary)
+    }
+
+    fn to_json_message_using<B: TryFrom<Bytes, Error: Debug>, F: Fn(B) -> Message>(
+        block: &FlashBlock,
+        wrapper_f: F,
+    ) -> Result<Message, Error> {
+        Ok(wrapper_f(B::try_from(Bytes::from(serde_json::to_vec(block).unwrap())).unwrap()))
     }
 
     fn to_brotli_message(block: &FlashBlock) -> Result<Message, Error> {
@@ -407,13 +440,8 @@ mod tests {
         Ok(Message::Binary(Bytes::from(compressed)))
     }
 
-    #[test_case::test_case(to_json_message; "json")]
-    #[test_case::test_case(to_brotli_message; "brotli")]
-    #[tokio::test]
-    async fn test_stream_decodes_messages_successfully(
-        to_message: impl Fn(&FlashBlock) -> Result<Message, Error>,
-    ) {
-        let flashblocks = [FlashBlock {
+    fn flashblock() -> FlashBlock {
+        FlashBlock {
             payload_id: Default::default(),
             index: 0,
             base: Some(ExecutionPayloadBaseV1 {
@@ -429,13 +457,22 @@ mod tests {
             }),
             diff: Default::default(),
             metadata: Default::default(),
-        }];
+        }
+    }
 
-        let messages = FakeConnector::from(flashblocks.iter().map(to_message));
+    #[test_case::test_case(to_json_message(Message::Binary); "json binary")]
+    #[test_case::test_case(to_json_message(Message::Text); "json UTF-8")]
+    #[test_case::test_case(to_brotli_message; "brotli")]
+    #[tokio::test]
+    async fn test_stream_decodes_messages_successfully(
+        to_message: impl Fn(&FlashBlock) -> Result<Message, Error>,
+    ) {
+        let flashblocks = [flashblock()];
+        let connector = FakeConnector::from(flashblocks.iter().map(to_message));
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, messages);
+        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
 
-        let actual_messages: Vec<_> = stream.map(Result::unwrap).collect().await;
+        let actual_messages: Vec<_> = stream.take(1).map(Result::unwrap).collect().await;
         let expected_messages = flashblocks.to_vec();
 
         assert_eq!(actual_messages, expected_messages);
@@ -445,20 +482,26 @@ mod tests {
     #[test_case::test_case(Message::Frame(Frame::pong(b"test".as_slice())); "frame")]
     #[tokio::test]
     async fn test_stream_ignores_unexpected_message(message: Message) {
-        let messages = FakeConnector::from([Ok(message)]);
+        let flashblock = flashblock();
+        let connector = FakeConnector::from([Ok(message), to_json_binary_message(&flashblock)]);
         let ws_url = "http://localhost".parse().unwrap();
-        let mut stream = WsFlashBlockStream::with_connector(ws_url, messages);
-        assert!(stream.next().await.is_none());
+        let mut stream = WsFlashBlockStream::with_connector(ws_url, connector);
+
+        let expected_message = flashblock;
+        let actual_message =
+            stream.next().await.expect("Binary message should not be ignored").unwrap();
+
+        assert_eq!(actual_message, expected_message)
     }
 
     #[tokio::test]
     async fn test_stream_passes_errors_through() {
-        let messages = FakeConnector::from([Err(Error::AttackAttempt)]);
+        let connector = FakeConnector::from([Err(Error::AttackAttempt)]);
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, messages);
+        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
 
         let actual_messages: Vec<_> =
-            stream.map(Result::unwrap_err).map(|e| format!("{e}")).collect().await;
+            stream.take(1).map(Result::unwrap_err).map(|e| format!("{e}")).collect().await;
         let expected_messages = vec!["Attack attempt detected".to_owned()];
 
         assert_eq!(actual_messages, expected_messages);
@@ -468,9 +511,9 @@ mod tests {
     async fn test_connect_error_causes_retries() {
         let tries = 3;
         let error_msg = "test".to_owned();
-        let messages = FailingConnector(error_msg.clone());
+        let connector = FailingConnector(error_msg.clone());
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, messages);
+        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
 
         let actual_errors: Vec<_> =
             stream.take(tries).map(Result::unwrap_err).map(|e| format!("{e}")).collect().await;
@@ -479,26 +522,30 @@ mod tests {
         assert_eq!(actual_errors, expected_errors);
     }
 
+    #[test_case::test_case(
+        Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "test".into() })),
+        Message::Close(Some(CloseFrame { code: CloseCode::Normal, reason: "test".into() }));
+        "close"
+    )]
+    #[test_case::test_case(
+        Message::Ping(Bytes::from_static(&[1u8, 2, 3])),
+        Message::Pong(Bytes::from_static(&[1u8, 2, 3]));
+        "ping"
+    )]
     #[tokio::test]
-    async fn test_stream_pongs_ping() {
-        const ECHO: [u8; 3] = [1u8, 2, 3];
-
-        let messages = [Ok(Message::Ping(Bytes::from_static(&ECHO)))];
+    async fn test_stream_responds_to_messages(msg: Message, expected_response: Message) {
+        let flashblock = flashblock();
+        let messages = [Ok(msg), to_json_binary_message(&flashblock)];
         let connector = FakeConnectorWithSink::from(messages);
         let ws_url = "http://localhost".parse().unwrap();
         let mut stream = WsFlashBlockStream::with_connector(ws_url, connector);
 
         let _ = stream.next().await;
 
-        let FakeSink(actual_buffered_messages, actual_sent_messages) = stream.sink.unwrap();
+        let expected_response = vec![expected_response];
+        let FakeSink(actual_buffer, actual_response) = stream.sink.unwrap();
 
-        assert!(
-            actual_buffered_messages.is_none(),
-            "buffer not flushed: {actual_buffered_messages:#?}"
-        );
-
-        let expected_sent_messages = vec![Message::Pong(Bytes::from_static(&ECHO))];
-
-        assert_eq!(actual_sent_messages, expected_sent_messages);
+        assert!(actual_buffer.is_none(), "buffer not flushed: {actual_buffer:#?}");
+        assert_eq!(actual_response, expected_response);
     }
 }

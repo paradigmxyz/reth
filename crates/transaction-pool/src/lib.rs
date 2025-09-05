@@ -380,12 +380,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool
-            .validator()
-            .validate_transactions_with_origin(origin, transactions)
-            .await
-            .into_iter()
-            .collect()
+        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
     }
 
     /// Validates all transactions with their individual origins.
