@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, StorageKey, B256, U256};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
@@ -9,6 +9,7 @@ use reth_db_api::{
 use reth_db_common::DbTool;
 use reth_primitives_traits::StorageEntry;
 use reth_provider::providers::ProviderNodeTypes;
+use reth_trie::Nibbles;
 use std::{
     str::FromStr,
     sync::{
@@ -18,17 +19,59 @@ use std::{
     thread,
 };
 
+/// Search target type for inverse lookup
+#[derive(Debug, Clone, Copy)]
+pub enum SearchTarget {
+    /// Exact hash match (keccak256)
+    Hash(B256),
+    /// Prefix match using nibbles
+    Prefix(Nibbles),
+}
+
+impl FromStr for SearchTarget {
+    type Err = eyre::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // If it starts with "0x" and is 66 chars (0x + 64 hex chars), treat as hash
+        if s.starts_with("0x") && s.len() == 66 {
+            Ok(SearchTarget::Hash(B256::from_str(s)?))
+        } else {
+            // Otherwise, treat as a hex string prefix for nibbles
+            let hex_str = s.strip_prefix("0x").unwrap_or(s);
+
+            // Parse each hex character as a separate nibble
+            let mut nibbles = Nibbles::default();
+
+            for hex_char in hex_str.chars() {
+                // Parse each hex character as a nibble (0-15)
+                let nibble = u8::from_str_radix(&hex_char.to_string(), 16)?;
+                if nibble > 15 {
+                    return Err(eyre::eyre!("Invalid hex character: {}", hex_char));
+                }
+                nibbles.push(nibble);
+            }
+
+            Ok(SearchTarget::Prefix(nibbles))
+        }
+    }
+}
+
 /// `reth db inverse-lookup` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The target hashed address to search for (keccak256 hash of the address)
-    #[arg(long, value_parser = B256::from_str, required = true)]
-    target_hashed_address: B256,
+    /// The target address to search for. Can be:
+    /// - Full hash: 0x1234...abcd (66 chars) for exact keccak256 hash match
+    /// - Prefix: 0x1234 or 1234 for nibbles prefix match
+    #[arg(long, value_parser = SearchTarget::from_str, required = true)]
+    target_address: SearchTarget,
 
-    /// The target hashed storage slot to search for (keccak256 hash of the storage slot)
+    /// The target storage slot to search for. Can be:
+    /// - Full hash: 0x1234...abcd (66 chars) for exact keccak256 hash match
+    /// - Prefix: 0x1234 or 1234 for nibbles prefix match
+    ///
     /// When specified, will also search for the storage slot after finding the address
-    #[arg(long, value_parser = B256::from_str)]
-    target_hashed_storage_slot: Option<B256>,
+    #[arg(long, value_parser = SearchTarget::from_str)]
+    target_storage_slot: Option<SearchTarget>,
 
     /// Number of threads to use for parallel search (defaults to number of CPU cores)
     #[arg(long)]
@@ -47,14 +90,14 @@ impl Command {
 
         // First, search for the address
         let found_address =
-            self.search_address_parallel(tool, self.target_hashed_address, num_threads)?;
+            self.search_address_parallel(tool, &self.target_address, num_threads)?;
 
         if let Some(address) = found_address {
             println!("\nAccount found: {}", address);
             println!("Hashed address: {}", keccak256(address));
 
             // If we need to find a storage slot, search for it
-            if let Some(target_slot) = self.target_hashed_storage_slot {
+            if let Some(ref target_slot) = self.target_storage_slot {
                 println!("\nSearching for storage slot...");
                 let found_slot =
                     self.search_storage_slot_parallel(tool, address, target_slot, num_threads)?;
@@ -73,11 +116,22 @@ impl Command {
         Ok(())
     }
 
+    /// Check if a hash matches the search target
+    fn matches_target(hash: B256, target: &SearchTarget) -> bool {
+        match target {
+            SearchTarget::Hash(target_hash) => hash == *target_hash,
+            SearchTarget::Prefix(prefix) => {
+                let hash_nibbles = Nibbles::unpack(hash.as_slice());
+                hash_nibbles.starts_with(prefix)
+            }
+        }
+    }
+
     /// Search for an address in parallel
     fn search_address_parallel<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         tool: &DbTool<N>,
-        target_hashed_address: B256,
+        target: &SearchTarget,
         num_threads: usize,
     ) -> eyre::Result<Option<Address>> {
         let provider = tool.provider_factory.provider()?;
@@ -86,10 +140,16 @@ impl Command {
         // Get total number of accounts for progress tracking
         let total_accounts = tx.entries::<tables::PlainAccountState>()?;
 
-        println!(
-            "Using {} threads to search through {} accounts for hashed address: {}",
-            num_threads, total_accounts, target_hashed_address
-        );
+        match target {
+            SearchTarget::Hash(hash) => println!(
+                "Using {} threads to search through {} accounts for hashed address: {}",
+                num_threads, total_accounts, hash
+            ),
+            SearchTarget::Prefix(prefix) => println!(
+                "Using {} threads to search through {} accounts for address prefix: {:?}",
+                num_threads, total_accounts, prefix
+            ),
+        }
 
         // Calculate chunk boundaries for Address space
         let max_value = alloy_primitives::U160::MAX;
@@ -119,6 +179,7 @@ impl Command {
             let found_address = found_address.clone();
             let found_flag = found_flag.clone();
             let progress_bar = progress_bar.clone();
+            let target = *target;
 
             // Calculate range for this thread in U160 space
             let start = alloy_primitives::U160::from(thread_id) * chunk_size;
@@ -151,7 +212,7 @@ impl Command {
 
                     // Check if the hash matches the target
                     let hashed = keccak256(address);
-                    if hashed == target_hashed_address {
+                    if Self::matches_target(hashed, &target) {
                         found_flag.store(true, Ordering::Relaxed);
                         *found_address.lock().unwrap() = Some(address);
                         break;
@@ -184,7 +245,7 @@ impl Command {
         &self,
         tool: &DbTool<N>,
         address: Address,
-        target_hashed_slot: B256,
+        target: &SearchTarget,
         num_threads: usize,
     ) -> eyre::Result<Option<StorageKey>> {
         let provider = tool.provider_factory.provider()?;
@@ -193,10 +254,16 @@ impl Command {
         // First, let's get an estimate of total storage entries
         let total_storage_entries = tx.entries::<tables::PlainStorageState>()?;
 
-        println!(
-            "Using {} threads to search through ~{} storage entries for address {} and hashed slot: {}",
-            num_threads, total_storage_entries, address, target_hashed_slot
-        );
+        match target {
+            SearchTarget::Hash(hash) => println!(
+                "Using {} threads to search through ~{} storage entries for address {} and hashed slot: {}",
+                num_threads, total_storage_entries, address, hash
+            ),
+            SearchTarget::Prefix(prefix) => println!(
+                "Using {} threads to search through ~{} storage entries for address {} and slot prefix: {:?}",
+                num_threads, total_storage_entries, address, prefix
+            ),
+        }
 
         // Split the B256 storage key space into chunks for parallel processing
         // Storage keys are B256 values, so we split that space
@@ -227,6 +294,7 @@ impl Command {
             let found_slot = found_slot.clone();
             let found_flag = found_flag.clone();
             let progress_bar = progress_bar.clone();
+            let target = *target;
 
             // Calculate range for this thread in U256 space
             let start = U256::from(thread_id) * chunk_size;
@@ -267,7 +335,7 @@ impl Command {
 
                         // Check if the hash matches the target
                         let hashed_slot = keccak256(storage_key);
-                        if hashed_slot == target_hashed_slot {
+                        if Self::matches_target(hashed_slot, &target) {
                             found_flag.store(true, Ordering::Relaxed);
                             *found_slot.lock().unwrap() = Some(storage_key);
                             break;
