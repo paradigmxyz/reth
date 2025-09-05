@@ -14,6 +14,8 @@ hardfork!(
     ///
     /// When building a list of hardforks for a chain, it's still expected to mix with [`EthereumHardfork`].
     BscHardfork {
+        /// Initial hardfork of BSC.
+        Frontier,
         /// BSC `Ramanujan` hardfork
         Ramanujan,
         /// BSC `Niels` hardfork
@@ -46,6 +48,8 @@ hardfork!(
         Feynman,
         /// BSC `FeynmanFix` hardfork
         FeynmanFix,
+        /// BSC `Cancun` hardfork
+        Cancun,
         /// BSC `Haber` hardfork
         Haber,
         /// BSC `HaberFix` hardfork
@@ -54,8 +58,10 @@ hardfork!(
         Bohr,
         /// BSC `Pascal` hardfork
         Pascal,
-        /// BSC `Prague` hardfork
-        Prague,
+        /// BSC `Lorentz` hardfork
+        Lorentz,
+        /// BSC `Maxwell` hardfork
+        Maxwell,
     }
 );
 
@@ -87,16 +93,28 @@ impl BscHardfork {
             (EthereumHardfork::London.boxed(), ForkCondition::Block(31302048)),
             (Self::Hertz.boxed(), ForkCondition::Block(31302048)),
             (Self::HertzFix.boxed(), ForkCondition::Block(34140700)),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1705996800)),
-            (Self::Kepler.boxed(), ForkCondition::Timestamp(1705996800)),
-            (Self::Feynman.boxed(), ForkCondition::Timestamp(1713419340)),
-            (Self::FeynmanFix.boxed(), ForkCondition::Timestamp(1713419340)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1718863500)),
-            (Self::Haber.boxed(), ForkCondition::Timestamp(1718863500)),
-            (Self::HaberFix.boxed(), ForkCondition::Timestamp(1727316120)),
-            (Self::Bohr.boxed(), ForkCondition::Timestamp(1727317200)),
-            (Self::Pascal.boxed(), ForkCondition::Timestamp(1742436600)),
-            (Self::Prague.boxed(), ForkCondition::Timestamp(1742436600)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1705996800)), /* 2024-01-23 08:00:00 AM UTC */
+            (Self::Kepler.boxed(), ForkCondition::Timestamp(1705996800)), /* 2024-01-23 08:00:00
+                                                                           * AM UTC */
+            (Self::Feynman.boxed(), ForkCondition::Timestamp(1713419340)), /* 2024-04-18
+                                                                            * 05:49:00 AM UTC */
+            (Self::FeynmanFix.boxed(), ForkCondition::Timestamp(1713419340)), /* 2024-04-18 05:49:00 AM UTC */
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1718863500)), /* 2024-06-20 06:05:00 AM UTC */
+            (Self::Cancun.boxed(), ForkCondition::Timestamp(1718863500)), /* 2024-06-20 06:05:00
+                                                                           * AM UTC */
+            (Self::Haber.boxed(), ForkCondition::Timestamp(1718863500)), /* 2024-06-20 06:05:00
+                                                                          * AM UTC */
+            (Self::HaberFix.boxed(), ForkCondition::Timestamp(1727316120)), /* 2024-09-26 02:02:00 AM UTC */
+            (Self::Bohr.boxed(), ForkCondition::Timestamp(1727317200)),     /* 2024-09-26
+                                                                             * 02:20:00
+                                                                             * AM UTC */
+            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1742436600)), /* 2025-03-20 02:10:00 AM UTC */
+            (Self::Pascal.boxed(), ForkCondition::Timestamp(1742436600)), /* 2025-03-20 02:10:00
+                                                                           * AM UTC */
+            (Self::Lorentz.boxed(), ForkCondition::Timestamp(1745903100)), /* 2025-04-29
+                                                                            * 05:05:00 AM UTC */
+            (Self::Maxwell.boxed(), ForkCondition::Timestamp(1751250600)), /* 2025-06-30
+                                                                            * 02:30:00 AM UTC */
         ])
     }
 }
@@ -142,7 +160,7 @@ pub fn boot_nodes() -> Vec<NodeRecord> {
 }
 
 pub fn head() -> Head {
-    Head { number: 40_000_000, timestamp: 1742436600, ..Default::default() }
+    Head { number: 40_000_000, timestamp: 1751250600, ..Default::default() }
 }
 #[cfg(test)]
 mod tests {
@@ -152,7 +170,7 @@ mod tests {
 
     #[test]
     fn can_create_forkid() {
-        let b = hex::decode("ce18f5d3").unwrap();
+        let b = hex::decode("098d24ac").unwrap();
         let expected = [b[0], b[1], b[2], b[3]];
         let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
 
