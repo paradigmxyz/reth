@@ -164,7 +164,15 @@ where
         >,
     {
         // Create nodes with imported chain data
-        let import_result = self.create_nodes_with_import::<N>(rlp_path).await?;
+        let mut import_result = self.create_nodes_with_import::<N>(rlp_path).await?;
+
+        // Create channel for trie updates
+        let (trie_tx, trie_rx) = tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
+
+        // Start trie update forwarders for each node
+        for (idx, node) in import_result.nodes.iter_mut().enumerate() {
+            node.start_trie_update_forwarder(idx, trie_tx.clone());
+        }
 
         // Extract node clients
         let mut node_clients = Vec::new();
@@ -177,6 +185,11 @@ where
             let url = node.rpc_url();
             node_clients.push(crate::testsuite::NodeClient::new(rpc, auth, url));
         }
+
+        // We'll handle node context setting in a different way since nodes don't implement Clone
+
+        // Set the trie update receiver in the environment
+        env.trie_update_rx = Some(trie_rx);
 
         // Store the import result to keep nodes alive
         // They will be dropped when the Setup is dropped
@@ -231,9 +244,17 @@ where
         )
         .await;
 
+        // Create channel for trie updates
+        let (trie_tx, trie_rx) = tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
+
         let mut node_clients = Vec::new();
         match result {
-            Ok((nodes, executor, _wallet)) => {
+            Ok((mut nodes, executor, _wallet)) => {
+                // Start trie update forwarders for each node
+                for (idx, node) in nodes.iter_mut().enumerate() {
+                    node.start_trie_update_forwarder(idx, trie_tx.clone());
+                }
+                
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
                     let rpc = node
@@ -259,6 +280,9 @@ where
                 return Err(eyre!("Failed to setup nodes: {}", e));
             }
         }
+
+        // Set the trie update receiver in the environment
+        env.trie_update_rx = Some(trie_rx);
 
         // Finalize setup
         self.finalize_setup(env, node_clients, false).await

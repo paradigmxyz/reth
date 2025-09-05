@@ -149,7 +149,14 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
             "block_3312"
         ))
 
-        // Step 8: Verify trie updates structure directly (Option 3 implementation)
+        // Step 8: Verify trie updates structure directly
+        // Check if we get any trie updates for genesis (likely not, but let's see)
+        .with_action(VerifyTrieUpdates::new("genesis"))
+
+        // Check if we have trie updates for the first 3311 block
+        .with_action(VerifyTrieUpdates::new("first_3311")
+            .expect_storage_node(Nibbles::from_nibbles_unchecked(vec![0x0, 0xf]), true))
+
         // Check that fork block created storage node 0xf
         .with_action(VerifyTrieUpdates::new("fork_3311")
             .expect_storage_node(Nibbles::from_nibbles_unchecked(vec![0x0, 0xf]), true))
@@ -360,13 +367,20 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                 .get(&self.block_tag)
                 .ok_or_else(|| eyre::eyre!("Block tag '{}' not found", self.block_tag))?;
 
-            let _client = &env.node_clients[node_idx];
+            // Wait a bit for canonical state notifications to be processed
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            
+            // Drain any pending trie update events before checking
+            env.drain_trie_updates();
+            
             let node_state = env.node_state(node_idx)?;
+            println!("Checking trie updates for block {} on node {}", block_info.hash, node_idx);
+            println!("Available blocks in trie updates: {:?}", node_state.block_trie_updates.keys().collect::<Vec<_>>());
 
-            // First try to get trie updates from internal node state
+            // Check if we have trie updates for this block
             if let Some(trie_updates) = node_state.block_trie_updates.get(&block_info.hash) {
-                // Found trie updates in internal state
-                println!("Trie updates found in internal state for block {}:", self.block_tag);
+                // Found trie updates from canonical state notifications
+                println!("Trie updates found for block {}:", self.block_tag);
                 println!("  Trie updates structure: {:?}", trie_updates);
 
                 // Look up storage trie updates for the contract address
@@ -416,9 +430,12 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                     }
                 }
             } else {
-                // No trie updates available - this indicates the bug we're testing for
+                // No trie updates available - this indicates either:
+                // 1. The trie corruption bug where updates are missing during reorgs (unfixed version)
+                // 2. The canonical state notification hasn't been emitted yet
+                // 3. The block doesn't have trie updates (no state changes)
                 return Err(eyre::eyre!(
-                    "No trie updates available for block {} - trie updates are missing (expected bug behavior)",
+                    "No trie updates available for block {} - this may indicate the trie corruption bug or no canonical state notification was emitted",
                     self.block_tag
                 ));
             }
