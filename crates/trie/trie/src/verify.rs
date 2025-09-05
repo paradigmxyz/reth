@@ -181,6 +181,8 @@ pub enum Inconsistency {
     AccountMissing(Nibbles, BranchNodeCompact),
     /// A storage node was missing.
     StorageMissing(B256, Nibbles, BranchNodeCompact),
+    /// Progress indicator with the last seen account path.
+    Progress(Nibbles),
 }
 
 /// Verifies the contents of a trie table against some other data source which is able to produce
@@ -353,7 +355,11 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
             }
             Some(BranchNode::Account(path, node)) => {
                 trace!(target: "trie::verify", ?path, "Account node from state root");
-                self.account.next(&mut self.inconsistencies, path, node)?
+                self.account.next(&mut self.inconsistencies, path, node)?;
+                // Push progress indicator
+                if !path.is_empty() {
+                    self.inconsistencies.push(Inconsistency::Progress(path));
+                }
             }
             Some(BranchNode::Storage(account, path, node)) => {
                 trace!(target: "trie::verify", ?account, ?path, "Storage node from state root");
@@ -404,7 +410,7 @@ mod tests {
         hashed_cursor::mock::MockHashedCursorFactory,
         trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory},
     };
-    use alloy_primitives::{address, keccak256, U256};
+    use alloy_primitives::{address, keccak256, map::B256Map, U256};
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
