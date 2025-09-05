@@ -352,7 +352,7 @@ fn block_to_payload_v3(block: Block) -> ExecutionPayloadV3 {
 /// Action to load and send a payload from embedded JSON data
 #[derive(Debug)]
 pub struct SendPayloadFromJson<Engine> {
-    /// JSON payload data as string (can be from include_str! or dynamic)
+    /// JSON payload data as string (can be from `include_str`! or dynamic)
     pub payload_json: String,
     /// Node index to send to
     pub node_idx: Option<usize>,
@@ -384,13 +384,13 @@ impl<Engine> SendPayloadFromJson<Engine> {
     }
 
     /// Set the target node index
-    pub fn with_node_idx(mut self, idx: usize) -> Self {
+    pub const fn with_node_idx(mut self, idx: usize) -> Self {
         self.node_idx = Some(idx);
         self
     }
 
     /// Set expected status for the payload
-    pub fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
+    pub const fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
         self.expected_status = status;
         self
     }
@@ -475,14 +475,13 @@ where
                             "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}, Latest valid hash: {:?}",
                             node_idx, self.expected_status, result.status, latest_valid_hash
                         ));
-                    } else {
-                        return Err(eyre::eyre!(
-                            "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}",
-                            node_idx,
-                            self.expected_status,
-                            result.status
-                        ));
                     }
+                    return Err(eyre::eyre!(
+                        "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}",
+                        node_idx,
+                        self.expected_status,
+                        result.status
+                    ));
                 }
             }
 
@@ -515,13 +514,13 @@ impl<Engine> SendPayloadFromFile<Engine> {
     }
 
     /// Set the target node index
-    pub fn with_node_idx(mut self, idx: usize) -> Self {
+    pub const fn with_node_idx(mut self, idx: usize) -> Self {
         self.node_idx = Some(idx);
         self
     }
 
     /// Set expected status for the payload
-    pub fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
+    pub const fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
         self.expected_status = status;
         self
     }
@@ -665,7 +664,7 @@ where
     }
 }
 
-/// Helper function to convert JSON block data to ExecutionPayloadV3
+/// Helper function to convert JSON block data to `ExecutionPayloadV3`
 fn json_to_payload_v3(block_json: &serde_json::Value) -> Result<ExecutionPayloadV3> {
     use alloy_primitives::{Address, B256, U256};
 

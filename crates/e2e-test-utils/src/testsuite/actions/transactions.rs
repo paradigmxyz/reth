@@ -54,7 +54,7 @@ impl ProduceBlockWithTransactions {
     }
 
     /// Set the node index to send transactions to
-    pub fn with_node_idx(mut self, idx: usize) -> Self {
+    pub const fn with_node_idx(mut self, idx: usize) -> Self {
         self.node_idx = Some(idx);
         self
     }
@@ -115,11 +115,10 @@ where
             capture.execute(env).await?;
 
             // Verify transactions were included
-            let (block_info, _) = env
+            let (block_info, _) = *env
                 .block_registry
                 .get(&self.block_tag)
-                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found", self.block_tag))?
-                .clone();
+                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found", self.block_tag))?;
 
             // Get the block to check transactions
             let block = EthApiClient::<
@@ -150,7 +149,7 @@ where
                 debug!("  ✓ All {} transactions included in block", tx_hashes.len());
             } else {
                 debug!(
-                    "  ⚠️ Only {}/{} transactions included in block",
+                    "Only {}/{} transactions included in block",
                     included_count,
                     tx_hashes.len()
                 );
@@ -161,15 +160,8 @@ where
     }
 }
 
-/// Create a transaction that calls approve() on a token contract.
+/// Create a transaction that calls `approve()` on a token contract.
 /// This modifies storage in a way that can trigger trie node creation/deletion.
-///
-/// # Arguments
-/// * `token_address` - Address of the token contract
-/// * `spender` - Address to approve for spending
-/// * `amount` - Amount to approve
-/// * `nonce` - Transaction nonce
-/// * `chain_id` - Chain ID for the transaction
 pub async fn create_approve_tx(
     token_address: Address,
     spender: Address,
@@ -222,12 +214,6 @@ pub async fn create_approve_tx(
 }
 
 /// Create a simple transfer transaction that sends ETH.
-///
-/// # Arguments
-/// * `to` - Recipient address
-/// * `value` - Amount of ETH to send (in wei)
-/// * `nonce` - Transaction nonce
-/// * `chain_id` - Chain ID for the transaction
 pub async fn create_transfer_tx(
     to: Address,
     value: U256,
