@@ -7,13 +7,6 @@ use crate::types::{BlockBoundary, FilterMapMeta, FilterResult};
 use alloy_primitives::{BlockNumber, B256};
 use std::ops::RangeBounds;
 
-/// Rows for a specific map
-#[derive(Debug, Clone)]
-pub(crate) struct MapRow {
-    pub map_row_index: u64,
-    pub rows: Vec<u32>,
-}
-
 /// Rows for a specific map and value combination
 #[derive(Debug, Clone)]
 pub struct MapValueRows {

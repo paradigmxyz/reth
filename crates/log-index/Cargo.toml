@@ -16,20 +16,16 @@ workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 
-# bytes
-bytes.workspace = true
 
 auto_impl.workspace = true
 
 # reth
 reth-errors.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 modular-bitfield.workspace = true
 
 tracing.workspace = true
-tracing-subscriber.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"] }

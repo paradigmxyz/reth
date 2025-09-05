@@ -13,10 +13,7 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
-use jsonrpsee::{
-    core::RpcResult,
-    server::IdProvider,
-};
+use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_log_index::{query::spawn_query_logs_tasks, FilterMapParams, LogIndexProvider};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
@@ -592,7 +589,7 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.task_spawner.spawn_blocking(Box::pin(async move {
-            // let bloom_res = this
+            // let res = this
             //     .clone()
             //     .get_logs_in_block_range_inner(&filter, from_block, to_block, limits)
             //     .await;

@@ -168,6 +168,7 @@ impl FilterMapParams {
         (pos << hash_bits) | collision
     }
 
+    /// Returns the maximum row length for a given layer index.
     #[inline]
     pub const fn max_row_length(&self, layer_index: u32) -> u32 {
         let mut log_layer = (layer_index as u64 * self.log_layer_diff as u64) as u32;
@@ -198,13 +199,12 @@ impl FilterMapParams {
         let map_first = (map_index as u64) << self.log_values_per_map;
 
         for row in rows {
-            for j in 0..row.len() {
-                let col = row[j];
+            for col in row {
                 // potentialMatch := mapFirst + uint64(row[i]>>(logMapWidth-logValuesPerMap))
                 let potential =
-                    map_first + ((col as u64) >> (self.log_map_width - self.log_values_per_map));
+                    map_first + ((*col as u64) >> (self.log_map_width - self.log_values_per_map));
                 // row[i] == columnIndex(potentialMatch, logValue)
-                if col == self.column_index(potential, log_value) {
+                if *col == self.column_index(potential, log_value) {
                     results.push(potential);
                 }
             }
@@ -249,7 +249,6 @@ impl FilterMapParams {
 mod tests {
     use super::*;
     use alloy_primitives::b256;
-    
 
     #[test]
     fn test_row_index_distribution() {
@@ -303,9 +302,6 @@ mod tests {
         let col3 = params.column_index(1, &value);
         assert_eq!(col3 >> 8, 1);
     }
-
-    const TEST_PM_COUNT: usize = 50;
-    const TEST_PM_LEN: usize = 1000;
 
     // #[test]
     //     fn test_potential_matches() {

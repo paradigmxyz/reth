@@ -452,7 +452,8 @@ where
                 })
         };
         let unwind_to_map = (unwind_to_log_value_index >> self.params.log_values_per_map) as u32;
-        let current_map = ((meta.last_log_value_index + 1) >> self.params.log_values_per_map) as u32;
+        let current_map =
+            ((meta.last_log_value_index + 1) >> self.params.log_values_per_map) as u32;
 
         // Find the block that starts this map (or the closest block before it)
         let mut effective_unwind_to = unwind_to;
@@ -543,15 +544,14 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    
+
     use reth_db_api::transaction::DbTx;
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::{InMemorySize, SealedBlock};
     use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::{EntitiesCheckpoint, StageUnitCheckpoint};
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_receipt, BlockParams,
-        BlockRangeParams,
+        self, random_block, random_block_range, random_receipt, BlockParams, BlockRangeParams,
     };
 
     stage_test_suite_ext!(IndexLogsTestRunner, index_logs);

@@ -58,14 +58,19 @@ pub struct FilterMapMeta {
     pub oldest_epoch_map_count: u32,
 }
 
+/// A filter map row.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
 pub struct FilterMapRow {
+    /// The index of the filter map row.
     pub map_row_index: u64,
+    /// The columns in the filter map.
     pub columns: FilterMapColumns,
 }
 
+/// Filter map column.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
 pub struct FilterMapColumns {
+    /// Indices of the columns in the filter map.
     pub indices: Vec<u32>,
 }
 
@@ -74,7 +79,9 @@ pub struct FilterMapColumns {
 /// Each entry indicates the starting log value index for a specific block number.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Compact)]
 pub struct BlockBoundary {
+    /// The block number.
     pub block_number: BlockNumber,
+    /// The log value index of the first log entry in the block.
     pub log_value_index: u64,
 }
 

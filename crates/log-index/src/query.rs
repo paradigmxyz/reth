@@ -177,7 +177,6 @@ fn query_maps_range(
     let Some((first_offset, first_values)) = constraints.first().cloned() else {
         return Ok(Vec::new()); // This should never happen
     };
-    let first_values = first_values;
 
     let mut candidates: BTreeSet<u64> = first_values
         .iter()

@@ -8669,7 +8669,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "auto_impl",
- "bytes",
  "fnv",
  "futures",
  "itertools 0.14.0",
@@ -8690,7 +8689,6 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tracing",
- "tracing-subscriber 0.3.19",
 ]
 
 [[package]]

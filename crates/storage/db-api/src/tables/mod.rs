@@ -534,7 +534,7 @@ tables! {
     }
 
     /// Stores filter map rows containing column indices for log values.
-    /// Key is map_row_index (epoch-based organization for efficient access).
+    /// Key is `map_row_index` (epoch-based organization for efficient access).
     table FilterMapRows {
         type Key = MapRowIndex;
         type Value = FilterMapColumns;
