@@ -39,15 +39,13 @@ use eyre::Result;
 use futures_util::future::BoxFuture;
 use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
-use reth_e2e_test_utils::{
-    testsuite::{
-        actions::{
-            Action, BlockReference, CaptureBlock, ExpectedPayloadStatus,
-            SendForkchoiceUpdate, SendPayloadFromJson,
-        },
-        setup::{NetworkSetup, Setup},
-        Environment, TestBuilder,
+use reth_e2e_test_utils::testsuite::{
+    actions::{
+        Action, BlockReference, CaptureBlock, ExpectedPayloadStatus, SendForkchoiceUpdate,
+        SendPayloadFromJson,
     },
+    setup::{NetworkSetup, Setup},
+    Environment, TestBuilder,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -365,8 +363,12 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
             let client = &env.node_clients[node_idx];
 
             // Try to get trie updates using the debug API
-            let trie_updates_result: Result<Option<TrieUpdates>, _> = client.rpc
-                .request("debug_getTrieUpdates", vec![serde_json::to_value(format!("0x{:x}", block_info.hash))?])
+            let trie_updates_result: Result<Option<TrieUpdates>, _> = client
+                .rpc
+                .request(
+                    "debug_getTrieUpdates",
+                    vec![serde_json::to_value(format!("0x{:x}", block_info.hash))?],
+                )
                 .await;
 
             match trie_updates_result {
@@ -375,18 +377,16 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                     println!("  Trie updates structure: {:?}", trie_updates);
 
                     // Look up storage trie updates for the contract address
-                    let contract_addr = Address::from_str(
-                        "0x77d34361f991fa724ff1db9b1d760063a16770db",
-                    )?;
+                    let contract_addr =
+                        Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
                     let addr_hash = keccak256(contract_addr);
 
-                    let storage_updates = trie_updates
-                        .storage_tries
-                        .get(&addr_hash)
-                        .ok_or_else(|| {
+                    let storage_updates =
+                        trie_updates.storage_tries.get(&addr_hash).ok_or_else(|| {
                             eyre::eyre!(
                                 "No storage trie updates found for contract {} in block {}",
-                                contract_addr, self.block_tag
+                                contract_addr,
+                                self.block_tag
                             )
                         })?;
 
@@ -414,13 +414,15 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                         if !storage_updates.removed_nodes.contains(nibbles) {
                             return Err(eyre::eyre!(
                                 "Expected removed node {:?} not found at block {}",
-                                nibbles, self.block_tag
+                                nibbles,
+                                self.block_tag
                             ));
                         }
                     }
                 }
                 Ok(None) => {
-                    // This is the expected case when the fix is not enabled - trie updates should be missing
+                    // This is the expected case when the fix is not enabled - trie updates should
+                    // be missing
                     println!("No trie updates available for block {} via debug API (expected when fix is not enabled)", self.block_tag);
 
                     // When trie updates are missing, we expect the verification to fail
