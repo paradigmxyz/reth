@@ -175,7 +175,6 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
     test.run::<EthereumNode>().await?;
 
     info!("✅ Test completed - trie corruption bug reproduction successful");
-    info!("✅ With state_root_fallback=false, trie update deletion should be present");
 
     Ok(())
 }
