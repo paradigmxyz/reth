@@ -4,7 +4,7 @@ use crate::Compact;
 use alloc::vec::Vec;
 use alloy_block_access_list::{
     balance_change::BalanceChange as AlloyBalanceChange,
-    code_change::CodeChange as AlloyCodeChnage, nonce_change::NonceChange as AlloyNonceChange,
+    code_change::CodeChange as AlloyCodeChange, nonce_change::NonceChange as AlloyNonceChange,
     AccountChanges as AlloyAccountChanges, SlotChanges as AlloySlotChange,
 };
 use alloy_primitives::{Address, Bytes, StorageKey, B256, U256};
@@ -20,7 +20,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(crate, compact)]
 pub(crate) struct AccountChanges {
-    /// The address of the account whoose changes are stored.
+    /// The address of the account whose changes are stored.
     pub address: Address,
     /// List of slot changes for this account.
     pub storage_changes: Vec<SlotChanges>,
@@ -50,7 +50,7 @@ pub(crate) struct BalanceChange {
     pub post_balance: U256,
 }
 
-/// CodeChange acts as bridge which simplifies Compact implementation for `AlloyCodeChnage`.
+/// CodeChange acts as bridge which simplifies Compact implementation for `AlloyCodeChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -206,7 +206,7 @@ impl Compact for AlloyAccountChanges {
             code_changes: account_changes
                 .code_changes
                 .into_iter()
-                .map(|cc| AlloyCodeChnage {
+                .map(|cc| AlloyCodeChange {
                     block_access_index: cc.block_access_index,
                     new_code: cc.new_code,
                 })

@@ -48,16 +48,17 @@ rstest.workspace = true
 [features]
 default = ["std", "alloy"]
 std = [
-    "alloy-primitives/std",
-    "bytes/std",
-    "alloy-consensus?/std",
-    "alloy-eips?/std",
-    "alloy-genesis?/std",
-    "alloy-trie?/std",
-    "serde/std",
-    "op-alloy-consensus?/std",
-    "serde_json/std",
-    "reth-zstd-compressors?/std",
+	"alloy-primitives/std",
+	"bytes/std",
+	"alloy-consensus?/std",
+	"alloy-eips?/std",
+	"alloy-genesis?/std",
+	"alloy-trie?/std",
+	"serde/std",
+	"op-alloy-consensus?/std",
+	"serde_json/std",
+	"reth-zstd-compressors?/std",
+	"alloy-block-access-list/std"
 ]
 alloy = [
     "dep:alloy-consensus",
@@ -83,9 +84,10 @@ serde = [
     "op-alloy-consensus?/serde",
 ]
 arbitrary = [
-    "alloy-consensus?/arbitrary",
-    "alloy-eips?/arbitrary",
-    "alloy-primitives/arbitrary",
-    "alloy-trie?/arbitrary",
-    "op-alloy-consensus?/arbitrary",
+	"alloy-consensus?/arbitrary",
+	"alloy-eips?/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-trie?/arbitrary",
+	"op-alloy-consensus?/arbitrary",
+	"alloy-block-access-list/arbitrary"
 ]

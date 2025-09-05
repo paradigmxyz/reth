@@ -129,7 +129,7 @@ where
                 }
             }
 
-            // Write block acces lists  if any
+            // Write block access lists  if any
             if let Some(block_access_list) = body.block_access_list {
                 if !block_access_list.is_empty() {
                     block_access_lists_cursor

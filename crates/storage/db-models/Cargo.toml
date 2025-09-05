@@ -47,11 +47,12 @@ test-fuzz.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "reth-primitives-traits/std",
-    "bytes?/std",
-    "serde?/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"reth-primitives-traits/std",
+	"bytes?/std",
+	"serde?/std",
+	"alloy-block-access-list/std"
 ]
 serde = [
     "dep:serde",
@@ -67,12 +68,13 @@ test-utils = [
     "reth-codecs?/test-utils",
 ]
 arbitrary = [
-    "std",
-    "reth-primitives-traits/arbitrary",
-    "dep:arbitrary",
-    "alloy-primitives/arbitrary",
-    "alloy-eips/arbitrary",
-    "reth-codecs?/arbitrary",
+	"std",
+	"reth-primitives-traits/arbitrary",
+	"dep:arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-eips/arbitrary",
+	"reth-codecs?/arbitrary",
+	"alloy-block-access-list/arbitrary"
 ]
 reth-codec = [
     "dep:reth-codecs",
