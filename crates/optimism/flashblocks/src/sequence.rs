@@ -85,10 +85,21 @@ where
     }
 }
 
-pub(crate) struct FlashBlockCompleteSequence(Vec<FlashBlock>);
+/// A complete sequence of flashblocks, often corresponding to a full block.
+/// Ensure invariants of a complete flashblocks sequence.
+#[derive(Debug)]
+pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
 
 impl FlashBlockCompleteSequence {
-    fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
+    /// Create a complete sequence from a vector of flashblocks.
+    /// Ensure that:
+    /// * vector is not empty
+    /// * first flashblock have the base payload
+    /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
+    ///
+    /// Also see [`TryFrom`] implementation of `FlashBlockCompleteSequence` for
+    /// [`FlashBlockPendingSequence`]
+    pub fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
         // Ensure that first flashblock have base
@@ -107,17 +118,17 @@ impl FlashBlockCompleteSequence {
     }
 
     /// Returns the block number
-    fn block_number(&self) -> u64 {
+    pub fn block_number(&self) -> u64 {
         self.0.first().unwrap().metadata.block_number
     }
 
     /// Returns the payload base of the first flashblock.
-    fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
+    pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
         self.0.first().unwrap().base.as_ref().unwrap()
     }
 
     /// Returns the number of flashblocks in the sequence.
-    const fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.0.len()
     }
 }
