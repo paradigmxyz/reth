@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::HashedCursorFactory,
+    hashed_cursor::{HashedCursor, HashedCursorFactory},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie::StateRoot,
     trie_cursor::{
@@ -305,6 +305,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 #[derive(Debug)]
 pub struct Verifier<T: TrieCursorFactory, H> {
     trie_cursor_factory: T,
+    hashed_cursor_factory: H,
     branch_node_iter: StateRootBranchNodesIter<H>,
     outputs: Vec<Output>,
     account: SingleVerifier<DepthFirstTrieIterator<T::AccountTrieCursor>>,
@@ -317,6 +318,7 @@ impl<T: TrieCursorFactory + Clone, H: HashedCursorFactory + Clone> Verifier<T, H
     pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Result<Self, DatabaseError> {
         Ok(Self {
             trie_cursor_factory: trie_cursor_factory.clone(),
+            hashed_cursor_factory: hashed_cursor_factory.clone(),
             branch_node_iter: StateRootBranchNodesIter::new(hashed_cursor_factory),
             outputs: Default::default(),
             account: SingleVerifier::new(None, trie_cursor_factory.account_trie_cursor()?)?,
@@ -340,12 +342,70 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
         Ok(())
     }
 
+    /// This method is called using the account hashes at the boundary of [`BranchNode::Storage`]
+    /// sequences, ie once the [`StateRootBranchNodesIter`] has begun yielding storage nodes for a
+    /// different account than it was yielding previously. All accounts between the two should have
+    /// empty storages.
+    fn verify_empty_storages(
+        &mut self,
+        last_account: B256,
+        next_account: B256,
+        start_inclusive: bool,
+        end_inclusive: bool,
+    ) -> Result<(), DatabaseError> {
+        let mut account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
+        let mut account_seeked = false;
+
+        if !start_inclusive {
+            account_seeked = true;
+            account_cursor.seek(last_account)?;
+        }
+
+        loop {
+            let Some((curr_account, _)) = (if account_seeked {
+                account_cursor.next()?
+            } else {
+                account_seeked = true;
+                account_cursor.seek(last_account)?
+            }) else {
+                return Ok(())
+            };
+
+            if curr_account > next_account || (end_inclusive && curr_account == next_account) {
+                return Ok(())
+            }
+
+            trace!(target: "trie::verify", account = ?curr_account, "Verying account has empty storage");
+
+            let mut storage_cursor = self.trie_cursor_factory.storage_trie_cursor(curr_account)?;
+            let mut seeked = false;
+            while let Some((path, node)) = if seeked {
+                storage_cursor.next()?
+            } else {
+                seeked = true;
+                storage_cursor.seek(Nibbles::new())?
+            } {
+                self.outputs.push(Output::StorageExtra(curr_account, path, node));
+            }
+        }
+    }
+
     fn try_next(&mut self) -> Result<(), StateRootError> {
         match self.branch_node_iter.next().transpose()? {
             None => {
                 self.account.finalize(&mut self.outputs)?;
-                if let Some((_, storage)) = self.storage.as_mut() {
+                if let Some((prev_account, storage)) = self.storage.as_mut() {
                     storage.finalize(&mut self.outputs)?;
+
+                    // If there was a previous storage account, and it is the final one, then we
+                    // need to validate that all accounts coming after it have empty storages.
+                    let prev_account = *prev_account;
+
+                    // Calculate the max possible account address.
+                    let mut max_account = B256::ZERO;
+                    max_account.reverse();
+
+                    self.verify_empty_storages(prev_account, max_account, false, true)?;
                 }
                 self.complete = true;
             }
@@ -360,12 +420,19 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
             Some(BranchNode::Storage(account, path, node)) => {
                 trace!(target: "trie::verify", ?account, ?path, "Storage node from state root");
                 match self.storage.as_mut() {
-                    None => self.new_storage(account, path, node)?,
+                    None => {
+                        // First storage account - check for any empty storages before it
+                        self.verify_empty_storages(B256::ZERO, account, true, false)?;
+                        self.new_storage(account, path, node)?;
+                    }
                     Some((prev_account, storage)) if *prev_account == account => {
                         storage.next(&mut self.outputs, path, node)?;
                     }
-                    Some((_, storage)) => {
+                    Some((prev_account, storage)) => {
                         storage.finalize(&mut self.outputs)?;
+                        // Clear any storage entries between the previous account and the new one
+                        let prev_account = *prev_account;
+                        self.verify_empty_storages(prev_account, account, false, false)?;
                         self.new_storage(account, path, node)?;
                     }
                 }
