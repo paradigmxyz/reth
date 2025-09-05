@@ -253,6 +253,14 @@ where
         }
     }
 
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
+    }
+
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
         B: Block,
