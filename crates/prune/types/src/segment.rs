@@ -42,6 +42,16 @@ impl PruneSegment {
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
     }
+
+    /// Returns true if this is [`Self::AccountHistory`].
+    pub const fn is_account_history(&self) -> bool {
+        matches!(self, Self::AccountHistory)
+    }
+
+    /// Returns true if this is [`Self::StorageHistory`].
+    pub const fn is_storage_history(&self) -> bool {
+        matches!(self, Self::StorageHistory)
+    }
 }
 
 /// Prune purpose.
