@@ -52,7 +52,7 @@ impl ProduceBlockWithTransactions {
     }
 
     /// Set the node index to send transactions to
-    pub fn with_node_idx(mut self, idx: usize) -> Self {
+    pub const fn with_node_idx(mut self, idx: usize) -> Self {
         self.node_idx = Some(idx);
         self
     }
@@ -110,11 +110,10 @@ where
             capture.execute(env).await?;
 
             // Verify transactions were included
-            let (block_info, _) = env
+            let (block_info, _) = *env
                 .block_registry
                 .get(&self.block_tag)
-                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.block_tag))?
-                .clone();
+                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.block_tag))?;
 
             // Get the block to check transactions
             let block = EthApiClient::<
@@ -159,7 +158,7 @@ where
 
 // Transaction creation utilities
 
-/// Create a transaction that calls approve() on a token contract.
+/// Create a transaction that calls `approve()` on a token contract.
 /// This modifies storage in a way that can trigger trie node creation/deletion.
 ///
 /// # Arguments
