@@ -991,7 +991,8 @@ where
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
-            registry.eth_api().with_dev_accounts();
+            let dev_mnemonic = config.dev.dev_mnemonic.clone();
+            registry.eth_api().with_dev_accounts(dev_mnemonic);
         }
 
         let mut registry = RpcRegistry { registry };

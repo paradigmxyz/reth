@@ -299,8 +299,13 @@ where
         Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
     >,
 {
-    fn with_dev_accounts(&self) {
-        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
+    fn with_dev_accounts(&self, dev_mnemonic: Option<String>) {
+        const DEFAULT_MNEMONIC: &str =
+            "test test test test test test test test test test test junk";
+        let phrase = dev_mnemonic.as_deref().unwrap_or(DEFAULT_MNEMONIC);
+
+        let signers = DevSigner::from_mnemonic(phrase, 20);
+        *self.inner.eth_api.signers().write() = signers;
     }
 }
 
