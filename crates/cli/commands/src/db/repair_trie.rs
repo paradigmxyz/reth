@@ -90,24 +90,15 @@ impl Command {
                         storage_trie_cursor.delete_current()?;
                     }
                 }
-                Output::AccountWrong { path, expected, .. } => {
-                    // Wrong account node value, update it
-                    let nibbles = StoredNibbles(path);
-                    account_trie_cursor.upsert(nibbles, &expected)?;
-                }
-                Output::StorageWrong { account, path, expected, .. } => {
-                    // Wrong storage node value, update it
-                    let nibbles = StoredNibblesSubKey(path);
-                    let entry = StorageTrieEntry { nibbles, node: expected };
-                    storage_trie_cursor.upsert(account, &entry)?;
-                }
+                Output::AccountWrong { path, expected: node, .. } |
                 Output::AccountMissing(path, node) => {
-                    // Missing account node, add it
+                    // Wrong/missing account node value, upsert it
                     let nibbles = StoredNibbles(path);
                     account_trie_cursor.upsert(nibbles, &node)?;
                 }
+                Output::StorageWrong { account, path, expected: node, .. } |
                 Output::StorageMissing(account, path, node) => {
-                    // Missing storage node, add it
+                    // Wrong/missing storage node value, upsert it
                     let nibbles = StoredNibblesSubKey(path);
                     let entry = StorageTrieEntry { nibbles, node };
                     storage_trie_cursor.upsert(account, &entry)?;
@@ -163,19 +154,10 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
     let remaining_time = estimated_total_time - elapsed_secs;
     let eta_duration = Duration::from_secs(remaining_time as u64);
 
-    if let Some(inconsistent_nodes) = inconsistent_nodes {
-        info!(
-            progress_percent = progress_percent_str,
-            eta = %humantime::format_duration(eta_duration),
-            inconsistent_nodes,
-            "Repairing trie tables",
-        );
-    } else {
-        info!(
-            progress_percent = progress_percent_str,
-            eta = %humantime::format_duration(eta_duration),
-            inconsistent_nodes,
-            "Verifying trie tables",
-        );
-    }
+    info!(
+        progress_percent = progress_percent_str,
+        eta = %humantime::format_duration(eta_duration),
+        inconsistent_nodes,
+        "Repairing trie tables",
+    );
 }

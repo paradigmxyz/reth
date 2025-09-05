@@ -267,11 +267,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // aren't equal then we produce a wrong node. Either way we want to move the
                     // iterator forward.
                     if *curr_node != node {
-                        outputs.push(self.output_wrong(
-                            path,
-                            node,
-                            curr_node.clone(),
-                        ))
+                        outputs.push(self.output_wrong(path, node, curr_node.clone()))
                     }
                     self.curr = self.trie_iter.next().transpose()?;
                     return Ok(())
@@ -647,9 +643,7 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with different node value
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x1]), node_expected.clone())
-            .unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node_expected.clone()).unwrap();
 
         // Should have one "wrong" output
         assert_eq!(outputs.len(), 1);
@@ -673,9 +667,7 @@ mod tests {
         let mut outputs = Vec::new();
 
         // Call next with a node that comes before any in the trie
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x1]), node_missing.clone())
-            .unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node_missing.clone()).unwrap();
 
         // Should have one "missing" output
         assert_eq!(outputs.len(), 1);
@@ -788,9 +780,7 @@ mod tests {
 
         // Call next with missing node
         let missing_node = test_branch_node(0b0101, 0b0001, 0b0100, vec![B256::from([2u8; 32])]);
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x0]), missing_node.clone())
-            .unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x0]), missing_node.clone()).unwrap();
 
         // Should produce StorageMissing, not AccountMissing
         assert_eq!(outputs.len(), 1);
@@ -889,9 +879,7 @@ mod tests {
         // Process in WRONG order (skip root, provide child before processing all nodes correctly)
         // The iterator will produce: root, 0x1, 0x11
         // But we provide: 0x11, root, 0x1 (completely wrong order)
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11)
-            .unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
         verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
 
@@ -930,12 +918,8 @@ mod tests {
 
         // The depth-first iterator produces nodes in post-order (children before parents)
         // Order: 0x111, 0x112, 0x11, 0x12, 0x1, 0x21, 0x2, root
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111)
-            .unwrap();
-        verifier
-            .next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112)
-            .unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x1]), node111).unwrap();
+        verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1, 0x2]), node112).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x1]), node11).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1, 0x2]), node12).unwrap();
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x1]), node1).unwrap();
