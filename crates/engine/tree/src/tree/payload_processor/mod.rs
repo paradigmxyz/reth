@@ -33,8 +33,9 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
+    ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
+use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -50,6 +51,14 @@ pub mod prewarm;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
+
+/// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
+///
+/// These values were determined by performing benchmarks using gradually increasing values to judge
+/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
+/// would deteriorate to the point where PST might as well not be used.
+pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
+    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -76,7 +85,9 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+        parking_lot::Mutex<
+            Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ConfiguredSparseTrie>>,
+        >,
     >,
     /// Whether to use the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
@@ -363,20 +374,24 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let accounts_trie = if self.disable_parallel_sparse_trie {
+            let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
             } else {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            };
+                ConfiguredSparseTrie::Parallel(Box::new(
+                    ParallelSparseTrie::default()
+                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                ))
+            });
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
-                    .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
                     .with_updates(true),
             )
         });
 
         let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
+            SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
                 proof_task_handle,
                 self.trie_metrics.clone(),

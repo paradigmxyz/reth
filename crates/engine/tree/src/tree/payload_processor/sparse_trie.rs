@@ -39,7 +39,7 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
@@ -140,7 +140,7 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default + Clone,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
