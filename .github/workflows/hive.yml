@@ -93,7 +93,7 @@ jobs:
           - sim: ethereum/rpc-compat
             include:
               # - eth_blockNumber
-              # - eth_call
+              - eth_call
               # - eth_chainId
               # - eth_createAccessList
               # - eth_estimateGas
@@ -107,7 +107,7 @@ jobs:
               # - eth_getTransactionBy
               # - eth_getTransactionCount
               # - eth_getTransactionReceipt
-              - eth_sendRawTransaction
+              # - eth_sendRawTransaction
               # - eth_syncing
               # # debug_ rpc methods
               # - debug_
