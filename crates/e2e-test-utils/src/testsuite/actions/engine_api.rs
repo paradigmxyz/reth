@@ -24,18 +24,19 @@ pub enum PayloadSource {
     /// Load payload from file path
     File(String),
     /// Load payload from another node by block number
-    Node { 
+    Node {
         /// Index of the source node to load from
-        source_node_idx: usize, 
+        source_node_idx: usize,
         /// Block number to retrieve
-        block_number: u64 
+        block_number: u64,
     },
 }
 
 /// Represents different JSON payload formats
 #[derive(Debug)]
 enum PayloadJsonFormat {
-    /// Array format: [block, `versioned_hashes`, `parent_beacon_block_root`, `execution_requests_hash`]
+    /// Array format: [block, `versioned_hashes`, `parent_beacon_block_root`,
+    /// `execution_requests_hash`]
     Array { block: serde_json::Value, versioned_hashes: Vec<alloy_primitives::B256> },
     /// Object format: just the block object
     Object(serde_json::Value),
