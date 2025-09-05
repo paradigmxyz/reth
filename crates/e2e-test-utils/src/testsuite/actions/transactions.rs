@@ -159,13 +159,6 @@ where
 
 /// Create a transaction that calls `approve()` on a token contract.
 /// This modifies storage in a way that can trigger trie node creation/deletion.
-///
-/// # Arguments
-/// * `token_address` - Address of the token contract
-/// * `spender` - Address to approve for spending
-/// * `amount` - Amount to approve
-/// * `nonce` - Transaction nonce
-/// * `chain_id` - Chain ID for the transaction
 pub async fn create_approve_tx(
     token_address: Address,
     spender: Address,
@@ -214,12 +207,6 @@ pub async fn create_approve_tx(
 }
 
 /// Create a simple transfer transaction that sends ETH.
-///
-/// # Arguments
-/// * `to` - Recipient address
-/// * `value` - Amount of ETH to send (in wei)
-/// * `nonce` - Transaction nonce
-/// * `chain_id` - Chain ID for the transaction
 pub async fn create_transfer_tx(
     to: Address,
     value: U256,
@@ -257,8 +244,6 @@ pub async fn create_transfer_tx(
 }
 
 /// Helper to create approve transaction for the default test token contract.
-/// The default contract address is 0x77d34361f991fa724ff1db9b1d760063a16770db
-/// which is used in the trie corruption tests.
 pub async fn create_test_approve_tx(
     spender: Address,
     amount: U256,
