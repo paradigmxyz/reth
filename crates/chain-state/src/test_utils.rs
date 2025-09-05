@@ -113,12 +113,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         };
 
         let num_txs = rng.random_range(0..5);
-        let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
+        let start_balance = self.signer_build_account_info.balance;
+        let start_nonce = self.signer_build_account_info.nonce;
+        let single_cost = Self::single_tx_cost();
+        let signer_balance_decrease = single_cost * U256::from(num_txs);
         let transactions: Vec<Recovered<_>> = (0..num_txs)
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
-                self.signer_build_account_info.balance -= signer_balance_decrease;
+                self.signer_build_account_info.balance -= single_cost;
                 tx
             })
             .collect();
@@ -137,7 +140,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             })
             .collect::<Vec<_>>();
 
-        let initial_signer_balance = U256::from(10).pow(U256::from(18));
+        let final_balance = start_balance - signer_balance_decrease;
+        let final_nonce = start_nonce + num_txs;
 
         let header = Header {
             number,
@@ -154,8 +158,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             state_root: state_root_unhashed(HashMap::from([(
                 self.signer,
                 Account {
-                    balance: initial_signer_balance - signer_balance_decrease,
-                    nonce: num_txs,
+                    balance: final_balance,
+                    nonce: final_nonce,
                     ..Default::default()
                 }
                 .into_trie_account(EMPTY_ROOT_HASH),
