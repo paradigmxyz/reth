@@ -80,6 +80,12 @@ pub fn validate_amsterdam_block_access_lists<B: Block>(
     let header_bal_hash =
         block.block_access_list_hash().ok_or(ConsensusError::BlockAccessListHashMissing)?;
     if bal_hash != header_bal_hash {
+        tracing::error!(
+            target: "consensus",
+            ?header_bal_hash,
+            ?bal,
+            "Block access list hash mismatch in validation.rs in L81"
+        );
         return Err(ConsensusError::BodyBlockAccessListHashDiff(
             GotExpected { got: bal_hash, expected: header_bal_hash }.into(),
         ));
@@ -155,6 +161,12 @@ where
         let got_hash = alloy_primitives::keccak256(alloy_rlp::encode(body_bal));
 
         if got_hash != expected_hash {
+            tracing::error!(
+                target: "consensus",
+                ?expected_hash,
+                ?body_bal,
+                "Block access list hash mismatch in validation.rs in L164"
+            );
             return Err(ConsensusError::BodyBlockAccessListHashDiff(
                 GotExpected { got: got_hash, expected: expected_hash }.into(),
             ));
