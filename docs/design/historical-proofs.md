@@ -11,11 +11,13 @@ For the historical state RPCs, Reth needs to traverse half the entire tree and h
 We need to support these RPCs
 
 - `eth_getProof`: proves a small number of key-value pairs against an old block state root
+    - Many RPC providers want to provide this RPC for users, but currently can't with Reth.
 - `debug_executePayload`: executes an arbitrary block and returns the prestate and proof of each needed key-value pair
+    - Optimism chains need this RPC to execute possibly invalid blocks on top of historical state as part of the fault dispute game.
 - `debug_executionWitness`: similar to executePayload but only with blocks in the chain
 
 Based on these, we need a way to fetch proofs that:
-- can efficiently prove a decently large number of slots (1,000-10,000) within a few seconds
+- can efficiently prove a decently large number of slots (1,000-10,000) within a few seconds over an arbitrary number of blocks (1M+ for historical RPC providers)
 - can prove any slot in the state trie, not only recently accessed/modified slots
 
 If we had a way of storing trie nodes, we could potentially improve the efficiency of these proofs significantly. Instead of having to calculate the entire left subtrie (assuming the key being proven is on the right), we could just look it up.
@@ -24,11 +26,11 @@ This means higher storage requirements, but faster proof generation times.
 
 ## Baseline implementation
 
-This is a table with the following key structure:
+Keys are the concatenation of the path and block number where the trie node was created:
 
-- account hash (if storage trie)
-- path to node
-- block number where node was created
+```
+#<optional_account_hash>-<trie_path>-<block_number>
+```
 
 The values of the table are compact branch nodes, similar to the AccountsTrie and StorageTrie tables. The value can also be empty if the node was deleted at a certain block.
 
@@ -36,7 +38,7 @@ We also need a secondary index from block number to the keys created in that blo
 
 ### How trie nodes are stored incrementally
 
-We just have to load the entire `AccountsTrie` and `StorageTrie` data into a new `AccountsTrieHistory` and `StorageTrieHistory` table. These will have block number set to 0. We will also separately keep track of minimum block number. This allows us to prune with fewer write operations.
+We just have to load the entire `AccountsTrie` and `StorageTrie` data into a new `AccountsTrieHistory` and `StorageTrieHistory` table. These will have block number set to 0. We will also separately keep track of minimum block number. This allows us to prune without updating the block number of the earliest state.
 
 As we process blocks, we simply apply `TrieUpdates` in the same way as the existing tables. Deletions in the historical tables will just be inserting an empty value.
 
