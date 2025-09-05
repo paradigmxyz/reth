@@ -110,10 +110,9 @@ where
             capture.execute(env).await?;
 
             // Verify transactions were included
-            let (block_info, _) = *env
-                .block_registry
-                .get(&self.block_tag)
-                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.block_tag))?;
+            let (block_info, _) = *env.block_registry.get(&self.block_tag).ok_or_else(|| {
+                eyre::eyre!("Block tag '{}' not found in registry", self.block_tag)
+            })?;
 
             // Get the block to check transactions
             let block = EthApiClient::<
@@ -266,7 +265,8 @@ pub async fn create_test_approve_tx(
     nonce: u64,
     chain_id: u64,
 ) -> Result<Bytes> {
-    let token_address = Address::parse_checksummed("0x77d34361f991fa724ff1db9b1d760063a16770db", None)
-        .map_err(|e| eyre::eyre!("Invalid test token address: {}", e))?;
+    let token_address =
+        Address::parse_checksummed("0x77d34361f991fa724ff1db9b1d760063a16770db", None)
+            .map_err(|e| eyre::eyre!("Invalid test token address: {}", e))?;
     create_approve_tx(token_address, spender, amount, nonce, chain_id).await
 }
