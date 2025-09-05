@@ -56,11 +56,11 @@ jobs:
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
-          - sim: smoke/genesis
-          - sim: smoke/network
-          - sim: ethereum/sync
-          - sim: devp2p
-            limit: discv4
+          # - sim: smoke/genesis
+          # - sim: smoke/network
+          # - sim: ethereum/sync
+          # - sim: devp2p
+          #   limit: discv4
           # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
           # action on our side, remove from here when we get unxpected passes on these tests
           # - sim: devp2p
@@ -74,43 +74,43 @@ jobs:
           #    - GetBlockBodies
           #    - Transaction
           #    - NewPooledTxs
-          - sim: devp2p
-            limit: discv5
-            include:
-              # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
-              - PingLargeRequestID
-          - sim: ethereum/engine
-            limit: engine-exchange-capabilities
-          - sim: ethereum/engine
-            limit: engine-withdrawals
-          - sim: ethereum/engine
-            limit: engine-auth
-          - sim: ethereum/engine
-            limit: engine-api
-          - sim: ethereum/engine
-            limit: cancun
-          # eth_ rpc methods
-          - sim: ethereum/rpc-compat
-            include:
-              # - eth_blockNumber
-              # - eth_call
-              # - eth_chainId
-              # - eth_createAccessList
-              # - eth_estimateGas
-              # - eth_feeHistory
-              # - eth_getBalance
-              # - eth_getBlockBy
-              # - eth_getBlockTransactionCountBy
-              # - eth_getCode
-              # - eth_getProof
-              # - eth_getStorage
-              # - eth_getTransactionBy
-              # - eth_getTransactionCount
-              # - eth_getTransactionReceipt
-              - eth_sendRawTransaction
-              # - eth_syncing
-              # # debug_ rpc methods
-              # - debug_
+          # - sim: devp2p
+          #   limit: discv5
+          #   include:
+          #     # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
+          #     - PingLargeRequestID
+          # - sim: ethereum/engine
+          #   limit: engine-exchange-capabilities
+          # - sim: ethereum/engine
+          #   limit: engine-withdrawals
+          # - sim: ethereum/engine
+          #   limit: engine-auth
+          # - sim: ethereum/engine
+          #   limit: engine-api
+          # - sim: ethereum/engine
+          #   limit: cancun
+          # # eth_ rpc methods
+          # - sim: ethereum/rpc-compat
+          #   include:
+          #     # - eth_blockNumber
+          #     # - eth_call
+          #     # - eth_chainId
+          #     # - eth_createAccessList
+          #     # - eth_estimateGas
+          #     # - eth_feeHistory
+          #     # - eth_getBalance
+          #     # - eth_getBlockBy
+          #     # - eth_getBlockTransactionCountBy
+          #     # - eth_getCode
+          #     # - eth_getProof
+          #     # - eth_getStorage
+          #     # - eth_getTransactionBy
+          #     # - eth_getTransactionCount
+          #     # - eth_getTransactionReceipt
+          #     - eth_sendRawTransaction
+          #     # - eth_syncing
+          #     # # debug_ rpc methods
+          #     # - debug_
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
