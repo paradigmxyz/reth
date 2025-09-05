@@ -44,7 +44,7 @@ use reth_e2e_test_utils::{
     testsuite::{
         actions::{
             Action, CaptureBlock, ProduceBlocks, MakeCanonical,
-            SendPayloadFromFile, SendForkchoiceUpdate,
+            SendPayloadFromJson, SendForkchoiceUpdate,
             BlockReference, ExpectedPayloadStatus,
         },
         setup::{NetworkSetup, Setup},
@@ -112,8 +112,8 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         .with_action(CaptureBlock::new("genesis"))
 
         // Step 1: Send first 3311 payload (0xa46feca5...)
-        .with_action(SendPayloadFromFile::<EthEngineTypes>::new(
-            "crates/e2e-test-utils/tests/e2e-testsuite/testdata/trie_corruption/block_23003311_first.json"
+        .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
+            include_str!("testdata/trie_corruption/block_23003311_first.json")
         ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
 
         // Step 2: FCU to make first 3311 canonical
@@ -125,8 +125,8 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         .with_action(CaptureBlock::new("first_3311"))
 
         // Step 3: Send second 3311 payload (0xcf8b0110...) - fork block
-        .with_action(SendPayloadFromFile::<EthEngineTypes>::new(
-            "crates/e2e-test-utils/tests/e2e-testsuite/testdata/trie_corruption/block_23003311_fork.json"
+        .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
+            include_str!("testdata/trie_corruption/block_23003311_fork.json")
         ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
 
         // Step 4: FCU to make fork 3311 canonical (triggers reorg)
@@ -138,8 +138,8 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         .with_action(CaptureBlock::new("fork_3311"))
 
         // Step 5: Send 3312 payload (0xe7bd6431...)
-        .with_action(SendPayloadFromFile::<EthEngineTypes>::new(
-            "crates/e2e-test-utils/tests/e2e-testsuite/testdata/trie_corruption/block_23003312.json"
+        .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
+            include_str!("testdata/trie_corruption/block_23003312.json")
         ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
 
         // Step 6: FCU to make 3312 canonical
