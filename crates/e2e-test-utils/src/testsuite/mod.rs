@@ -13,7 +13,6 @@ use reth_payload_builder::PayloadId;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
-pub mod transaction_utils;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
