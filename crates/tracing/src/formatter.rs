@@ -1,7 +1,6 @@
-use crate::layers::BoxedLayer;
+use crate::{layers::BoxedLayer, non_blocking_drop_tracking::NonBlockingDropTracking};
 use clap::ValueEnum;
 use std::{fmt, fmt::Display};
-use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::{EnvFilter, Layer, Registry};
 
 /// Represents the logging format.
@@ -41,7 +40,7 @@ impl LogFormat {
         &self,
         filter: EnvFilter,
         color: Option<String>,
-        file_writer: Option<NonBlocking>,
+        file_writer: Option<NonBlockingDropTracking>,
     ) -> BoxedLayer<Registry> {
         let ansi = if let Some(color) = color {
             std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
