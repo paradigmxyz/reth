@@ -9,7 +9,8 @@ use reth_transaction_pool::{
     test_utils::{
         MockFeeRange, MockTransactionDistribution, MockTransactionRatio, TestPool, TestPoolBuilder,
     },
-    BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool, TransactionPoolExt,
+    AddedTransactionOutcome, BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin,
+    TransactionPool, TransactionPoolExt,
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -97,7 +98,7 @@ async fn only_blobs_eviction() {
             let results = pool.add_transactions(TransactionOrigin::External, set).await;
             for (i, result) in results.iter().enumerate() {
                 match result {
-                    Ok(hash) => {
+                    Ok(AddedTransactionOutcome { hash, .. }) => {
                         println!("✅ Inserted tx into pool with hash: {hash}");
                     }
                     Err(e) => {
@@ -111,7 +112,12 @@ async fn only_blobs_eviction() {
 
                                 // ensure that this is only returned when the sender is over the
                                 // pool limit per account
-                                assert!(i + 1 >= pool_config.max_account_slots, "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}", pool_config.max_account_slots, i + 1);
+                                assert!(
+                                    i + 1 >= pool_config.max_account_slots,
+                                    "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}",
+                                    pool_config.max_account_slots,
+                                    i + 1
+                                );
                                 // at this point we know that the sender has been limited, so we
                                 // keep going
                             }
@@ -218,7 +224,12 @@ async fn mixed_eviction() {
 
                                 // ensure that this is only returned when the sender is over the
                                 // pool limit per account
-                                assert!(i + 1 >= pool_config.max_account_slots, "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}", pool_config.max_account_slots, i + 1);
+                                assert!(
+                                    i + 1 >= pool_config.max_account_slots,
+                                    "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}",
+                                    pool_config.max_account_slots,
+                                    i + 1
+                                );
                             }
                             _ => panic!("Failed to insert tx into pool with unexpected error: {e}"),
                         }
@@ -326,7 +337,12 @@ async fn nonce_gaps_eviction() {
 
                                 // ensure that this is only returned when the sender is over the
                                 // pool limit per account
-                                assert!(i + 1 >= pool_config.max_account_slots, "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}", pool_config.max_account_slots, i + 1);
+                                assert!(
+                                    i + 1 >= pool_config.max_account_slots,
+                                    "Spammer exceeded capacity, but it shouldn't have. Max accounts slots: {}, current txs by sender: {}",
+                                    pool_config.max_account_slots,
+                                    i + 1
+                                );
                             }
                             _ => panic!("Failed to insert tx into pool with unexpected error: {e}"),
                         }

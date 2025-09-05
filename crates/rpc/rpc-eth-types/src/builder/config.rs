@@ -3,8 +3,10 @@
 use std::time::Duration;
 
 use crate::{
-    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
 };
+use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
@@ -15,8 +17,48 @@ use serde::{Deserialize, Serialize};
 /// Default value for stale filter ttl
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
+/// Config for the locally built pending block
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingBlockKind {
+    /// Return a pending block with header only, no transactions included
+    Empty,
+    /// Return null/no pending block
+    None,
+    /// Return a pending block with all transactions from the mempool (default behavior)
+    #[default]
+    Full,
+}
+
+impl std::str::FromStr for PendingBlockKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "empty" => Ok(Self::Empty),
+            "none" => Ok(Self::None),
+            "full" => Ok(Self::Full),
+            _ => Err(format!(
+                "Invalid pending block kind: {s}. Valid options are: empty, none, full"
+            )),
+        }
+    }
+}
+
+impl PendingBlockKind {
+    /// Returns true if the pending block kind is `None`
+    pub const fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Returns true if the pending block kind is `Empty`
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+}
+
 /// Additional config values for the eth namespace.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
@@ -45,6 +87,12 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
+    /// Maximum batch size for transaction pool insertions.
+    pub max_batch_size: usize,
+    /// Controls how pending blocks are built when requested via RPC methods
+    pub pending_block_kind: PendingBlockKind,
+    /// The raw transaction forwarder.
+    pub raw_tx_forwarder: ForwardConfig,
 }
 
 impl EthConfig {
@@ -72,6 +120,9 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            max_batch_size: 1,
+            pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -134,6 +185,26 @@ impl EthConfig {
     /// Configures the number of getproof requests
     pub const fn proof_permits(mut self, permits: usize) -> Self {
         self.proof_permits = permits;
+        self
+    }
+
+    /// Configures the maximum batch size for transaction pool insertions
+    pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
+        self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Configures the pending block config
+    pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Configures the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<Url>) -> Self {
+        if let Some(tx_forwarder) = tx_forwarder {
+            self.raw_tx_forwarder.tx_forwarder = Some(tx_forwarder);
+        }
         self
     }
 }

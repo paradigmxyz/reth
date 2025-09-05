@@ -11,6 +11,9 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// This is intended to be used in conjunction with `revm::db::State`
 /// during payload building which repeatedly accesses the same data.
 ///
+/// [`CachedReads::as_db_mut`] transforms this type into a [`Database`] implementation that uses
+/// [`CachedReads`] as a caching layer for operations, and records any cache misses.
+///
 /// # Example
 ///
 /// ```

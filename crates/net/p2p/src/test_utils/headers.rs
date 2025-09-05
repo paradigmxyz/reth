@@ -12,7 +12,6 @@ use crate::{
 };
 use alloy_consensus::Header;
 use futures::{Future, FutureExt, Stream, StreamExt};
-use reth_consensus::{test_utils::TestConsensus, HeaderValidator};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::SealedHeader;
@@ -31,7 +30,6 @@ use tokio::sync::Mutex;
 #[derive(Debug)]
 pub struct TestHeaderDownloader {
     client: TestHeadersClient,
-    consensus: Arc<TestConsensus>,
     limit: u64,
     download: Option<TestDownload>,
     queued_headers: Vec<SealedHeader>,
@@ -40,19 +38,13 @@ pub struct TestHeaderDownloader {
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub const fn new(
-        client: TestHeadersClient,
-        consensus: Arc<TestConsensus>,
-        limit: u64,
-        batch_size: usize,
-    ) -> Self {
-        Self { client, consensus, limit, download: None, batch_size, queued_headers: Vec::new() }
+    pub const fn new(client: TestHeadersClient, limit: u64, batch_size: usize) -> Self {
+        Self { client, limit, download: None, batch_size, queued_headers: Vec::new() }
     }
 
     fn create_download(&self) -> TestDownload {
         TestDownload {
             client: self.client.clone(),
-            consensus: Arc::clone(&self.consensus),
             limit: self.limit,
             fut: None,
             buffer: vec![],
@@ -98,7 +90,6 @@ type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>
 
 struct TestDownload {
     client: TestHeadersClient,
-    consensus: Arc<TestConsensus>,
     limit: u64,
     fut: Option<TestHeadersFut>,
     buffer: Vec<SealedHeader>,
@@ -124,7 +115,6 @@ impl fmt::Debug for TestDownload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TestDownload")
             .field("client", &self.client)
-            .field("consensus", &self.consensus)
             .field("limit", &self.limit)
             .field("buffer", &self.buffer)
             .field("done", &self.done)
@@ -145,23 +135,15 @@ impl Stream for TestDownload {
                 return Poll::Ready(None)
             }
 
-            let empty: SealedHeader = SealedHeader::default();
-            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
-                this.done = true;
-                return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
-                    hash: empty.hash(),
-                    number: empty.number,
-                    error: Box::new(error),
-                })))
-            }
-
             match ready!(this.get_or_init_fut().poll_unpin(cx)) {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
                         resp.1.into_iter().skip(1).map(SealedHeader::seal_slow).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
-                    headers.into_iter().for_each(|h| this.buffer.push(h));
+                    for h in headers {
+                        this.buffer.push(h);
+                    }
                     this.done = true;
                 }
                 Err(err) => {

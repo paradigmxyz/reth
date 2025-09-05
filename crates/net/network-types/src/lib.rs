@@ -25,7 +25,10 @@ pub use backoff::BackoffKind;
 pub use peers::{
     addr::PeerAddr,
     kind::PeerKind,
-    reputation::{is_banned_reputation, ReputationChangeOutcome, DEFAULT_REPUTATION},
+    reputation::{
+        is_banned_reputation, is_connection_failed_reputation, ReputationChangeOutcome,
+        DEFAULT_REPUTATION,
+    },
     state::PeerConnectionState,
     ConnectionsConfig, Peer, PeersConfig,
 };

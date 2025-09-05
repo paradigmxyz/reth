@@ -47,8 +47,9 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
-        + DBProvider<Tx: DbTxMut>
+    Provider: StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        > + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
         + BlockReader<Transaction: Encodable2718>,
 {
@@ -64,6 +65,7 @@ where
             receipts,
             account_history,
             storage_history,
+            bodies_history: _,
             receipts_log_filter,
         } = prune_modes;
 

@@ -1,6 +1,4 @@
-use crate::{
-    any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError,
-};
+use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -39,7 +37,9 @@ pub enum ProviderError {
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
+    #[error(
+        "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist"
+    )]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
@@ -79,9 +79,6 @@ pub enum ProviderError {
     /// Unable to find the safe block.
     #[error("safe block does not exist")]
     SafeBlockNotFound,
-    /// Thrown when the cache service task dropped.
-    #[error("cache service task stopped")]
-    CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state.
     #[error("unknown block {_0}")]
     UnknownBlockHash(B256),
@@ -131,15 +128,15 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
-    /// Storage lock error.
-    #[error(transparent)]
-    StorageLockError(#[from] StorageLockError),
     /// Storage writer error.
     #[error(transparent)]
     UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
+    /// Missing trie updates.
+    #[error("missing trie updates for block {0}")]
+    MissingTrieUpdates(B256),
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
@@ -218,7 +215,6 @@ impl StaticFileWriterError {
         Self { message: message.into() }
     }
 }
-
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 pub enum ConsistentViewError {

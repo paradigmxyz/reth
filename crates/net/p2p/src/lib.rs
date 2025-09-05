@@ -22,6 +22,7 @@ pub mod either;
 
 /// An implementation that uses headers and bodies traits to download full blocks
 pub mod full_block;
+pub use full_block::{FullBlockClient, NoopFullBlockClient};
 
 /// Traits for implementing P2P Header Clients. Also includes implementations
 /// of a Linear and a Parallel downloader generic over the [`Consensus`] and

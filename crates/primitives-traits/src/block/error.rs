@@ -26,8 +26,11 @@ impl<T> BlockRecoveryError<T> {
     }
 }
 
-impl<T> From<BlockRecoveryError<T>> for RecoveryError {
-    fn from(_: BlockRecoveryError<T>) -> Self {
-        Self
+impl<T> From<BlockRecoveryError<T>> for RecoveryError
+where
+    T: core::fmt::Debug + Send + Sync + 'static,
+{
+    fn from(err: BlockRecoveryError<T>) -> Self {
+        Self::from_source(err)
     }
 }

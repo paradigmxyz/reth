@@ -1,4 +1,9 @@
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse, RpcModule};
+use jsonrpsee::{
+    core::middleware::{Batch, Notification},
+    server::middleware::rpc::RpcServiceT,
+    types::Request,
+    MethodResponse, RpcModule,
+};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -99,13 +104,15 @@ impl<S> RpcRequestMetricsService<S> {
     }
 }
 
-impl<'a, S> RpcServiceT<'a> for RpcRequestMetricsService<S>
+impl<S> RpcServiceT for RpcRequestMetricsService<S>
 where
-    S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
 {
-    type Future = MeteredRequestFuture<S::Future>;
+    type MethodResponse = S::MethodResponse;
+    type NotificationResponse = S::NotificationResponse;
+    type BatchResponse = S::BatchResponse;
 
-    fn call(&self, req: Request<'a>) -> Self::Future {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = S::MethodResponse> + Send + 'a {
         self.metrics.inner.connection_metrics.requests_started_total.increment(1);
         let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
         if let Some((_, call_metrics)) = &call_metrics {
@@ -117,6 +124,17 @@ where
             metrics: self.metrics.clone(),
             method: call_metrics.map(|(method, _)| *method),
         }
+    }
+
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        self.inner.batch(req)
+    }
+
+    fn notification<'a>(
+        &self,
+        n: Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        self.inner.notification(n)
     }
 }
 

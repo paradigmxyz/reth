@@ -13,7 +13,7 @@ up to date.
 ### Docker Compose
 
 To run Reth, Grafana or Prometheus with Docker Compose, refer to
-the [docker docs](/book/installation/docker.md#using-docker-compose).
+the [docker docs](https://reth.rs/installation/docker#using-docker-compose).
 
 ### Grafana
 

@@ -29,7 +29,7 @@ fn main() {
                 install_ress_subprotocol(
                     ress_args,
                     node.provider,
-                    node.block_executor,
+                    node.evm_config,
                     node.network,
                     node.task_executor,
                     node.add_ons_handle.engine_events.new_listener(),

@@ -99,6 +99,11 @@ impl<H: Sealable> SealedHeader<H> {
         let hash = self.hash();
         (self.header, hash)
     }
+
+    /// Returns references to both the header and hash without taking ownership.
+    pub fn split_ref(&self) -> (&H, &BlockHash) {
+        (self.header(), self.hash_ref())
+    }
 }
 
 impl<H: Sealable> SealedHeader<&H> {
@@ -231,6 +236,34 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.header.set_difficulty(difficulty);
+    }
+}
+
+#[cfg(feature = "rpc-compat")]
+mod rpc_compat {
+    use super::*;
+
+    impl<H> SealedHeader<H> {
+        /// Converts this header into `alloy_rpc_types_eth::Header<H>`.
+        ///
+        /// Note: This does not set the total difficulty or size of the block.
+        pub fn into_rpc_header(self) -> alloy_rpc_types_eth::Header<H>
+        where
+            H: Sealable,
+        {
+            alloy_rpc_types_eth::Header::from_sealed(self.into())
+        }
+
+        /// Converts an `alloy_rpc_types_eth::Header<H>` into a `SealedHeader<H>`.
+        pub fn from_rpc_header(header: alloy_rpc_types_eth::Header<H>) -> Self {
+            Self::new(header.inner, header.hash)
+        }
+    }
+
+    impl<H> From<alloy_rpc_types_eth::Header<H>> for SealedHeader<H> {
+        fn from(value: alloy_rpc_types_eth::Header<H>) -> Self {
+            Self::from_rpc_header(value)
+        }
     }
 }
 

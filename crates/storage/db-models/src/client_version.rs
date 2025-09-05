@@ -18,7 +18,7 @@ pub struct ClientVersion {
 
 impl ClientVersion {
     /// Returns `true` if no version fields are set.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.version.is_empty() && self.git_sha.is_empty() && self.build_timestamp.is_empty()
     }
 }
@@ -29,9 +29,10 @@ impl reth_codecs::Compact for ClientVersion {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        self.version.to_compact(buf);
-        self.git_sha.to_compact(buf);
-        self.build_timestamp.to_compact(buf)
+        let version_size = self.version.to_compact(buf);
+        let git_sha_size = self.git_sha.to_compact(buf);
+        let build_timestamp_size = self.build_timestamp.to_compact(buf);
+        version_size + git_sha_size + build_timestamp_size
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {

@@ -81,6 +81,7 @@ async fn main() -> eyre::Result<()> {
                         IncomingEthRequest::GetBlockBodies { .. } => {}
                         IncomingEthRequest::GetNodeData { .. } => {}
                         IncomingEthRequest::GetReceipts { .. } => {}
+                        IncomingEthRequest::GetReceipts69 { .. } => {}
                     }
              }
              transaction_message = transactions_rx.recv() => {

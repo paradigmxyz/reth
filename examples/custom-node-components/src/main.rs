@@ -2,13 +2,15 @@
 
 #![warn(unused_crate_dependencies)]
 
-use reth::{
-    builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},
-    cli::Cli,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
-    node::{api::NodeTypes, node::EthereumAddOns, EthereumNode},
+    cli::interface::Cli,
+    node::{
+        api::{FullNodeTypes, NodeTypes},
+        builder::{components::PoolBuilder, BuilderContext},
+        node::EthereumAddOns,
+        EthereumNode,
+    },
     pool::{
         blobstore::InMemoryBlobStore, EthTransactionPool, PoolConfig,
         TransactionValidationTaskExecutor,

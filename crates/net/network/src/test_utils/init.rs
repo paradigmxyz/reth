@@ -1,9 +1,6 @@
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use reth_network_peers::PeerId;
-use std::{net::SocketAddr, time::Duration};
-
-/// The timeout for tests that create a `GethInstance`
-pub const GETH_TIMEOUT: Duration = Duration::from_secs(60);
+use std::net::SocketAddr;
 
 /// Obtains a `PeerId` from an ENR. In this case, the `PeerId` represents the public key contained
 /// in the ENR.
@@ -16,7 +13,7 @@ pub fn enr_to_peer_id(enr: Enr<SigningKey>) -> PeerId {
 // copied from ethers-rs
 /// A bit of hack to find an unused TCP port.
 ///
-/// Does not guarantee that the given port is unused after the function exists, just that it was
+/// Does not guarantee that the given port is unused after the function exits, just that it was
 /// unused before the function started (i.e., it does not reserve a port).
 pub fn unused_port() -> u16 {
     unused_tcp_addr().port()

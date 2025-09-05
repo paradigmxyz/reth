@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use url::Url;
 
 #[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
@@ -100,6 +101,8 @@ impl Config {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct StageConfig {
+    /// ERA stage configuration.
+    pub era: EraConfig,
     /// Header stage configuration.
     pub headers: HeadersConfig,
     /// Body stage configuration.
@@ -133,9 +136,36 @@ impl StageConfig {
     /// `ExecutionStage`
     pub fn execution_external_clean_threshold(&self) -> u64 {
         self.merkle
-            .clean_threshold
+            .incremental_threshold
             .max(self.account_hashing.clean_threshold)
             .max(self.storage_hashing.clean_threshold)
+    }
+}
+
+/// ERA stage configuration.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct EraConfig {
+    /// Path to a local directory where ERA1 files are located.
+    ///
+    /// Conflicts with `url`.
+    pub path: Option<PathBuf>,
+    /// The base URL of an ERA1 file host to download from.
+    ///
+    /// Conflicts with `path`.
+    pub url: Option<Url>,
+    /// Path to a directory where files downloaded from `url` will be stored until processed.
+    ///
+    /// Required for `url`.
+    pub folder: Option<PathBuf>,
+}
+
+impl EraConfig {
+    /// Sets `folder` for temporary downloads as a directory called "era" inside `dir`.
+    pub fn with_datadir(mut self, dir: impl AsRef<Path>) -> Self {
+        self.folder = Some(dir.as_ref().join("era"));
+        self
     }
 }
 
@@ -312,14 +342,22 @@ impl Default for HashingConfig {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct MerkleConfig {
+    /// The number of blocks we will run the incremental root method for when we are catching up on
+    /// the merkle stage for a large number of blocks.
+    ///
+    /// When we are catching up for a large number of blocks, we can only run the incremental root
+    /// for a limited number of blocks, otherwise the incremental root method may cause the node to
+    /// OOM. This number determines how many blocks in a row we will run the incremental root
+    /// method for.
+    pub incremental_threshold: u64,
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
     /// to whole rebuild.
-    pub clean_threshold: u64,
+    pub rebuild_threshold: u64,
 }
 
 impl Default for MerkleConfig {
     fn default() -> Self {
-        Self { clean_threshold: 5_000 }
+        Self { incremental_threshold: 7_000, rebuild_threshold: 100_000 }
     }
 }
 
@@ -425,6 +463,7 @@ impl PruneConfig {
                     receipts,
                     account_history,
                     storage_history,
+                    bodies_history,
                     receipts_log_filter,
                 },
         } = other;
@@ -440,6 +479,7 @@ impl PruneConfig {
         self.segments.receipts = self.segments.receipts.or(receipts);
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
+        self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
             self.segments.receipts_log_filter = receipts_log_filter;
@@ -960,6 +1000,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Distance(1000)),
                 account_history: None,
                 storage_history: Some(PruneMode::Before(5000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
                     Address::random(),
                     PruneMode::Full,
@@ -975,6 +1016,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Full),
                 account_history: Some(PruneMode::Distance(2000)),
                 storage_history: Some(PruneMode::Distance(3000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
                     (Address::random(), PruneMode::Distance(1000)),
                     (Address::random(), PruneMode::Before(2000)),
@@ -1027,9 +1069,9 @@ connect_trusted_nodes_only = true
         assert_eq!(conf.peers.trusted_nodes.len(), 2);
 
         let expected_enodes = vec![
-        "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
-        "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
-    ];
+            "enode://0401e494dbd0c84c5c0f72adac5985d2f2525e08b68d448958aae218f5ac8198a80d1498e0ebec2ce38b1b18d6750f6e61a56b4614c5a6c6cf0981c39aed47dc@34.159.32.127:30303",
+            "enode://e9675164b5e17b9d9edf0cc2bd79e6b6f487200c74d1331c220abb5b8ee80c2eefbf18213989585e9d0960683e819542e11d4eefb5f2b4019e1e49f9fd8fff18@berav2-bootnode.staketab.org:30303",
+        ];
 
         for enode in expected_enodes {
             let node = TrustedPeer::from_str(enode).unwrap();

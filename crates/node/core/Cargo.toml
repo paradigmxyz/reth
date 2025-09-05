@@ -23,7 +23,7 @@ reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
-reth-rpc-types-compat.workspace = true
+reth-rpc-convert.workspace = true
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config = { workspace = true, features = ["serde"] }
@@ -34,6 +34,7 @@ reth-network-peers.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-ethereum-forks.workspace = true
+reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 
 # ethereum
@@ -52,6 +53,7 @@ toml.workspace = true
 serde.workspace = true
 strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
+url.workspace = true
 
 # io
 dirs-next.workspace = true

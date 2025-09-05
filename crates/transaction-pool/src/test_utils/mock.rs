@@ -12,25 +12,26 @@ use alloy_consensus::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
         LEGACY_TX_TYPE_ID,
     },
-    transaction::PooledTransaction,
-    EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope,
+    EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702,
     TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
+    eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{distr::Uniform, prelude::Distribution};
-use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
-    InMemorySize, Recovered, SignedTransaction,
+    transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
+    SignedTransaction,
 };
 
+use alloy_consensus::error::ValueError;
 use alloy_eips::eip4844::env_settings::KzgSettings;
 use rand::distr::weighted::WeightedIndex;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -217,7 +218,7 @@ pub enum MockTransaction {
         /// The transaction input data.
         input: Bytes,
         /// The sidecar information for the transaction.
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
         /// The blob versioned hashes for the transaction.
         blob_versioned_hashes: Vec<B256>,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
@@ -360,7 +361,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             access_list: Default::default(),
-            sidecar: Default::default(),
+            sidecar: BlobTransactionSidecarVariant::Eip4844(Default::default()),
             blob_versioned_hashes: Default::default(),
             size: Default::default(),
             cost: U256::ZERO,
@@ -368,7 +369,7 @@ impl MockTransaction {
     }
 
     /// Returns a new EIP4844 transaction with a provided sidecar
-    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
+    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecarVariant) -> Self {
         let mut transaction = Self::eip4844();
         if let Self::Eip4844 { sidecar: existing_sidecar, blob_versioned_hashes, .. } =
             &mut transaction
@@ -388,15 +389,12 @@ impl MockTransaction {
     /// * [`MockTransaction::eip1559`]
     /// * [`MockTransaction::eip4844`]
     pub fn new_from_type(tx_type: TxType) -> Self {
-        #[expect(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
             TxType::Eip2930 => Self::eip2930(),
             TxType::Eip1559 => Self::eip1559(),
             TxType::Eip4844 => Self::eip4844(),
             TxType::Eip7702 => Self::eip7702(),
-
-            _ => unreachable!("Invalid transaction type"),
         }
     }
 
@@ -478,6 +476,15 @@ impl MockTransaction {
                 *accesslist = list;
             }
         }
+        self
+    }
+
+    /// Sets the authorization list for EIP-7702 transactions.
+    pub fn set_authorization_list(&mut self, list: Vec<SignedAuthorization>) -> &mut Self {
+        if let Self::Eip7702 { authorization_list, .. } = self {
+            *authorization_list = list;
+        }
+
         self
     }
 
@@ -646,7 +653,7 @@ impl MockTransaction {
         matches!(self, Self::Eip2930 { .. })
     }
 
-    /// Checks if the transaction is of the EIP-2930 type.
+    /// Checks if the transaction is of the EIP-7702 type.
     pub const fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702 { .. })
     }
@@ -667,11 +674,11 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type TryFromConsensusError = TransactionConversionError;
+    type TryFromConsensusError = ValueError<EthereumTxEnvelope<TxEip4844>>;
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransaction;
+    type Pooled = PooledTransactionVariant;
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
@@ -792,21 +799,24 @@ impl alloy_consensus::Transaction for MockTransaction {
     }
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        base_fee.map_or(self.max_fee_per_gas(), |base_fee| {
-            // if the tip is greater than the max priority fee per gas, set it to the max
-            // priority fee per gas + base fee
-            let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
-            if let Some(max_tip) = self.max_priority_fee_per_gas() {
-                if tip > max_tip {
-                    max_tip + base_fee as u128
+        base_fee.map_or_else(
+            || self.max_fee_per_gas(),
+            |base_fee| {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
+                if let Some(max_tip) = self.max_priority_fee_per_gas() {
+                    if tip > max_tip {
+                        max_tip + base_fee as u128
+                    } else {
+                        // otherwise return the max fee per gas
+                        self.max_fee_per_gas()
+                    }
                 } else {
-                    // otherwise return the max fee per gas
                     self.max_fee_per_gas()
                 }
-            } else {
-                self.max_fee_per_gas()
-            }
-        })
+            },
+        )
     }
 
     fn is_dynamic_fee(&self) -> bool {
@@ -878,7 +888,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
@@ -888,7 +898,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
@@ -899,7 +909,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn validate_blob(
         &self,
-        _blob: &BlobTransactionSidecar,
+        _blob: &BlobTransactionSidecarVariant,
         _settings: &KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
@@ -918,8 +928,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
-        #[expect(unreachable_patterns)]
-        match transaction.into_transaction() {
+        match transaction.into_typed_transaction() {
             Transaction::Legacy(TxLegacy {
                 chain_id,
                 nonce,
@@ -1014,7 +1023,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 value,
                 input,
                 access_list,
-                sidecar: BlobTransactionSidecar::default(),
+                sidecar: BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
                 blob_versioned_hashes: Default::default(),
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
@@ -1046,15 +1055,18 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
-            tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
         }
     }
 }
 
-impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
+impl TryFrom<Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>>
+    for MockTransaction
+{
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: Recovered<TxEnvelope>) -> Result<Self, Self::Error> {
+    fn try_from(
+        tx: Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>,
+    ) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_inner();
         let hash = *transaction.tx_hash();
@@ -1126,7 +1138,9 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     value: tx.value,
                     input: tx.input.clone(),
                     access_list: tx.access_list.clone(),
-                    sidecar: BlobTransactionSidecar::default(),
+                    sidecar: BlobTransactionSidecarVariant::Eip4844(
+                        BlobTransactionSidecar::default(),
+                    ),
                     blob_versioned_hashes: tx.blob_versioned_hashes.clone(),
                     size,
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
@@ -1156,8 +1170,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
     }
 }
 
-impl From<Recovered<PooledTransaction>> for MockTransaction {
-    fn from(tx: Recovered<PooledTransaction>) -> Self {
+impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
+    fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
         let (tx, signer) = tx.into_parts();
         Recovered::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
@@ -1167,10 +1181,12 @@ impl From<Recovered<PooledTransaction>> for MockTransaction {
 
 impl From<MockTransaction> for Recovered<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
-        let signed_tx =
-            TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
-
-        Self::new_unchecked(signed_tx, tx.sender())
+        let hash = *tx.hash();
+        let sender = tx.sender();
+        let tx = Transaction::from(tx);
+        let tx: TransactionSigned =
+            Signed::new_unchecked(tx, Signature::test_signature(), hash).into();
+        Self::new_unchecked(tx, sender)
     }
 }
 
@@ -1339,6 +1355,7 @@ impl MockTransactionFactory {
             transaction,
             timestamp: Instant::now(),
             origin,
+            authority_ids: None,
         }
     }
 
@@ -1693,7 +1710,7 @@ impl MockTransactionSet {
     ///
     /// Let an example transaction set be `[(tx1, 1), (tx2, 2)]`, where the first element of the
     /// tuple is a transaction, and the second element is the nonce. If the `gap_pct` is 50, and
-    /// the `gap_range` is `1..=1`, then the resulting transaction set could would be either
+    /// the `gap_range` is `1..=1`, then the resulting transaction set could be either
     /// `[(tx1, 1), (tx2, 2)]` or `[(tx1, 1), (tx2, 3)]`, with a 50% chance of either.
     pub fn with_nonce_gaps(
         &mut self,

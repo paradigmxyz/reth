@@ -31,8 +31,7 @@ pub use info::ChainInfo;
 pub use spec::test_fork_ids;
 pub use spec::{
     make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    ChainSpecProvider, DepositContract, ForkBaseFeeParams, HardforkBlobParams, DEV, HOLESKY, HOODI,
-    MAINNET, SEPOLIA,
+    ChainSpecProvider, DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
 
 use reth_primitives_traits::sync::OnceLock;
@@ -145,5 +144,35 @@ mod tests {
         let s = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@all.holesky.ethdisco.net";
         let chain: Chain = NamedChain::Holesky.into();
         assert_eq!(s, chain.public_dns_network_protocol().unwrap().as_str());
+    }
+
+    #[test]
+    fn test_centralized_base_fee_calculation() {
+        use crate::{ChainSpec, EthChainSpec};
+        use alloy_consensus::Header;
+        use alloy_eips::eip1559::INITIAL_BASE_FEE;
+
+        fn parent_header() -> Header {
+            Header {
+                gas_used: 15_000_000,
+                gas_limit: 30_000_000,
+                base_fee_per_gas: Some(INITIAL_BASE_FEE),
+                timestamp: 1_000,
+                ..Default::default()
+            }
+        }
+
+        let spec = ChainSpec::default();
+        let parent = parent_header();
+
+        // For testing, assume next block has timestamp 12 seconds later
+        let next_timestamp = parent.timestamp + 12;
+
+        let expected = parent
+            .next_block_base_fee(spec.base_fee_params_at_timestamp(next_timestamp))
+            .unwrap_or_default();
+
+        let got = spec.next_block_base_fee(&parent, next_timestamp).unwrap_or_default();
+        assert_eq!(expected, got, "Base fee calculation does not match expected value");
     }
 }

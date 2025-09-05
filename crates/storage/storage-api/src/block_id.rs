@@ -7,7 +7,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
 ///
-/// This trait also supports fetching block hashes and block numbers from a [BlockHashOrNumber].
+/// This trait also supports fetching block hashes and block numbers from a [`BlockHashOrNumber`].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the current info for the chain.
@@ -18,6 +18,11 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 
     /// Returns the last block number associated with the last canonical header in the database.
     fn last_block_number(&self) -> ProviderResult<BlockNumber>;
+
+    /// Returns earliest block number to keep track of the expired block range.
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        Ok(0)
+    }
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>>;
@@ -48,7 +53,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
 ///
-/// The resulting block numbers can be converted to hashes using the underlying [BlockNumReader]
+/// The resulting block numbers can be converted to hashes using the underlying [`BlockNumReader`]
 /// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdReader: BlockNumReader + Send + Sync {
@@ -56,7 +61,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {
             BlockNumberOrTag::Latest => self.best_block_number()?,
-            BlockNumberOrTag::Earliest => 0,
+            BlockNumberOrTag::Earliest => self.earliest_block_number()?,
             BlockNumberOrTag::Pending => {
                 return self
                     .pending_block_num_hash()
@@ -84,7 +89,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.hash)),
                 BlockNumberOrTag::Finalized => self.finalized_block_hash(),
                 BlockNumberOrTag::Safe => self.safe_block_hash(),
-                BlockNumberOrTag::Earliest => self.block_hash(0),
+                BlockNumberOrTag::Earliest => self.block_hash(self.earliest_block_number()?),
                 BlockNumberOrTag::Number(num) => self.block_hash(num),
             },
         }

@@ -6,19 +6,19 @@ use crate::{
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
     transactions::{
-        config::TransactionPropagationKind, TransactionsHandle, TransactionsManager,
-        TransactionsManagerConfig,
+        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        policy::NetworkPolicies,
+        TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use alloy_consensus::transaction::PooledTransaction;
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -246,7 +246,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
@@ -314,7 +317,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
@@ -393,7 +399,13 @@ pub struct Peer<C, Pool = TestPool> {
     #[pin]
     request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
     #[pin]
-    transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
+    transactions_manager: Option<
+        TransactionsManager<
+            Pool,
+            EthNetworkPrimitives,
+            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
+        >,
+    >,
     pool: Option<Pool>,
     client: C,
     secret_key: SecretKey,
@@ -523,12 +535,15 @@ where
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
 
+        let announcement_policy = StrictEthAnnouncementFilter::default();
+        let policies = NetworkPolicies::new(policy, announcement_policy);
+
         let transactions_manager = TransactionsManager::with_policy(
             network.handle().clone(),
             pool.clone(),
             rx,
             config,
-            policy,
+            policies,
         );
 
         Peer {
@@ -562,7 +577,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
@@ -768,9 +786,9 @@ impl NetworkEventStream {
         peers
     }
 
-    /// Ensures that the first two events are a [`NetworkEvent::Peer(PeerEvent::PeerAdded`] and
-    /// [`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the established
-    /// session.
+    /// Ensures that the first two events are a [`NetworkEvent::Peer`] and
+    /// [`PeerEvent::PeerAdded`][`NetworkEvent::ActivePeerSession`], returning the [`PeerId`] of the
+    /// established session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
             Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,

@@ -7,8 +7,8 @@ use itertools::Either;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload as _, OnForkChoiceUpdated,
-    PayloadValidator,
 };
+use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -103,7 +103,7 @@ where
         + StateProviderFactory
         + ChainSpecProvider,
     Evm: ConfigureEvm,
-    Validator: PayloadValidator<ExecutionData = T::ExecutionData, Block = BlockTy<Evm::Primitives>>,
+    Validator: EngineValidator<T, Evm::Primitives>,
 {
     type Item = S::Item;
 
@@ -236,19 +236,20 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm, Validator>(
+fn create_reorg_head<Provider, Evm, T, Validator>(
     provider: &Provider,
     evm_config: &Evm,
     payload_validator: &Validator,
     mut depth: usize,
-    next_payload: Validator::ExecutionData,
+    next_payload: T::ExecutionData,
 ) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
 where
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
-    Validator: PayloadValidator<Block = BlockTy<Evm::Primitives>>,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    Validator: EngineValidator<T, Evm::Primitives>,
 {
     // Ensure next payload is valid.
     let next_block =
@@ -298,7 +299,7 @@ where
         }
 
         let tx_recovered =
-            tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
+            tx.try_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let gas_used = match builder.execute_transaction(tx_recovered) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {

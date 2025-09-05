@@ -73,14 +73,14 @@ where
         self.inner.best_payload(id).await
     }
 
-    /// Returns the payload attributes associated with the given identifier.
+    /// Returns the payload timestamp associated with the given identifier.
     ///
-    /// Note: this returns the attributes of the payload and does not resolve the job.
-    pub async fn payload_attributes(
+    /// Note: this returns the timestamp of the payload and does not resolve the job.
+    pub async fn payload_timestamp(
         &self,
         id: PayloadId,
-    ) -> Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>> {
-        self.inner.payload_attributes(id).await
+    ) -> Option<Result<u64, PayloadBuilderError>> {
+        self.inner.payload_timestamp(id).await
     }
 }
 
@@ -166,15 +166,15 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         Ok(PayloadEvents { receiver: rx.await? })
     }
 
-    /// Returns the payload attributes associated with the given identifier.
+    /// Returns the payload timestamp associated with the given identifier.
     ///
-    /// Note: this returns the attributes of the payload and does not resolve the job.
-    pub async fn payload_attributes(
+    /// Note: this returns the timestamp of the payload and does not resolve the job.
+    pub async fn payload_timestamp(
         &self,
         id: PayloadId,
-    ) -> Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>> {
+    ) -> Option<Result<u64, PayloadBuilderError>> {
         let (tx, rx) = oneshot::channel();
-        self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
+        self.to_service.send(PayloadServiceCommand::PayloadTimestamp(id, tx)).ok()?;
         rx.await.ok()?
     }
 }
@@ -260,6 +260,12 @@ where
         PayloadBuilderHandle::new(self.service_tx.clone())
     }
 
+    /// Create clone on `payload_events` sending handle that could be used by builder to produce
+    /// additional events during block building
+    pub fn payload_events_handle(&self) -> broadcast::Sender<Events<T>> {
+        self.payload_events.clone()
+    }
+
     /// Returns true if the given payload is currently being built.
     fn contains_payload(&self, id: PayloadId) -> bool {
         self.payload_jobs.iter().any(|(_, job_id)| *job_id == id)
@@ -286,14 +292,14 @@ where
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
-        trace!(%id, "resolving payload job");
+        debug!(target: "payload_builder", %id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
             let (_, id) = self.payload_jobs.swap_remove(job);
-            trace!(%id, "terminated resolved job");
+            debug!(target: "payload_builder", %id, "terminated resolved job");
         }
 
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
@@ -303,8 +309,10 @@ where
 
         let fut = async move {
             let res = fut.await;
-            if let Ok(ref payload) = res {
-                payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+            if let Ok(payload) = &res {
+                if payload_events.receiver_count() > 0 {
+                    payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+                }
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
@@ -323,22 +331,19 @@ where
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
-    /// Returns the payload attributes for the given payload.
-    fn payload_attributes(
-        &self,
-        id: PayloadId,
-    ) -> Option<Result<<Gen::Job as PayloadJob>::PayloadAttributes, PayloadBuilderError>> {
-        let attributes = self
+    /// Returns the payload timestamp for the given payload.
+    fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
+        let timestamp = self
             .payload_jobs
             .iter()
             .find(|(_, job_id)| *job_id == id)
-            .map(|(j, _)| j.payload_attributes());
+            .map(|(j, _)| j.payload_timestamp());
 
-        if attributes.is_none() {
-            trace!(%id, "no matching payload job found to get attributes for");
+        if timestamp.is_none() {
+            trace!(target: "payload_builder", %id, "no matching payload job found to get timestamp for");
         }
 
-        attributes
+        timestamp
     }
 }
 
@@ -372,10 +377,10 @@ where
                 match job.poll_unpin(cx) {
                     Poll::Ready(Ok(_)) => {
                         this.metrics.set_active_jobs(this.payload_jobs.len());
-                        trace!(%id, "payload job finished");
+                        trace!(target: "payload_builder", %id, "payload job finished");
                     }
                     Poll::Ready(Err(err)) => {
-                        warn!(%err, ?id, "Payload builder job failed; resolving payload");
+                        warn!(target: "payload_builder",%err, ?id, "Payload builder job failed; resolving payload");
                         this.metrics.inc_failed_jobs();
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
@@ -397,13 +402,13 @@ where
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {
-                            debug!(%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
+                            debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
                         } else {
                             // no job for this payload yet, create one
                             let parent = attr.parent();
                             match this.generator.new_payload_job(attr.clone()) {
                                 Ok(job) => {
-                                    info!(%id, %parent, "New payload job created");
+                                    info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
@@ -411,7 +416,7 @@ where
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
-                                    warn!(%err, %id, "Failed to create payload builder job");
+                                    warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
                                     res = Err(err);
                                 }
                             }
@@ -423,9 +428,9 @@ where
                     PayloadServiceCommand::BestPayload(id, tx) => {
                         let _ = tx.send(this.best_payload(id));
                     }
-                    PayloadServiceCommand::PayloadAttributes(id, tx) => {
-                        let attributes = this.payload_attributes(id);
-                        let _ = tx.send(attributes);
+                    PayloadServiceCommand::PayloadTimestamp(id, tx) => {
+                        let timestamp = this.payload_timestamp(id);
+                        let _ = tx.send(timestamp);
                     }
                     PayloadServiceCommand::Resolve(id, strategy, tx) => {
                         let _ = tx.send(this.resolve(id, strategy));
@@ -453,11 +458,8 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ),
     /// Get the best payload so far
     BestPayload(PayloadId, oneshot::Sender<Option<Result<T::BuiltPayload, PayloadBuilderError>>>),
-    /// Get the payload attributes for the given payload
-    PayloadAttributes(
-        PayloadId,
-        oneshot::Sender<Option<Result<T::PayloadBuilderAttributes, PayloadBuilderError>>>,
-    ),
+    /// Get the payload timestamp for the given payload
+    PayloadTimestamp(PayloadId, oneshot::Sender<Option<Result<u64, PayloadBuilderError>>>),
     /// Resolve the payload and return the payload
     Resolve(
         PayloadId,
@@ -480,7 +482,7 @@ where
             Self::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
             }
-            Self::PayloadAttributes(f0, f1) => {
+            Self::PayloadTimestamp(f0, f1) => {
                 f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
             }
             Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),

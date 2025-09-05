@@ -83,7 +83,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(key.clone())?;
+        let mut db_entry = self.cursor.seek(key)?;
         while db_entry.as_ref().is_some_and(|entry| self.removed_nodes.contains(&entry.0)) {
             db_entry = self.cursor.next()?;
         }
@@ -101,7 +101,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         let in_memory = self.in_memory_cursor.first_after(&last);
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(last.clone())?;
+        let mut db_entry = self.cursor.seek(last)?;
         while db_entry
             .as_ref()
             .is_some_and(|entry| entry.0 < last || self.removed_nodes.contains(&entry.0))
@@ -120,7 +120,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, true)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
+        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
         Ok(entry)
     }
 
@@ -129,15 +129,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, false)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
+        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let next = match &self.last_key {
             Some(last) => {
-                let entry = self.next_inner(last.clone())?;
-                self.last_key = entry.as_ref().map(|entry| entry.0.clone());
+                let entry = self.next_inner(*last)?;
+                self.last_key = entry.as_ref().map(|entry| entry.0);
                 entry
             }
             // no previous entry was found
@@ -148,7 +148,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         match &self.last_key {
-            Some(key) => Ok(Some(key.clone())),
+            Some(key) => Ok(Some(*key)),
             None => self.cursor.current(),
         }
     }
@@ -207,7 +207,7 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(key.clone())?;
+        let mut db_entry = self.cursor.seek(key)?;
         while db_entry
             .as_ref()
             .is_some_and(|entry| self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
@@ -231,7 +231,7 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         }
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(last.clone())?;
+        let mut db_entry = self.cursor.seek(last)?;
         while db_entry.as_ref().is_some_and(|entry| {
             entry.0 < last || self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0))
         }) {
@@ -249,7 +249,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, true)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
+        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
         Ok(entry)
     }
 
@@ -258,15 +258,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let entry = self.seek_inner(key, false)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
+        self.last_key = entry.as_ref().map(|(nibbles, _)| *nibbles);
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let next = match &self.last_key {
             Some(last) => {
-                let entry = self.next_inner(last.clone())?;
-                self.last_key = entry.as_ref().map(|entry| entry.0.clone());
+                let entry = self.next_inner(*last)?;
+                self.last_key = entry.as_ref().map(|entry| entry.0);
                 entry
             }
             // no previous entry was found
@@ -277,7 +277,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         match &self.last_key {
-            Some(key) => Ok(Some(key.clone())),
+            Some(key) => Ok(Some(*key)),
             None => self.cursor.current(),
         }
     }

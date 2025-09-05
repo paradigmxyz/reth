@@ -88,7 +88,9 @@ pub enum Error {
     BadSignature,
     /// Database should be recovered, but cannot be done automatically since it's in read-only
     /// mode.
-    #[error("database should be recovered, but cannot be done automatically since it's in read-only mode")]
+    #[error(
+        "database should be recovered, but cannot be done automatically since it's in read-only mode"
+    )]
     WannaRecovery,
     /// The given key value is mismatched to the current cursor position.
     #[error("the given key value is mismatched to the current cursor position")]
@@ -97,7 +99,9 @@ pub enum Error {
     #[error("invalid parameter specified")]
     DecodeError,
     /// The environment opened in read-only.
-    #[error("the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more")]
+    #[error(
+        "the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more"
+    )]
     Access,
     /// Database is too large for the current system.
     #[error("database is too large for the current system")]

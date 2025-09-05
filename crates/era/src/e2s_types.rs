@@ -165,3 +165,96 @@ impl Entry {
         self.entry_type == SLOT_INDEX
     }
 }
+
+/// Serialize and deserialize index entries with format:
+/// `starting-number | offsets... | count`
+pub trait IndexEntry: Sized {
+    /// Get the entry type identifier for this index
+    fn entry_type() -> [u8; 2];
+
+    /// Create a new instance with starting number and offsets
+    fn new(starting_number: u64, offsets: Vec<i64>) -> Self;
+
+    /// Get the starting number - can be starting slot or block number for example
+    fn starting_number(&self) -> u64;
+
+    /// Get the offsets vector
+    fn offsets(&self) -> &[i64];
+
+    /// Convert to an [`Entry`] for storage in an e2store file
+    /// Format: starting-number | offset1 | offset2 | ... | count
+    fn to_entry(&self) -> Entry {
+        let mut data = Vec::with_capacity(8 + self.offsets().len() * 8 + 8);
+
+        // Add starting number
+        data.extend_from_slice(&self.starting_number().to_le_bytes());
+
+        // Add all offsets
+        data.extend(self.offsets().iter().flat_map(|offset| offset.to_le_bytes()));
+
+        // Encode count - 8 bytes again
+        let count = self.offsets().len() as i64;
+        data.extend_from_slice(&count.to_le_bytes());
+
+        Entry::new(Self::entry_type(), data)
+    }
+
+    /// Create from an [`Entry`]
+    fn from_entry(entry: &Entry) -> Result<Self, E2sError> {
+        let expected_type = Self::entry_type();
+
+        if entry.entry_type != expected_type {
+            return Err(E2sError::Ssz(format!(
+                "Invalid entry type: expected {:02x}{:02x}, got {:02x}{:02x}",
+                expected_type[0], expected_type[1], entry.entry_type[0], entry.entry_type[1]
+            )));
+        }
+
+        if entry.data.len() < 16 {
+            return Err(E2sError::Ssz(
+                "Index entry too short: need at least 16 bytes for starting_number and count"
+                    .to_string(),
+            ));
+        }
+
+        // Extract count from last 8 bytes
+        let count_bytes = &entry.data[entry.data.len() - 8..];
+        let count = i64::from_le_bytes(
+            count_bytes
+                .try_into()
+                .map_err(|_| E2sError::Ssz("Failed to read count bytes".to_string()))?,
+        ) as usize;
+
+        // Verify entry has correct size
+        let expected_len = 8 + count * 8 + 8;
+        if entry.data.len() != expected_len {
+            return Err(E2sError::Ssz(format!(
+                "Index entry has incorrect length: expected {expected_len}, got {}",
+                entry.data.len()
+            )));
+        }
+
+        // Extract starting number from first 8 bytes
+        let starting_number = u64::from_le_bytes(
+            entry.data[0..8]
+                .try_into()
+                .map_err(|_| E2sError::Ssz("Failed to read starting_number bytes".to_string()))?,
+        );
+
+        // Extract all offsets
+        let mut offsets = Vec::with_capacity(count);
+        for i in 0..count {
+            let start = 8 + i * 8;
+            let end = start + 8;
+            let offset_bytes = &entry.data[start..end];
+            let offset = i64::from_le_bytes(
+                offset_bytes
+                    .try_into()
+                    .map_err(|_| E2sError::Ssz(format!("Failed to read offset {i} bytes")))?,
+            );
+            offsets.push(offset);
+        }
+
+        Ok(Self::new(starting_number, offsets))
+    }
+}

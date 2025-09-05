@@ -81,6 +81,8 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 /// The notification contains at least one [`Chain`] with the imported segment. If some blocks were
 /// reverted (e.g. during a reorg), the old chain is also returned.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub enum CanonStateNotification<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// The canonical chain was extended.
     Commit {
@@ -120,13 +122,33 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
         }
     }
 
-    /// Get the new tip of the chain.
+    /// Gets the new tip of the chain.
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
+        }
+    }
+
+    /// Gets the new tip of the chain.
+    ///
+    /// If the chain has no blocks, it returns `None`. Otherwise, it returns the new tip for
+    /// [`Self::Reorg`] and [`Self::Commit`] variants.
+    pub fn tip_checked(&self) -> Option<&RecoveredBlock<N::Block>> {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => {
+                if new.is_empty() {
+                    None
+                } else {
+                    Some(new.tip())
+                }
+            }
         }
     }
 
@@ -215,8 +237,8 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::BlockBody;
-    use alloy_primitives::{b256, B256};
+    use alloy_consensus::{BlockBody, SignableTransaction, TxLegacy};
+    use alloy_primitives::{b256, Signature, B256};
     use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::SealedBlock;
@@ -305,7 +327,7 @@ mod tests {
         let block2_hash = B256::new([0x02; 32]);
 
         // Create a default transaction to include in block1's transactions.
-        let tx = TransactionSigned::default();
+        let tx = TxLegacy::default().into_signed(Signature::test_signature()).into();
         body.transactions.push(tx);
 
         let block = SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
@@ -357,6 +379,7 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: block1.num_hash(),
+                timestamp: block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
@@ -373,7 +396,7 @@ mod tests {
     fn test_block_receipts_reorg() {
         // Define block1 for the old chain segment, which will be reverted.
         let mut body = BlockBody::<TransactionSigned>::default();
-        body.transactions.push(TransactionSigned::default());
+        body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut old_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
                 SealedHeader::seal_slow(alloy_consensus::Header::default()),
@@ -402,7 +425,7 @@ mod tests {
 
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
-        body.transactions.push(TransactionSigned::default());
+        body.transactions.push(TxLegacy::default().into_signed(Signature::test_signature()).into());
         let mut new_block1 =
             SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
                 SealedHeader::seal_slow(alloy_consensus::Header::default()),
@@ -442,6 +465,7 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: old_block1.num_hash(),
+                timestamp: old_block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
@@ -458,6 +482,7 @@ mod tests {
             block_receipts[1].0,
             BlockReceipts {
                 block: new_block1.num_hash(),
+                timestamp: new_block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),

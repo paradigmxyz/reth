@@ -3,6 +3,7 @@
 use crate::ForkchoiceStatus;
 use alloc::boxed::Box;
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use core::{
@@ -13,13 +14,19 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineEvent instead")]
+pub type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
+
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
-pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
+pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
     ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    /// A new block was received from the consensus engine
+    BlockReceived(BlockNumHash),
     /// A block was added to the canonical chain, and the elapsed time validating the block
     CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
@@ -30,9 +37,9 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
 }
 
-impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
+impl<N: NodePrimitives> ConsensusEngineEvent<N> {
     /// Returns the canonical header if the event is a
-    /// [`BeaconConsensusEngineEvent::CanonicalChainCommitted`].
+    /// [`ConsensusEngineEvent::CanonicalChainCommitted`].
     pub const fn canonical_header(&self) -> Option<&SealedHeader<N::BlockHeader>> {
         match self {
             Self::CanonicalChainCommitted(header, _) => Some(header),
@@ -41,7 +48,7 @@ impl<N: NodePrimitives> BeaconConsensusEngineEvent<N> {
     }
 }
 
-impl<N> Display for BeaconConsensusEngineEvent<N>
+impl<N> Display for ConsensusEngineEvent<N>
 where
     N: NodePrimitives<BlockHeader: BlockHeader>,
 {
@@ -68,6 +75,9 @@ where
             }
             Self::LiveSyncProgress(progress) => {
                 write!(f, "LiveSyncProgress({progress:?})")
+            }
+            Self::BlockReceived(num_hash) => {
+                write!(f, "BlockReceived({num_hash:?})")
             }
         }
     }

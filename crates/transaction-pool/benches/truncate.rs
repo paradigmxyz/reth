@@ -88,7 +88,9 @@ fn generate_many_transactions(
 
 /// Benchmarks all pool types for the truncate function.
 fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max_depth: usize) {
-    println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
+    println!(
+        "Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}..."
+    );
     let txs = generate_many_transactions(senders, max_depth, false);
 
     // benchmark parked pool

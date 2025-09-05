@@ -1,0 +1,45 @@
+# Consensus Component
+
+The consensus component validates blocks according to Ethereum protocol rules, handles chain reorganizations, and manages the canonical chain state.
+
+## Overview
+
+The consensus component is responsible for:
+- Validating block headers and bodies
+- Verifying state transitions
+- Managing fork choice rules
+- Handling chain reorganizations
+- Tracking finalized and safe blocks
+- Validating blob transactions (EIP-4844)
+
+## Key Concepts
+
+### Block Validation
+The consensus component performs multiple validation steps:
+1. **Pre-execution validation**: Header and body checks before running transactions
+2. **Post-execution validation**: State root and receipts verification after execution
+
+### Header Validation
+Headers must pass several checks:
+- **Timestamp**: Must be greater than parent's timestamp
+- **Gas limit**: Changes must be within protocol limits (1/1024 of parent)
+- **Extra data**: Size restrictions based on network rules
+- **Difficulty/PoS**: Appropriate validation for pre/post-merge
+
+### Body Validation
+Block bodies are validated against headers:
+- **Transaction root**: Merkle root must match header
+- **Withdrawals root**: For post-Shanghai blocks
+- **Blob validation**: For EIP-4844 transactions
+
+### Fork Choice
+The consensus engine determines the canonical chain:
+- Tracks multiple chain branches
+- Applies fork choice rules (longest chain, most work, etc.)
+- Handles reorganizations when better chains are found
+
+## Next Steps
+
+- Explore [EVM](/sdk/node-components/evm) execution
+- Learn about [RPC](/sdk/node-components/rpc) server integration
+- Understand [Transaction Pool](/sdk/node-components/pool) interaction

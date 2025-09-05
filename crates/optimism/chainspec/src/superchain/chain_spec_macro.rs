@@ -24,10 +24,14 @@ macro_rules! key_for {
     };
 }
 
-/// Create an enum of every superchain (name, environment) pair.
+/// Create chain specs and an enum of every superchain (name, environment) pair.
 #[macro_export]
-macro_rules! create_superchain_enum {
+macro_rules! create_superchain_specs {
     ( $( ($name:expr, $env:expr) ),+ $(,)? ) => {
+        $(
+            $crate::create_chain_spec!($name, $env);
+        )+
+
         paste::paste! {
             /// All available superchains as an enum
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,7 +73,6 @@ macro_rules! create_superchain_enum {
             /// All supported superchains, including both older and newer naming,
             /// for backwards compatibility
             pub const SUPPORTED_CHAINS: &'static [&'static str] = &[
-                "dev",
                 "optimism",
                 "optimism_sepolia",
                 "optimism-sepolia",
@@ -79,6 +82,7 @@ macro_rules! create_superchain_enum {
                 $(
                     $crate::key_for!($name, $env),
                 )+
+                "dev",
             ];
 
             /// Parses the chain into an [`$crate::OpChainSpec`], if recognized.

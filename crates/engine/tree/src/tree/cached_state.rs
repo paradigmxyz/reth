@@ -6,8 +6,8 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_revm::db::BundleState;
 use reth_trie::{
@@ -162,7 +162,9 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
             }
         }
     }
+}
 
+impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(res) = self.caches.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);

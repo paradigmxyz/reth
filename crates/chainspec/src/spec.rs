@@ -5,7 +5,7 @@ use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     EthChainSpec,
 };
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -15,8 +15,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
+    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -105,14 +104,10 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         hardforks,
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-        deposit_contract: Some(DepositContract::new(
-            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-            11052984,
-            b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
+        deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -141,7 +136,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -168,7 +163,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -197,7 +192,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: HardforkBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -261,32 +256,6 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-/// A container for hardforks that use eip-7804 blobs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardforkBlobParams {
-    /// Configuration for blob-related calculations for the Cancun hardfork.
-    pub cancun: BlobParams,
-    /// Configuration for blob-related calculations for the Prague hardfork.
-    pub prague: BlobParams,
-}
-
-impl HardforkBlobParams {
-    /// Constructs params for chainspec from a provided blob schedule.
-    /// Falls back to defaults if the schedule is missing.
-    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
-        Self {
-            cancun: blob_schedule.get("cancun").copied().unwrap_or_else(BlobParams::cancun),
-            prague: blob_schedule.get("prague").copied().unwrap_or_else(BlobParams::prague),
-        }
-    }
-}
-
-impl Default for HardforkBlobParams {
-    fn default() -> Self {
-        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
-    }
-}
-
 impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
@@ -330,7 +299,7 @@ pub struct ChainSpec {
     pub prune_delete_limit: usize,
 
     /// The settings passed for blob configurations for specific hardforks.
-    pub blob_params: HardforkBlobParams,
+    pub blob_params: BlobScheduleBlobParams,
 }
 
 impl Default for ChainSpec {
@@ -424,25 +393,6 @@ impl ChainSpec {
         }
     }
 
-    /// Get the [`BaseFeeParams`] for the chain at the given block number
-    pub fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
-        match self.base_fee_params {
-            BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
-                // Walk through the base fee params configuration in reverse order, and return the
-                // first one that corresponds to a hardfork that is active at the
-                // given timestamp.
-                for (fork, params) in bf_params.iter().rev() {
-                    if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params
-                    }
-                }
-
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
-            }
-        }
-    }
-
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         self.genesis_header.hash()
@@ -505,8 +455,8 @@ impl ChainSpec {
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+            // the fork filter.
             Some(match condition {
                 ForkCondition::Block(block) |
                 ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
@@ -720,6 +670,11 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Bpo1.boxed(), genesis.config.bpo1_time),
+            (EthereumHardfork::Bpo2.boxed(), genesis.config.bpo2_time),
+            (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
+            (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
+            (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -746,7 +701,7 @@ impl From<Genesis> for ChainSpec {
         ordered_hardforks.append(&mut hardforks);
 
         // Extract blob parameters directly from blob_schedule
-        let blob_params = HardforkBlobParams::from_schedule(&genesis.config.blob_schedule);
+        let blob_params = genesis.config.blob_schedule_blob_params();
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
@@ -973,10 +928,22 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at the given timestamp.
+    pub fn with_prague_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Enable Osaka at genesis.
     pub fn osaka_activated(mut self) -> Self {
         self = self.prague_activated();
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at the given timestamp.
+    pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         self
     }
 
@@ -1064,7 +1031,7 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
-    use alloy_eips::eip4844::BLOB_TX_MIN_BLOB_GASPRICE;
+    use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
@@ -1081,9 +1048,9 @@ mod tests {
                     "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
                 if matches!(hardfork, EthereumHardfork::Shanghai) {
-                    if let Some(shangai_id) = spec.shanghai_fork_id() {
+                    if let Some(shanghai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
-                            expected_id, &shangai_id,
+                            expected_id, &shanghai_id,
                             "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for Shanghai hardfork"
                         );
                     } else {
@@ -1991,9 +1958,24 @@ Post-merge hard forks (timestamp based):
 
         // alloc key -> expected rlp mapping
         let key_rlp = vec![
-            (hex!("0x658bdf435d810c91414ec09147daa6db62406379"), &hex!("0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")[..]),
-            (hex!("0xaa00000000000000000000000000000000000000"), &hex!("0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99")[..]),
-            (hex!("0xbb00000000000000000000000000000000000000"), &hex!("0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2")[..]),
+            (
+                hex!("0x658bdf435d810c91414ec09147daa6db62406379"),
+                &hex!(
+                    "0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                )[..],
+            ),
+            (
+                hex!("0xaa00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99"
+                )[..],
+            ),
+            (
+                hex!("0xbb00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2"
+                )[..],
+            ),
         ];
 
         for (key, expected_rlp) in key_rlp {
@@ -2522,32 +2504,39 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn blob_params_from_genesis() {
         let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = HardforkBlobParams::from_schedule(&schedule);
-        let expected = HardforkBlobParams {
+            "blobSchedule": {
+                "cancun":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                },
+                "prague":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                }
+            }
+        }"#;
+        let config: ChainConfig = serde_json::from_str(s).unwrap();
+        let hardfork_params = config.blob_schedule_blob_params();
+        let expected = BlobScheduleBlobParams {
             cancun: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             prague: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
+            ..Default::default()
         };
         assert_eq!(hardfork_params, expected);
     }

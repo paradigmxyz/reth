@@ -5,8 +5,8 @@ pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
-use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineValidator, PayloadValidator};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
 use reth_node_api::PayloadTypes;
@@ -19,11 +19,11 @@ use std::sync::Arc;
 
 /// Validator for the ethereum engine API.
 #[derive(Debug, Clone)]
-pub struct EthereumEngineValidator {
+pub struct EthereumEngineValidator<ChainSpec = reth_chainspec::ChainSpec> {
     inner: EthereumExecutionPayloadValidator<ChainSpec>,
 }
 
-impl EthereumEngineValidator {
+impl<ChainSpec> EthereumEngineValidator<ChainSpec> {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
@@ -36,9 +36,12 @@ impl EthereumEngineValidator {
     }
 }
 
-impl PayloadValidator for EthereumEngineValidator {
+impl<ChainSpec, Types> PayloadValidator<Types> for EthereumEngineValidator<ChainSpec>
+where
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
+    Types: PayloadTypes<ExecutionData = ExecutionData>,
+{
     type Block = Block;
-    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -49,14 +52,15 @@ impl PayloadValidator for EthereumEngineValidator {
     }
 }
 
-impl<Types> EngineValidator<Types> for EthereumEngineValidator
+impl<ChainSpec, Types> EngineApiValidator<Types> for EthereumEngineValidator<ChainSpec>
 where
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
     Types: PayloadTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, EthPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         payload_or_attrs
             .execution_requests()
@@ -74,7 +78,7 @@ where
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, EthPayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<Types::ExecutionData, EthPayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )

@@ -7,7 +7,8 @@ use crate::{
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives,
+    UnifiedStatus,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
@@ -73,7 +74,7 @@ pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     /// The local address of the connection.
     pub(crate) local_addr: Option<SocketAddr>,
     /// The Status message the peer sent for the `eth` handshake
-    pub(crate) status: Arc<Status>,
+    pub(crate) status: Arc<UnifiedStatus>,
 }
 
 // === impl ActiveSessionHandle ===
@@ -173,7 +174,7 @@ pub enum PendingSessionEvent<N: NetworkPrimitives> {
         /// All capabilities the peer announced
         capabilities: Arc<Capabilities>,
         /// The Status message the peer sent for the `eth` handshake
-        status: Arc<Status>,
+        status: Arc<UnifiedStatus>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
         conn: EthRlpxConnection<N>,

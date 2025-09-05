@@ -2,11 +2,12 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
+use alloy_evm::overrides::apply_block_overrides;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
-    BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
-    SimBundleOverrides, SimBundleResponse, Validity,
+    BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
+    SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, Evm};
@@ -17,9 +18,7 @@ use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{
-    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
-};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -89,7 +88,7 @@ where
     /// inclusion, validity and privacy settings from parent bundles.
     fn parse_and_flatten_bundle(
         &self,
-        request: &SendBundleRequest,
+        request: &MevSendBundle,
     ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
         let mut items = Vec::new();
 
@@ -220,7 +219,7 @@ where
 
     async fn sim_bundle_inner(
         &self,
-        request: SendBundleRequest,
+        request: MevSendBundle,
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
@@ -416,7 +415,7 @@ where
 {
     async fn sim_bundle(
         &self,
-        request: SendBundleRequest,
+        request: MevSendBundle,
         overrides: SimBundleOverrides,
     ) -> RpcResult<SimBundleResponse> {
         trace!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);

@@ -2,15 +2,18 @@
 
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
-    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
+    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
+
+#[cfg(feature = "db-api")]
+use crate::{DBProvider, DatabaseProviderFactory};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
@@ -20,11 +23,14 @@ use core::{
     ops::{RangeBounds, RangeInclusive},
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
+#[cfg(feature = "db-api")]
+use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{
-    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
+#[cfg(feature = "db-api")]
+use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -38,20 +44,38 @@ use reth_trie_common::{
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
+    #[cfg(feature = "db-api")]
+    tx: TxMock,
+    #[cfg(feature = "db-api")]
+    prune_modes: PruneModes,
     _phantom: PhantomData<N>,
 }
 
 impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
     /// Create a new instance for specific primitive types.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self {
+            chain_spec,
+            #[cfg(feature = "db-api")]
+            tx: TxMock::default(),
+            #[cfg(feature = "db-api")]
+            prune_modes: PruneModes::none(),
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<ChainSpec> NoopProvider<ChainSpec> {
     /// Create a new instance of the `NoopBlockReader`.
     pub fn eth(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self {
+            chain_spec,
+            #[cfg(feature = "db-api")]
+            tx: TxMock::default(),
+            #[cfg(feature = "db-api")]
+            prune_modes: PruneModes::none(),
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -70,7 +94,14 @@ impl Default for NoopProvider {
 
 impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     fn clone(&self) -> Self {
-        Self { chain_spec: Arc::clone(&self.chain_spec), _phantom: Default::default() }
+        Self {
+            chain_spec: Arc::clone(&self.chain_spec),
+            #[cfg(feature = "db-api")]
+            tx: self.tx.clone(),
+            #[cfg(feature = "db-api")]
+            prune_modes: self.prune_modes.clone(),
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -146,10 +177,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
     fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<N::BlockHeader>> {
         Ok(None)
     }
-
-    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<N::BlockHeader>>> {
-        Ok(None)
-    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
@@ -167,17 +194,13 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(None)
     }
 
@@ -246,7 +269,7 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
     }
 
     fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        todo!()
+        Ok(None)
     }
 
     fn transactions_by_block(
@@ -304,6 +327,13 @@ impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
+        Ok(Vec::new())
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         Ok(Vec::new())
     }
 }
@@ -448,6 +478,17 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
     }
 }
 
+impl<C: Send + Sync, N: NodePrimitives> StateReader for NoopProvider<C, N> {
+    type Receipt = N::Receipt;
+
+    fn get_state(
+        &self,
+        _block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
+        Ok(None)
+    }
+}
+
 impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
     fn storage(
         &self,
@@ -456,7 +497,9 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
     }
+}
 
+impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
     fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
@@ -487,7 +530,9 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
                 self.history_by_block_hash(hash)
             }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Earliest => {
+                self.history_by_block_number(self.earliest_block_number()?)
+            }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
@@ -528,22 +573,6 @@ impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, N> {
-    fn withdrawals_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        Ok(None)
-    }
-}
-
 impl<C: Send + Sync, N: NodePrimitives> PruneCheckpointReader for NoopProvider<C, N> {
     fn get_prune_checkpoint(
         &self,
@@ -571,5 +600,43 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Ok(Vec::new())
+    }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<ChainSpec, N> {
+    type Tx = TxMock;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
+    }
+
+    fn into_tx(self) -> Self::Tx {
+        self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
+    }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory
+    for NoopProvider<ChainSpec, N>
+{
+    type DB = DatabaseMock;
+    type Provider = Self;
+    type ProviderRW = Self;
+
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        Ok(self.clone())
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        Ok(self.clone())
     }
 }

@@ -2,9 +2,8 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
@@ -66,17 +65,15 @@ impl BundleStateSorted {
             .clone()
             .into_iter()
             .map(|(address, account)| {
-                {
-                    (
-                        address,
-                        BundleAccountSorted {
-                            info: account.info,
-                            original_info: account.original_info,
-                            status: account.status,
-                            storage: BTreeMap::from_iter(account.storage),
-                        },
-                    )
-                }
+                (
+                    address,
+                    BundleAccountSorted {
+                        info: account.info,
+                        original_info: account.original_info,
+                        status: account.status,
+                        storage: BTreeMap::from_iter(account.storage),
+                    },
+                )
             })
             .collect();
 
@@ -116,7 +113,7 @@ pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
     /// The EVM configuration to use for the execution.
-    executor: E,
+    evm_config: E,
     /// The directory to write the witness to. Additionally, diff files will be written to this
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
@@ -128,22 +125,18 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
     /// Creates a new witness hook.
     pub const fn new(
         provider: P,
-        executor: E,
+        evm_config: E,
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     ) -> Self {
-        Self { provider, executor, output_directory, healthy_node_client }
+        Self { provider, evm_config, output_directory, healthy_node_client }
     }
 }
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
-    E: BlockExecutorProvider<Primitives = N>,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
+    E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
     fn on_invalid_block(
@@ -158,7 +151,7 @@ where
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
-        let mut executor = self.executor.executor(StateProviderDatabase::new(
+        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
 
@@ -166,7 +159,7 @@ where
 
         // Take the bundle state
         let mut db = executor.into_state();
-        let mut bundle_state = db.take_bundle();
+        let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
@@ -230,8 +223,11 @@ where
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::debug_execution_witness(healthy_node_client, block.number().into())
-                    .await
+                DebugApiClient::<()>::debug_execution_witness(
+                    healthy_node_client,
+                    block.number().into(),
+                )
+                .await
             })?;
 
             let healthy_path = self.save_file(
@@ -255,20 +251,10 @@ where
 
         // The bundle state after re-execution should match the original one.
         //
-        // NOTE: This should not be needed if `Reverts` had a comparison method that sorted first,
-        // or otherwise did not care about order.
+        // Reverts now supports order-independent equality, so we can compare directly without
+        // sorting the reverts vectors.
         //
-        // See: https://github.com/bluealloy/revm/issues/1813
-        let mut output = output.clone();
-        for reverts in output.state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
-        // We also have to sort the `bundle_state` reverts
-        for reverts in bundle_state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
+        // See: https://github.com/bluealloy/revm/pull/1827
         if bundle_state != output.state {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
@@ -281,7 +267,7 @@ where
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
             // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
-            // have deterministric ordering
+            // have deterministic ordering
             let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
             let output_state_sorted = BundleStateSorted::from_bundle_state(&output.state);
 
@@ -317,13 +303,15 @@ where
 
             if &trie_output != original_updates {
                 // Trie updates are too big to diff, so we just save the original and re-executed
+                let trie_output_sorted = &trie_output.into_sorted_ref();
+                let original_updates_sorted = &original_updates.into_sorted_ref();
                 let original_path = self.save_file(
                     format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
-                    original_updates,
+                    original_updates_sorted,
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
-                    &trie_output,
+                    trie_output_sorted,
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -361,12 +349,8 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + Send
-        + Sync
-        + 'static,
-    E: BlockExecutorProvider<Primitives = N>,
+    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
+    E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(
         &self,

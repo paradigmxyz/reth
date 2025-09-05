@@ -4,6 +4,7 @@
 
 use op_alloy_consensus::interop::SafetyLevel;
 use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
+use url::Url;
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
@@ -20,11 +21,6 @@ pub struct RollupArgs {
     /// Enable transaction pool admission
     #[arg(long = "rollup.enable-tx-pool-admission", default_value = "true")]
     pub enable_txpool_admission: bool,
-
-    /// Enable walkback to genesis on startup. This is useful for re-validating the existing DB
-    /// prior to beginning normal syncing.
-    #[arg(long = "rollup.enable-genesis-walkback")]
-    pub enable_genesis_walkback: bool,
 
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
@@ -59,6 +55,29 @@ pub struct RollupArgs {
         default_value_t = SafetyLevel::CrossUnsafe,
     )]
     pub supervisor_safety_level: SafetyLevel,
+
+    /// Optional headers to use when connecting to the sequencer.
+    #[arg(long = "rollup.sequencer-headers", requires = "sequencer")]
+    pub sequencer_headers: Vec<String>,
+
+    /// RPC endpoint for historical data.
+    #[arg(
+        long = "rollup.historicalrpc",
+        alias = "rollup.historical-rpc",
+        value_name = "HISTORICAL_HTTP_URL"
+    )]
+    pub historical_rpc: Option<String>,
+
+    /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
+    #[arg(long, default_value_t = 1_000_000)]
+    pub min_suggested_priority_fee: u64,
+
+    /// A URL pointing to a secure websocket subscription that streams out flashblocks.
+    ///
+    /// If given, the flashblocks are received to build pending block. All request with "pending"
+    /// block tag will use the pending state based on flashblocks.
+    #[arg(long)]
+    pub flashblocks_url: Option<Url>,
 }
 
 impl Default for RollupArgs {
@@ -67,12 +86,15 @@ impl Default for RollupArgs {
             sequencer: None,
             disable_txpool_gossip: false,
             enable_txpool_admission: true,
-            enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,
             enable_tx_conditional: false,
             supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
+            sequencer_headers: Vec::new(),
+            historical_rpc: None,
+            min_suggested_priority_fee: 1_000_000,
+            flashblocks_url: None,
         }
     }
 }
@@ -94,15 +116,6 @@ mod tests {
         let default_args = RollupArgs::default();
         let args = CommandParser::<RollupArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-    }
-
-    #[test]
-    fn test_parse_optimism_walkback_args() {
-        let expected_args = RollupArgs { enable_genesis_walkback: true, ..Default::default() };
-        let args =
-            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-genesis-walkback"])
-                .args;
-        assert_eq!(args, expected_args);
     }
 
     #[test]
@@ -157,7 +170,6 @@ mod tests {
         let expected_args = RollupArgs {
             disable_txpool_gossip: true,
             compute_pending_block: true,
-            enable_genesis_walkback: true,
             enable_tx_conditional: true,
             sequencer: Some("http://host:port".into()),
             ..Default::default()
@@ -166,7 +178,6 @@ mod tests {
             "reth",
             "--rollup.disable-tx-pool-gossip",
             "--rollup.compute-pending-block",
-            "--rollup.enable-genesis-walkback",
             "--rollup.enable-tx-conditional",
             "--rollup.sequencer-http",
             "http://host:port",

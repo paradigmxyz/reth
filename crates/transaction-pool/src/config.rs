@@ -50,6 +50,8 @@ pub struct PoolConfig {
     pub price_bumps: PriceBumpConfig,
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: u64,
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    pub minimum_priority_fee: Option<u128>,
     /// The max gas limit for transactions in the pool
     pub gas_limit: u64,
     /// How to handle locally received transactions:
@@ -66,6 +68,22 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
+    /// Sets the minimal protocol base fee to 0, effectively disabling checks that enforce that a
+    /// transaction's fee must be higher than the [`MIN_PROTOCOL_BASE_FEE`] which is the lowest
+    /// value the ethereum EIP-1559 base fee can reach.
+    pub const fn with_disabled_protocol_base_fee(self) -> Self {
+        self.with_protocol_base_fee(0)
+    }
+
+    /// Configures the minimal protocol base fee that should be enforced.
+    ///
+    /// Ethereum's EIP-1559 base fee can't drop below [`MIN_PROTOCOL_BASE_FEE`] hence this is
+    /// enforced by default in the pool.
+    pub const fn with_protocol_base_fee(mut self, protocol_base_fee: u64) -> Self {
+        self.minimal_protocol_basefee = protocol_base_fee;
+        self
+    }
+
     /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
@@ -87,6 +105,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            minimum_priority_fee: None,
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
@@ -110,6 +129,11 @@ impl SubPoolLimit {
     /// Creates a new instance with the given limits.
     pub const fn new(max_txs: usize, max_size: usize) -> Self {
         Self { max_txs, max_size }
+    }
+
+    /// Creates an unlimited [`SubPoolLimit`]
+    pub const fn max() -> Self {
+        Self::new(usize::MAX, usize::MAX)
     }
 
     /// Returns whether the size or amount constraint is violated.

@@ -104,19 +104,31 @@ impl Command {
         // Convert to execution payload
         let execution_payload = ExecutionPayload::from_block_slow(&block).0;
 
+        let use_v4 = block.header.requests_hash.is_some();
+
         // Create JSON request data
-        let json_request = serde_json::to_string(&(
-            execution_payload,
-            blob_versioned_hashes,
-            parent_beacon_block_root,
-        ))?;
+        let json_request = if use_v4 {
+            serde_json::to_string(&(
+                execution_payload,
+                blob_versioned_hashes,
+                parent_beacon_block_root,
+                block.header.requests_hash.unwrap_or_default(),
+            ))?
+        } else {
+            serde_json::to_string(&(
+                execution_payload,
+                blob_versioned_hashes,
+                parent_beacon_block_root,
+            ))?
+        };
 
         // Print output or execute command
         match self.mode {
             Mode::Execute => {
                 // Create cast command
                 let mut command = std::process::Command::new("cast");
-                command.arg("rpc").arg("engine_newPayloadV3").arg("--raw");
+                let method = if use_v4 { "engine_newPayloadV4" } else { "engine_newPayloadV3" };
+                command.arg("rpc").arg(method).arg("--raw");
                 if let Some(rpc_url) = self.rpc_url {
                     command.arg("--rpc-url").arg(rpc_url);
                 }

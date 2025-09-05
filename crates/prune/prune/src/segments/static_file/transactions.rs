@@ -15,6 +15,7 @@ use reth_prune_types::{
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
+/// The type responsible for pruning transactions in the database and history expiry.
 #[derive(Debug)]
 pub struct Transactions<N> {
     static_file_provider: StaticFileProvider<N>,

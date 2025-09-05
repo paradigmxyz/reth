@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -35,6 +35,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         balance: U256,
         /// Current nonce of the sender.
         state_nonce: u64,
+        /// Code hash of the sender.
+        bytecode_hash: Option<B256>,
         /// The validated transaction.
         ///
         /// See also [`ValidTransaction`].
@@ -44,6 +46,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         transaction: ValidTransaction<T>,
         /// Whether to propagate the transaction to the network.
         propagate: bool,
+        /// The authorities of EIP-7702 transaction.
+        authorities: Option<Vec<Address>>,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
@@ -59,6 +63,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
             Self::Valid { transaction, .. } => *transaction.hash(),
             Self::Invalid(transaction, ..) => *transaction.hash(),
             Self::Error(hash, ..) => *hash,
+        }
+    }
+
+    /// Returns the [`InvalidPoolTransactionError`] if this is an invalid variant.
+    pub const fn as_invalid(&self) -> Option<&InvalidPoolTransactionError> {
+        match self {
+            Self::Invalid(_, err) => Some(err),
+            _ => None,
         }
     }
 
@@ -99,13 +111,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecar>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {
@@ -194,12 +206,23 @@ pub trait TransactionValidator: Debug + Send + Sync {
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        async {
-            futures_util::future::join_all(
-                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
-            )
-            .await
-        }
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+        )
+    }
+
+    /// Validates a batch of transactions with that given origin.
+    ///
+    /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_transaction`].
+    fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
+        let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
+        futures_util::future::join_all(futures)
     }
 
     /// Invoked when the head block changes.
@@ -240,6 +263,17 @@ where
         }
     }
 
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
+            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
+        }
+    }
+
     fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
     where
         Bl: Block,
@@ -268,6 +302,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
+    /// The sender ids of the 7702 transaction authorities.
+    pub authority_ids: Option<Vec<SenderId>>,
 }
 
 // === impl ValidPoolTransaction ===
@@ -376,6 +412,22 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.size()
     }
 
+    /// Returns the [`SignedAuthorization`] list of the transaction.
+    ///
+    /// Returns `None` if this transaction is not EIP-7702.
+    pub fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.transaction.authorization_list()
+    }
+
+    /// Returns the number of blobs of [`SignedAuthorization`] in this transactions
+    ///
+    /// This is convenience function for `len(authorization_list)`.
+    ///
+    /// Returns `None` for non-eip7702 transactions.
+    pub fn authorization_count(&self) -> Option<u64> {
+        self.transaction.authorization_count()
+    }
+
     /// EIP-4844 blob transactions and normal transactions are treated as mutually exclusive per
     /// account.
     ///
@@ -454,6 +506,7 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
             propagate: self.propagate,
             timestamp: self.timestamp,
             origin: self.origin,
+            authority_ids: self.authority_ids.clone(),
         }
     }
 }

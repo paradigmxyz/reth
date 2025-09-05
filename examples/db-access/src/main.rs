@@ -4,14 +4,12 @@ use alloy_primitives::{Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
-    primitives::{
-        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
-    },
+    primitives::{AlloyBlockHeader, SealedBlock, SealedHeader},
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-        ReceiptProvider, StateProvider, TransactionsProvider,
+        ReceiptProvider, StateProvider, TransactionVariant, TransactionsProvider,
     },
-    rpc::eth::primitives::{Filter, FilteredParams},
+    rpc::eth::primitives::Filter,
     TransactionSigned,
 };
 
@@ -59,7 +57,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
     // Can query the header by number
     let header = provider.header_by_number(number)?.ok_or(eyre::eyre!("header not found"))?;
 
-    // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
+    // We can convert a header to a sealed header which contains the hash w/o needing to recompute
     // it every time.
     let sealed_header = SealedHeader::seal_slow(header);
 
@@ -128,7 +126,9 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     // Can query a block with its senders, this is useful when you'd want to execute a block and do
     // not want to manually recover the senders for each transaction (as each transaction is
     // stored on disk with its v,r,s but not its `from` field.).
-    let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
+    let _recovered_block = provider
+        .sealed_block_with_senders(number.into(), TransactionVariant::WithHash)?
+        .ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
     let sealed_block = SealedBlock::seal_slow(block.clone());
@@ -151,14 +151,6 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
         .find_block_by_hash(sealed_block.hash(), BlockSource::Any)?
         .ok_or(eyre::eyre!("block hash not found"))?;
     assert_eq!(block, block_by_hash3);
-
-    // Can query the block's ommers/uncles
-    let _ommers = provider.ommers(number.into())?;
-
-    // Can query the block's withdrawals (via the `WithdrawalsProvider`)
-    let _withdrawals =
-        provider.withdrawals_by_block(sealed_block.hash().into(), sealed_block.timestamp)?;
-
     Ok(())
 }
 
@@ -188,7 +180,7 @@ fn receipts_provider_example<
         .receipts_by_block(100.into())?
         .ok_or(eyre::eyre!("no receipts found for block"))?;
 
-    // Can check if a address/topic filter is present in a header, if it is we query the block and
+    // Can check if an address/topic filter is present in a header, if it is we query the block and
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();
@@ -203,21 +195,14 @@ fn receipts_provider_example<
     // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
     // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moment.
     let filter = Filter::new().address(addr).event_signature(topic);
-    let filter_params = FilteredParams::new(Some(filter));
-    let address_filter = FilteredParams::address_filter(&addr.into());
-    let topics_filter = FilteredParams::topics_filter(&[topic.into()]);
 
     // 3. If the address & topics filters match do something. We use the outer check against the
     // bloom filter stored in the header to avoid having to query the receipts table when there
     // is no instance of any event that matches the filter in the header.
-    if FilteredParams::matches_address(bloom, &address_filter) &&
-        FilteredParams::matches_topics(bloom, &topics_filter)
-    {
+    if filter.matches_bloom(bloom) {
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
-            if filter_params.filter_address(&log.address) &&
-                filter_params.filter_topics(log.topics())
-            {
+            if filter.matches(log) {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")
             }

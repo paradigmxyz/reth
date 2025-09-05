@@ -1,12 +1,13 @@
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
-use reth_payload_builder::PayloadBuilderHandle;
 
+use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 use reth_node_api::{EngineTypes, FullNodeComponents, PayloadTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
@@ -18,7 +19,9 @@ use std::{
     sync::Arc,
 };
 
-use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
+/// A helper type to obtain components for a given node when [`FullNodeTypes::Types`] is a [`Node`]
+/// implementation.
+pub type ComponentsFor<N> = <<<N as FullNodeTypes>::Types as Node<N>>::ComponentsBuilder as NodeComponentsBuilder<N>>::Components;
 
 /// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
 ///
@@ -70,8 +73,6 @@ where
 
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
 
-    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
-
     type Storage = <N::Types as NodeTypes>::Storage;
 
     type Payload = <N::Types as NodeTypes>::Payload;
@@ -102,8 +103,6 @@ where
 pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
-    /// The executor of the node.
-    pub block_executor: Node::Executor,
     /// The node's transaction pool.
     pub pool: Node::Pool,
     /// Handle to the node's network.
@@ -126,7 +125,6 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
     fn clone(&self) -> Self {
         Self {
             evm_config: self.evm_config.clone(),
-            block_executor: self.block_executor.clone(),
             pool: self.pool.clone(),
             network: self.network.clone(),
             provider: self.provider.clone(),

@@ -3,17 +3,13 @@
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     batch_response_error,
-    core::{
-        server::helpers::prepare_error,
-        tracing::server::{rx_log_from_json, tx_log_from_str},
-        JsonRawValue,
-    },
+    core::{server::helpers::prepare_error, JsonRawValue},
     server::middleware::rpc::RpcServiceT,
     types::{
         error::{reject_too_big_request, ErrorCode},
         ErrorObject, Id, InvalidRequest, Notification, Request,
     },
-    BatchResponseBuilder, MethodResponse, ResponsePayload,
+    BatchResponseBuilder, MethodResponse,
 };
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
@@ -37,7 +33,7 @@ pub(crate) async fn process_batch_request<S>(
     max_response_body_size: usize,
 ) -> Option<String>
 where
-    for<'a> S: RpcServiceT<'a> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
     let Batch { data, rpc_service } = b;
 
@@ -69,8 +65,8 @@ where
             .collect();
 
         while let Some(response) = pending_calls.next().await {
-            if let Err(too_large) = batch_response.append(&response) {
-                return Some(too_large.to_result())
+            if let Err(too_large) = batch_response.append(response) {
+                return Some(too_large.to_json().to_string())
             }
         }
 
@@ -78,10 +74,10 @@ where
             None
         } else {
             let batch_resp = batch_response.finish();
-            Some(MethodResponse::from_batch(batch_resp).to_result())
+            Some(MethodResponse::from_batch(batch_resp).to_json().to_string())
         }
     } else {
-        Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)))
+        Some(batch_response_error(Id::Null, ErrorObject::from(ErrorCode::ParseError)).to_string())
     }
 }
 
@@ -90,7 +86,7 @@ pub(crate) async fn process_single_request<S>(
     rpc_service: &S,
 ) -> Option<MethodResponse>
 where
-    for<'a> S: RpcServiceT<'a> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
     if let Ok(req) = serde_json::from_slice::<Request<'_>>(&data) {
         Some(execute_call_with_tracing(req, rpc_service).await)
@@ -108,18 +104,9 @@ pub(crate) async fn execute_call_with_tracing<'a, S>(
     rpc_service: &S,
 ) -> MethodResponse
 where
-    for<'b> S: RpcServiceT<'b> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
     rpc_service.call(req).await
-}
-
-#[instrument(name = "notification", fields(method = notif.method.as_ref()), skip(notif, max_log_length), level = "TRACE")]
-fn execute_notification(notif: &Notif<'_>, max_log_length: u32) -> MethodResponse {
-    rx_log_from_json(notif, max_log_length);
-    let response =
-        MethodResponse::response(Id::Null, ResponsePayload::success(String::new()), usize::MAX);
-    tx_log_from_str(response.as_result(), max_log_length);
-    response
 }
 
 pub(crate) async fn call_with_service<S>(
@@ -130,7 +117,7 @@ pub(crate) async fn call_with_service<S>(
     conn: Arc<OwnedSemaphorePermit>,
 ) -> Option<String>
 where
-    for<'a> S: RpcServiceT<'a> + Send,
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send,
 {
     enum Kind {
         Single,
@@ -148,17 +135,17 @@ where
 
     let data = request.into_bytes();
     if data.len() > max_request_body_size {
-        return Some(batch_response_error(
-            Id::Null,
-            reject_too_big_request(max_request_body_size as u32),
-        ))
+        return Some(
+            batch_response_error(Id::Null, reject_too_big_request(max_request_body_size as u32))
+                .to_string(),
+        )
     }
 
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
         let response = process_single_request(data, &rpc_service).await;
         match response {
-            Some(response) if response.is_method_call() => Some(response.to_result()),
+            Some(response) if response.is_method_call() => Some(response.to_json().to_string()),
             _ => {
                 // subscription responses are sent directly over the sink, return a response here
                 // would lead to duplicate responses for the subscription response

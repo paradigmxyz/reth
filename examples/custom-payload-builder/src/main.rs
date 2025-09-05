@@ -12,14 +12,17 @@
 #![warn(unused_crate_dependencies)]
 
 use crate::generator::EmptyBlockPayloadJobGenerator;
-use reth::{
-    builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
-    cli::{config::PayloadBuilderConfig, Cli},
-};
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_ethereum::{
     chainspec::ChainSpec,
-    node::{api::NodeTypes, node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode},
+    cli::interface::Cli,
+    node::{
+        api::{node::FullNodeTypes, NodeTypes},
+        builder::{components::PayloadServiceBuilder, BuilderContext},
+        core::cli::config::PayloadBuilderConfig,
+        node::EthereumAddOns,
+        EthEngineTypes, EthEvmConfig, EthereumNode,
+    },
     pool::{PoolTransaction, TransactionPool},
     provider::CanonStateSubscriptions,
     EthPrimitives, TransactionSigned,
@@ -34,7 +37,7 @@ pub mod job;
 #[non_exhaustive]
 pub struct CustomPayloadBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
+impl<Node, Pool> PayloadServiceBuilder<Node, Pool, EthEvmConfig> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
@@ -51,13 +54,14 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
+        evm_config: EthEvmConfig,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>> {
         tracing::info!("Spawning a custom payload builder");
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
-            EthEvmConfig::new(ctx.chain_spec()),
+            evm_config,
             EthereumBuilderConfig::new(),
         );
 

@@ -23,10 +23,13 @@ pub enum Error {
     /// Block processing failed
     /// Note: This includes but is not limited to execution.
     /// For example, the header number could be incorrect.
-    #[error("block {block_number} failed to process")]
+    #[error("block {block_number} failed to process: {err}")]
     BlockProcessingFailed {
         /// The block number for the block that failed
         block_number: u64,
+        /// The specific error
+        #[source]
+        err: Box<dyn std::error::Error + Send + Sync>,
     },
     /// An IO error occurred
     #[error("an error occurred interacting with the file system at {path}: {error}")]
@@ -61,6 +64,16 @@ pub enum Error {
     /// A consensus error occurred.
     #[error("an error occurred during consensus checks: {0}")]
     ConsensusError(#[from] reth_consensus::ConsensusError),
+}
+
+impl Error {
+    /// Create a new [`Error::BlockProcessingFailed`] error.
+    pub fn block_failed(
+        block_number: u64,
+        err: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::BlockProcessingFailed { block_number, err: Box::new(err) }
+    }
 }
 
 /// The result of running a test.

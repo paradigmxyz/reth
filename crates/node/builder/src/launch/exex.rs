@@ -69,7 +69,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 id.clone(),
                 head,
                 components.provider().clone(),
-                components.block_executor().clone(),
+                components.evm_config().clone(),
                 exex_wal.handle(),
             );
             exex_handles.push(handle);
@@ -90,7 +90,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 let span = reth_tracing::tracing::info_span!("exex", id);
 
                 // init the exex
-                let exex = exex.launch(context).instrument(span.clone()).await.unwrap();
+                let exex = exex.launch(context).instrument(span.clone()).await?;
 
                 // spawn it as a crit task
                 executor.spawn_critical(
@@ -104,10 +104,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                     }
                     .instrument(span),
                 );
+
+                Ok::<(), eyre::Error>(())
             });
         }
 
-        future::join_all(exexes).await;
+        future::try_join_all(exexes).await?;
 
         // spawn exex manager
         debug!(target: "reth::cli", "spawning exex manager");

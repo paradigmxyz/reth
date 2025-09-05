@@ -78,12 +78,21 @@ impl ValidationJobSender {
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
 /// This validator is non-blocking, all validation work is done in a separate task.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TransactionValidationTaskExecutor<V> {
     /// The validator that will validate transactions on a separate task.
-    pub validator: V,
+    pub validator: Arc<V>,
     /// The sender half to validation tasks that perform the actual validation.
     pub to_validation_task: Arc<sync::Mutex<ValidationJobSender>>,
+}
+
+impl<V> Clone for TransactionValidationTaskExecutor<V> {
+    fn clone(&self) -> Self {
+        Self {
+            validator: self.validator.clone(),
+            to_validation_task: self.to_validation_task.clone(),
+        }
+    }
 }
 
 // === impl TransactionValidationTaskExecutor ===
@@ -102,9 +111,14 @@ impl<V> TransactionValidationTaskExecutor<V> {
         F: FnMut(V) -> T,
     {
         TransactionValidationTaskExecutor {
-            validator: f(self.validator),
+            validator: Arc::new(f(Arc::into_inner(self.validator).unwrap())),
             to_validation_task: self.to_validation_task,
         }
+    }
+
+    /// Returns the validator.
+    pub fn validator(&self) -> &V {
+        &self.validator
     }
 }
 
@@ -151,13 +165,13 @@ impl<V> TransactionValidationTaskExecutor<V> {
     /// validation tasks.
     pub fn new(validator: V) -> Self {
         let (tx, _) = ValidationTask::new();
-        Self { validator, to_validation_task: Arc::new(sync::Mutex::new(tx)) }
+        Self { validator: Arc::new(validator), to_validation_task: Arc::new(sync::Mutex::new(tx)) }
     }
 }
 
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
-    V: TransactionValidator + Clone + 'static,
+    V: TransactionValidator + 'static,
 {
     type Transaction = <V as TransactionValidator>::Transaction;
 
@@ -171,20 +185,19 @@ where
         {
             let res = {
                 let to_validation_task = self.to_validation_task.clone();
-                let to_validation_task = to_validation_task.lock().await;
                 let validator = self.validator.clone();
-                to_validation_task
-                    .send(Box::pin(async move {
-                        let res = validator.validate_transaction(origin, transaction).await;
-                        let _ = tx.send(res);
-                    }))
-                    .await
+                let fut = Box::pin(async move {
+                    let res = validator.validate_transaction(origin, transaction).await;
+                    let _ = tx.send(res);
+                });
+                let to_validation_task = to_validation_task.lock().await;
+                to_validation_task.send(fut).await
             };
             if res.is_err() {
                 return TransactionValidationOutcome::Error(
                     hash,
                     Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                )
+                );
             }
         }
 
@@ -194,6 +207,49 @@ where
                 hash,
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
             ),
+        }
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
+        let (tx, rx) = oneshot::channel();
+        {
+            let res = {
+                let to_validation_task = self.to_validation_task.clone();
+                let validator = self.validator.clone();
+                let fut = Box::pin(async move {
+                    let res = validator.validate_transactions(transactions).await;
+                    let _ = tx.send(res);
+                });
+                let to_validation_task = to_validation_task.lock().await;
+                to_validation_task.send(fut).await
+            };
+            if res.is_err() {
+                return hashes
+                    .into_iter()
+                    .map(|hash| {
+                        TransactionValidationOutcome::Error(
+                            hash,
+                            Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+                        )
+                    })
+                    .collect();
+            }
+        }
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => hashes
+                .into_iter()
+                .map(|hash| {
+                    TransactionValidationOutcome::Error(
+                        hash,
+                        Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+                    )
+                })
+                .collect(),
         }
     }
 

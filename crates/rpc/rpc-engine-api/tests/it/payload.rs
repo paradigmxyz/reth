@@ -2,7 +2,7 @@
 
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::Bytes;
-use alloy_rlp::{Decodable, Error as RlpError};
+use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ExecutionPayloadV1,
     PayloadError,
@@ -87,16 +87,6 @@ fn payload_validation_conversion() {
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
-    // Zero base fee
-    let block_with_zero_base_fee = transform_block(block.clone(), |mut b| {
-        b.header.base_fee_per_gas = Some(0);
-        b
-    });
-    assert_matches!(
-        block_with_zero_base_fee.try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
-        Err(PayloadError::BaseFee(val)) if val.is_zero()
-    );
-
     // Invalid encoded transactions
     let mut payload_with_invalid_txs =
         ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block());
@@ -105,5 +95,5 @@ fn payload_validation_conversion() {
         *tx = Bytes::new();
     });
     let payload_with_invalid_txs = payload_with_invalid_txs.try_into_block::<TransactionSigned>();
-    assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
+    assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(_)));
 }

@@ -13,7 +13,7 @@ use reth_primitives_traits::logs_bloom;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
-pub struct EthBlockAssembler<ChainSpec> {
+pub struct EthBlockAssembler<ChainSpec = reth_chainspec::ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
     /// Extra data to use for the blocks.
@@ -52,7 +52,7 @@ where
             ..
         } = input;
 
-        let timestamp = evm_env.block_env.timestamp;
+        let timestamp = evm_env.block_env.timestamp.saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
         let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
@@ -84,7 +84,10 @@ where
             } else {
                 // for the first post-fork block, both parent.blob_gas_used and
                 // parent.excess_blob_gas are evaluated as 0
-                Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
+                Some(
+                    alloy_eips::eip7840::BlobParams::cancun()
+                        .next_block_excess_blob_gas_osaka(0, 0, 0),
+                )
             };
         }
 
@@ -101,7 +104,7 @@ where
             mix_hash: evm_env.block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
             base_fee_per_gas: Some(evm_env.block_env.basefee),
-            number: evm_env.block_env.number,
+            number: evm_env.block_env.number.saturating_to(),
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,
             gas_used: *gas_used,

@@ -17,14 +17,13 @@ mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
 mod prune;
-/// The s3 download stage
-mod s3;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The transaction lookup stage
 mod tx_lookup;
 
 pub use bodies::*;
+pub use era::*;
 pub use execution::*;
 pub use finish::*;
 pub use hashing_account::*;
@@ -34,18 +33,22 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use prune::*;
-pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
+mod era;
 mod utils;
+
 use utils::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::{
+        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::mdbx::{cursor::Cursor, RW};
@@ -58,7 +61,7 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
@@ -151,7 +154,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthExecutorProvider::ethereum(Arc::new(
+                EthEvmConfig::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
                 Arc::new(EthBeaconConsensus::new(Arc::new(
@@ -163,7 +166,7 @@ mod tests {
                     max_cumulative_gas: None,
                     max_duration: None,
                 },
-                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+                MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
                 ExExManagerHandle::empty(),
             );
 
@@ -207,7 +210,7 @@ mod tests {
 
             if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).is_err());
+                assert!(storage_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
@@ -274,7 +277,7 @@ mod tests {
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.transaction_count());
             for transaction in &block.body().transactions {
-                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
+                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0), None)));
                 tx_num += 1;
             }
             receipts.push((block.number, block_receipts));
@@ -502,7 +505,7 @@ mod tests {
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
-            &Default::default(),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
@@ -510,7 +513,7 @@ mod tests {
             &db,
             current + 1,
             None,
-            &Default::default(),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
     }
 

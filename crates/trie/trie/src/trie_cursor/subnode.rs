@@ -1,5 +1,6 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
+use alloy_trie::proof::AddedRemovedKeys;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -28,7 +29,7 @@ impl std::fmt::Debug for CursorSubNode {
             .field("state_flag", &self.state_flag())
             .field("tree_flag", &self.tree_flag())
             .field("hash_flag", &self.hash_flag())
-            .field("hash", &self.hash())
+            .field("hash", &self.maybe_hash())
             .finish()
     }
 }
@@ -74,7 +75,7 @@ impl CursorSubNode {
         node: Option<BranchNodeCompact>,
         position: SubNodePosition,
     ) -> Self {
-        let mut full_key = key.clone();
+        let mut full_key = key;
         if let Some(nibble) = position.as_child() {
             full_key.push(nibble);
         }
@@ -85,6 +86,26 @@ impl CursorSubNode {
     #[inline]
     pub const fn full_key(&self) -> &Nibbles {
         &self.full_key
+    }
+
+    /// Returns true if all of:
+    /// - Position is a child
+    /// - There is a branch node
+    /// - All children except the current are removed according to the [`AddedRemovedKeys`].
+    pub fn full_key_is_only_nonremoved_child(&self, added_removed_keys: &AddedRemovedKeys) -> bool {
+        self.position.as_child().zip(self.node.as_ref()).is_some_and(|(nibble, node)| {
+            let removed_mask = added_removed_keys.get_removed_mask(&self.key);
+            let nonremoved_mask = !removed_mask & node.state_mask;
+            tracing::trace!(
+                target: "trie::walker",
+                key = ?self.key,
+                ?removed_mask,
+                ?nonremoved_mask,
+                ?nibble,
+                "Checking full_key_is_only_nonremoved_node",
+            );
+            nonremoved_mask.count_ones() == 1 && nonremoved_mask.is_bit_set(nibble)
+        })
     }
 
     /// Updates the full key by replacing or appending a child nibble based on the old subnode
@@ -151,6 +172,21 @@ impl CursorSubNode {
             SubNodePosition::ParentBranch => node.root_hash,
             // Or get it from the children
             SubNodePosition::Child(nibble) => Some(node.hash_for_nibble(nibble)),
+        })
+    }
+
+    /// Returns the hash of the current node, if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    pub fn maybe_hash(&self) -> Option<B256> {
+        self.node.as_ref().and_then(|node| match self.position {
+            // Get the root hash for the parent branch node
+            SubNodePosition::ParentBranch => node.root_hash,
+            // Or get it from the children
+            SubNodePosition::Child(nibble) => {
+                node.hash_mask.is_bit_set(nibble).then(|| node.hash_for_nibble(nibble))
+            }
         })
     }
 

@@ -26,7 +26,7 @@ It is assumed that the commit that is being considered for release has been mark
 - [ ] Tag the new commit on main with `vx.y.z` (`git tag vx.y.z SHA`)
 - [ ] Push the tag (`git push origin vx.y.z`)[^1]
 - [ ] Update [Homebrew Tap](https://github.com/paradigmxyz/homebrew-brew)
-- [ ] Run the release commit on testing infrastructure for 1-3 days to check for inconsistencies and bugs
+- [ ] Run the release commit on the testing infrastructure for 1-3 days to check for inconsistencies and bugs
   - This testing infrastructure is going to sync and keep up with a live testnet, and includes monitoring of bandwidth, CPU, disk space etc.
 
 > **Note**
@@ -43,6 +43,6 @@ The release artifacts are automatically added to the draft release. Once ready, 
 
 #### Release summaries
 
-The release summary should include general notes on what the release contains that is important to operators. These changes can be found using the https://github.com/paradigmxyz/reth/labels/M-changelog label.
+The release summary should include general notes on what the release contains that are important to operators. These changes can be found using the https://github.com/paradigmxyz/reth/labels/M-changelog label.
 
 [^1]: It is possible to use `git push --tags`, but this is discouraged since it can be very difficult to get rid of bad tags.

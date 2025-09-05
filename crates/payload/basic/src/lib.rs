@@ -455,6 +455,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.config.attributes.timestamp())
+    }
+
     fn resolve_kind(
         &mut self,
         kind: PayloadKind,
@@ -726,7 +730,7 @@ impl<Payload> BuildOutcome<Payload> {
     }
 
     /// Applies a fn on the current payload.
-    pub(crate) fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    pub fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
     where
         F: FnOnce(Payload) -> P,
     {

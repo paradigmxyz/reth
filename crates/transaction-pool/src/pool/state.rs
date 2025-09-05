@@ -14,7 +14,7 @@ bitflags::bitflags! {
     pub(crate) struct TxState: u8 {
         /// Set to `1` if all ancestor transactions are pending.
         const NO_PARKED_ANCESTORS = 0b10000000;
-        /// Set to `1` of the transaction is either the next transaction of the sender (on chain nonce == tx.nonce) or all prior transactions are also present in the pool.
+        /// Set to `1` if the transaction is either the next transaction of the sender (on chain nonce == tx.nonce) or all prior transactions are also present in the pool.
         const NO_NONCE_GAPS = 0b01000000;
         /// Bit derived from the sender's balance.
         ///

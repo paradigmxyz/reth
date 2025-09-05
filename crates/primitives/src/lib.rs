@@ -4,7 +4,6 @@
 //!
 //! ## Feature Flags
 //!
-//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 //! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
@@ -32,8 +31,8 @@ pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
 pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
     logs_bloom, Account, BlockTy, BodyTy, Bytecode, GotExpected, GotExpectedBoxed, Header,
-    HeaderError, HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
-    StorageEntry, TxTy,
+    HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, StorageEntry,
+    TxTy,
 };
 pub use static_file::StaticFileSegment;
 
@@ -55,9 +54,6 @@ pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcR
 
 // Re-exports
 pub use reth_ethereum_forks::*;
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;
 
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;
