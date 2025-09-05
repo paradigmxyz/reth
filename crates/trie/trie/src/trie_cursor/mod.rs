@@ -11,11 +11,14 @@ pub mod subnode;
 /// Noop trie cursor implementations.
 pub mod noop;
 
+/// Depth-first trie iterator.
+pub mod depth_first;
+
 /// Mock trie cursor implementations.
 #[cfg(test)]
 pub mod mock;
 
-pub use self::{in_memory::*, subnode::CursorSubNode};
+pub use self::{depth_first::DepthFirstTrieIterator, in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.
 #[auto_impl::auto_impl(&)]
