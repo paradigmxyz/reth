@@ -632,7 +632,6 @@ where
             let this = this.clone();
             match seg {
                 Seg::Legacy(a, b) => {
-                    // Pass down remaining quota so inner path won’t overshoot.
                     let sub_limits = QueryLimits {
                         max_blocks_per_filter: limits.max_blocks_per_filter,
                         max_logs_per_response: remaining,
@@ -668,13 +667,8 @@ where
     ) -> Result<Vec<alloy_rpc_types_eth::Log>, EthFilterError> {
         let mut all_logs = Vec::new();
         let chain_tip = self.provider().best_block_number()?;
-        // Fast exit if no constraints (index can’t help)
-        let has_constraints =
-            !filter.address.is_empty() || filter.topics.iter().any(|t| !t.is_empty());
-        if !has_constraints {
-            return Ok(Vec::new());
-        }
 
+        // TODO: figure out params passing
         let params = FilterMapParams::default();
 
         let provider_arc: Arc<_> = Arc::new(self.provider().clone());
@@ -752,8 +746,6 @@ where
                 }
             }
         }
-
-        info!("Logs len: {}", all_logs.len());
 
         Ok(all_logs)
     }

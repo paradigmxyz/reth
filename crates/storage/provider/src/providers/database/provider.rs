@@ -3282,12 +3282,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_end: u32,
         values: &[B256],
     ) -> FilterResult<Vec<MapValueRows>> {
-        info!(
-            "Getting rows until short row for maps {map_start} to {map_end} and values {values:?}",
-            map_start = map_start,
-            map_end = map_end,
-            values = values,
-        );
         let mut results = Vec::new();
 
         for value in values {
