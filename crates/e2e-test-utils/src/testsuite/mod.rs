@@ -10,6 +10,7 @@ use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
+use reth_trie_common::updates::TrieUpdates;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
@@ -108,6 +109,8 @@ where
     pub latest_payload_envelope: Option<I::ExecutionPayloadEnvelopeV3>,
     /// Fork base block number for validation (if this node is currently on a fork)
     pub current_fork_base: Option<u64>,
+    /// Stores trie updates for blocks by hash (for internal test verification)
+    pub block_trie_updates: HashMap<B256, TrieUpdates>,
 }
 
 impl<I> Default for NodeState<I>
@@ -126,6 +129,7 @@ where
             latest_payload_executed: None,
             latest_payload_envelope: None,
             current_fork_base: None,
+            block_trie_updates: HashMap::new(),
         }
     }
 }
@@ -146,6 +150,7 @@ where
             .field("latest_payload_executed", &self.latest_payload_executed)
             .field("latest_payload_envelope", &"<ExecutionPayloadEnvelopeV3>")
             .field("current_fork_base", &self.current_fork_base)
+            .field("block_trie_updates", &format!("<{} entries>", self.block_trie_updates.len()))
             .finish()
     }
 }

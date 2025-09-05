@@ -52,7 +52,7 @@ use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::{str::FromStr, sync::Arc};
 use tracing::info;
 // Imports for trie updates verification
-use reth_trie_common::{updates::TrieUpdates, Nibbles};
+use reth_trie_common::Nibbles;
 
 /// Test for reproducing and verifying the fix for the trie corruption bug
 /// that occurred at mainnet blocks 23003311-23003312.
@@ -360,103 +360,67 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                 .get(&self.block_tag)
                 .ok_or_else(|| eyre::eyre!("Block tag '{}' not found", self.block_tag))?;
 
-            let client = &env.node_clients[node_idx];
+            let _client = &env.node_clients[node_idx];
+            let node_state = env.node_state(node_idx)?;
 
-            // Try to get trie updates using the debug API
-            let trie_updates_result: Result<Option<TrieUpdates>, _> = client
-                .rpc
-                .request(
-                    "debug_getTrieUpdates",
-                    vec![serde_json::to_value(format!("0x{:x}", block_info.hash))?],
-                )
-                .await;
+            // First try to get trie updates from internal node state
+            if let Some(trie_updates) = node_state.block_trie_updates.get(&block_info.hash) {
+                // Found trie updates in internal state
+                println!("Trie updates found in internal state for block {}:", self.block_tag);
+                println!("  Trie updates structure: {:?}", trie_updates);
 
-            match trie_updates_result {
-                Ok(Some(trie_updates)) => {
-                    println!("Trie updates found for block {}:", self.block_tag);
-                    println!("  Trie updates structure: {:?}", trie_updates);
+                // Look up storage trie updates for the contract address
+                let contract_addr =
+                    Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
+                let addr_hash = keccak256(contract_addr);
 
-                    // Look up storage trie updates for the contract address
-                    let contract_addr =
-                        Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
-                    let addr_hash = keccak256(contract_addr);
-
-                    let storage_updates =
-                        trie_updates.storage_tries.get(&addr_hash).ok_or_else(|| {
-                            eyre::eyre!(
-                                "No storage trie updates found for contract {} in block {}",
-                                contract_addr,
-                                self.block_tag
-                            )
-                        })?;
-
-                    // For this scenario the trie itself should not be fully deleted
-                    if storage_updates.is_deleted {
-                        return Err(eyre::eyre!(
-                            "Storage trie marked deleted unexpectedly at block {}",
+                let storage_updates =
+                    trie_updates.storage_tries.get(&addr_hash).ok_or_else(|| {
+                        eyre::eyre!(
+                            "No storage trie updates found for contract {} in block {}",
+                            contract_addr,
                             self.block_tag
-                        ));
-                    }
+                        )
+                    })?;
 
-                    // Verify expected storage node presence/absence
-                    for (nibbles, should_exist) in &self.expected_storage_nodes {
-                        let exists = storage_updates.storage_nodes.contains_key(nibbles);
-                        if exists != *should_exist {
-                            return Err(eyre::eyre!(
-                                "Storage node {:?} existence mismatch at block {}: expected {}, got {}",
-                                nibbles, self.block_tag, should_exist, exists
-                            ));
-                        }
-                    }
-
-                    // Verify expected removed nodes
-                    for nibbles in &self.expected_removed_nodes {
-                        if !storage_updates.removed_nodes.contains(nibbles) {
-                            return Err(eyre::eyre!(
-                                "Expected removed node {:?} not found at block {}",
-                                nibbles,
-                                self.block_tag
-                            ));
-                        }
-                    }
-                }
-                Ok(None) => {
-                    // This is the expected case when the fix is not enabled - trie updates should
-                    // be missing
-                    println!("No trie updates available for block {} via debug API (expected when fix is not enabled)", self.block_tag);
-
-                    // When trie updates are missing, we expect the verification to fail
-                    // This is the bug scenario we're testing for
+                // For this scenario the trie itself should not be fully deleted
+                if storage_updates.is_deleted {
                     return Err(eyre::eyre!(
-                        "Trie updates verification failed for block {}: trie updates are missing (expected bug behavior)",
+                        "Storage trie marked deleted unexpectedly at block {}",
                         self.block_tag
                     ));
                 }
-                Err(e) => {
-                    println!("Debug API not available or trie updates not supported: {}", e);
 
-                    // Fallback to storage proof verification
-                    let contract_addr =
-                        Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
-                    let storage_proof: alloy_rpc_types_eth::EIP1186AccountProofResponse = client.rpc
-                        .request("eth_getProof", vec![
-                            serde_json::to_value(contract_addr)?,
-                            serde_json::to_value(vec![B256::from(U256::from(15))])?, // storage slot 0xf
-                            serde_json::to_value(format!("0x{:x}", block_info.hash))?,
-                        ]).await?;
-
-                    println!("Storage proof verification for block {}:", self.block_tag);
-                    println!("  Account proof nodes: {}", storage_proof.account_proof.len());
-                    println!("  Storage proofs: {}", storage_proof.storage_proof.len());
-
-                    // Basic verification: trie should be accessible
-                    if storage_proof.account_proof.is_empty() {
+                // Verify expected storage node presence/absence
+                for (nibbles, should_exist) in &self.expected_storage_nodes {
+                    let exists = storage_updates.storage_nodes.contains_key(nibbles);
+                    if exists != *should_exist {
                         return Err(eyre::eyre!(
-                            "Account proof is empty at block {} - trie corruption detected",
+                            "Storage node {:?} existence mismatch at block {}: expected {}, got {}",
+                            nibbles,
+                            self.block_tag,
+                            should_exist,
+                            exists
+                        ));
+                    }
+                }
+
+                // Verify expected removed nodes
+                for nibbles in &self.expected_removed_nodes {
+                    if !storage_updates.removed_nodes.contains(nibbles) {
+                        return Err(eyre::eyre!(
+                            "Expected removed node {:?} not found at block {}",
+                            nibbles,
                             self.block_tag
                         ));
                     }
                 }
+            } else {
+                // No trie updates available - this indicates the bug we're testing for
+                return Err(eyre::eyre!(
+                    "No trie updates available for block {} - trie updates are missing (expected bug behavior)",
+                    self.block_tag
+                ));
             }
 
             Ok(())
