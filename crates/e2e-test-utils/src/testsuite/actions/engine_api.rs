@@ -1,7 +1,6 @@
 //! Engine API specific actions for testing.
 
 use crate::testsuite::{Action, Environment};
-use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadStatusEnum,
 };
@@ -12,6 +11,50 @@ use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::marker::PhantomData;
 use tracing::debug;
+
+// Constants
+const MAX_BLOCK_RETRIEVAL_RETRIES: u32 = 5;
+const BLOCK_RETRIEVAL_RETRY_DELAY_MS: u64 = 100;
+
+/// Represents different payload data sources
+#[derive(Debug, Clone)]
+pub enum PayloadSource {
+    /// Load payload from embedded JSON string
+    Json(String),
+    /// Load payload from file path
+    File(String),
+    /// Load payload from another node by block number
+    Node { 
+        /// Index of the source node to load from
+        source_node_idx: usize, 
+        /// Block number to retrieve
+        block_number: u64 
+    },
+}
+
+/// Represents different JSON payload formats
+#[derive(Debug)]
+enum PayloadJsonFormat {
+    /// Array format: [block, `versioned_hashes`, `parent_beacon_block_root`, `execution_requests_hash`]
+    Array { block: serde_json::Value, versioned_hashes: Vec<alloy_primitives::B256> },
+    /// Object format: just the block object
+    Object(serde_json::Value),
+}
+
+/// Common payload sending configuration
+#[derive(Debug, Clone)]
+pub struct PayloadConfig {
+    /// Node index to send to
+    pub node_idx: Option<usize>,
+    /// Expected payload status
+    pub expected_status: ExpectedPayloadStatus,
+}
+
+impl Default for PayloadConfig {
+    fn default() -> Self {
+        Self { node_idx: None, expected_status: ExpectedPayloadStatus::Valid }
+    }
+}
 
 /// Action that sends a newPayload request to a specific node.
 #[derive(Debug)]
@@ -68,6 +111,7 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            // Validate node indices
             if self.node_idx >= env.node_clients.len() {
                 return Err(eyre::eyre!("Target node index out of bounds: {}", self.node_idx));
             }
@@ -78,105 +122,13 @@ where
                 ));
             }
 
-            // Get the block from the source node with retries
-            let source_rpc = &env.node_clients[self.source_node_idx].rpc;
-            let mut block = None;
-            let mut retries = 0;
-            const MAX_RETRIES: u32 = 5;
+            // Use the unified payload sender with node source
+            let mut unified_sender =
+                SendPayload::from_node(self.source_node_idx, self.block_number)
+                    .with_node_idx(self.node_idx)
+                    .with_expected_status(self.expected_status.clone());
 
-            while retries < MAX_RETRIES {
-                match EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
-                    source_rpc,
-                    alloy_eips::BlockNumberOrTag::Number(self.block_number),
-                    true, // include transactions
-                )
-                .await
-                {
-                    Ok(Some(b)) => {
-                        block = Some(b);
-                        break;
-                    }
-                    Ok(None) => {
-                        debug!(
-                            "Block {} not found on source node {} (attempt {}/{})",
-                            self.block_number,
-                            self.source_node_idx,
-                            retries + 1,
-                            MAX_RETRIES
-                        );
-                        retries += 1;
-                        if retries < MAX_RETRIES {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        }
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-
-            let block = block.ok_or_else(|| {
-                eyre::eyre!(
-                    "Block {} not found on source node {} after {} retries",
-                    self.block_number,
-                    self.source_node_idx,
-                    MAX_RETRIES
-                )
-            })?;
-
-            // Convert block to ExecutionPayloadV3
-            let payload = block_to_payload_v3(block.clone());
-
-            // Send the payload to the target node
-            let target_engine = env.node_clients[self.node_idx].engine.http_client();
-            let result = EngineApiClient::<Engine>::new_payload_v3(
-                &target_engine,
-                payload,
-                vec![],
-                B256::ZERO, // parent_beacon_block_root
-            )
-            .await?;
-
-            debug!(
-                "Node {}: new_payload for block {} response - status: {:?}, latest_valid_hash: {:?}",
-                self.node_idx, self.block_number, result.status, result.latest_valid_hash
-            );
-
-            // Validate the response based on expectations
-            match (&result.status, &self.expected_status) {
-                (PayloadStatusEnum::Valid, ExpectedPayloadStatus::Valid) => {
-                    debug!(
-                        "Node {}: Block {} marked as VALID as expected",
-                        self.node_idx, self.block_number
-                    );
-                    Ok(())
-                }
-                (
-                    PayloadStatusEnum::Invalid { validation_error },
-                    ExpectedPayloadStatus::Invalid,
-                ) => {
-                    debug!(
-                        "Node {}: Block {} marked as INVALID as expected: {:?}",
-                        self.node_idx, self.block_number, validation_error
-                    );
-                    Ok(())
-                }
-                (
-                    PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted,
-                    ExpectedPayloadStatus::SyncingOrAccepted,
-                ) => {
-                    debug!(
-                        "Node {}: Block {} marked as SYNCING/ACCEPTED as expected (buffered)",
-                        self.node_idx, self.block_number
-                    );
-                    Ok(())
-                }
-                (status, expected) => Err(eyre::eyre!(
-                    "Node {}: Unexpected payload status for block {}. Got {:?}, expected {:?}",
-                    self.node_idx,
-                    self.block_number,
-                    status,
-                    expected
-                )),
-            }
+            unified_sender.execute(env).await
         })
     }
 }
@@ -349,6 +301,272 @@ fn block_to_payload_v3(block: Block) -> ExecutionPayloadV3 {
     }
 }
 
+/// Parse JSON payload data into a structured format
+fn parse_payload_json(json_data: &str) -> Result<PayloadJsonFormat> {
+    let json_value: serde_json::Value = serde_json::from_str(json_data)
+        .map_err(|e| eyre::eyre!("Failed to parse payload JSON: {}", e))?;
+
+    if json_value.is_array() {
+        // Array format: [block, versioned_hashes, parent_beacon_block_root,
+        // execution_requests_hash]
+        let payload_array = json_value.as_array().unwrap();
+        if payload_array.len() < 2 {
+            return Err(eyre::eyre!(
+                "Payload array must contain at least block data and versioned hashes"
+            ));
+        }
+
+        let block = payload_array[0].clone();
+        let versioned_hashes_json = &payload_array[1];
+        let versioned_hashes: Vec<alloy_primitives::B256> =
+            serde_json::from_value(versioned_hashes_json.clone())
+                .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
+
+        Ok(PayloadJsonFormat::Array { block, versioned_hashes })
+    } else {
+        // Object format: just the block object
+        Ok(PayloadJsonFormat::Object(json_value))
+    }
+}
+
+/// Load payload data from the specified source
+async fn load_payload_data(source: &PayloadSource) -> Result<String> {
+    match source {
+        PayloadSource::Json(json_data) => Ok(json_data.clone()),
+        PayloadSource::File(file_path) => {
+            // Handle path resolution for relative paths
+            let resolved_path = if file_path.starts_with("crates/") {
+                // Try multiple possible locations
+                let candidates = vec![
+                    std::path::Path::new(file_path).to_path_buf(),
+                    std::path::Path::new("../../..").join(file_path),
+                    std::path::Path::new("../../../..").join(file_path),
+                ];
+
+                let mut found_path = None;
+                for candidate in candidates {
+                    if candidate.exists() {
+                        found_path = Some(candidate);
+                        break;
+                    }
+                }
+
+                found_path.ok_or_else(|| {
+                    eyre::eyre!(
+                        "Could not find payload file {} in any expected location",
+                        file_path
+                    )
+                })?
+            } else {
+                std::path::Path::new(file_path).to_path_buf()
+            };
+
+            std::fs::read_to_string(&resolved_path).map_err(|e| {
+                eyre::eyre!("Failed to read payload file {}: {}", resolved_path.display(), e)
+            })
+        }
+        PayloadSource::Node { .. } => {
+            Err(eyre::eyre!("Node-based payload source should be handled separately"))
+        }
+    }
+}
+
+/// Validate payload response against expected status
+fn validate_payload_response(
+    result: &alloy_rpc_types_engine::PayloadStatus,
+    expected: &ExpectedPayloadStatus,
+    node_idx: usize,
+    context: &str,
+) -> Result<()> {
+    match (&result.status, expected) {
+        (PayloadStatusEnum::Valid, ExpectedPayloadStatus::Valid) => {
+            debug!("Node {}: {} marked as VALID as expected", node_idx, context);
+            Ok(())
+        }
+        (PayloadStatusEnum::Invalid { validation_error }, ExpectedPayloadStatus::Invalid) => {
+            debug!(
+                "Node {}: {} marked as INVALID as expected: {:?}",
+                node_idx, context, validation_error
+            );
+            Ok(())
+        }
+        (
+            PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted,
+            ExpectedPayloadStatus::SyncingOrAccepted,
+        ) => {
+            debug!("Node {}: {} marked as SYNCING/ACCEPTED as expected", node_idx, context);
+            Ok(())
+        }
+        (status, expected) => {
+            let error_msg = if let Some(ref latest_valid_hash) = result.latest_valid_hash {
+                format!(
+                    "Node {}: Unexpected payload status for {}. Expected: {:?}, Got: {:?}, Latest valid hash: {:?}",
+                    node_idx, context, expected, status, latest_valid_hash
+                )
+            } else {
+                format!(
+                    "Node {}: Unexpected payload status for {}. Expected: {:?}, Got: {:?}",
+                    node_idx, context, expected, status
+                )
+            };
+            Err(eyre::eyre!(error_msg))
+        }
+    }
+}
+
+/// Unified action to send a payload from various sources (JSON, file, or node)
+#[derive(Debug)]
+pub struct SendPayload<Engine> {
+    /// Payload data source
+    pub source: PayloadSource,
+    /// Payload configuration
+    pub config: PayloadConfig,
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> SendPayload<Engine> {
+    /// Create a new `SendPayload` action from JSON data
+    pub fn from_json(json_data: impl Into<String>) -> Self {
+        Self {
+            source: PayloadSource::Json(json_data.into()),
+            config: PayloadConfig::default(),
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Create a new `SendPayload` action from file
+    pub fn from_file(file_path: impl Into<String>) -> Self {
+        Self {
+            source: PayloadSource::File(file_path.into()),
+            config: PayloadConfig::default(),
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Create a new `SendPayload` action from another node
+    pub fn from_node(source_node_idx: usize, block_number: u64) -> Self {
+        Self {
+            source: PayloadSource::Node { source_node_idx, block_number },
+            config: PayloadConfig::default(),
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Set the target node index
+    pub const fn with_node_idx(mut self, idx: usize) -> Self {
+        self.config.node_idx = Some(idx);
+        self
+    }
+
+    /// Set expected status for the payload
+    pub const fn with_expected_status(mut self, status: ExpectedPayloadStatus) -> Self {
+        self.config.expected_status = status;
+        self
+    }
+}
+
+impl<Engine> Action<Engine> for SendPayload<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let node_idx = self.config.node_idx.unwrap_or(env.active_node_idx);
+            if node_idx >= env.node_clients.len() {
+                return Err(eyre::eyre!("Node index {} out of bounds", node_idx));
+            }
+
+            // Load and parse payload data
+            let (payload, versioned_hashes) = match &self.source {
+                PayloadSource::Node { source_node_idx, block_number } => {
+                    // Handle node-based payload loading (similar to SendNewPayload logic)
+                    if *source_node_idx >= env.node_clients.len() {
+                        return Err(eyre::eyre!(
+                            "Source node index {} out of bounds",
+                            source_node_idx
+                        ));
+                    }
+
+                    let source_rpc = &env.node_clients[*source_node_idx].rpc;
+                    let mut block = None;
+                    let mut retries = 0;
+
+                    while retries < MAX_BLOCK_RETRIEVAL_RETRIES {
+                        match EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
+                            source_rpc,
+                            alloy_eips::BlockNumberOrTag::Number(*block_number),
+                            true,
+                        ).await {
+                            Ok(Some(b)) => {
+                                block = Some(b);
+                                break;
+                            }
+                            Ok(None) => {
+                                debug!(
+                                    "Block {} not found on source node {} (attempt {}/{})",
+                                    block_number, source_node_idx, retries + 1, MAX_BLOCK_RETRIEVAL_RETRIES
+                                );
+                                retries += 1;
+                                if retries < MAX_BLOCK_RETRIEVAL_RETRIES {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(BLOCK_RETRIEVAL_RETRY_DELAY_MS)).await;
+                                }
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    }
+
+                    let block = block.ok_or_else(|| {
+                        eyre::eyre!(
+                            "Block {} not found on source node {} after {} retries",
+                            block_number,
+                            source_node_idx,
+                            MAX_BLOCK_RETRIEVAL_RETRIES
+                        )
+                    })?;
+
+                    (block_to_payload_v3(block), vec![])
+                }
+                _ => {
+                    // Handle JSON/file-based payload loading
+                    let payload_data = load_payload_data(&self.source).await?;
+                    let parsed = parse_payload_json(&payload_data)?;
+
+                    match parsed {
+                        PayloadJsonFormat::Array { block, versioned_hashes } => {
+                            (json_to_payload_v3(&block)?, versioned_hashes)
+                        }
+                        PayloadJsonFormat::Object(block) => (json_to_payload_v3(&block)?, vec![]),
+                    }
+                }
+            };
+
+            // Send the payload
+            let target_engine = env.node_clients[node_idx].engine.http_client();
+            let result = EngineApiClient::<Engine>::new_payload_v3(
+                &target_engine,
+                payload,
+                versioned_hashes,
+                alloy_primitives::B256::ZERO,
+            )
+            .await?;
+
+            debug!(
+                "Node {}: new_payload response - status: {:?}, latest_valid_hash: {:?}",
+                node_idx, result.status, result.latest_valid_hash
+            );
+
+            // Validate the response
+            let context = match &self.source {
+                PayloadSource::Json(_) => "JSON payload",
+                PayloadSource::File(path) => &format!("file {}", path),
+                PayloadSource::Node { block_number, .. } => &format!("block {}", block_number),
+            };
+
+            validate_payload_response(&result, &self.config.expected_status, node_idx, context)
+        })
+    }
+}
+
 /// Action to load and send a payload from embedded JSON data
 #[derive(Debug)]
 pub struct SendPayloadFromJson<Engine> {
@@ -402,90 +620,16 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // Parse the JSON directly from the embedded string
-            let json_value: serde_json::Value = serde_json::from_str(&self.payload_json)
-                .map_err(|e| eyre::eyre!("Failed to parse payload JSON: {}", e))?;
+            // Delegate to the unified SendPayload action
+            let mut unified_sender = SendPayload::from_json(self.payload_json.clone());
 
-            // Debug: print the JSON structure
-            debug!("JSON payload loaded from embedded data");
-
-            // Extract block data - handle both array and object formats
-            let (block_json, versioned_hashes) = if json_value.is_array() {
-                // Array format: [block, versionedHashes, parentBeaconBlockRoot,
-                // executionRequestsHash]
-                let payload_array = json_value.as_array().unwrap();
-                if payload_array.len() < 2 {
-                    return Err(eyre::eyre!(
-                        "Payload must contain at least block data and versioned hashes"
-                    ));
-                }
-                let block_json = &payload_array[0];
-                let versioned_hashes_json = &payload_array[1];
-                let versioned_hashes: Vec<alloy_primitives::B256> =
-                    serde_json::from_value(versioned_hashes_json.clone())
-                        .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
-                (block_json.clone(), versioned_hashes)
-            } else {
-                // Object format: block object
-                let block_json = json_value;
-
-                // For now, assume no versioned hashes for object format
-                let versioned_hashes: Vec<alloy_primitives::B256> = vec![];
-
-                (block_json, versioned_hashes)
-            };
-
-            // Convert JSON to ExecutionPayloadV3
-            let payload = json_to_payload_v3(&block_json)?;
-
-            let node_idx = self.node_idx.unwrap_or(env.active_node_idx);
-            if node_idx >= env.node_clients.len() {
-                return Err(eyre::eyre!("Node index {} out of bounds", node_idx));
+            if let Some(node_idx) = self.node_idx {
+                unified_sender = unified_sender.with_node_idx(node_idx);
             }
 
-            // Send the payload to the target node
-            let target_engine = env.node_clients[node_idx].engine.http_client();
-            let result = EngineApiClient::<Engine>::new_payload_v3(
-                &target_engine,
-                payload,
-                versioned_hashes,
-                alloy_primitives::B256::ZERO, // parent_beacon_block_root
-            )
-            .await?;
+            unified_sender = unified_sender.with_expected_status(self.expected_status.clone());
 
-            debug!(
-                "Node {}: new_payload from embedded JSON response - status: {:?}, latest_valid_hash: {:?}",
-                node_idx, result.status, result.latest_valid_hash
-            );
-
-            // Validate the response based on expectations
-            match (&result.status, &self.expected_status) {
-                (PayloadStatusEnum::Valid, ExpectedPayloadStatus::Valid) => {
-                    debug!("Node {}: Payload validation successful", node_idx);
-                }
-                (
-                    PayloadStatusEnum::Accepted | PayloadStatusEnum::Syncing,
-                    ExpectedPayloadStatus::SyncingOrAccepted,
-                ) => {
-                    debug!("Node {}: Payload accepted for processing", node_idx);
-                }
-                _ => {
-                    if let Some(ref latest_valid_hash) = result.latest_valid_hash {
-                        return Err(eyre::eyre!(
-                            "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}, Latest valid hash: {:?}",
-                            node_idx, self.expected_status, result.status, latest_valid_hash
-                        ));
-                    }
-                    return Err(eyre::eyre!(
-                        "Node {}: Unexpected payload status. Expected: {:?}, Got: {:?}",
-                        node_idx,
-                        self.expected_status,
-                        result.status
-                    ));
-                }
-            }
-
-            Ok(())
+            unified_sender.execute(env).await
         })
     }
 }
@@ -532,134 +676,16 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // Load the payload from JSON file with path resolution
-            let payload_path = if self.payload_file.starts_with("crates/") {
-                // Relative to workspace root - try multiple possible locations
-                let candidates = vec![
-                    std::path::Path::new(&self.payload_file).to_path_buf(),
-                    std::path::Path::new("../../..").join(&self.payload_file),
-                    std::path::Path::new("../../../..").join(&self.payload_file),
-                ];
+            // Delegate to the unified SendPayload action
+            let mut unified_sender = SendPayload::from_file(self.payload_file.clone());
 
-                let mut found_path = None;
-                for candidate in candidates {
-                    if candidate.exists() {
-                        found_path = Some(candidate);
-                        break;
-                    }
-                }
-
-                found_path.ok_or_else(|| {
-                    eyre::eyre!(
-                        "Could not find payload file {} in any expected location",
-                        self.payload_file
-                    )
-                })?
-            } else {
-                std::path::Path::new(&self.payload_file).to_path_buf()
-            };
-
-            let payload_data = std::fs::read_to_string(&payload_path).map_err(|e| {
-                eyre::eyre!("Failed to read payload file {}: {}", payload_path.display(), e)
-            })?;
-
-            // Parse the JSON - try array format first, then fall back to object format
-            let json_value: serde_json::Value = serde_json::from_str(&payload_data)
-                .map_err(|e| eyre::eyre!("Failed to parse payload JSON: {}", e))?;
-
-            let (block_json, versioned_hashes) = if json_value.is_array() {
-                // Array format: [block, versionedHashes, parentBeaconBlockRoot,
-                // executionRequestsHash]
-                let payload_array = json_value.as_array().unwrap();
-                if payload_array.len() < 2 {
-                    return Err(eyre::eyre!(
-                        "Payload file must contain at least block data and versioned hashes"
-                    ));
-                }
-                let block_json = &payload_array[0];
-                let versioned_hashes_json = &payload_array[1];
-                let versioned_hashes: Vec<alloy_primitives::B256> =
-                    serde_json::from_value(versioned_hashes_json.clone())
-                        .map_err(|e| eyre::eyre!("Failed to parse versioned hashes: {}", e))?;
-                (block_json.clone(), versioned_hashes)
-            } else {
-                // Object format: block object
-                // This is the format of the actual mainnet payload files
-                let block_json = json_value;
-
-                // For now, assume no versioned hashes for object format
-                // TODO: Extract versioned hashes from object format if present
-                let versioned_hashes: Vec<alloy_primitives::B256> = vec![];
-
-                (block_json, versioned_hashes)
-            };
-
-            // Debug: print the block_json structure
-            debug!(
-                "Block JSON keys: {:?}",
-                block_json.as_object().map(|obj| obj.keys().collect::<Vec<_>>())
-            );
-
-            // Convert JSON to ExecutionPayloadV3
-            let payload = json_to_payload_v3(&block_json)?;
-
-            let node_idx = self.node_idx.unwrap_or(env.active_node_idx);
-            if node_idx >= env.node_clients.len() {
-                return Err(eyre::eyre!("Node index {} out of bounds", node_idx));
+            if let Some(node_idx) = self.node_idx {
+                unified_sender = unified_sender.with_node_idx(node_idx);
             }
 
-            // Send the payload to the target node
-            let target_engine = env.node_clients[node_idx].engine.http_client();
-            let result = EngineApiClient::<Engine>::new_payload_v3(
-                &target_engine,
-                payload,
-                versioned_hashes,             // Use extracted versioned hashes
-                alloy_primitives::B256::ZERO, // parent_beacon_block_root
-            )
-            .await?;
+            unified_sender = unified_sender.with_expected_status(self.expected_status.clone());
 
-            debug!(
-                "Node {}: new_payload from file {} response - status: {:?}, latest_valid_hash: {:?}",
-                node_idx, payload_path.display(), result.status, result.latest_valid_hash
-            );
-
-            // Validate the response based on expectations
-            match (&result.status, &self.expected_status) {
-                (PayloadStatusEnum::Valid, ExpectedPayloadStatus::Valid) => {
-                    debug!(
-                        "Node {}: Payload from {} marked as VALID as expected",
-                        node_idx, self.payload_file
-                    );
-                    Ok(())
-                }
-                (
-                    PayloadStatusEnum::Invalid { validation_error },
-                    ExpectedPayloadStatus::Invalid,
-                ) => {
-                    debug!(
-                        "Node {}: Payload from {} marked as INVALID as expected: {:?}",
-                        node_idx, self.payload_file, validation_error
-                    );
-                    Ok(())
-                }
-                (
-                    PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted,
-                    ExpectedPayloadStatus::SyncingOrAccepted,
-                ) => {
-                    debug!(
-                        "Node {}: Payload from {} marked as SYNCING/ACCEPTED as expected (buffered)",
-                        node_idx, self.payload_file
-                    );
-                    Ok(())
-                }
-                (status, expected) => Err(eyre::eyre!(
-                    "Node {}: Unexpected payload status for file {}. Got {:?}, expected {:?}",
-                    node_idx,
-                    self.payload_file,
-                    status,
-                    expected
-                )),
-            }
+            unified_sender.execute(env).await
         })
     }
 }
