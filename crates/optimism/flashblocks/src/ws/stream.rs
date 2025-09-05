@@ -187,7 +187,7 @@ type ConnectFuture<Sink, Stream> =
 
 /// The `WsConnect` trait allows for connecting to a websocket.
 ///
-/// Implementors of the `WsConnect` trait are called 'connectors'.
+/// Implementers of the `WsConnect` trait are called 'connectors'.
 ///
 /// Connectors are defined by one method, [`connect()`]. A call to [`connect()`] attempts to
 /// establish a secure websocket connection and return an asynchronous stream of [`Message`]s
