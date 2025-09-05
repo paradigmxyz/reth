@@ -9339,6 +9339,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "serde",
  "serde_json",
  "test-case",

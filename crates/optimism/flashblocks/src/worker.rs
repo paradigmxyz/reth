@@ -25,22 +25,18 @@ use tracing::trace;
 pub(crate) struct FlashBlockBuilder<EvmConfig, Provider> {
     evm_config: EvmConfig,
     provider: Provider,
-    /// Cached state reads for the current block.
-    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
-    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
-    /// within the same block.
-    cached_state: Option<(B256, CachedReads)>,
 }
 
 impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
     pub(crate) const fn new(evm_config: EvmConfig, provider: Provider) -> Self {
-        Self { evm_config, provider, cached_state: None }
+        Self { evm_config, provider }
     }
 }
 
 pub(crate) struct BuildArgs<I> {
     pub base: ExecutionPayloadBaseV1,
     pub transactions: I,
+    pub cached_state: Option<(B256, CachedReads)>,
 }
 
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
@@ -61,9 +57,9 @@ where
     ///
     /// Returns `None` if the flashblock doesn't attach to the latest header.
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
-        &mut self,
-        args: BuildArgs<I>,
-    ) -> eyre::Result<Option<PendingBlock<N>>> {
+        &self,
+        mut args: BuildArgs<I>,
+    ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
         trace!("Building new pending block from flashblocks");
 
         let latest = self
@@ -80,7 +76,7 @@ where
 
         let state_provider = self.provider.history_by_block_hash(latest.hash())?;
 
-        let mut request_cache = self
+        let mut request_cache = args
             .cached_state
             .take()
             .filter(|(hash, _)| hash == &latest_hash)
@@ -110,15 +106,22 @@ where
             vec![execution_result.requests],
         );
 
-        self.cached_state.replace((latest_hash, request_cache));
-
-        Ok(Some(PendingBlock::with_executed_block(
-            Instant::now() + Duration::from_secs(1),
-            ExecutedBlock {
-                recovered_block: block.into(),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
-            },
+        Ok(Some((
+            PendingBlock::with_executed_block(
+                Instant::now() + Duration::from_secs(1),
+                ExecutedBlock {
+                    recovered_block: block.into(),
+                    execution_output: Arc::new(execution_outcome),
+                    hashed_state: Arc::new(hashed_state),
+                },
+            ),
+            request_cache,
         )))
+    }
+}
+
+impl<EvmConfig: Clone, Provider: Clone> Clone for FlashBlockBuilder<EvmConfig, Provider> {
+    fn clone(&self) -> Self {
+        Self { evm_config: self.evm_config.clone(), provider: self.provider.clone() }
     }
 }
