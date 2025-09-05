@@ -112,7 +112,9 @@ where
         // this is the number of blocks that we will cache the values for
         let cached_values = (oracle_config.blocks * 5).max(oracle_config.max_block_history as u32);
         let inner = Mutex::new(GasPriceOracleInner {
-            last_price: Default::default(),
+            last_price: oracle_config.default.map_or_else(Default::default, |price| {
+                GasPriceOracleResult { block_hash: B256::ZERO, price }
+            }),
             lowest_effective_tip_cache: EffectiveTipLruCache(LruMap::new(ByLength::new(
                 cached_values,
             ))),
