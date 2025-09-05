@@ -182,7 +182,7 @@ mod test {
             "0",
             "--rpc.max-subscriptions-per-connection",
             "10000",
-            "--metrics",
+            "--metrics.prometheus",
             "9003",
             "--log.file.max-size",
             "100",
