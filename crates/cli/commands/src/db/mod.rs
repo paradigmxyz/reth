@@ -12,6 +12,7 @@ mod checksum;
 mod clear;
 mod diff;
 mod get;
+mod inverse_lookup;
 mod list;
 mod stats;
 /// DB List TUI
@@ -52,6 +53,8 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
+    /// Performs inverse lookup to find an account by its hashed address
+    InverseLookup(inverse_lookup::Command),
 }
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
@@ -152,6 +155,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Path => {
                 println!("{}", db_path.display());
+            }
+            Subcommands::InverseLookup(command) => {
+                db_ro_exec!(self.env, tool, N, {
+                    command.execute(&tool)?;
+                });
             }
         }
 
