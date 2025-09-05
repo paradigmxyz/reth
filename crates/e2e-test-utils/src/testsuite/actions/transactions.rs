@@ -29,7 +29,6 @@ use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::EthApiClient;
-use std::str::FromStr;
 use tracing::debug;
 
 /// Action to produce blocks with real storage-modifying transactions.
@@ -257,4 +256,18 @@ pub async fn create_transfer_tx(
     signed.encode_2718(&mut encoded);
 
     Ok(Bytes::from(encoded))
+}
+
+/// Helper to create approve transaction for the default test token contract.
+/// The default contract address is 0x77d34361f991fa724ff1db9b1d760063a16770db
+/// which is used in the trie corruption tests.
+pub async fn create_test_approve_tx(
+    spender: Address,
+    amount: U256,
+    nonce: u64,
+    chain_id: u64,
+) -> Result<Bytes> {
+    let token_address = Address::parse_checksummed("0x77d34361f991fa724ff1db9b1d760063a16770db", None)
+        .map_err(|e| eyre::eyre!("Invalid test token address: {}", e))?;
+    create_approve_tx(token_address, spender, amount, nonce, chain_id).await
 }
