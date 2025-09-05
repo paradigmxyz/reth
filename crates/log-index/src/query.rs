@@ -1,73 +1,18 @@
-use std::{
-    collections::BTreeSet, f32::INFINITY, f64::consts::LOG10_2, future::Future, pin::Pin, sync::Arc,
-};
+use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
     utils::{address_value, topic_value},
     BlockBoundary, FilterError, FilterMapParams, FilterResult, LogIndexProvider, MapValueRows,
 };
-use alloy_primitives::{map::HashMap, B256};
+use alloy_primitives::{map::HashMap, BlockNumber, B256};
 use alloy_rpc_types_eth::Filter;
-use futures::{
-    future::try_join_all,
-    stream::{ForEachConcurrent, FuturesOrdered},
-    StreamExt,
-};
+use futures::stream::FuturesOrdered;
 use itertools::Itertools;
-use tokio::{task, time::Instant};
-use tracing::{info, trace};
+use tokio::task;
+use tracing::trace;
 
 const ADDRESS_OFFSET: u64 = 0;
 const TOPIC_OFFSET_BASE: u64 = 1;
-
-/// Default concurrency for parallel processing
-const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
-
-#[derive(Debug, Clone, Copy)]
-struct MapRangeChunk {
-    start: u32,
-    end: u32,
-    epoch: u32,
-}
-
-/// Calculate epoch-chunked map ranges for the block boundaries using params only
-fn calculate_epoch_chunks(
-    params: &FilterMapParams,
-    block_boundaries: &[BlockBoundary],
-) -> Option<Vec<MapRangeChunk>> {
-    if block_boundaries.is_empty() {
-        return None;
-    }
-
-    let first_lv = block_boundaries.first()?.log_value_index;
-    let last_lv = block_boundaries.last()?.log_value_index;
-
-    // map index = floor(lv_index / values_per_map) == lv_index >> log_values_per_map
-    let map_start = (first_lv >> params.log_values_per_map) as u32;
-    let map_end = (last_lv >> params.log_values_per_map) as u32;
-
-    let start_epoch = params.map_epoch(map_start);
-    let end_epoch = params.map_epoch(map_end);
-
-    let mut chunks = Vec::with_capacity((end_epoch - start_epoch + 1) as usize);
-    for epoch in start_epoch..=end_epoch {
-        let start = if epoch == start_epoch { map_start } else { params.first_epoch_map(epoch) };
-        let end = if epoch == end_epoch { map_end } else { params.last_epoch_map(epoch) };
-        chunks.push(MapRangeChunk { start, end, epoch });
-    }
-    Some(chunks)
-}
-
-/// Result from a filter map query containing indices and metadata
-#[derive(Debug, Clone)]
-pub struct FilterMapQueryResult {
-    /// Log value index from the filter map
-    pub log_index: u64,
-    /// Block number containing this log
-    pub block_number: u64,
-    /// Starting log value index for this block (for position calculation)
-    pub block_start_lv_index: u64,
-}
 
 /// Fetch log indices for the block range
 fn fetch_block_boundaries<P: LogIndexProvider>(
@@ -157,7 +102,6 @@ fn fetch_filter_rows<P: LogIndexProvider>(
 fn get_matches_for_constraint(
     params: &FilterMapParams,
     value: &B256,
-    position_offset: u64, // 0 for address, 1+ for topics
     map_start: u32,
     map_end: u32,
     rows_by_map: &HashMap<(u32, B256), MapValueRows>,
@@ -181,7 +125,7 @@ fn resolve_to_blocks(
     log_value_indices: &[BlockBoundary],
     from_block: u64,
     to_block: u64,
-) -> Vec<FilterMapQueryResult> {
+) -> Vec<BlockNumber> {
     let mut results = Vec::new();
 
     for log_index in log_indices {
@@ -206,10 +150,11 @@ fn resolve_to_blocks(
             continue;
         }
 
-        let block_start_lv_index = log_value_indices[block_idx].log_value_index;
-
-        results.push(FilterMapQueryResult { log_index, block_number, block_start_lv_index });
+        results.push(block_number);
     }
+
+    results.sort_unstable();
+    results.dedup();
 
     results
 }
@@ -237,7 +182,7 @@ fn query_maps_range(
     let mut candidates: BTreeSet<u64> = first_values
         .iter()
         .flat_map(|value| {
-            get_matches_for_constraint(params, value, first_offset, map_start, map_end, rows_by_map)
+            get_matches_for_constraint(params, value, map_start, map_end, rows_by_map)
         })
         .collect();
 
@@ -250,7 +195,7 @@ fn query_maps_range(
         let current_matches: BTreeSet<u64> = values
             .iter()
             .flat_map(|value| {
-                get_matches_for_constraint(params, value, offset, map_start, map_end, rows_by_map)
+                get_matches_for_constraint(params, value, map_start, map_end, rows_by_map)
             })
             .collect();
 
@@ -271,7 +216,7 @@ pub fn query_logs_in_block_range<P>(
     filter: &Filter,
     from_block: u64,
     to_block: u64,
-) -> FilterResult<Vec<FilterMapQueryResult>>
+) -> FilterResult<Vec<BlockNumber>>
 where
     P: LogIndexProvider,
 {
@@ -299,6 +244,7 @@ where
 }
 
 /// Query logs in a block range in parallel.
+/// TODO: this can be massively cleaner
 pub async fn spawn_query_logs_tasks<P>(
     provider: Arc<P>,
     params: FilterMapParams,
@@ -307,9 +253,7 @@ pub async fn spawn_query_logs_tasks<P>(
     to_block: u64,
     concurrency: usize,
 ) -> FilterResult<
-    FuturesOrdered<
-        Pin<Box<dyn Future<Output = Result<Vec<FilterMapQueryResult>, FilterError>> + Send>>,
-    >,
+    FuturesOrdered<Pin<Box<dyn Future<Output = Result<Vec<BlockNumber>, FilterError>> + Send>>>,
 >
 where
     P: LogIndexProvider + Send + Sync + 'static,
@@ -353,7 +297,7 @@ where
         let map_end = *chunk.last().unwrap();
 
         let chunk_task = Box::pin(async move {
-            let chunk_task = task::spawn_blocking(move || -> Vec<FilterMapQueryResult> {
+            let chunk_task = task::spawn_blocking(move || -> Vec<BlockNumber> {
                 let rows = provider
                     .get_rows_until_short_row(map_start, map_end, &values)
                     .unwrap_or(Vec::new());

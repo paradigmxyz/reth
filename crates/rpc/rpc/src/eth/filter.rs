@@ -695,14 +695,7 @@ where
         let mut matching_headers = Vec::new();
 
         while let Some(Ok(results)) = tasks.next().await {
-            info!("results length: {}", results.len());
-
-            // group results by block number
-            let mut results_by_block: BTreeMap<u64, Vec<_>> = BTreeMap::new();
-            for result in results {
-                results_by_block.entry(result.block_number).or_default().push(result);
-            }
-            for (block_number, _) in results_by_block {
+            for block_number in results {
                 let header = match self.provider().header_by_number(block_number)? {
                     Some(h) => h,
                     None => continue,

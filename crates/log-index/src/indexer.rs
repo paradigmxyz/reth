@@ -273,7 +273,7 @@ impl LogIndexer {
         self.index
     }
 
-    /// Get the last completed map index (if any)
+    /// Get the last completed map index
     pub fn last_completed_map(&self) -> Option<MapIndex> {
         self.last_completed_map
     }
@@ -283,12 +283,12 @@ impl LogIndexer {
         self.last_completed_log_value_index
     }
 
-    /// Get pending rows (for checkpointing)
+    /// Get pending rows
     pub fn pending_rows(&self) -> &HashMap<MapRowIndex, FilterMapColumns> {
         &self.pending_rows
     }
 
-    /// Take pending rows (for final flush)
+    /// Take pending rows
     pub fn take_pending_rows(&mut self) -> HashMap<MapRowIndex, FilterMapColumns> {
         std::mem::take(&mut self.pending_rows)
     }
