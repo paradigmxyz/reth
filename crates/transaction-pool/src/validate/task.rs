@@ -35,8 +35,7 @@ pub struct ValidationTask {
 impl ValidationTask {
     /// Creates a new cloneable task pair.
     ///
-    /// The [`ValidationJobSender`] sends new (transaction) validation tasks to an available
-    /// validation task.
+    /// The sender sends new (transaction) validation tasks to an available validation task.
     pub fn new() -> (ValidationJobSender, Self) {
         Self::with_capacity(1)
     }
