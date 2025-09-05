@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, StorageKey, B256, U256};
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
@@ -96,17 +96,28 @@ impl Command {
             println!("\nAccount found: {}", address);
             println!("Hashed address: {}", keccak256(address));
 
-            // If we need to find a storage slot, search for it
+            // If we need to find storage slots, search for them
             if let Some(ref target_slot) = self.target_storage_slot {
-                println!("\nSearching for storage slot...");
-                let found_slot =
+                println!("\nSearching for storage slot(s)...");
+                let found_slots =
                     self.search_storage_slot_parallel(tool, address, target_slot, num_threads)?;
 
-                if let Some(storage_slot) = found_slot {
-                    println!("\nStorage slot found: {}", storage_slot);
-                    println!("Hashed storage slot: {}", keccak256(B256::from(storage_slot)));
-                } else {
-                    println!("\nStorage slot not found for this account");
+                match found_slots.len() {
+                    0 => {
+                        println!("\nNo storage slots found for this account");
+                    }
+                    1 => {
+                        let storage_slot = found_slots[0];
+                        println!("\nStorage slot found: {}", storage_slot);
+                        println!("Hashed storage slot: {}", keccak256(B256::from(storage_slot)));
+                    }
+                    n => {
+                        println!("\n{} storage slots found:", n);
+                        for (i, storage_slot) in found_slots.iter().enumerate() {
+                            println!("  {}. {}", i + 1, storage_slot);
+                            println!("     Hashed: {}", keccak256(B256::from(*storage_slot)));
+                        }
+                    }
                 }
             }
         } else {
@@ -240,14 +251,14 @@ impl Command {
         Ok(result)
     }
 
-    /// Search for a storage slot in parallel across all addresses
+    /// Search for storage slots in parallel across all addresses
     fn search_storage_slot_parallel<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
         &self,
         tool: &DbTool<N>,
         address: Address,
         target: &SearchTarget,
         num_threads: usize,
-    ) -> eyre::Result<Option<StorageKey>> {
+    ) -> eyre::Result<Vec<StorageKey>> {
         let provider = tool.provider_factory.provider()?;
         let tx = provider.tx_ref();
 
@@ -270,9 +281,9 @@ impl Command {
         let max_value = U256::MAX;
         let chunk_size = max_value / U256::from(num_threads);
 
-        // Shared state
-        let found_slot = Arc::new(Mutex::new(None));
-        let found_flag = Arc::new(AtomicBool::new(false));
+        // Shared state - collect all matching slots for prefix searches
+        let found_slots = Arc::new(Mutex::new(Vec::new()));
+        let stop_flag = Arc::new(AtomicBool::new(false));
 
         // Create global progress bar
         let progress_bar = Arc::new(ProgressBar::new(total_storage_entries as u64));
@@ -291,8 +302,8 @@ impl Command {
 
         for thread_id in 0..num_threads {
             let provider_factory = provider_factory.clone();
-            let found_slot = found_slot.clone();
-            let found_flag = found_flag.clone();
+            let found_slots = found_slots.clone();
+            let stop_flag = stop_flag.clone();
             let progress_bar = progress_bar.clone();
             let target = *target;
 
@@ -319,9 +330,11 @@ impl Command {
                 // We need to check storage entries for the specific address
                 if let Ok(walker) = storage_cursor.walk_dup(Some(address), Some(start_key)) {
                     for result in walker {
-                        // Check if another thread found the slot
-                        if found_flag.load(Ordering::Relaxed) {
-                            break;
+                        // Check if we should stop (for exact hash matches only)
+                        if let SearchTarget::Hash(_) = target {
+                            if stop_flag.load(Ordering::Relaxed) {
+                                break;
+                            }
                         }
 
                         let Ok((_, StorageEntry { key: storage_key, value: _ })) = result else {
@@ -336,9 +349,14 @@ impl Command {
                         // Check if the hash matches the target
                         let hashed_slot = keccak256(storage_key);
                         if Self::matches_target(hashed_slot, &target) {
-                            found_flag.store(true, Ordering::Relaxed);
-                            *found_slot.lock().unwrap() = Some(storage_key);
-                            break;
+                            found_slots.lock().unwrap().push(storage_key);
+
+                            // For exact hash matches, stop after finding one
+                            if let SearchTarget::Hash(_) = target {
+                                stop_flag.store(true, Ordering::Relaxed);
+                                break;
+                            }
+                            // For prefix matches, continue searching for more matches
                         }
 
                         progress_bar.inc(1);
@@ -354,13 +372,19 @@ impl Command {
             let _ = handle.join();
         }
 
-        let result = *found_slot.lock().unwrap();
-        if result.is_some() {
-            progress_bar.finish_with_message("✓ Storage slot found!");
-        } else {
-            progress_bar.finish_with_message("✗ Storage slot not found for this address");
+        let results = found_slots.lock().unwrap().clone();
+        match results.len() {
+            0 => {
+                progress_bar.finish_with_message("✗ No storage slots found");
+            }
+            1 => {
+                progress_bar.finish_with_message("✓ Storage slot found!");
+            }
+            n => {
+                progress_bar.finish_with_message(format!("✓ {} storage slots found!", n));
+            }
         }
 
-        Ok(result)
+        Ok(results)
     }
 }
