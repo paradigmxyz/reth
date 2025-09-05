@@ -15,6 +15,7 @@ pub mod fork;
 pub mod node_ops;
 pub mod produce_blocks;
 pub mod reorg;
+pub mod transactions;
 
 pub use custom_fcu::{BlockReference, FinalizeBlock, SendForkchoiceUpdate};
 pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads};
@@ -30,6 +31,9 @@ pub use produce_blocks::{
     UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
+pub use transactions::{
+    create_approve_tx, create_test_approve_tx, create_transfer_tx, ProduceBlockWithTransactions,
+};
 
 /// An action that can be performed on an instance.
 ///
