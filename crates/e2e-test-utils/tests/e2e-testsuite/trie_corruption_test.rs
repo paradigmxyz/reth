@@ -34,8 +34,7 @@
 // genesis state from the db walker in
 // crates/e2e-test-utils/tests/e2e-testsuite/genesis_with_storage.json
 
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use jsonrpsee::core::client::ClientT;
@@ -43,21 +42,19 @@ use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     testsuite::{
         actions::{
-            Action, BlockReference, CaptureBlock, ExpectedPayloadStatus, MakeCanonical,
-            ProduceBlocks, SendForkchoiceUpdate, SendPayloadFromJson,
+            Action, BlockReference, CaptureBlock, ExpectedPayloadStatus,
+            SendForkchoiceUpdate, SendPayloadFromJson,
         },
         setup::{NetworkSetup, Setup},
         Environment, TestBuilder,
     },
-    wallet::Wallet,
 };
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
-use reth_rpc_api::clients::EthApiClient;
 use std::{str::FromStr, sync::Arc};
-use tracing::{debug, info};
+use tracing::info;
 // Imports for trie updates verification
-use reth_trie_common::Nibbles;
+use reth_trie_common::{updates::TrieUpdates, Nibbles};
 
 /// Test for reproducing and verifying the fix for the trie corruption bug
 /// that occurred at mainnet blocks 23003311-23003312.
@@ -367,17 +364,76 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
 
             let client = &env.node_clients[node_idx];
 
-            // Try to get trie updates using the Alloy provider
-            // Note: This requires Reth to store trie updates with blocks
-            let provider = client.provider();
+            // Try to get trie updates using the debug API
+            let trie_updates_result: Result<Option<TrieUpdates>, _> = client.rpc
+                .request("debug_getTrieUpdates", vec![serde_json::to_value(format!("0x{:x}", block_info.hash))?])
+                .await;
 
-            // Get the block with senders to access trie updates
-            match provider.get_block_by_hash(block_info.hash).await {
-                Ok(Some(_block)) => {
-                    println!("Block {} found, checking for trie updates...", self.block_tag);
+            match trie_updates_result {
+                Ok(Some(trie_updates)) => {
+                    println!("Trie updates found for block {}:", self.block_tag);
+                    println!("  Trie updates structure: {:?}", trie_updates);
 
-                    // For now, we'll use storage proofs as the primary verification
-                    // since direct trie updates access requires more framework changes
+                    // Look up storage trie updates for the contract address
+                    let contract_addr = Address::from_str(
+                        "0x77d34361f991fa724ff1db9b1d760063a16770db",
+                    )?;
+                    let addr_hash = keccak256(contract_addr);
+
+                    let storage_updates = trie_updates
+                        .storage_tries
+                        .get(&addr_hash)
+                        .ok_or_else(|| {
+                            eyre::eyre!(
+                                "No storage trie updates found for contract {} in block {}",
+                                contract_addr, self.block_tag
+                            )
+                        })?;
+
+                    // For this scenario the trie itself should not be fully deleted
+                    if storage_updates.is_deleted {
+                        return Err(eyre::eyre!(
+                            "Storage trie marked deleted unexpectedly at block {}",
+                            self.block_tag
+                        ));
+                    }
+
+                    // Verify expected storage node presence/absence
+                    for (nibbles, should_exist) in &self.expected_storage_nodes {
+                        let exists = storage_updates.storage_nodes.contains_key(nibbles);
+                        if exists != *should_exist {
+                            return Err(eyre::eyre!(
+                                "Storage node {:?} existence mismatch at block {}: expected {}, got {}",
+                                nibbles, self.block_tag, should_exist, exists
+                            ));
+                        }
+                    }
+
+                    // Verify expected removed nodes
+                    for nibbles in &self.expected_removed_nodes {
+                        if !storage_updates.removed_nodes.contains(nibbles) {
+                            return Err(eyre::eyre!(
+                                "Expected removed node {:?} not found at block {}",
+                                nibbles, self.block_tag
+                            ));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // This is the expected case when the fix is not enabled - trie updates should be missing
+                    println!("No trie updates available for block {} via debug API (expected when fix is not enabled)", self.block_tag);
+
+                    // When trie updates are missing, we expect the verification to fail
+                    // This is the bug scenario we're testing for
+                    return Err(eyre::eyre!(
+                        "Trie updates verification failed for block {}: trie updates are missing (expected bug behavior)",
+                        self.block_tag
+                    ));
+                }
+                Err(e) => {
+                    println!("Debug API not available or trie updates not supported: {}", e);
+
+                    // Fallback to storage proof verification
                     let contract_addr =
                         Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
                     let storage_proof: alloy_rpc_types_eth::EIP1186AccountProofResponse = client.rpc
@@ -387,26 +443,9 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                             serde_json::to_value(format!("0x{:x}", block_info.hash))?,
                         ]).await?;
 
-                    println!("Trie updates verification for block {}:", self.block_tag);
+                    println!("Storage proof verification for block {}:", self.block_tag);
                     println!("  Account proof nodes: {}", storage_proof.account_proof.len());
                     println!("  Storage proofs: {}", storage_proof.storage_proof.len());
-
-                    // Verify expected storage node states
-                    for (nibbles, should_exist) in &self.expected_storage_nodes {
-                        println!(
-                            "  Checking storage node {:?}: should_exist={}",
-                            nibbles, should_exist
-                        );
-                        // Note: With current E2E framework, we can't directly inspect TrieUpdates
-                        // This would require extending the framework to expose internal Reth
-                        // structures
-                    }
-
-                    // Verify expected removed nodes
-                    for nibbles in &self.expected_removed_nodes {
-                        println!("  Checking removed node {:?}", nibbles);
-                        // Note: With current E2E framework, we can't directly inspect TrieUpdates
-                    }
 
                     // Basic verification: trie should be accessible
                     if storage_proof.account_proof.is_empty() {
@@ -415,28 +454,6 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                             self.block_tag
                         ));
                     }
-                }
-                Ok(None) => {
-                    return Err(eyre::eyre!("Block {} not found", self.block_tag));
-                }
-                Err(e) => {
-                    println!("Could not get block via provider, falling back to RPC: {}", e);
-                    // Fallback to RPC-based verification
-                    let contract_addr =
-                        Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
-                    let storage_proof: alloy_rpc_types_eth::EIP1186AccountProofResponse = client.rpc
-                        .request("eth_getProof", vec![
-                            serde_json::to_value(contract_addr)?,
-                            serde_json::to_value(vec![B256::from(U256::from(15))])?, // storage slot 0xf
-                            serde_json::to_value(format!("0x{:x}", block_info.hash))?,
-                        ]).await?;
-
-                    println!(
-                        "Trie updates verification for block {} (RPC fallback):",
-                        self.block_tag
-                    );
-                    println!("  Account proof nodes: {}", storage_proof.account_proof.len());
-                    println!("  Storage proofs: {}", storage_proof.storage_proof.len());
                 }
             }
 
