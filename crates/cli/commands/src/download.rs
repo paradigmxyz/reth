@@ -220,9 +220,5 @@ async fn get_latest_snapshot_url() -> Result<String> {
         .trim()
         .to_string();
 
-    if !filename.ends_with(EXTENSION_TAR_LZ4) {
-        return Err(eyre::eyre!("Unexpected snapshot filename format: {}", filename));
-    }
-
     Ok(format!("{MERKLE_BASE_URL}/{filename}"))
 }
