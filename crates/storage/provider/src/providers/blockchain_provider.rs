@@ -2025,7 +2025,7 @@ mod tests {
                     "partial mem data"
                 );
 
-                // Test range in in-memory to unbounded end
+                // Test range in memory to unbounded end
                 assert_eq!(provider.$method(in_mem_range.start() + 1..)?, &in_memory_data[1..], "unbounded mem data");
 
                 // Test last element in-memory
