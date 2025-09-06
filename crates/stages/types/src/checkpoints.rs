@@ -4,7 +4,6 @@ use alloy_primitives::{map::HashMap, Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
 use reth_log_index::{BlockBoundary, FilterMapColumns, FilterMapRow, LogValueIndex, MapRowIndex};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
-use std::collections::VecDeque;
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -311,7 +310,7 @@ impl IndexLogsCheckpoint {
         current_map: u32,
         next_log_value_index: u64,
         pending_rows: HashMap<MapRowIndex, FilterMapColumns>,
-        pending_boundaries: VecDeque<(BlockNumber, LogValueIndex)>,
+        pending_boundaries: Vec<(BlockNumber, LogValueIndex)>,
     ) -> Self {
         Self {
             current_map,

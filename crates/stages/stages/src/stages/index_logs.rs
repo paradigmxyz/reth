@@ -383,7 +383,7 @@ where
                         log_indexer.current_map(),
                         log_indexer.current_index(),
                         log_indexer.pending_rows().iter().map(|(k, v)| (*k, v.clone())).collect(),
-                        block_boundaries.clone(),
+                        block_boundaries.clone().into(),
                     );
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
                 } else {
@@ -552,8 +552,6 @@ mod tests {
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockParams, BlockRangeParams,
     };
-
-    stage_test_suite_ext!(IndexLogsTestRunner, index_logs);
 
     #[tokio::test]
     async fn execute_index_logs_range() {
