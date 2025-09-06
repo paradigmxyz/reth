@@ -8,7 +8,6 @@ use alloy_primitives::BlockNumber;
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "serde"), serde(rename_all = "lowercase"))]
-#[allow(clippy::derivable_impls)]
 pub enum PruneMode {
     /// Prune all blocks.
     Full,
@@ -19,6 +18,7 @@ pub enum PruneMode {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
+#[allow(clippy::derivable_impls)]
 impl Default for PruneMode {
     fn default() -> Self {
         Self::Full
