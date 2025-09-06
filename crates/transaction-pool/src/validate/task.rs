@@ -2,6 +2,7 @@
 
 use crate::{
     blobstore::BlobStore,
+    metrics::TxPoolValidatorMetrics,
     validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
@@ -43,7 +44,8 @@ impl ValidationTask {
     /// Creates a new cloneable task pair with the given channel capacity.
     pub fn with_capacity(capacity: usize) -> (ValidationJobSender, Self) {
         let (tx, rx) = mpsc::channel(capacity);
-        (ValidationJobSender { tx }, Self::with_receiver(rx))
+        let metrics = TxPoolValidatorMetrics::default();
+        (ValidationJobSender { tx, metrics }, Self::with_receiver(rx))
     }
 
     /// Creates a new task with the given receiver.
@@ -71,6 +73,7 @@ impl std::fmt::Debug for ValidationTask {
 #[derive(Debug)]
 pub struct ValidationJobSender {
     tx: mpsc::Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
+    metrics: TxPoolValidatorMetrics,
 }
 
 impl ValidationJobSender {
@@ -79,7 +82,14 @@ impl ValidationJobSender {
         &self,
         job: Pin<Box<dyn Future<Output = ()> + Send>>,
     ) -> Result<(), TransactionValidatorError> {
-        self.tx.send(job).await.map_err(|_| TransactionValidatorError::ValidationServiceUnreachable)
+        self.metrics.inflight_validation_jobs.increment(1);
+        let res = self
+            .tx
+            .send(job)
+            .await
+            .map_err(|_| TransactionValidatorError::ValidationServiceUnreachable);
+        self.metrics.inflight_validation_jobs.decrement(1);
+        res
     }
 }
 
@@ -258,6 +268,14 @@ where
                 })
                 .collect(),
         }
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

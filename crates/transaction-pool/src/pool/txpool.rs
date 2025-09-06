@@ -771,8 +771,8 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Determines if the tx sender is delegated or has a  pending delegation, and if so, ensures
-    /// they have at most one in-flight **executable** transaction, e.g. disallow stacked and
-    /// nonce-gapped transactions from the account.
+    /// they have at most one configured amount of in-flight **executable** transactions (default at
+    /// most one), e.g. disallow stacked and nonce-gapped transactions from the account.
     fn check_delegation_limit(
         &self,
         transaction: &ValidPoolTransaction<T::Transaction>,
@@ -802,8 +802,17 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Ok(())
         }
 
-        if txs_by_sender.any(|id| id == &transaction.transaction_id) {
-            // Transaction replacement is supported
+        let mut count = 0;
+        for id in txs_by_sender {
+            if id == &transaction.transaction_id {
+                // Transaction replacement is supported
+                return Ok(())
+            }
+            count += 1;
+        }
+
+        if count < self.config.max_inflight_delegated_slot_limit {
+            // account still has an available slot
             return Ok(())
         }
 
@@ -818,8 +827,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This verifies that the transaction complies with code authorization
     /// restrictions brought by EIP-7702 transaction type:
     /// 1. Any account with a deployed delegation or an in-flight authorization to deploy a
-    ///    delegation will only be allowed a single transaction slot instead of the standard limit.
-    ///    This is due to the possibility of the account being sweeped by an unrelated account.
+    ///    delegation will only be allowed a certain amount of transaction slots (default 1) instead
+    ///    of the standard limit. This is due to the possibility of the account being sweeped by an
+    ///    unrelated account.
     /// 2. In case the pool is tracking a pending / queued transaction from a specific account, at
     ///    most one in-flight transaction is allowed; any additional delegated transactions from
     ///    that account will be rejected.
@@ -829,12 +839,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_nonce: u64,
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
-        // Allow at most one in-flight tx for delegated accounts or those with a
-        // pending authorization.
+        // Ensure in-flight limit for delegated accounts or those with a pending authorization.
         self.check_delegation_limit(transaction, on_chain_nonce, on_chain_code_hash)?;
 
         if let Some(authority_list) = &transaction.authority_ids {
             for sender_id in authority_list {
+                // Ensure authority has at most 1 inflight transaction.
                 if self.all_transactions.txs_iter(*sender_id).nth(1).is_some() {
                     return Err(PoolError::new(
                         *transaction.hash(),
