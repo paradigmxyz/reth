@@ -120,6 +120,7 @@ where
 
         Ok(())
     }
+
 }
 
 /// Pipes all stream items to the subscription sink.

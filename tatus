@@ -1,0 +1,156 @@
+* [33m01d6f8569[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32msven[m[33m, [m[1;31mupstream/main[m[33m, [m[1;31mupstream/HEAD[m[33m, [m[1;31morigin/sven[m[33m)[m perf: specialize len 1 (#18307)
+* [33m50e8409fa[m feat: expose `EvmEnv` to `caller_gas_allowance` (#18302)
+* [33m0bd1bb2b8[m feat: introduce setting for delegated txs slots (#18298)
+[31m|[m * [33ma6ad1f58f[m[33m ([m[1;31mupstream/alexey/db-inverse-lookup[m[33m)[m feat: support finding all matching storage slots for prefix searches
+[31m|[m * [33mfc2604a34[m feat: add SearchTarget enum with hash and nibbles prefix support
+[31m|[m * [33m8cbe9b6b3[m refactor: improve storage slot search to split B256 space
+[31m|[m * [33m4f858f438[m feat: add db inverse-lookup command
+[31m|[m[31m/[m  
+* [33me93e1fcec[m feat(gpo): add default fee price argument (#18297)
+[32m|[m * [33m72540a72f[m[33m ([m[1;31mupstream/matt/properly-compute-hash-for-genesis[m[33m)[m fix: properly compute genesis hash
+[32m|[m[32m/[m  
+[32m|[m * [33m512c8f4cf[m[33m ([m[1;31mupstream/mediocregopher/repair-trie-tables[m[33m)[m remove print
+[32m|[m * [33m0bcbae8e0[m Fix verify_empty_storages
+[32m|[m * [33m4188229d2[m Include validation that accounts with no storage have empty tries
+[32m|[m * [33m515e9f523[m fmt and other simplifications
+[32m|[m * [33md2c7e7c21[m More progress improvements
+[32m|[m * [33m9ac75e72a[m better progress indicator
+[32m|[m * [33m59d08f5e8[m progress indicator
+[32m|[m * [33m6090e3449[m Depth-first
+[32m|[m * [33mebbd5c544[m Add actual repairing logic
+[32m|[m * [33m46f73f16e[m disable tx timeout
+[32m|[m * [33m5914fd9ee[m WIP
+[32m|[m [34m|[m * [33m4d47ff524[m[33m ([m[1;31mupstream/yk/e2e_reorg_trie[m[33m)[m feat: implement trie update forwarding and monitoring in testsuite
+[32m|[m [34m|[m * [33mb83f46fe4[m feat: enhance trie updates handling in testsuite
+[32m|[m [34m|[m * [33mbc7d68181[m fix: update parent_beacon_block_root to use B256::ZERO in testsuite
+[32m|[m [34m|[m * [33m2d79c1381[m fmt, clippy
+[32m|[m [34m|[m * [33m07c7a4258[m added trie updates checker
+[32m|[m [34m|[m * [33mc55e9cf1c[m refactor: remove duplicate ProduceBlockWithTransactions implementation
+[32m|[m [34m|[m * [33m8fab72ec5[m feat: introduce unified payload handling for engine API actions
+[32m|[m [34m|[m * [33m8ffe93608[m refactor: improve code readability and consistency in e2e test utilities
+[32m|[m [34m|[m * [33m5e7ba45af[m combine files
+[32m|[m [34m|[m * [33me8c0c8043[m refactor: clean up trie corruption test and improve code readability
+[32m|[m [34m|[m * [33m55deb98e2[m feat: add SendPayloadFromJson action for payload handling
+[32m|[m [34m|[m * [33ma682a6f3e[m removed unused files
+[32m|[m [34m|[m * [33m43e76b962[m feat: add e2e tests for reorg and trie corruption scenarios
+[32m|[m [34m|[m [35m|[m * [33mee09bc6c6[m[33m ([m[1;31mupstream/alexey/persistence-refactor[m[33m)[m add logs
+[32m|[m [34m|[m [35m|[m * [33mf24eefbe8[m oops
+[32m|[m [34m|[m [35m|[m *   [33mbd537d6f6[m Merge remote-tracking branch 'origin/main' into alexey/persistence-refactor
+[32m|[m [34m|[m [35m|[m [1;31m|[m[32m\[m  
+[32m|[m [34m|[m[32m_[m[35m|[m[32m_[m[1;31m|[m[32m/[m  
+[32m|[m[32m/[m[34m|[m [35m|[m [1;31m|[m   
+[32m|[m [34m|[m [35m|[m * [33mb12d263df[m refactor(tree): persistence of blocks
+[32m|[m [34m|[m [35m|[m [1;32m|[m * [33m6acfea11b[m[33m ([m[1;31mupstream/chore/apply-recent-spelling-fixes[m[33m)[m chore: fix doubled word typos
+[32m|[m [34m|[m [35m|[m [1;32m|[m * [33m11998cf48[m chore: fix British spelling to American spelling
+[32m|[m [34m|[m [35m|[m [1;32m|[m * [33m4690267fb[m chore: fix typos in comments
+[32m|[m [34m|[m[32m_[m[35m|[m[32m_[m[1;32m|[m[32m/[m  
+[32m|[m[32m/[m[34m|[m [35m|[m [1;32m|[m   
+* [34m|[m [35m|[m [1;32m|[m [33md6845357c[m[33m ([m[1;31mupstream/gh-readonly-queue/main/pr-18295-9c61b467526c9cbdeac9f8b0b8fa62876d974089[m[33m)[m feat(metrics): add `TxPoolValidatorMetrics` to track inflight validation jobs (#18295)
+* [34m|[m [35m|[m [1;32m|[m [33m9c61b4675[m[33m ([m[1;31mupstream/gh-readonly-queue/main/pr-18288-848d7fa830a097bbaf6d35bb6d315555e4a8c698[m[33m)[m perf: specialize validate_transactions_with_origin for task validator (#18288)
+* [34m|[m [35m|[m [1;32m|[m [33m848d7fa83[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m test(optimism): Test that close message is responded to in `WsFlashBlockStream` (#18268)
+* [34m|[m [35m|[m [1;32m|[m [33m0cdd54838[m chore: delist unused deps with `cargo-machete` (#18259)
+[1;33m|[m [34m|[m [35m|[m [1;32m|[m * [33mcbf375229[m[33m ([m[1;31mupstream/matt/introduce-with-capacity[m[33m)[m docs
+[1;33m|[m [34m|[m [35m|[m [1;32m|[m * [33ma60e4f12b[m chore: introduce validationtask with capacity
+[1;33m|[m [34m|[m[1;33m_[m[35m|[m[1;33m_[m[1;32m|[m[1;33m/[m  
+[1;33m|[m[1;33m/[m[34m|[m [35m|[m [1;32m|[m   
+* [34m|[m [35m|[m [1;32m|[m [33mf8b678cf1[m perf: specialize single batch request (#18289)
+* [34m|[m [35m|[m [1;32m|[m [33md99f37b24[m perf: optimize send raw batching (#18280)
+* [34m|[m [35m|[m [1;32m|[m [33m30297092f[m fix: check prune checkpoints for unwind target limit (#18263)
+* [34m|[m [35m|[m [1;32m|[m [33m254860f2d[m chore(txpool): add sanity tests for blob fee bit handling (#18258)
+* [34m|[m [35m|[m [1;32m|[m [33m4cc600c41[m perf(db): do not heap-allocate the stage key per query (#18284)
+* [34m|[m [35m|[m [1;32m|[m [33m02ff408b1[m perf: build local pending block without updates (#18271)
+* [34m|[m [35m|[m [1;32m|[m [33m7c8f5a402[m perf: rm redundant collect (#18281)
+* [34m|[m [35m|[m [1;32m|[m [33m60311096e[m chore: extract `validate_against_parent_gas_limit` into separate fn (#18277)
+[1;34m|[m [34m|[m [35m|[m [1;32m|[m * [33m04103b0f2[m[33m ([m[1;31mupstream/matt/specialize-validate_transactions_with_origin[m[33m)[m perf: specialize validate_transactions_with_origin for task validator
+[1;34m|[m [34m|[m[1;34m_[m[35m|[m[1;34m_[m[1;32m|[m[1;34m/[m  
+[1;34m|[m[1;34m/[m[34m|[m [35m|[m [1;32m|[m   
+* [34m|[m [35m|[m [1;32m|[m [33mcf46aa017[m chore: log prune settings on unwind (#18270)
+* [34m|[m [35m|[m [1;32m|[m [33m7f8674971[m test(optimism): Test that UTF-8 encoded messages are received in `WsFlashBlockStream` (#18269)
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33mcc8fcb333[m[33m ([m[1;31mupstream/yk/txn_action_e2e[m[33m)[m style: remove unnecessary inline comments
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33m859495055[m revert: remove clippy fix for reth-node-core version.rs
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33mf74b19a6e[m style: simplify documentation to match codebase conventions
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33m94dc3cdcf[m style: apply nightly rustfmt formatting
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33meb4baa8ad[m fix: resolve clippy warnings across codebase
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33m68d444e58[m fix(e2e-test-utils): add missing create_test_approve_tx function and remove unused import
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33m71a2ba7af[m refactor(testsuite): remove unused transaction utility function from actions module
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m * [33m20db4b686[m feat(testsuite): add transaction actions and utilities for block production
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m [1;36m|[m * [33me9176b8a9[m[33m ([m[1;31mupstream/reth-optimism-flashblocks33[m[33m)[m refactor(optimism): Use non blocking spawn for the `FlashBlockService`
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m [1;36m|[m * [33mfed243dd4[m refactor(optimism): Return `CachedReads` in `FlashBlockBuilder`
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m [1;36m|[m * [33m6bb8ba1ca[m feat(optimism): Build blocks in a spawn blocking task
+[1;35m|[m [34m|[m [35m|[m [1;32m|[m [1;36m|[m * [33mbd9491c97[m[33m ([m[1;31mupstream/reth-optimism-flashblocks28[m[33m)[m refactor(optimism): Extract pending block building responsibility out of `FlashBlockService`
+[1;35m|[m [34m|[m[1;35m_[m[35m|[m[1;35m_[m[1;32m|[m[1;35m_[m[1;36m|[m[1;35m/[m  
+[1;35m|[m[1;35m/[m[34m|[m [35m|[m [1;32m|[m [1;36m|[m   
+* [34m|[m [35m|[m [1;32m|[m [1;36m|[m [33mc57feda64[m fix(optimism): Reconnect if ws stream ends in `WsFlashBlockStream` (#18226)
+* [34m|[m [35m|[m [1;32m|[m [1;36m|[m [33mecd18987b[m feat(optimism): Respond to close messages in `WsFlashBlockStream` (#18256)
+[1;32m|[m [34m|[m[1;32m_[m[35m|[m[1;32m/[m [1;36m/[m  
+[1;32m|[m[1;32m/[m[34m|[m [35m|[m [1;36m|[m   
+* [34m|[m [35m|[m [1;36m|[m [33mb1e19325b[m chore: remove redundant payload trait bounds (#18262)
+* [34m|[m [35m|[m [1;36m|[m [33m107399ff0[m feat(optimism): Decode text messages in `WsFlashBlockStream` (#18257)
+[1;36m|[m [34m|[m[1;36m_[m[35m|[m[1;36m/[m  
+[1;36m|[m[1;36m/[m[34m|[m [35m|[m   
+* [34m|[m [35m|[m [33m36e39ebe3[m fix(optimism): Compare parent hash and latest hash to invalidate cached flashblock (#18238)
+* [34m|[m [35m|[m [33m1d7fefece[m chore: unify engine downloader targets (#18248)
+[31m|[m [34m|[m [35m|[m * [33mbb63a838c[m[33m ([m[1;31mupstream/emhane/eth-api-timeout[m[33m)[m Fix error code of eth_sendRawTransactionSync timeout
+[31m|[m [34m|[m[31m_[m[35m|[m[31m/[m  
+[31m|[m[31m/[m[34m|[m [35m|[m   
+* [34m|[m [35m|[m [33m3d8d7ce78[m chore: downgrade debug to trace  for peer reputation logs (#18250)
+* [34m|[m [35m|[m [33m29685ce00[m test(optimism): Test that `WsFlashBlockStream` pongs a ping (#18217)
+* [34m|[m [35m|[m [33m0550289c6[m feat(optimism): Respond to ping messages with pong in `WsFlashBlockStream` (#18212)
+* [34m|[m [35m|[m [33m9121dba0b[m docs: update urls in docs (#18245)
+* [34m|[m [35m|[m [33mbb1dfc9e9[m perf(txpool): eliminate allocations in basefee enforcement (#18218)
+* [34m|[m [35m|[m [33ma11655b51[m perf(reth-optimism-flashblocks): rm redundant clone (#18196)
+* [34m|[m [35m|[m [33mf0880f3ff[m fix: filter zero storage values when computing withdrawals root in genesis header (#18213)
+* [34m|[m [35m|[m [33m783ef6579[m chore(trie): use instrument instead of manual span (#18239)
+* [34m|[m [35m|[m [33m0acebab68[m chore(engine): add better logs and spans for execution (#18240)
+* [34m|[m [35m|[m [33md5a489838[m fix(download): use updated merkle base URL (#18236)
+* [34m|[m [35m|[m [33m60ce53655[m chore: improve flashblock logs (#18232)
+* [34m|[m [35m|[m [33m733e8cfce[m chore: safe None check (#18225)
+* [34m|[m [35m|[m [33m298a7cb5e[m feat(optimism): Warn if `FlashBlockService` has stopped (#18227)
+* [34m|[m [35m|[m [33m44caf60af[m test(optimism): Test that sequence stops before a gap (#18228)
+[32m|[m [34m|[m [35m|[m * [33m0e9a2ae1b[m[33m ([m[1;31mupstream/alexey/tx-execution-cache[m[33m)[m metrics: delete after use (details)
+[32m|[m [34m|[m [35m|[m * [33m01b349fcf[m feat: add granular cache overhead instrumentation for performance analysis
+[32m|[m [34m|[m [35m|[m * [33mae9bc6c13[m feat: add comprehensive transaction-level performance instrumentation
+[32m|[m [34m|[m [35m|[m * [33m9778532e4[m feat: add detailed cache miss execution timing instrumentation (delete after use)
+[32m|[m [34m|[m [35m|[m * [33m5a19b8923[m metrics: delete after use (find heaviest overhead)
+[32m|[m [34m|[m [35m|[m * [33ma85266b45[m fix: added back caching
+[32m|[m [34m|[m [35m|[m * [33m5db62e37a[m Delete benchmark_storage_optimization.rs
+[32m|[m [34m|[m [35m|[m * [33mfc48381fc[m Delete benchmark_storage_optimization
+[32m|[m [34m|[m [35m|[m * [33m871b961b5[m Delete cpu_cycle_analysis.md
+[32m|[m [34m|[m [35m|[m * [33m2b9bffa03[m metrics: delete after use
+[32m|[m [34m|[m [35m|[m * [33mbfa6f50c5[m feat(payload_validator): optimize access validation by deduplicating records
+[32m|[m [34m|[m [35m|[m * [33m62f4b5484[m feat(prewarm): skip initial transactions to prevent cache invalidation
+[32m|[m [34m|[m [35m|[m * [33m91b9a570d[m fmt
+[32m|[m [34m|[m [35m|[m * [33m09bc27f2f[m refactor(payload_validator): optimize result cloning logic
+[32m|[m [34m|[m [35m|[m * [33md93e4988d[m feat(metrics): add transaction execution methods to BlockExecutor
+[32m|[m [34m|[m [35m|[m * [33ma07245a25[m feat: update to use execute_with_state_closure API from alloy-evm
+[32m|[m [34m|[m [35m|[m * [33m7f9663331[m revert: remove hot account caching optimizations
+[32m|[m [34m|[m [35m|[m [33m|[m * [33m123aa1585[m[33m ([m[1;31mupstream/dan/support-zst-archive-reth-download[m[33m)[m feat(download): support zst archives in reth download
+[32m|[m [34m|[m[32m_[m[35m|[m[32m_[m[33m|[m[32m/[m  
+[32m|[m[32m/[m[34m|[m [35m|[m [33m|[m   
+* [34m|[m [35m|[m [33m|[m [33m358b61b4e[m fix(optimism): Prevent repeated executions of current flashblock sequence (#18224)
+* [34m|[m [35m|[m [33m|[m [33m6bcd5e07a[m fix: incorrect blob fee comparison (#18216)
+* [34m|[m [35m|[m [33m|[m [33mdba13f448[m revert: "perf(txpool): eliminate allocations in basefee enforcement" (#18215)
+* [34m|[m [35m|[m [33m|[m [33m1788c5c6a[m fix: spawn flashblocks service as blocking (#18214)
+[34m|[m [34m|[m [35m|[m [33m|[m * [33md90225f9c[m[33m ([m[1;31mupstream/matt/bypass1[m[33m)[m bypass
+[34m|[m [34m|[m [35m|[m [33m|[m * [33m201077802[m[33m ([m[1;31mupstream/alexey/state-root-debug[m[33m)[m always save bundle state
+[34m|[m [34m|[m [35m|[m [33m|[m * [33mdbb78698a[m remove prints
+[34m|[m [34m|[m [35m|[m [33m|[m * [33m2ae45f584[m bump nybbles
+[34m|[m [34m|[m [35m|[m [33m|[m * [33m9057d679d[m also log struct
+[34m|[m [34m|[m [35m|[m [33m|[m * [33m509b58af9[m add debug print to hook
+[34m|[m [34m|[m [35m|[m [33m|[m [35m|[m * [33mb6b074d36[m[33m ([m[1;31mupstream/timing-analysis-main[m[33m)[m metrics: delete after use, full timing analysis
+[34m|[m [34m|[m[34m_[m[35m|[m[34m_[m[33m|[m[34m_[m[35m|[m[34m/[m  
+[34m|[m[34m/[m[34m|[m [35m|[m [33m|[m [35m|[m   
+* [34m|[m [35m|[m [33m|[m [35m|[m [33md10e5f6fb[m perf: prepare flashblock txs (#18201)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33m4d94e201d[m chore: impl ExecutorTx for withtxenv (#18202)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33me9801a799[m chore: simplify flashblocks poll logic (#18194)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33mfe37279ab[m test(optimism): Test that streaming flashblocks from remote source is successful (#18170)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33mb6fddd7d0[m fix: struct serialization to match actual fields (#18189)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33m945d50a7f[m test(optimism): Cover the case of repeatedly failing to connect to websocket in `WsFlashBlockStream` (#18169)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33me3772c4db[m test(optimism): Cover the case of stream returning errors in `WsFlashBlockStream` (#18167)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33me76c88c21[m test(optimism): Cover the failure case of decoding a non-binary message in `WsFlashBlockStream` (#18166)
+* [34m|[m [35m|[m [33m|[m [35m|[m [33m9ec6459bd[m test(optimism): Cover successful decoding of websocket messages in `WsFlashBlockStream` (#18163)
+[36m|[m [34m|[m [35m|[m [33m|[m [35m|[m * [33m51e154eb5[m[33m ([m[1;31mupstream/mediocregopher/pst-storage-tries[m[33m)[m PST default to no thresholds, set them in engine
+[36m|[m [34m|[m [35m|[m [33m|[m [35m|[m *   [33m572653eca[m Merge remote-tracking branch 'upstream/main' into mediocregopher/pst-storage-tries
+[36m|[m [34m|[m [35m|[m [33m|[m [35m|[m [1;32m|[m[36m\[m  
+[36m|[m [34m|[m[36m_[m[35m|[m[36m_[m[33m|[m[36m_[m[35m|[m[36m_[m[1;32m|[m[36m/[m  
+[36m|[m[36m/[m[34m|[m [35m|[m [33m|[m [35m|[m [1;32m|[m   
