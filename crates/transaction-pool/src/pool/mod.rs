@@ -75,7 +75,7 @@ use crate::{
             BlobTransactionSidecarListener, PendingTransactionHashListener, PoolEventBroadcast,
             TransactionListener,
         },
-        state::SubPool,
+        state::{SubPool, TxState},
         txpool::{SenderInfo, TxPool},
         update::UpdateOutcome,
     },
@@ -510,10 +510,7 @@ where
 
                 let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
-                let state = match added.subpool() {
-                    SubPool::Pending => AddedTransactionState::Pending,
-                    _ => AddedTransactionState::Queued,
-                };
+                let state = Self::determine_transaction_state(&added, pool);
 
                 // transaction was successfully inserted into the pool
                 if let Some(sidecar) = maybe_sidecar {
@@ -1055,6 +1052,47 @@ where
             .collect();
         self.delete_blobs(blob_txs);
     }
+
+    /// Determines the specific reason why a transaction was added to the pool.
+    ///
+    /// Maps the transaction's subpool assignment to a granular `AddedTransactionState`
+    /// that indicates the specific condition preventing it from being pending.
+    fn determine_transaction_state<U: PoolTransaction>(
+        added: &AddedTransaction<U>,
+        pool: &RwLockWriteGuard<'_, TxPool<T>>,
+    ) -> AddedTransactionState {
+        match added.subpool() {
+            SubPool::Pending => AddedTransactionState::Pending,
+            SubPool::Queued => {
+                let tx_id = match added {
+                    AddedTransaction::Pending(pending_tx) => pending_tx.transaction.id(),
+                    AddedTransaction::Parked { transaction, .. } => transaction.id(),
+                };
+
+                if let Some(internal_tx) = pool.all().get(tx_id) {
+                    let state = internal_tx.state;
+
+                    if !state.contains(TxState::NO_NONCE_GAPS) {
+                        AddedTransactionState::Queued(QueuedReason::NonceGap)
+                    } else if !state.contains(TxState::ENOUGH_BALANCE) {
+                        AddedTransactionState::Queued(QueuedReason::InsufficientBalance)
+                    } else if !state.contains(TxState::NO_PARKED_ANCESTORS) {
+                        AddedTransactionState::Queued(QueuedReason::ParkedAncestors)
+                    } else if !state.contains(TxState::NOT_TOO_MUCH_GAS) {
+                        AddedTransactionState::Queued(QueuedReason::TooMuchGas)
+                    } else {
+                        // Fallback for unexpected queued state - could be due to other conditions
+                        AddedTransactionState::Queued(QueuedReason::NonceGap)
+                    }
+                } else {
+                    // Fallback if we can't find the transaction in the pool
+                    AddedTransactionState::Queued(QueuedReason::NonceGap)
+                }
+            }
+            SubPool::BaseFee => AddedTransactionState::Queued(QueuedReason::InsufficientBaseFee),
+            SubPool::Blob => AddedTransactionState::Queued(QueuedReason::InsufficientBlobFee),
+        }
+    }
 }
 
 impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
@@ -1231,24 +1269,49 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 }
 
+/// The specific reason why a transaction is queued (not ready for execution)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueuedReason {
+    /// Transaction has a nonce gap - missing prior transactions
+    NonceGap,
+    /// Transaction has parked ancestors - waiting for other transactions to be mined
+    ParkedAncestors,
+    /// Sender has insufficient balance to cover the transaction cost
+    InsufficientBalance,
+    /// Transaction exceeds the block gas limit
+    TooMuchGas,
+    /// Transaction doesn't meet the base fee requirement
+    InsufficientBaseFee,
+    /// Transaction doesn't meet the blob fee requirement (EIP-4844)
+    InsufficientBlobFee,
+}
+
 /// The state of a transaction when is was added to the pool
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddedTransactionState {
     /// Ready for execution
     Pending,
-    /// Not ready for execution due to a nonce gap or insufficient balance
-    Queued, // TODO: Break it down to missing nonce, insufficient balance, etc.
+    /// Not ready for execution due to a specific condition
+    Queued(QueuedReason),
 }
 
 impl AddedTransactionState {
     /// Returns whether the transaction was submitted as queued.
     pub const fn is_queued(&self) -> bool {
-        matches!(self, Self::Queued)
+        matches!(self, Self::Queued(_))
     }
 
     /// Returns whether the transaction was submitted as pending.
     pub const fn is_pending(&self) -> bool {
         matches!(self, Self::Pending)
+    }
+
+    /// Returns the specific queued reason if the transaction is queued.
+    pub const fn queued_reason(&self) -> Option<&QueuedReason> {
+        match self {
+            Self::Queued(reason) => Some(reason),
+            Self::Pending => None,
+        }
     }
 }
 
