@@ -116,19 +116,19 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
         // Check that we're currently persisting.
         let Some(action) = self.persistence().current_action() else {
-            return PersistingKind::NotPersisting
+            return PersistingKind::NotPersisting;
         };
         // Check that the persistince action is saving blocks, not removing them.
         let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
+            return PersistingKind::PersistingNotDescendant;
         };
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
+        if block.block.number > highest.number
+            && self.state().tree_state.is_descendant(*highest, block)
         {
-            return PersistingKind::PersistingDescendant
+            return PersistingKind::PersistingDescendant;
         }
 
         // In all other cases, the block is not a descendant.
@@ -301,7 +301,9 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = self.convert_to_block(input)?;
-                        return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+                        return Err(
+                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
+                        );
                     }
                 }
             };
@@ -319,7 +321,7 @@ where
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
 
         let state_provider = ensure_ok!(provider_builder.build());
@@ -331,7 +333,7 @@ where
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
 
         let evm_env = self.evm_env_for(&input);
@@ -361,9 +363,9 @@ where
         //    accounting for the prefix sets.
         let has_ancestors_with_missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-        let mut use_state_root_task = run_parallel_state_root &&
-            self.config.use_state_root_task() &&
-            !has_ancestors_with_missing_trie_updates;
+        let mut use_state_root_task = run_parallel_state_root
+            && self.config.use_state_root_task()
+            && !has_ancestors_with_missing_trie_updates;
 
         debug!(
             target: "engine::tree",
@@ -403,7 +405,8 @@ where
             // Use state root task only if prefix sets are empty, otherwise proof generation is too
             // expensive because it requires walking over the paths in the prefix set in every
             // proof.
-            if trie_input.prefix_sets.is_empty() {
+            let prewarming_start = Instant::now();
+            let handle = if trie_input.prefix_sets.is_empty() {
                 self.payload_processor.spawn(
                     env.clone(),
                     txs,
@@ -416,9 +419,25 @@ where
                 debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
                 self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
-            }
+            };
+
+            // record prewarming initialization duration
+            self.metrics
+                .new_payload_phases
+                .prewarming_init_duration
+                .record(prewarming_start.elapsed().as_secs_f64());
+            handle
         } else {
-            self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
+            let prewarming_start = Instant::now();
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder);
+
+            // Record prewarming initialization duration
+            self.metrics
+                .new_payload_phases
+                .prewarming_init_duration
+                .record(prewarming_start.elapsed().as_secs_f64());
+            handle
         };
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -429,6 +448,8 @@ where
             handle.cache_metrics(),
         );
 
+        // Phase C: Block execution
+        let execution_start = Instant::now();
         let output = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
@@ -437,6 +458,12 @@ where
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
+
+        // record execution duration
+        self.metrics
+            .new_payload_phases
+            .execution_duration
+            .record(execution_start.elapsed().as_secs_f64());
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -453,6 +480,8 @@ where
             };
         }
 
+        // Phase D: Post-execution validation
+        let post_execution_start = Instant::now();
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
         // validate block consensus rules
         ensure_ok!(self.validate_block_inner(&block));
@@ -462,13 +491,13 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into());
         }
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
@@ -478,8 +507,14 @@ where
         {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
         }
+
+        // record post-execution validation duration
+        self.metrics
+            .new_payload_phases
+            .post_execution_validation_duration
+            .record(post_execution_start.elapsed().as_secs_f64());
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
@@ -496,9 +531,14 @@ where
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
+                        // record sparse trie state root algorithm duration
+                        self.metrics
+                            .new_payload_phases
+                            .sparse_trie_state_root_duration
+                            .record(elapsed.as_secs_f64());
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed))
+                            maybe_state_root = Some((state_root, trie_updates, elapsed));
                         } else {
                             warn!(
                                 target: "engine::tree",
@@ -527,7 +567,13 @@ where
                             regular_state_root = ?result.0,
                             "Regular root task finished"
                         );
-                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
+                        let elapsed = root_time.elapsed();
+                        // record parallel state root algorithm duration
+                        self.metrics
+                            .new_payload_phases
+                            .parallel_state_root_duration
+                            .record(elapsed.as_secs_f64());
+                        maybe_state_root = Some((result.0, result.1, elapsed));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
@@ -543,10 +589,10 @@ where
             }
         }
 
-        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
+        let (state_root, trie_output, root_elapsed) = if let Some(ref maybe_state_root) =
             maybe_state_root
         {
-            maybe_state_root
+            maybe_state_root.clone()
         } else {
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
@@ -560,6 +606,17 @@ where
                 ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
+
+        // record state root computation duration (Phase E)
+        self.metrics.new_payload_phases.state_root_duration.record(root_elapsed.as_secs_f64());
+
+        // record regular state root algorithm duration if we used the fallback
+        if maybe_state_root.is_none() {
+            self.metrics
+                .new_payload_phases
+                .regular_state_root_duration
+                .record(root_elapsed.as_secs_f64());
+        }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
@@ -582,7 +639,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         // terminate prewarming task with good state output
@@ -627,12 +684,12 @@ where
     fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -766,7 +823,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         // Check if the block is persisted
@@ -774,7 +831,7 @@ where
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
@@ -843,7 +900,7 @@ where
                 } else {
                     // If the block is higher than the best block number, stop filtering, as it's
                     // the first block that's not in the database.
-                    break
+                    break;
                 }
             }
 

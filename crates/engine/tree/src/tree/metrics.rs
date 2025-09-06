@@ -26,6 +26,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
+    /// Metrics for newPayload processing phases
+    pub(crate) new_payload_phases: NewPayloadPhaseMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub tree: TreeMetrics,
 }
@@ -190,6 +192,30 @@ impl BlockValidationMetrics {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
     }
+}
+
+/// Metrics for newPayload processing phases
+#[derive(Metrics)]
+#[metrics(scope = "engine.new_payload")]
+pub(crate) struct NewPayloadPhaseMetrics {
+    /// Pre-execution phase duration (entry → execution start)
+    pub(crate) pre_execution_duration: Histogram,
+    /// Prewarming initialization duration
+    pub(crate) prewarming_init_duration: Histogram,
+    /// Block execution duration
+    pub(crate) execution_duration: Histogram,
+    /// Post-execution validation duration
+    pub(crate) post_execution_validation_duration: Histogram,
+    /// State root computation duration
+    pub(crate) state_root_duration: Histogram,
+    /// Post-processing duration
+    pub(crate) post_processing_duration: Histogram,
+    /// Parallel state root algorithm duration
+    pub(crate) parallel_state_root_duration: Histogram,
+    /// Sparse trie state root algorithm duration
+    pub(crate) sparse_trie_state_root_duration: Histogram,
+    /// Regular state root algorithm duration
+    pub(crate) regular_state_root_duration: Histogram,
 }
 
 /// Metrics for the blockchain tree block buffer
