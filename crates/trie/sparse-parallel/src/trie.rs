@@ -2492,7 +2492,7 @@ mod tests {
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
         b256, hex,
-        map::{foldhash::fast::RandomState, B256Set, DefaultHashBuilder, HashMap},
+        map::{B256Set, DefaultHashBuilder, HashMap},
         B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
@@ -2548,7 +2548,7 @@ mod tests {
     impl MockTrieNodeProvider {
         /// Creates a new empty mock provider
         fn new() -> Self {
-            Self { nodes: HashMap::with_hasher(RandomState::default()) }
+            Self { nodes: HashMap::default() }
         }
 
         /// Adds a revealed node at the specified path
@@ -5687,7 +5687,7 @@ mod tests {
         //   0xXY: Leaf { key: 0xZ... }
 
         // Create leaves that will force multiple subtries
-        let leaves = vec![
+        let leaves = [
             ctx.create_test_leaf([0x0, 0x0, 0x1, 0x2], 1),
             ctx.create_test_leaf([0x0, 0x1, 0x3, 0x4], 2),
             ctx.create_test_leaf([0x0, 0x2, 0x5, 0x6], 3),
@@ -6272,7 +6272,7 @@ mod tests {
 
         // Assert the root hash matches the expected value
         let expected_root =
-            b256!("29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
+            b256!("0x29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
         assert_eq!(trie.root(), expected_root);
     }
 

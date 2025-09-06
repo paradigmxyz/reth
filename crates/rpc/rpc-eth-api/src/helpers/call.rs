@@ -401,7 +401,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             evm_env.cfg_env.disable_eip3607 = true;
 
             if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
-                let cap = this.caller_gas_allowance(&mut db, &tx_env)?;
+                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
                 // limit
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
@@ -479,9 +479,10 @@ pub trait Call:
     fn caller_gas_allowance(
         &self,
         mut db: impl Database<Error: Into<EthApiError>>,
-        env: &TxEnvFor<Self::Evm>,
+        _evm_env: &EvmEnvFor<Self::Evm>,
+        tx_env: &TxEnvFor<Self::Evm>,
     ) -> Result<u64, Self::Error> {
-        alloy_evm::call::caller_gas_allowance(&mut db, env).map_err(Self::Error::from_eth_err)
+        alloy_evm::call::caller_gas_allowance(&mut db, tx_env).map_err(Self::Error::from_eth_err)
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
@@ -799,7 +800,7 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = self.caller_gas_allowance(db, &tx_env)?;
+                let cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }
