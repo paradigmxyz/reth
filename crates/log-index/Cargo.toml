@@ -1,0 +1,63 @@
+[package]
+name = "reth-log-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Log index implementation for efficient log indexing"
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+auto_impl.workspace = true
+
+# reth
+reth-errors.workspace = true
+reth-primitives-traits.workspace = true
+reth-codecs.workspace = true
+modular-bitfield.workspace = true
+
+tracing.workspace = true
+
+# misc
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+sha2.workspace = true
+fnv.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+futures.workspace = true
+itertools.workspace = true
+
+# codecs
+
+[dev-dependencies]
+# For tests
+alloy-consensus.workspace = true
+rand.workspace = true
+test-fuzz.workspace = true
+futures.workspace = true
+
+# For integration tests
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
+tokio = { workspace = true, features = ["full"] }
+reth-testing-utils.workspace = true
+reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
+
+[features]
+default = []
+reth-codecs = []
+test-utils = [
+    "reth-codecs/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+]

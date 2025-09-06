@@ -19,6 +19,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
+use reth_log_index::{BlockBoundary, FilterMapMeta, FilterResult, LogIndexProvider, MapValueRows};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -1447,6 +1448,45 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
         } else {
             Self::get_state(self, block..=block)
         }
+    }
+}
+
+impl<N: ProviderNodeTypes> LogIndexProvider for ConsistentProvider<N> {
+    fn get_metadata(&self) -> FilterResult<Option<FilterMapMeta>> {
+        self.storage_provider.get_metadata()
+    }
+
+    fn get_base_layer_rows_for_value(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        value: &B256,
+    ) -> FilterResult<Vec<Vec<u32>>> {
+        self.storage_provider.get_base_layer_rows_for_value(map_start, map_end, value)
+    }
+
+    fn get_log_value_indices_range(
+        &self,
+        block_range: impl RangeBounds<BlockNumber>,
+    ) -> FilterResult<Vec<BlockBoundary>> {
+        self.storage_provider.get_log_value_indices_range(block_range)
+    }
+
+    fn get_rows_until_short_row(
+        &self,
+        map_start: u32,
+        map_end: u32,
+        values: &[B256],
+    ) -> FilterResult<Vec<MapValueRows>> {
+        self.storage_provider.get_rows_until_short_row(map_start, map_end, values)
+    }
+
+    fn fetch_more_layers_for_map(
+        &self,
+        map_index: u32,
+        value: &B256,
+    ) -> FilterResult<Vec<Vec<u32>>> {
+        self.storage_provider.fetch_more_layers_for_map(map_index, value)
     }
 }
 
