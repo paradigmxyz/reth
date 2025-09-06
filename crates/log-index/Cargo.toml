@@ -16,7 +16,6 @@ workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 
-
 auto_impl.workspace = true
 
 # reth
@@ -47,14 +46,18 @@ futures.workspace = true
 
 # For integration tests
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-ethereum-primitives.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 reth-testing-utils.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
-reth-tracing.workspace = true
 
 [features]
 default = []
 reth-codecs = []
-test-utils = []
+test-utils = [
+	"reth-codecs/test-utils",
+	"reth-ethereum-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider/test-utils"
+]

@@ -540,7 +540,14 @@ where
     }
 
     fn split_into_segments(self: Arc<Self>, from: u64, to: u64) -> Option<Vec<Seg>> {
-        let meta = self.provider().get_metadata().ok().flatten()?;
+        let meta = match self.provider().get_metadata().ok().flatten() {
+            Some(meta) => meta,
+            None => {
+                // No metadata means no indexed blocks, use legacy for entire range
+                return Some(vec![Seg::Legacy(from, to)]);
+            }
+        };
+
         let first = meta.first_indexed_block;
         let last = meta.last_indexed_block;
 
@@ -612,13 +619,8 @@ where
     ) -> Result<Vec<Log>, EthFilterError> {
         let this = self.clone();
         let Some(segs) = this.split_into_segments(from_block, to_block) else {
-            return Ok(Vec::new());
+            return Ok(Vec::new()); // TODO: should handle error properly
         };
-
-        // If there's only one Legacy segment spanning the whole range, let caller fall back.
-        if matches!(segs.as_slice(), [Seg::Legacy(a, b)] if *a == from_block && *b == to_block) {
-            return Ok(Vec::new());
-        }
 
         let mut out = Vec::new();
         let mut remaining = limits.max_logs_per_response;

@@ -589,7 +589,7 @@ mod tests {
         let mut total_log_values = 0;
         for block in &blocks {
             receipts.reserve_exact(block.body().size());
-            for transaction in block.body().transactions.iter() {
+            for transaction in &block.body().transactions {
                 let receipt = random_receipt(
                     &mut rng,
                     transaction,

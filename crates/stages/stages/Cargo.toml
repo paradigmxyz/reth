@@ -27,9 +27,7 @@ reth-era.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives-traits = { workspace = true, features = [
-    "serde-bincode-compat",
-] }
+reth-primitives-traits = { workspace = true, features = ["serde-bincode-compat"] }
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
@@ -63,10 +61,7 @@ rayon.workspace = true
 num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
-reqwest = { workspace = true, default-features = false, features = [
-    "rustls-tls-native-roots",
-    "blocking",
-] }
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
 eyre.workspace = true
 
 [dev-dependencies]
@@ -100,27 +95,28 @@ criterion = { workspace = true, features = ["async_tokio"] }
 
 [features]
 test-utils = [
-    "dep:reth-chainspec",
-    "reth-network-p2p/test-utils",
-    "reth-db/test-utils",
-    "reth-provider/test-utils",
-    "reth-stages-api/test-utils",
-    "dep:reth-testing-utils",
-    "dep:tempfile",
-    "reth-chainspec?/test-utils",
-    "reth-consensus/test-utils",
-    "reth-evm/test-utils",
-    "reth-downloaders/test-utils",
-    "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
-    "reth-codecs/test-utils",
-    "reth-db-api/test-utils",
-    "reth-trie-db/test-utils",
-    "reth-trie/test-utils",
-    "reth-prune-types/test-utils",
-    "dep:reth-ethereum-primitives",
-    "reth-ethereum-primitives?/test-utils",
-    "reth-evm-ethereum/test-utils",
+	"dep:reth-chainspec",
+	"reth-network-p2p/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-stages-api/test-utils",
+	"dep:reth-testing-utils",
+	"dep:tempfile",
+	"reth-chainspec?/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-downloaders/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-revm/test-utils",
+	"reth-codecs/test-utils",
+	"reth-db-api/test-utils",
+	"reth-trie-db/test-utils",
+	"reth-trie/test-utils",
+	"reth-prune-types/test-utils",
+	"dep:reth-ethereum-primitives",
+	"reth-ethereum-primitives?/test-utils",
+	"reth-evm-ethereum/test-utils",
+	"reth-log-index/test-utils"
 ]
 
 [[bench]]

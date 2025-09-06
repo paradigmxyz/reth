@@ -48,9 +48,10 @@ reth-codec = [
     "reth-trie-common/reth-codec",
 ]
 test-utils = [
-    "arbitrary",
-    "reth-codecs?/test-utils",
-    "reth-trie-common/test-utils",
+	"arbitrary",
+	"reth-codecs?/test-utils",
+	"reth-trie-common/test-utils",
+	"reth-log-index/test-utils"
 ]
 arbitrary = [
     "std",
