@@ -56,8 +56,8 @@ reth-storage-errors.workspace = true
 default = []
 reth-codecs = []
 test-utils = [
-	"reth-codecs/test-utils",
-	"reth-ethereum-primitives/test-utils",
-	"reth-primitives-traits/test-utils",
-	"reth-provider/test-utils"
+    "reth-codecs/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
 ]

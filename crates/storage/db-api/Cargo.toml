@@ -62,15 +62,15 @@ proptest-arbitrary-interop.workspace = true
 
 [features]
 test-utils = [
-	"arbitrary",
-	"reth-primitives-traits/test-utils",
-	"reth-codecs/test-utils",
-	"reth-db-models/test-utils",
-	"reth-trie-common/test-utils",
-	"reth-prune-types/test-utils",
-	"reth-stages-types/test-utils",
-	"reth-ethereum-primitives/test-utils",
-	"reth-log-index/test-utils"
+    "arbitrary",
+    "reth-primitives-traits/test-utils",
+    "reth-codecs/test-utils",
+    "reth-db-models/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-prune-types/test-utils",
+    "reth-stages-types/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-log-index/test-utils",
 ]
 arbitrary = [
     "reth-db-models/arbitrary",
