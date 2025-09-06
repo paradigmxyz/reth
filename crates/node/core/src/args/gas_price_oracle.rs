@@ -25,17 +25,22 @@ pub struct GasPriceOracleArgs {
     /// The percentile of gas prices to use for the estimate
     #[arg(long = "gpo.percentile", default_value_t = DEFAULT_GAS_PRICE_PERCENTILE)]
     pub percentile: u32,
+
+    /// The default gas price to use if there are no blocks to use
+    #[arg(long = "gpo.default-suggested-fee")]
+    pub default_suggested_fee: Option<U256>,
 }
 
 impl GasPriceOracleArgs {
     /// Returns a [`GasPriceOracleConfig`] from the arguments.
     pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        let Self { blocks, ignore_price, max_price, percentile } = self;
+        let Self { blocks, ignore_price, max_price, percentile, default_suggested_fee } = self;
         GasPriceOracleConfig {
             max_price: Some(U256::from(*max_price)),
             ignore_price: Some(U256::from(*ignore_price)),
             percentile: *percentile,
             blocks: *blocks,
+            default_suggested_fee: *default_suggested_fee,
             ..Default::default()
         }
     }
@@ -48,6 +53,7 @@ impl Default for GasPriceOracleArgs {
             ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
             max_price: DEFAULT_MAX_GAS_PRICE.to(),
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
+            default_suggested_fee: None,
         }
     }
 }
@@ -73,6 +79,7 @@ mod tests {
                 ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
                 max_price: DEFAULT_MAX_GAS_PRICE.to(),
                 percentile: DEFAULT_GAS_PRICE_PERCENTILE,
+                default_suggested_fee: None,
             }
         );
     }

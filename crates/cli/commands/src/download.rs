@@ -18,7 +18,7 @@ use tracing::info;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://snapshots.merkle.io";
+const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
 const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
 const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
 
@@ -34,7 +34,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
         long_help = "Specify a snapshot URL or let the command propose a default one.\n\
         \n\
         Available snapshot sources:\n\
-        - https://snapshots.merkle.io (default, mainnet archive)\n\
+        - https://www.merkle.io/snapshots (default, mainnet archive)\n\
         - https://publicnode.com/snapshots (full nodes & testnets)\n\
         \n\
         If no URL is provided, the latest mainnet archive snapshot\n\
