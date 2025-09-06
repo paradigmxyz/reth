@@ -7327,6 +7327,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-signer",
  "alloy-signer-local",
+ "codspeed-criterion-compat",
  "derive_more",
  "metrics",
  "parking_lot",
