@@ -954,6 +954,12 @@ where
             let tx = recovered.inner();
             let h = tx.tx_hash();
 
+            // Skip blob (EIP-4844) transactions - IL handling for blobs is different and
+            // such transactions shouldn't be enforced by this inclusion-list check.
+            if tx.is_eip4844() {
+                continue;
+            }
+
             // Skip if already included or if not enough gas
             if included.contains(&h) || tx.gas_limit() > remaining {
                 continue;
@@ -984,6 +990,7 @@ where
 
                 if account_balance >= max_cost {
                     // Transaction would still be valid - inclusion list violation
+                    info!("Failed on TX: {:?}", recovered);
                     return Err(BlockExecutionError::Validation(
                         BlockValidationError::InvalidInclusionList,
                     ));

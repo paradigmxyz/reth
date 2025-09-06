@@ -1240,6 +1240,12 @@ where
 
                 while let Some(pool_tx) = best_txs.next() {
                     let tx = pool_tx.to_consensus().into_inner();
+
+                    // Skip blob (EIP-4844) transactions: IL should not include blob txs 
+                    if tx.is_eip4844() {
+                        continue;
+                    }
+
                     let tx_len = tx.encode_2718_len();
 
                     if il_size + tx_len > MAX_BYTES_PER_IL {
