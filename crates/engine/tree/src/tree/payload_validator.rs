@@ -25,14 +25,14 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    block::BlockExecutor, eth::validate_block_access_list_against_execution,
+    execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -442,6 +442,26 @@ where
         handle.stop_prewarming_execution();
 
         let block = self.convert_to_block(input)?;
+
+        if let (Some(executed_bal), Some(block_bal)) =
+            (output.result.block_access_list.as_ref(), block.body().block_access_list())
+        {
+            tracing::error!(
+                "BlockAccessList mismatch!\n  block BAL = {:?}\n  executed BAL = {:?}",
+                block_bal,
+                executed_bal
+            );
+
+            //     if !validate_block_access_list_against_execution(block_bal) ||
+            //         block_bal.as_slice() != executed_bal.as_slice()
+            //     {
+            //         return Err(InsertBlockError::new(
+            //             block.into_sealed_block(),
+            //             ConsensusError::BlockAccessListMismatch.into(),
+            //         )
+            //         .into());
+            //     }
+        }
 
         // A helper macro that returns the block in case there was an error
         macro_rules! ensure_ok {

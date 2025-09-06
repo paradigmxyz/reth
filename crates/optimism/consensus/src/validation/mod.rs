@@ -311,6 +311,7 @@ mod tests {
             transactions: vec![],
             ommers: vec![],
             withdrawals: Some(Default::default()),
+            ..Default::default()
         };
         validate_body_against_header_op(&chainspec, &body, &header).unwrap();
 

@@ -8,6 +8,7 @@ use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_db_models::blocks::{StaticFileBlockAccessList, StoredBlockAccessList};
 use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -225,7 +226,9 @@ impl_compression_for_compact!(
     StoredBlockBodyIndices,
     StoredBlockOmmers<H>,
     StoredBlockWithdrawals,
+    StoredBlockAccessList,
     StaticFileBlockWithdrawals,
+    StaticFileBlockAccessList,
     Bytecode,
     AccountBeforeTx,
     TransactionSigned,

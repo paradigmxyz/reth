@@ -19,6 +19,7 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-block-access-list = { workspace = true, features = ["arbitrary"] }
 
 # codecs
 modular-bitfield = { workspace = true, optional = true }
@@ -50,6 +51,7 @@ std = [
     "reth-primitives-traits/std",
     "bytes?/std",
     "serde?/std",
+    "alloy-block-access-list/std",
 ]
 serde = [
     "dep:serde",
@@ -71,6 +73,7 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
     "reth-codecs?/arbitrary",
+    "alloy-block-access-list/arbitrary",
 ]
 reth-codec = [
     "dep:reth-codecs",
