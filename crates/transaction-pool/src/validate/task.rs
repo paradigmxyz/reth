@@ -34,9 +34,16 @@ pub struct ValidationTask {
 }
 
 impl ValidationTask {
-    /// Creates a new cloneable task pair
+    /// Creates a new cloneable task pair.
+    ///
+    /// The sender sends new (transaction) validation tasks to an available validation task.
     pub fn new() -> (ValidationJobSender, Self) {
-        let (tx, rx) = mpsc::channel(1);
+        Self::with_capacity(1)
+    }
+
+    /// Creates a new cloneable task pair with the given channel capacity.
+    pub fn with_capacity(capacity: usize) -> (ValidationJobSender, Self) {
+        let (tx, rx) = mpsc::channel(capacity);
         let metrics = TxPoolValidatorMetrics::default();
         (ValidationJobSender { tx, metrics }, Self::with_receiver(rx))
     }
