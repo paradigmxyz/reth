@@ -522,8 +522,8 @@ where
                 0
             };
             meta.last_map_index = unwind_to_map.saturating_sub(1);
-            meta.is_last_indexed_block_complete = true; // Since we unwind to map boundaries
         }
+        meta.is_last_indexed_block_complete = true; // Since we unwind to map boundaries
 
         // Save updated metadata
         provider
@@ -545,7 +545,6 @@ mod tests {
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
 
-    use reth_db_api::transaction::DbTx;
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::{InMemorySize, SealedBlock};
     use reth_provider::providers::StaticFileWriter;
@@ -558,8 +557,6 @@ mod tests {
 
     #[tokio::test]
     async fn execute_index_logs_range() {
-        reth_tracing::init_test_tracing();
-
         let (previous_stage, stage_progress) = (500, 0);
         let mut rng = generators::rng();
         let tx_count: u64 = 190; // Number of transactions in a non-empty block
@@ -693,15 +690,17 @@ mod tests {
 
         fn validate_execution(
             &self,
-            input: ExecInput,
-            output: Option<ExecOutput>,
+            _input: ExecInput,
+            _output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
+            // TODO: Implement
             Ok(())
         }
     }
 
     impl UnwindStageTestRunner for IndexLogsTestRunner {
-        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            // TODO: Implement
             Ok(())
         }
     }
