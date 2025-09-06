@@ -27,16 +27,51 @@ use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind},
+    primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
+///
+/// These error codes are defined in the execution-apis specification: <https://github.com/ethereum/execution-apis/blob/e92738bba4dee798c555dbc371c36c4aaff67779/src/eth/execute.yaml#L98>
 #[derive(Debug, thiserror::Error)]
 pub enum EthSimulateError {
+    /// Transaction nonce is too low.
+    #[error("Transactions nonce is too low")]
+    NonceTooLow,
+    /// Transaction nonce is too high.
+    #[error("Transactions nonce is too high")]
+    NonceTooHigh,
+    /// Transaction base fee per gas is too low.
+    #[error("Transactions baseFeePerGas is too low")]
+    BaseFeePerGasTooLow,
+    /// Not enough gas provided to pay for intrinsic gas for a transaction.
+    #[error("Not enough gas provided to pay for intrinsic gas for a transaction")]
+    IntrinsicGasTooLow,
+    /// Insufficient funds to pay for gas fees and value for a transaction.
+    #[error("Insufficient funds to pay for gas fees and value for a transaction")]
+    InsufficientFunds,
     /// Total gas limit of transactions for the block exceeds the block gas limit.
     #[error("Block gas limit exceeded by the block's transactions")]
     BlockGasLimitExceeded,
+    /// Block number in sequence did not increase.
+    #[error("Block number in sequence did not increase")]
+    BlockNumberNotIncreased,
+    /// Block timestamp in sequence did not increase or stay the same.
+    #[error("Block timestamp in sequence did not increase or stay the same")]
+    BlockTimestampNotIncreased,
+    /// `MovePrecompileToAddress` referenced itself in replacement.
+    #[error("MovePrecompileToAddress referenced itself in replacement")]
+    PrecompileSelfReference,
+    /// Multiple `MovePrecompileToAddress` referencing the same address to replace.
+    #[error("Multiple MovePrecompileToAddress referencing the same address to replace")]
+    PrecompileMultipleReference,
+    /// Sender is not an EOA.
+    #[error("Sender is not an EOA")]
+    SenderNotEoa,
+    /// Max init code size exceeded.
+    #[error("Max init code size exceeded")]
+    MaxInitCodeSizeExceeded,
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
@@ -45,7 +80,18 @@ pub enum EthSimulateError {
 impl EthSimulateError {
     const fn error_code(&self) -> i32 {
         match self {
+            Self::NonceTooLow => -38010,
+            Self::NonceTooHigh => -38011,
+            Self::BaseFeePerGasTooLow => -38012,
+            Self::IntrinsicGasTooLow => -38013,
+            Self::InsufficientFunds => -38014,
             Self::BlockGasLimitExceeded => -38015,
+            Self::BlockNumberNotIncreased => -38020,
+            Self::BlockTimestampNotIncreased => -38021,
+            Self::PrecompileSelfReference => -38022,
+            Self::PrecompileMultipleReference => -38023,
+            Self::SenderNotEoa => -38024,
+            Self::MaxInitCodeSizeExceeded => -38025,
             Self::GasLimitReached => -38026,
         }
     }
@@ -54,6 +100,12 @@ impl EthSimulateError {
 impl ToRpcError for EthSimulateError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         rpc_err(self.error_code(), self.to_string(), None)
+    }
+}
+
+impl From<EthSimulateError> for EthApiError {
+    fn from(err: EthSimulateError) -> Self {
+        Self::other(err)
     }
 }
 
@@ -138,14 +190,22 @@ where
         Address::ZERO
     };
 
-    if tx.as_ref().nonce().is_none() {
-        tx.as_mut().set_nonce(
-            db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default(),
-        );
+    // Get current account state for validation
+    let account = db.basic(from).map_err(Into::into)?;
+    let (nonce, balance) = account.as_ref().map(|acc| (acc.nonce, acc.balance)).unwrap_or_default();
+
+    if let Some(tx_nonce) = tx.as_ref().nonce() {
+        if tx_nonce < nonce {
+            return Err(EthSimulateError::NonceTooLow.into());
+        }
+    } else {
+        // Note: We allow high nonces for simulation purposes as future transactions may be included
+        tx.as_mut().set_nonce(nonce);
     }
 
+    let gas_limit = tx.as_ref().gas_limit().unwrap_or(default_gas_limit);
     if tx.as_ref().gas_limit().is_none() {
-        tx.as_mut().set_gas_limit(default_gas_limit);
+        tx.as_mut().set_gas_limit(gas_limit);
     }
 
     if tx.as_ref().chain_id().is_none() {
@@ -159,22 +219,47 @@ where
     // if we can't build the _entire_ transaction yet, we need to check the fee values
     if tx.as_ref().output_tx_type_checked().is_none() {
         if tx_type.is_legacy() || tx_type.is_eip2930() {
-            if tx.as_ref().gas_price().is_none() {
-                tx.as_mut().set_gas_price(block_base_fee_per_gas as u128);
+            let gas_price = if let Some(gas_price) = tx.as_ref().gas_price() {
+                if gas_price < block_base_fee_per_gas as u128 {
+                    return Err(EthSimulateError::BaseFeePerGasTooLow.into());
+                }
+                gas_price
+            } else {
+                let gas_price = block_base_fee_per_gas as u128;
+                tx.as_mut().set_gas_price(gas_price);
+                gas_price
+            };
+
+            let value = tx.as_ref().value().unwrap_or_default();
+            let max_cost = gas_price.saturating_mul(gas_limit as u128).saturating_add(value.to());
+            if balance < U256::from(max_cost) {
+                return Err(EthSimulateError::InsufficientFunds.into());
             }
         } else {
-            // set dynamic 1559 fees
-            if tx.as_ref().max_fee_per_gas().is_none() {
+            // Handle EIP-1559 transactions
+            let max_fee_per_gas = if let Some(max_fee) = tx.as_ref().max_fee_per_gas() {
+                if max_fee < block_base_fee_per_gas as u128 {
+                    return Err(EthSimulateError::BaseFeePerGasTooLow.into());
+                }
+                max_fee
+            } else {
                 let mut max_fee_per_gas = block_base_fee_per_gas as u128;
                 if let Some(prio_fee) = tx.as_ref().max_priority_fee_per_gas() {
-                    // if a prio fee is provided we need to select the max fee accordingly
-                    // because the base fee must be higher than the prio fee.
                     max_fee_per_gas = prio_fee.max(max_fee_per_gas);
                 }
                 tx.as_mut().set_max_fee_per_gas(max_fee_per_gas);
-            }
+                max_fee_per_gas
+            };
+
             if tx.as_ref().max_priority_fee_per_gas().is_none() {
                 tx.as_mut().set_max_priority_fee_per_gas(0);
+            }
+
+            let value = tx.as_ref().value().unwrap_or_default();
+            let max_cost =
+                max_fee_per_gas.saturating_mul(gas_limit as u128).saturating_add(value.to());
+            if balance < U256::from(max_cost) {
+                return Err(EthSimulateError::InsufficientFunds.into());
             }
         }
     }
@@ -259,4 +344,19 @@ where
         |header, size| tx_resp_builder.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_eth_simulate_error_conversion() {
+        // Test that EthSimulateError can be converted to EthApiError
+        let simulate_error = EthSimulateError::NonceTooLow;
+        let api_error: EthApiError = simulate_error.into();
+
+        // Should be wrapped as an "other" error
+        assert!(matches!(api_error, EthApiError::Other(_)));
+    }
 }
