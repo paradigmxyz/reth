@@ -125,8 +125,8 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number
-            && self.state().tree_state.is_descendant(*highest, block)
+        if block.block.number > highest.number &&
+            self.state().tree_state.is_descendant(*highest, block)
         {
             return PersistingKind::PersistingDescendant;
         }
@@ -363,9 +363,9 @@ where
         //    accounting for the prefix sets.
         let has_ancestors_with_missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-        let mut use_state_root_task = run_parallel_state_root
-            && self.config.use_state_root_task()
-            && !has_ancestors_with_missing_trie_updates;
+        let mut use_state_root_task = run_parallel_state_root &&
+            self.config.use_state_root_task() &&
+            !has_ancestors_with_missing_trie_updates;
 
         debug!(
             target: "engine::tree",
