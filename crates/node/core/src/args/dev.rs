@@ -41,11 +41,12 @@ pub struct DevArgs {
     pub block_time: Option<Duration>,
 
     /// Derive dev accounts from a fixed mnemonic instead of random ones.
-    /// Defaults to "test test ... junk".
+    /// "test test test test test test test test test test test junk".
     #[arg(
         long = "dev.mnemonic",
         help_heading = "Dev testnet",
         value_name = "MNEMONIC",
+        requires = "dev",
         verbatim_doc_comment
     )]
     pub dev_mnemonic: Option<String>,
