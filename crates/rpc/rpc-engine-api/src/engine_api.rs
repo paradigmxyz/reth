@@ -1224,41 +1224,17 @@ where
     async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>> {
         info!(target: "rpc::engine", "Serving engine_getInclusionListV1");
 
-        let mut il = Vec::new();
-        let mut il_size = 0usize;
-
         // Try to resolve the parent header. If available, use the parent's base fee to request
         // the best transactions from the pool; otherwise return an UNKNOWN_PARENT error or an
         // internal error if the provider call failed.
-        match self.inner.provider.header(&parent_hash) {
+        let il = match self.inner.provider.header(&parent_hash) {
             Ok(Some(parent_header)) => {
-                // Read the real base fee from the parent header; if absent, fall back to 0.
                 let base_fee = parent_header.base_fee_per_gas().unwrap_or_default();
-                let attrs = reth_transaction_pool::BestTransactionsAttributes::new(base_fee, None);
 
-                let mut best_txs = self.inner.tx_pool.best_transactions_with_attributes(attrs);
-
-                while let Some(pool_tx) = best_txs.next() {
-                    let tx = pool_tx.to_consensus().into_inner();
-
-                    // Skip blob (EIP-4844) transactions: IL should not include blob txs 
-                    if tx.is_eip4844() {
-                        continue;
-                    }
-
-                    let tx_len = tx.encode_2718_len();
-
-                    if il_size + tx_len > MAX_BYTES_PER_IL {
-                        continue;
-                    }
-
-                    il.push(tx.encoded_2718().into());
-                    il_size += tx_len;
-                }
+                // Use the pool's build_inclusion_list method
+                self.inner.tx_pool.build_inclusion_list(base_fee, MAX_BYTES_PER_IL)
             }
             Ok(None) => {
-                // Parent is unknown -> return Engine API error for unknown parent with formatted
-                // data
                 return Err(EngineApiError::other(jsonrpsee_types::error::ErrorObject::owned(
                     UNKNOWN_PARENT_CODE,
                     "Parent hash unknown, Parent Hash: ",
@@ -1269,9 +1245,9 @@ where
             Err(err) => {
                 return Err(EngineApiError::Internal(Box::new(err)).into());
             }
-        }
+        };
 
-        info!(target: "rpc::engine", il = %il.len(), "serving getInclusionListV1");
+        info!(target: "rpc::engine", il = %il.len(), "getInclusionListV1");
         Ok(il)
     }
 }
@@ -1357,6 +1333,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip7685::{Requests, RequestsOrHash};
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, MAINNET};
@@ -1368,6 +1345,7 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::TokioTaskExecutor;
     use reth_transaction_pool::noop::NoopTransactionPool;
+    use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (

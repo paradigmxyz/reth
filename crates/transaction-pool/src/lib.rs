@@ -270,6 +270,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_eips::{Encodable2718, Typed2718};
+
 pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
@@ -297,7 +299,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
@@ -596,6 +598,34 @@ where
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         self.pool.best_transactions_with_attributes(best_transactions_attributes)
+    }
+
+    fn build_inclusion_list(&self, base_fee: u64, max_size: usize) -> Vec<Bytes> {
+        let mut il = Vec::new();
+        let mut il_size = 0usize;
+
+        let attrs = BestTransactionsAttributes::base_fee(base_fee);
+        let mut best_txs = self.best_transactions_with_attributes(attrs);
+
+        while let Some(pool_tx) = best_txs.next() {
+            let tx = pool_tx.to_consensus().into_inner();
+
+            // Skip blob (EIP-4844) transactions: IL should not include blob txs
+            if tx.is_eip4844() {
+                continue;
+            }
+
+            let tx_len = tx.encode_2718_len();
+
+            if il_size + tx_len > max_size {
+                continue;
+            }
+
+            il.push(tx.encoded_2718().into());
+            il_size += tx_len;
+        }
+
+        il
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
