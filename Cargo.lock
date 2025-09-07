@@ -273,7 +273,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#c5e74c49b62247d9cadfb2da45ef432abef142e9"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#fd79f2f57fd92969a64238ebf64392b2cd3b0a6e"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -384,7 +384,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#c5e74c49b62247d9cadfb2da45ef432abef142e9"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#fd79f2f57fd92969a64238ebf64392b2cd3b0a6e"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13358,11 +13358,11 @@ checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
 
 [[package]]
 name = "winapi-util"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
+checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
