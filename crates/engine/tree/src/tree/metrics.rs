@@ -200,22 +200,14 @@ impl BlockValidationMetrics {
 pub(crate) struct NewPayloadPhaseMetrics {
     /// Pre-execution phase duration (entry → execution start)
     pub(crate) pre_execution_duration: Histogram,
-    /// Prewarming initialization duration
-    pub(crate) prewarming_init_duration: Histogram,
-    /// Block execution duration
-    pub(crate) execution_duration: Histogram,
+    /// Payload processor spawning duration
+    pub(crate) spawn_payload_processor: Histogram,
     /// Post-execution validation duration
     pub(crate) post_execution_validation_duration: Histogram,
     /// State root computation duration
     pub(crate) state_root_duration: Histogram,
-    /// Post-processing duration
-    pub(crate) post_processing_duration: Histogram,
-    /// Parallel state root algorithm duration
-    pub(crate) parallel_state_root_duration: Histogram,
-    /// Sparse trie state root algorithm duration
-    pub(crate) sparse_trie_state_root_duration: Histogram,
-    /// Regular state root algorithm duration
-    pub(crate) regular_state_root_duration: Histogram,
+    /// Total duration of the new payload call
+    pub(crate) total_duration: Histogram,
 }
 
 /// Metrics for the blockchain tree block buffer

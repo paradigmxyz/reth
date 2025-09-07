@@ -541,16 +541,6 @@ where
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
 
-        // record pre-execution phase duration
-        self.metrics
-            .new_payload_phases
-            .pre_execution_duration
-            .record(pre_execution_start.elapsed().as_secs_f64());
-
-        self.metrics
-            .block_validation
-            .record_payload_validation(pre_execution_start.elapsed().as_secs_f64());
-
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
@@ -579,6 +569,11 @@ where
             let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
             return Ok(TreeOutcome::new(status));
         }
+
+        // record pre-execution phase duration
+        let pre_execution_elapsed = pre_execution_start.elapsed().as_secs_f64();
+        self.metrics.new_payload_phases.pre_execution_duration.record(pre_execution_elapsed);
+        self.metrics.block_validation.record_payload_validation(pre_execution_elapsed);
 
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
@@ -624,8 +619,6 @@ where
             }
         };
 
-        // Phase F: Post-processing
-        let post_processing_start = Instant::now();
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
@@ -637,16 +630,10 @@ where
             }
         }
 
-        // record post-processing duration
-        self.metrics
-            .new_payload_phases
-            .post_processing_duration
-            .record(post_processing_start.elapsed().as_secs_f64());
-
         // record total newPayload duration
         self.metrics
             .new_payload_phases
-            .pre_execution_duration // will be using this as a proxy for total duration
+            .total_duration
             .record(new_payload_start.elapsed().as_secs_f64());
 
         Ok(outcome)

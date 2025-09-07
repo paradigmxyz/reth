@@ -424,7 +424,7 @@ where
             // record prewarming initialization duration
             self.metrics
                 .new_payload_phases
-                .prewarming_init_duration
+                .spawn_payload_processor
                 .record(prewarming_start.elapsed().as_secs_f64());
             handle
         } else {
@@ -435,7 +435,7 @@ where
             // Record prewarming initialization duration
             self.metrics
                 .new_payload_phases
-                .prewarming_init_duration
+                .spawn_payload_processor
                 .record(prewarming_start.elapsed().as_secs_f64());
             handle
         };
@@ -448,8 +448,6 @@ where
             handle.cache_metrics(),
         );
 
-        // Phase C: Block execution
-        let execution_start = Instant::now();
         let output = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
@@ -458,12 +456,6 @@ where
         } else {
             ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
-
-        // record execution duration
-        self.metrics
-            .new_payload_phases
-            .execution_duration
-            .record(execution_start.elapsed().as_secs_f64());
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -531,14 +523,9 @@ where
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = root_time.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
-                        // record sparse trie state root algorithm duration
-                        self.metrics
-                            .new_payload_phases
-                            .sparse_trie_state_root_duration
-                            .record(elapsed.as_secs_f64());
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
-                            maybe_state_root = Some((state_root, trie_updates, elapsed));
+                            maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
                                 target: "engine::tree",
@@ -568,11 +555,6 @@ where
                             "Regular root task finished"
                         );
                         let elapsed = root_time.elapsed();
-                        // record parallel state root algorithm duration
-                        self.metrics
-                            .new_payload_phases
-                            .parallel_state_root_duration
-                            .record(elapsed.as_secs_f64());
                         maybe_state_root = Some((result.0, result.1, elapsed));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
@@ -609,14 +591,6 @@ where
 
         // record state root computation duration (Phase E)
         self.metrics.new_payload_phases.state_root_duration.record(root_elapsed.as_secs_f64());
-
-        // record regular state root algorithm duration if we used the fallback
-        if maybe_state_root.is_none() {
-            self.metrics
-                .new_payload_phases
-                .regular_state_root_duration
-                .record(root_elapsed.as_secs_f64());
-        }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
