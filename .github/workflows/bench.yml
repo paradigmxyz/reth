@@ -3,7 +3,7 @@
 on:
   pull_request:
   # TODO: Disabled temporarily for https://github.com/CodSpeedHQ/runner/issues/55
-  # merge_group :
+  # merge_group:
   push:
     branches: ["**"]
 
