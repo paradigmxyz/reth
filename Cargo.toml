@@ -507,7 +507,7 @@ alloy-rpc-types-trace = { version = "1.0.27", default-features = false }
 alloy-rpc-types-txpool = { version = "1.0.27", default-features = false }
 alloy-serde = { version = "1.0.27", default-features = false }
 alloy-signer = { version = "1.0.27", default-features = false }
-alloy-signer-local = { version = "1.0.27", default-features = false}
+alloy-signer-local = { version = "1.0.27", default-features = false }
 alloy-transport = { version = "1.0.27" }
 alloy-transport-http = { version = "1.0.27", features = ["reqwest-rustls-tls"], default-features = false }
 alloy-transport-ipc = { version = "1.0.27", default-features = false }
