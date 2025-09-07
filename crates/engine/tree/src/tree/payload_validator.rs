@@ -25,8 +25,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, eth::validate_block_access_list_against_execution,
-    execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor, SpecFor,
+    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
+    SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
