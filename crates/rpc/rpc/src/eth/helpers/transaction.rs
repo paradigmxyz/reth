@@ -27,15 +27,15 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
 
-        // broadcast raw transaction to subscribers if there is any.
-        self.broadcast_raw_transaction(tx.clone());
-
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // forward the transaction to the specific endpoint if configured.
         if let Some(client) = self.raw_tx_forwarder() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
-            let rlp_hex = hex::encode_prefixed(tx);
+            let rlp_hex = hex::encode_prefixed(&tx);
+
+            // broadcast raw transaction to subscribers if there is any.
+            self.broadcast_raw_transaction(tx);
 
             let hash =
                 client.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
@@ -47,6 +47,9 @@ where
 
             return Ok(hash);
         }
+
+        // broadcast raw transaction to subscribers if there is any.
+        self.broadcast_raw_transaction(tx);
 
         // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =

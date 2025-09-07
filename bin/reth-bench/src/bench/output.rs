@@ -52,7 +52,7 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 3)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
         state.end()

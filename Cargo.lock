@@ -3130,7 +3130,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.16",
- "tracing",
  "walkdir",
 ]
 
@@ -3342,7 +3341,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "bytes",
- "derive_more",
  "futures",
  "reth-chainspec",
  "reth-discv4",
@@ -3531,23 +3529,10 @@ dependencies = [
 name = "example-engine-api-access"
 version = "0.0.0"
 dependencies = [
- "alloy-rpc-types-engine",
- "async-trait",
- "clap",
- "eyre",
- "futures",
- "jsonrpsee",
  "reth-db",
- "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
- "reth-optimism-consensus",
  "reth-optimism-node",
- "reth-provider",
- "reth-rpc-api",
- "reth-tasks",
- "reth-tracing",
- "serde_json",
  "tokio",
 ]
 
@@ -3633,9 +3618,7 @@ dependencies = [
 name = "example-node-builder-api"
 version = "0.0.0"
 dependencies = [
- "eyre",
  "reth-ethereum",
- "reth-tracing",
 ]
 
 [[package]]
@@ -7521,6 +7504,7 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
@@ -7893,7 +7877,6 @@ version = "1.6.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
@@ -7913,9 +7896,7 @@ dependencies = [
  "reth-db",
  "reth-db-common",
  "reth-engine-local",
- "reth-ethereum-consensus",
  "reth-ethereum-primitives",
- "reth-evm",
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",
@@ -7929,14 +7910,11 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-prune-types",
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-api",
- "reth-rpc-layer",
  "reth-rpc-server-types",
  "reth-stages-types",
- "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -8105,7 +8083,6 @@ dependencies = [
  "reth-prune",
  "reth-prune-types",
  "reth-revm",
- "reth-rpc-convert",
  "reth-stages",
  "reth-stages-api",
  "reth-static-file",
@@ -8200,17 +8177,14 @@ version = "1.6.0"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
- "alloy-rlp",
  "bytes",
  "eyre",
- "futures",
  "futures-util",
  "reqwest",
  "reth-db-api",
  "reth-db-common",
  "reth-era",
  "reth-era-downloader",
- "reth-ethereum-primitives",
  "reth-etl",
  "reth-fs-util",
  "reth-primitives-traits",
@@ -8661,7 +8635,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "pretty_assertions",
- "reth-chainspec",
  "reth-engine-primitives",
  "reth-evm",
  "reth-primitives-traits",
@@ -8809,7 +8782,6 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "smallvec",
- "tempfile",
  "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
@@ -9319,7 +9291,6 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
- "reth-db-api",
  "reth-db-common",
  "reth-execution-types",
  "reth-optimism-chainspec",
@@ -9371,6 +9342,7 @@ dependencies = [
 name = "reth-optimism-flashblocks"
 version = "1.6.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -9386,11 +9358,11 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-revm",
- "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-storage-api",
  "serde",
  "serde_json",
+ "test-case",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -9431,7 +9403,6 @@ dependencies = [
  "reth-engine-local",
  "reth-evm",
  "reth-network",
- "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
@@ -9447,7 +9418,6 @@ dependencies = [
  "reth-optimism-txpool",
  "reth-payload-builder",
  "reth-payload-util",
- "reth-payload-validator",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -9463,7 +9433,6 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
- "tempfile",
  "tokio",
  "url",
 ]
@@ -10089,7 +10058,6 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-engine-primitives",
- "reth-engine-tree",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
@@ -10105,7 +10073,6 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
- "reth-rpc-convert",
  "reth-rpc-engine-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
@@ -10361,7 +10328,6 @@ dependencies = [
  "reth-etl",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-execution-errors",
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
@@ -10377,7 +10343,6 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-errors",
  "reth-testing-utils",
- "reth-tracing",
  "reth-trie",
  "reth-trie-db",
  "tempfile",
@@ -10466,7 +10431,6 @@ dependencies = [
  "parking_lot",
  "rayon",
  "reth-codecs",
- "reth-db",
  "reth-db-api",
  "reth-primitives-traits",
  "reth-provider",
@@ -10754,7 +10718,6 @@ dependencies = [
  "reth-execution-errors",
  "reth-primitives-traits",
  "reth-provider",
- "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
  "revm",
