@@ -5687,7 +5687,7 @@ mod tests {
         //   0xXY: Leaf { key: 0xZ... }
 
         // Create leaves that will force multiple subtries
-        let leaves = vec![
+        let leaves = [
             ctx.create_test_leaf([0x0, 0x0, 0x1, 0x2], 1),
             ctx.create_test_leaf([0x0, 0x1, 0x3, 0x4], 2),
             ctx.create_test_leaf([0x0, 0x2, 0x5, 0x6], 3),
