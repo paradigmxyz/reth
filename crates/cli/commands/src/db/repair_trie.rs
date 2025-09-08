@@ -1,6 +1,4 @@
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_cli::chainspec::ChainSpecParser;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -18,25 +16,25 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
+const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
+
 /// The arguments for the `reth db repair-trie` command
 #[derive(Parser, Debug)]
-pub struct Command<C: ChainSpecParser> {
-    #[command(flatten)]
-    env: EnvironmentArgs<C>,
-
+pub struct Command {
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
-    dry_run: bool,
+    pub(crate) dry_run: bool,
 }
 
-impl<C: ChainSpecParser> Command<C> {
+impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub fn execute<N: NodeTypesWithDB>(
+        self,
+        provider_factory: ProviderFactory<N>,
+    ) -> eyre::Result<()> {
         if self.dry_run {
-            let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
             verify_only(provider_factory)?
         } else {
-            let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
             verify_and_repair(provider_factory)?
         }
 
@@ -50,13 +48,9 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
-    // Create the hashed cursor factory
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
-
-    // Create the trie cursor factory
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-
     // Create the verifier
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
     let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
 
     let mut inconsistent_nodes = 0;
@@ -68,16 +62,14 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
         let output = output_result?;
 
         if let Output::Progress(path) = output {
-            // Output progress every 5 seconds
-            if last_progress_time.elapsed() > Duration::from_secs(5) {
+            if last_progress_time.elapsed() > PROGRESS_PERIOD {
                 output_progress(path, start_time, inconsistent_nodes);
                 last_progress_time = Instant::now();
             }
-            continue
-        };
-
-        warn!("Inconsistency found: {output:?}");
-        inconsistent_nodes += 1;
+        } else {
+            warn!("Inconsistency found: {output:?}");
+            inconsistent_nodes += 1;
+        }
     }
 
     info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
@@ -149,8 +141,7 @@ fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -
                 storage_trie_cursor.upsert(account, &entry)?;
             }
             Output::Progress(path) => {
-                // Output progress every 5 seconds
-                if last_progress_time.elapsed() > Duration::from_secs(5) {
+                if last_progress_time.elapsed() > PROGRESS_PERIOD {
                     output_progress(path, start_time, inconsistent_nodes);
                     last_progress_time = Instant::now();
                 }

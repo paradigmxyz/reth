@@ -25,12 +25,12 @@ pub struct Command<C: ChainSpecParser> {
     env: EnvironmentArgs<C>,
 
     #[command(subcommand)]
-    command: Subcommands<C>,
+    command: Subcommands,
 }
 
 #[derive(Subcommand, Debug)]
 /// `reth db` subcommands
-pub enum Subcommands<C: ChainSpecParser> {
+pub enum Subcommands {
     /// Lists all the tables, their entry count and their size
     Stats(stats::Command),
     /// Lists the contents of a table
@@ -50,7 +50,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     /// Deletes all table entries
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
-    RepairTrie(repair_trie::Command<C>),
+    RepairTrie(repair_trie::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -139,7 +139,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 command.execute(provider_factory)?;
             }
             Subcommands::RepairTrie(command) => {
-                command.execute::<N>()?;
+                let access_rights =
+                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
+                let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
+                command.execute(provider_factory)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
