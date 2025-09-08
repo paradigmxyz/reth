@@ -10653,7 +10653,6 @@ dependencies = [
  "reth-trie-sparse",
  "revm-database",
  "revm-state",
- "serde",
  "tracing",
  "triehash",
 ]

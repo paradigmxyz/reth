@@ -10,13 +10,14 @@ use tracing::trace;
 /// - Descendants come before their ancestors (children before parents)
 /// - Siblings are ordered lexicographically
 ///
-/// # Examples
+/// # Example
 ///
-/// ```
-/// // 0x11 comes before 0x1 (child before parent)
-/// // 0x12 comes before 0x1 (child before parent)
-/// // 0x11 comes before 0x12 (lexicographical among siblings)
-/// // Result: 0x11, 0x12, 0x1, 0x2
+/// ```text
+/// 0x11 comes before 0x1 (child before parent)
+/// 0x12 comes before 0x1 (child before parent)
+/// 0x11 comes before 0x12 (lexicographical among siblings)
+/// 0x1 comes before 0x21 (lexicographical among siblings)
+/// Result: 0x11, 0x12, 0x1, 0x21
 /// ```
 pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
     // If the two are equal length then compare them lexicographically
@@ -109,7 +110,7 @@ impl<C: TrieCursor> DepthFirstTrieIterator<C> {
                 self.cursor.seek(Nibbles::new())?
             }) else {
                 // Record that the cursor is empty and yield the stack. The stack is in reverse
-                // order of what we want to yeild, but `next` is popped from, so we don't have to
+                // order of what we want to yield, but `next` is popped from, so we don't have to
                 // reverse it.
                 self.complete = true;
                 self.next = core::mem::take(&mut self.stack);

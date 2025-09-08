@@ -35,7 +35,6 @@ tracing = { workspace = true, features = ["attributes"] }
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-serde = { workspace = true, optional = true }
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -68,7 +67,6 @@ proptest.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-    "dep:serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-trie/serde",

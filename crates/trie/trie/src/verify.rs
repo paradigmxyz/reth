@@ -27,10 +27,10 @@ enum BranchNode {
 /// hashed accounts/storages tables, meaning it is recomputing the trie from scratch without the use
 /// of the trie tables.
 ///
-/// [`BranchNodes`] are iterated over such that:
+/// [`BranchNode`]s are iterated over such that:
 /// * Account nodes and storage nodes may be interspersed.
 /// * Storage nodes for the same account will be ordered by ascending path relative to each other.
-/// * Account ndoes will be ordered by ascending path relative to each other.
+/// * Account nodes will be ordered by ascending path relative to each other.
 /// * All storage nodes for one account will finish before storage nodes for another account are
 ///   started. In other words, if the current storage account is not equal to the previous, the
 ///   previous has no more nodes.
@@ -197,7 +197,6 @@ struct SingleVerifier<I> {
 impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
     fn new(account: Option<B256>, trie_cursor: C) -> Result<Self, DatabaseError> {
         let mut trie_iter = DepthFirstTrieIterator::new(trie_cursor);
-        // The iterator loads all nodes upfront, get the first one
         let curr = trie_iter.next().transpose()?;
         Ok(Self { account, trie_iter, curr })
     }
