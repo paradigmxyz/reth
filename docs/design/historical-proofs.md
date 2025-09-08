@@ -58,6 +58,17 @@ If the latest value of the next node is empty, the node was deleted at that bloc
 
 This can be implemented in the same way as normal Reth. Reth already tracks history of leaf nodes, so we can use the existing table and implementation.
 
+## Implementation
+
+### Reth Execution Extension
+
+We'll build a Reth execution extension that will:
+
+- Save the initial state from existing tables (AccountsTrie and StorageTrie).
+- Listen for MerkleExecute events and store the TrieUpdates in the new tables.
+- Serve proof requests from the new tables.
+    - Open question: currently, ExExes can't do this because they don't have access to the proof serving interfaces. How do we serve proof RPCs? Maybe we can create a sidecar process that handles proof requests and serves the response from existing tables.
+
 ## Optimizations
 
 ### BranchNodeCompact vs BranchNode
@@ -81,9 +92,3 @@ Instead of storing every single trie node change, we can batch changes together 
 - Store trie nodes in a compact format to reduce storage requirements.
 - Implement a pruning-friendly numbering strategy to minimize incremental work.
 - In the future, allow batching trie node changes to reduce storage requirements.
-
-## Open Questions
-
-- How do we store the earliest block number metadata?
-- Should we support external storage or implement directly in MDBX?
-    - This could be done by exposing a JSON-RPC interface with `db_storeNode` and `db_getNode`.
