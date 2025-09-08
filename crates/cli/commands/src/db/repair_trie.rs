@@ -64,7 +64,7 @@ impl Command {
                 continue
             };
 
-            warn!("Inconsistency found: {output:?}");
+            warn!("Inconsistency found, will repair: {output:?}");
             inconsistent_nodes += 1;
 
             if self.dry_run {
