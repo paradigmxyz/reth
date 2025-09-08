@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn test_depth_first_ordering_complex() {
         // Test the example from the conversation: 0x11, 0x12, 0x1, 0x2
-        let mut paths = vec![
+        let mut paths = [
             Nibbles::from_nibbles([0x1]),      // 0x1
             Nibbles::from_nibbles([0x2]),      // 0x2
             Nibbles::from_nibbles([0x1, 0x1]), // 0x11
