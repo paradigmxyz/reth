@@ -151,7 +151,7 @@ impl FilterMapParams {
         row % self.map_height() // map_height() -> u32 in Geth
     }
 
-    /// columnIndex: FNV-1a( LE(lvIndex) || logValue[32] ), folded to u32
+    /// columnIndex: FNV-1a( LE(lvIndex) || logValue ), folded to u32
     pub fn column_index(&self, lv_index: u64, log_value: &B256) -> u32 {
         let mut hasher = FnvHasher::default();
         hasher.write(&lv_index.to_le_bytes()); // Geth: LittleEndian

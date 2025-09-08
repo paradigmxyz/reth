@@ -539,15 +539,14 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
 
     use reth_ethereum_primitives::Block;
     use reth_primitives_traits::{InMemorySize, SealedBlock};
-    use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::{EntitiesCheckpoint, StageUnitCheckpoint};
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockParams, BlockRangeParams,

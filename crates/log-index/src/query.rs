@@ -267,7 +267,7 @@ where
             None => return Ok(handles),
         };
 
-    let maps = (first_map..last_map).collect::<Vec<_>>();
+    let maps = (first_map..=last_map).collect::<Vec<_>>();
 
     let chunk_size = std::cmp::max(maps.len() / concurrency, 1);
 

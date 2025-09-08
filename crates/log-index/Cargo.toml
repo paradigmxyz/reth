@@ -45,11 +45,8 @@ test-fuzz.workspace = true
 futures.workspace = true
 
 # For integration tests
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
-reth-testing-utils.workspace = true
-reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 
 [features]
@@ -59,5 +56,4 @@ test-utils = [
     "reth-codecs/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-provider/test-utils",
 ]

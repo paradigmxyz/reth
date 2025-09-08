@@ -83,7 +83,7 @@ pub struct LogIndexer {
     index: LogValueIndex,
     /// Filter map parameters
     params: FilterMapParams,
-    /// Fill levels per layer. [layer] `row_idx` -> count
+    /// Fill levels per layer. layer -> `row_idx` -> count
     fills: Vec<HashMap<u32, Count>>,
     /// Cache for row calculation. (layer, value) -> `row_idx`
     row_cache: HashMap<(u8, B256), u32>,
