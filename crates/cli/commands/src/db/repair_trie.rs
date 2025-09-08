@@ -1,4 +1,6 @@
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -18,111 +20,153 @@ use tracing::{info, warn};
 
 /// The arguments for the `reth db repair-trie` command
 #[derive(Parser, Debug)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
+    #[command(flatten)]
+    env: EnvironmentArgs<C>,
+
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
     dry_run: bool,
 }
 
-impl Command {
+impl<C: ChainSpecParser> Command<C> {
     /// Execute `db repair-trie` command
-    pub fn execute<N: NodeTypesWithDB>(
-        self,
-        provider_factory: ProviderFactory<N>,
-    ) -> eyre::Result<()> {
-        // Get a database transaction directly from the database
-        let db = provider_factory.db_ref();
-        let mut tx = db.tx_mut()?;
-        tx.disable_long_read_transaction_safety();
+    pub fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+        if self.dry_run {
+            let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+            verify_only(provider_factory)?
+        } else {
+            let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+            verify_and_repair(provider_factory)?
+        }
 
-        // Create the hashed cursor factory
-        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+        Ok(())
+    }
+}
 
-        // Create the trie cursor factory
-        let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
+    // Get a database transaction directly from the database
+    let db = provider_factory.db_ref();
+    let mut tx = db.tx()?;
+    tx.disable_long_read_transaction_safety();
 
-        // Create the verifier
-        let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    // Create the hashed cursor factory
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
 
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+    // Create the trie cursor factory
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
 
-        let mut inconsistent_nodes = 0;
-        let start_time = Instant::now();
-        let mut last_progress_time = Instant::now();
+    // Create the verifier
+    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
 
-        // Iterate over the verifier and repair inconsistencies
-        for output_result in verifier {
-            let output = output_result?;
+    let mut inconsistent_nodes = 0;
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
 
-            if let Output::Progress(path) = output {
+    // Iterate over the verifier and repair inconsistencies
+    for output_result in verifier {
+        let output = output_result?;
+
+        if let Output::Progress(path) = output {
+            // Output progress every 5 seconds
+            if last_progress_time.elapsed() > Duration::from_secs(5) {
+                output_progress(path, start_time, inconsistent_nodes);
+                last_progress_time = Instant::now();
+            }
+            continue
+        };
+
+        warn!("Inconsistency found: {output:?}");
+        inconsistent_nodes += 1;
+    }
+
+    info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
+
+    Ok(())
+}
+
+fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
+    // Get a database transaction directly from the database
+    let db = provider_factory.db_ref();
+    let mut tx = db.tx_mut()?;
+    tx.disable_long_read_transaction_safety();
+
+    // Create the hashed cursor factory
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+
+    // Create the trie cursor factory
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+
+    // Create the verifier
+    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+
+    let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+    let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+    let mut inconsistent_nodes = 0;
+    let start_time = Instant::now();
+    let mut last_progress_time = Instant::now();
+
+    // Iterate over the verifier and repair inconsistencies
+    for output_result in verifier {
+        let output = output_result?;
+
+        if !matches!(output, Output::Progress(_)) {
+            warn!("Inconsistency found, will repair: {output:?}");
+            inconsistent_nodes += 1;
+        }
+
+        match output {
+            Output::AccountExtra(path, _node) => {
+                // Extra account node in trie, remove it
+                let nibbles = StoredNibbles(path);
+                if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                    account_trie_cursor.delete_current()?;
+                }
+            }
+            Output::StorageExtra(account, path, _node) => {
+                // Extra storage node in trie, remove it
+                let nibbles = StoredNibblesSubKey(path);
+                if storage_trie_cursor
+                    .seek_by_key_subkey(account, nibbles.clone())?
+                    .filter(|e| e.nibbles == nibbles)
+                    .is_some()
+                {
+                    storage_trie_cursor.delete_current()?;
+                }
+            }
+            Output::AccountWrong { path, expected: node, .. } |
+            Output::AccountMissing(path, node) => {
+                // Wrong/missing account node value, upsert it
+                let nibbles = StoredNibbles(path);
+                account_trie_cursor.upsert(nibbles, &node)?;
+            }
+            Output::StorageWrong { account, path, expected: node, .. } |
+            Output::StorageMissing(account, path, node) => {
+                // Wrong/missing storage node value, upsert it
+                let nibbles = StoredNibblesSubKey(path);
+                let entry = StorageTrieEntry { nibbles, node };
+                storage_trie_cursor.upsert(account, &entry)?;
+            }
+            Output::Progress(path) => {
                 // Output progress every 5 seconds
                 if last_progress_time.elapsed() > Duration::from_secs(5) {
                     output_progress(path, start_time, inconsistent_nodes);
                     last_progress_time = Instant::now();
                 }
-                continue
-            };
-
-            warn!("Inconsistency found, will repair: {output:?}");
-            inconsistent_nodes += 1;
-
-            if self.dry_run {
-                continue;
-            }
-
-            match output {
-                Output::AccountExtra(path, _node) => {
-                    // Extra account node in trie, remove it
-                    let nibbles = StoredNibbles(path);
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                        account_trie_cursor.delete_current()?;
-                    }
-                }
-                Output::StorageExtra(account, path, _node) => {
-                    // Extra storage node in trie, remove it
-                    let nibbles = StoredNibblesSubKey(path);
-                    if storage_trie_cursor
-                        .seek_by_key_subkey(account, nibbles.clone())?
-                        .filter(|e| e.nibbles == nibbles)
-                        .is_some()
-                    {
-                        storage_trie_cursor.delete_current()?;
-                    }
-                }
-                Output::AccountWrong { path, expected: node, .. } |
-                Output::AccountMissing(path, node) => {
-                    // Wrong/missing account node value, upsert it
-                    let nibbles = StoredNibbles(path);
-                    account_trie_cursor.upsert(nibbles, &node)?;
-                }
-                Output::StorageWrong { account, path, expected: node, .. } |
-                Output::StorageMissing(account, path, node) => {
-                    // Wrong/missing storage node value, upsert it
-                    let nibbles = StoredNibblesSubKey(path);
-                    let entry = StorageTrieEntry { nibbles, node };
-                    storage_trie_cursor.upsert(account, &entry)?;
-                }
-                Output::Progress(_) => {
-                    unreachable!()
-                }
             }
         }
-
-        if inconsistent_nodes > 0 {
-            if self.dry_run {
-                info!("Found {} inconsistencies (dry run - no changes made)", inconsistent_nodes);
-            } else {
-                info!("Repaired {} inconsistencies", inconsistent_nodes);
-                tx.commit()?;
-                info!("Changes committed to database");
-            }
-        } else {
-            info!("No inconsistencies found");
-        }
-
-        Ok(())
     }
+
+    if inconsistent_nodes == 0 {
+        info!("No inconsistencies found");
+    } else {
+        info!("Repaired {} inconsistencies", inconsistent_nodes);
+        tx.commit()?;
+        info!("Changes committed to database");
+    }
+
+    Ok(())
 }
 
 /// Output progress information based on the last seen account path.
