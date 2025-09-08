@@ -7610,6 +7610,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives-traits",
+ "reth-prune-types",
  "reth-static-file-types",
  "reth-storage-errors",
  "reth-tracing",
