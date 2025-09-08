@@ -9304,6 +9304,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "serde",
  "serde_json",
  "test-case",
