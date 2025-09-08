@@ -360,7 +360,7 @@ where
             signers,
             eth_cache,
             gas_oracle,
-            gas_cap: gas_cap.into().into(),
+            gas_cap: gas_cap.into(),
             max_simulate_blocks,
             eth_proof_window,
             starting_block,
