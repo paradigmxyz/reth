@@ -1,4 +1,4 @@
-\//! Support for producing static files.
+//! Support for producing static files.
 
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
