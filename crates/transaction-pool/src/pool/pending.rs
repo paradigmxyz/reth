@@ -522,6 +522,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &self.independent_transactions
     }
 
+    /// Subscribes to new transactions
+    pub fn new_transaction_receiver(&self) -> broadcast::Receiver<PendingTransaction<T>> {
+        self.new_transaction_notifier.subscribe()
+    }
+
     /// Whether the pool is empty
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
