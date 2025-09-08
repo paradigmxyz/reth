@@ -214,65 +214,6 @@ where
     }
 }
 
-/// A [`TransactionValidator`] implementation that validates ethereum transaction.
-///
-/// It supports all known ethereum transaction types:
-/// - Legacy
-/// - EIP-2718
-/// - EIP-1559
-/// - EIP-4844
-/// - EIP-7702
-///
-/// And enforces additional constraints such as:
-/// - Maximum transaction size
-/// - Maximum gas limit
-///
-/// And adheres to the configured [`LocalTransactionConfig`].
-#[derive(Debug)]
-pub(crate) struct EthTransactionValidatorInner<Client, T> {
-    /// This type fetches account info from the db
-    client: Client,
-    /// Blobstore used for fetching re-injected blob transactions.
-    blob_store: Box<dyn BlobStore>,
-    /// tracks activated forks relevant for transaction validation
-    fork_tracker: ForkTracker,
-    /// Fork indicator whether we are using EIP-2718 type transactions.
-    eip2718: bool,
-    /// Fork indicator whether we are using EIP-1559 type transactions.
-    eip1559: bool,
-    /// Fork indicator whether we are using EIP-4844 blob transactions.
-    eip4844: bool,
-    /// Fork indicator whether we are using EIP-7702 type transactions.
-    eip7702: bool,
-    /// The current max gas limit
-    block_gas_limit: AtomicU64,
-    /// The current tx fee cap limit in wei locally submitted into the pool.
-    tx_fee_cap: Option<u128>,
-    /// Minimum priority fee to enforce for acceptance into the pool.
-    minimum_priority_fee: Option<u128>,
-    /// Stores the setup and parameters needed for validating KZG proofs.
-    kzg_settings: EnvKzgSettings,
-    /// How to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions.
-    local_transactions_config: LocalTransactionConfig,
-    /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
-    max_tx_input_bytes: usize,
-    /// Maximum gas limit for individual transactions
-    max_tx_gas_limit: Option<u64>,
-    /// Marker for the transaction type
-    _marker: PhantomData<T>,
-    /// Metrics for tsx pool validation
-    validation_metrics: TxPoolValidationMetrics,
-}
-
-// === impl EthTransactionValidatorInner ===
-
-impl<Client: ChainSpecProvider, Tx> EthTransactionValidatorInner<Client, Tx> {
-    /// Returns the configured chain id
-    pub(crate) fn chain_id(&self) -> u64 {
-        self.client.chain_spec().chain().id()
-    }
-}
-
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
