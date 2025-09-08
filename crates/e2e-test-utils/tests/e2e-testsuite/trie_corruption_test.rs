@@ -105,7 +105,7 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         // Step 1: Send first 3311 payload (0xa46feca5...)
         .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
             include_str!("testdata/trie_corruption/block_23003311_first.json")
-        ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
+        ).with_expected_status(ExpectedPayloadStatus::Valid))
 
         // Step 2: FCU to make first 3311 canonical
         .with_action(SendForkchoiceUpdate::<EthEngineTypes>::new(
@@ -118,7 +118,7 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         // Step 3: Send second 3311 payload (0xcf8b0110...) - fork block
         .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
             include_str!("testdata/trie_corruption/block_23003311_fork.json")
-        ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
+        ).with_expected_status(ExpectedPayloadStatus::Valid))
 
         // Step 4: FCU to make fork 3311 canonical (triggers reorg)
         .with_action(SendForkchoiceUpdate::<EthEngineTypes>::new(
@@ -131,7 +131,7 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
         // Step 5: Send 3312 payload (0xe7bd6431...)
         .with_action(SendPayloadFromJson::<EthEngineTypes>::new(
             include_str!("testdata/trie_corruption/block_23003312.json")
-        ).with_expected_status(ExpectedPayloadStatus::SyncingOrAccepted))
+        ).with_expected_status(ExpectedPayloadStatus::Valid))
 
         // Step 6: FCU to make 3312 canonical
         .with_action(SendForkchoiceUpdate::<EthEngineTypes>::new(
