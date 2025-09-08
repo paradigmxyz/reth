@@ -273,7 +273,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#fd79f2f57fd92969a64238ebf64392b2cd3b0a6e"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#e1b8b0e8beacb7166d338dae46133059685aa213"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -384,7 +384,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#fd79f2f57fd92969a64238ebf64392b2cd3b0a6e"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#e1b8b0e8beacb7166d338dae46133059685aa213"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -11506,9 +11506,9 @@ dependencies = [
 
 [[package]]
 name = "security-framework"
-version = "3.3.0"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80fb1d92c5028aa318b4b8bd7302a5bfcf48be96a37fc6fc790f806b0004ee0c"
+checksum = "60b369d18893388b345804dc0007963c99b7d665ae71d275812d828c6f089640"
 dependencies = [
  "bitflags 2.9.4",
  "core-foundation",
@@ -11519,9 +11519,9 @@ dependencies = [
 
 [[package]]
 name = "security-framework-sys"
-version = "2.14.0"
+version = "2.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49db231d56a190491cb4aeda9527f1ad45345af50b0851622a7adb8c03b01c32"
+checksum = "cc1f0cbffaac4852523ce30d8bd3c5cdc873501d96ff467ca09b6767bb8cd5c0"
 dependencies = [
  "core-foundation-sys",
  "libc",
