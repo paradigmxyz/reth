@@ -95,7 +95,7 @@ where
 
     /// Returns the [`BuildArgs`] made purely out of [`FlashBlock`]s that were received earlier.
     ///
-    /// Returns `None` if the flashblock have no `base`.
+    /// Returns `None` if the flashblock have no `base` or the base is not a child block of latest.
     fn build_args(
         &mut self,
     ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
@@ -108,6 +108,14 @@ where
 
             return None
         };
+
+        // attempt an initial consecutive check
+        if let Some(latest) = self.builder.provider().latest_header().ok().flatten() {
+            if latest.hash() != base.parent_hash {
+                trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
+                return None;
+            }
+        }
 
         Some(BuildArgs {
             base,
@@ -146,88 +154,97 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        let result = if let Some((now, rx)) = &mut this.job {
-            let result = ready!(rx.poll_unpin(cx)).unwrap();
-            Some((*now, result))
-        } else {
-            None
-        };
-
-        if let Some((now, result)) = result {
+        loop {
+            // drive pending build job to completion
+            let result = match this.job.as_mut() {
+                Some((now, rx)) => {
+                    let result = ready!(rx.poll_unpin(cx));
+                    result.ok().map(|res| (*now, res))
+                }
+                None => None,
+            };
+            // reset job
             this.job.take();
 
-            match result {
-                Ok(Some((new_pending, cached_reads))) => {
-                    // built a new pending block
-                    this.current = Some(new_pending.clone());
-                    this.cached_state = Some((new_pending.block().hash(), cached_reads));
-                    this.rebuild = false;
+            if let Some((now, result)) = result {
+                match result {
+                    Ok(Some((new_pending, cached_reads))) => {
+                        // built a new pending block
+                        this.current = Some(new_pending.clone());
+                        // cache reads
+                        this.cached_state = Some((new_pending.parent_hash(), cached_reads));
+                        this.rebuild = false;
 
+                        trace!(
+                            parent_hash = %new_pending.block().parent_hash(),
+                            block_number = new_pending.block().number(),
+                            flash_blocks = this.blocks.count(),
+                            elapsed = ?now.elapsed(),
+                            "Built new block with flashblocks"
+                        );
+
+                        return Poll::Ready(Some(Ok(Some(new_pending))));
+                    }
+                    Ok(None) => {
+                        // nothing to do because tracked flashblock doesn't attach to latest
+                    }
+                    Err(err) => {
+                        // we can ignore this error
+                        debug!(%err, "failed to execute flashblock");
+                    }
+                }
+            }
+
+            // consume new flashblocks while they're ready
+            while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
+                match result {
+                    Ok(flashblock) => match this.blocks.insert(flashblock) {
+                        Ok(_) => this.rebuild = true,
+                        Err(err) => debug!(%err, "Failed to prepare flashblock"),
+                    },
+                    Err(err) => return Poll::Ready(Some(Err(err))),
+                }
+            }
+
+            // update on new head block
+            if let Poll::Ready(Ok(state)) = {
+                let fut = this.canon_receiver.recv();
+                pin!(fut);
+                fut.poll_unpin(cx)
+            } {
+                if let Some(current) = this.on_new_tip(state) {
                     trace!(
-                        parent_hash = %new_pending.block().parent_hash(),
-                        block_number = new_pending.block().number(),
-                        flash_blocks = this.blocks.count(),
-                        elapsed = ?now.elapsed(),
-                        "Built new block with flashblocks"
+                        parent_hash = %current.block().parent_hash(),
+                        block_number = current.block().number(),
+                        "Clearing current flashblock on new canonical block"
                     );
 
-                    return Poll::Ready(Some(Ok(Some(new_pending))));
-                }
-                Ok(None) => {
-                    // nothing to do because tracked flashblock doesn't attach to latest
-                }
-                Err(err) => {
-                    // we can ignore this error
-                    debug!(%err, "failed to execute flashblock");
+                    return Poll::Ready(Some(Ok(None)))
                 }
             }
-        }
 
-        // consume new flashblocks while they're ready
-        while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
-            match result {
-                Ok(flashblock) => match this.blocks.insert(flashblock) {
-                    Ok(_) => this.rebuild = true,
-                    Err(err) => debug!(%err, "Failed to prepare flashblock"),
-                },
-                Err(err) => return Poll::Ready(Some(Err(err))),
+            if !this.rebuild && this.current.is_some() {
+                return Poll::Pending
             }
-        }
 
-        if let Poll::Ready(Ok(state)) = {
-            let fut = this.canon_receiver.recv();
-            pin!(fut);
-            fut.poll_unpin(cx)
-        } {
-            if let Some(current) = this.on_new_tip(state) {
-                trace!(
-                    parent_hash = %current.block().parent_hash(),
-                    block_number = current.block().number(),
-                    "Clearing current flashblock on new canonical block"
-                );
+            // try to build a block on top of latest
+            if let Some(args) = this.build_args() {
+                let now = Instant::now();
 
-                return Poll::Ready(Some(Ok(None)))
+                let (tx, rx) = oneshot::channel();
+                let builder = this.builder.clone();
+
+                this.spawner.spawn_blocking(async move {
+                    let _ = tx.send(builder.execute(args));
+                });
+                this.job.replace((now, rx));
+
+                // continue and poll the spawned job
+                continue
             }
-        }
 
-        if !this.rebuild && this.current.is_some() {
             return Poll::Pending
         }
-
-        // try to build a block on top of latest
-        if let Some(args) = this.build_args() {
-            let now = Instant::now();
-
-            let (tx, rx) = oneshot::channel();
-            let builder = this.builder.clone();
-
-            this.spawner.spawn_blocking(async move {
-                let _ = tx.send(builder.execute(args));
-            });
-            this.job.replace((now, rx));
-        }
-
-        Poll::Pending
     }
 }
 

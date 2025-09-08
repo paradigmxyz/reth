@@ -31,6 +31,10 @@ impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
     pub(crate) const fn new(evm_config: EvmConfig, provider: Provider) -> Self {
         Self { evm_config, provider }
     }
+
+    pub(crate) const fn provider(&self) -> &Provider {
+        &self.provider
+    }
 }
 
 pub(crate) struct BuildArgs<I> {
@@ -60,7 +64,7 @@ where
         &self,
         mut args: BuildArgs<I>,
     ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
-        trace!("Building new pending block from flashblocks");
+        trace!("Attempting new pending block from flashblocks");
 
         let latest = self
             .provider
