@@ -77,7 +77,8 @@ use reth_trie_common::Nibbles;
 async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    // Create a chain spec with Cancun activated (for V3 APIs)
+    // Create a chain spec with genesis state of 3310 account data of
+    // 0x77d34361f991fa724ff1db9b1d760063a16770db
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
@@ -88,7 +89,6 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
             .prague_activated()
             .build(),
     );
-
     let contract_addr = Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
 
     // Create setup with state_root_fallback DISABLED to reproduce the bug
@@ -172,7 +172,7 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
     // Run the test
     test.run::<EthereumNode>().await?;
 
-    info!("✅ Test completed - trie corruption bug reproduction successful");
+    info!("Test completed - trie corruption bug reproduction successful");
 
     Ok(())
 }
@@ -181,77 +181,6 @@ async fn test_trie_corruption_with_actual_payloads() -> Result<()> {
 // Helper structs and functions
 // ================================================================================================
 
-/// Action to verify storage state at a specific address
-///
-/// This action checks storage slots to ensure they have the expected values
-/// after transactions have modified them.
-#[derive(Debug)]
-#[allow(dead_code)]
-struct VerifyStorageState {
-    address: Address,
-    storage_key: B256,
-    expected_value: Option<B256>, // None means empty/zero
-    block_tag: String,
-}
-
-impl VerifyStorageState {
-    #[allow(dead_code)]
-    fn new(
-        address: Address,
-        storage_key: B256,
-        expected_value: Option<B256>,
-        block_tag: impl Into<String>,
-    ) -> Self {
-        Self { address, storage_key, expected_value, block_tag: block_tag.into() }
-    }
-}
-
-impl Action<EthEngineTypes> for VerifyStorageState {
-    fn execute<'a>(
-        &'a mut self,
-        env: &'a mut Environment<EthEngineTypes>,
-    ) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // Get block info from registry
-            let (block_info, node_idx) = *env
-                .block_registry
-                .get(&self.block_tag)
-                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found", self.block_tag))?;
-
-            // Get storage value at the block
-            let storage_value: B256 = env.node_clients[node_idx]
-                .rpc
-                .request(
-                    "eth_getStorageAt",
-                    vec![
-                        serde_json::to_value(self.address)?,
-                        serde_json::to_value(self.storage_key)?,
-                        serde_json::to_value(format!("0x{:x}", block_info.hash))?,
-                    ],
-                )
-                .await?;
-
-            let expected = self.expected_value.unwrap_or(B256::ZERO);
-
-            if storage_value == expected {
-                info!(
-                    "✓ Storage verification passed at block {} - slot {:?} = {:?}",
-                    self.block_tag, self.storage_key, storage_value
-                );
-            } else {
-                return Err(eyre::eyre!(
-                    "Storage verification failed at block {} - slot {:?}: expected {:?}, got {:?}",
-                    self.block_tag,
-                    self.storage_key,
-                    expected,
-                    storage_value
-                ));
-            }
-
-            Ok(())
-        })
-    }
-}
 
 /// Action to get storage proof and verify trie nodes exist
 ///
@@ -369,13 +298,16 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
 
             // Wait a bit for canonical state notifications to be processed
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             // Drain any pending trie update events before checking
             env.drain_trie_updates();
-            
+
             let node_state = env.node_state(node_idx)?;
             println!("Checking trie updates for block {} on node {}", block_info.hash, node_idx);
-            println!("Available blocks in trie updates: {:?}", node_state.block_trie_updates.keys().collect::<Vec<_>>());
+            println!(
+                "Available blocks in trie updates: {:?}",
+                node_state.block_trie_updates.keys().collect::<Vec<_>>()
+            );
 
             // Check if we have trie updates for this block
             if let Some(trie_updates) = node_state.block_trie_updates.get(&block_info.hash) {
@@ -431,7 +363,8 @@ impl Action<EthEngineTypes> for VerifyTrieUpdates {
                 }
             } else {
                 // No trie updates available - this indicates either:
-                // 1. The trie corruption bug where updates are missing during reorgs (unfixed version)
+                // 1. The trie corruption bug where updates are missing during reorgs (unfixed
+                //    version)
                 // 2. The canonical state notification hasn't been emitted yet
                 // 3. The block doesn't have trie updates (no state changes)
                 return Err(eyre::eyre!(
