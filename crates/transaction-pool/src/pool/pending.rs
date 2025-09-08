@@ -513,12 +513,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     /// All transactions grouped by id
-    pub fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
         &self.by_id
     }
 
     /// Independent transactions
-    pub fn independent_transactions(&self) -> &FxHashMap<SenderId, PendingTransaction<T>> {
+    pub const fn independent_transactions(&self) -> &FxHashMap<SenderId, PendingTransaction<T>> {
         &self.independent_transactions
     }
 
