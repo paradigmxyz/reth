@@ -64,10 +64,11 @@ This can be implemented in the same way as normal Reth. Reth already tracks hist
 
 We'll build a Reth execution extension that will:
 
-- Save the initial state from existing tables (AccountsTrie and StorageTrie).
-- Listen for MerkleExecute events and store the TrieUpdates in the new tables.
+- Save the initial state from existing tables (`AccountsTrie` and `StorageTrie`).
+- Listen for `MerkleExecute` events and store the `TrieUpdates` in the new tables.
+    - `MerkleExecute` stage events are not supported yet, but will be soon. This is needed because this part of the implementation is what actually generates the TrieUpdates. Currently, ExExes can only hook into the `Execute` stage.
 - Serve proof requests from the new tables.
-    - Open question: currently, ExExes can't do this because they don't have access to the proof serving interfaces. How do we serve proof RPCs? Maybe we can create a sidecar process that handles proof requests and serves the response from existing tables.
+    - **Open question: currently, ExExes can't do this because they don't have access to the proof serving interfaces. How do we serve proof RPCs? Maybe we can create a sidecar process that handles proof requests and serves the response from existing tables.**
 
 ## Optimizations
 
