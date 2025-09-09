@@ -952,14 +952,10 @@ where
     ///
     /// If the node is configured to prune pre-merge transactions and it has synced past the merge
     /// block, it will delete the pre-merge transaction static files if they still exist.
-    /// It will also clear the `TransactionHashNumbers` table since we can't determine which
-    /// entries correspond to deleted transactions.
     pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
     where
         T: FullNodeTypes<Provider: StaticFileProviderFactory>,
     {
-        use reth_db_api::{tables, transaction::DbTxMut};
-
         if self.node_config().pruning.bodies_pre_merge {
             if let Some(merge_block) =
                 self.chain_spec().ethereum_fork_activation(EthereumHardfork::Paris).block_number()
@@ -967,20 +963,13 @@ where
                 // Ensure we only expire transactions after we synced past the merge block.
                 let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
                 if latest.number() > merge_block {
-                    let static_provider = self.blockchain_db().static_file_provider();
-                    if static_provider
+                    let provider = self.blockchain_db().static_file_provider();
+                    if provider
                         .get_lowest_transaction_static_file_block()
                         .is_some_and(|lowest| lowest < merge_block)
                     {
                         info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
-                        static_provider.delete_transactions_below(merge_block)?;
-
-                        // Clear the entire `TransactionHashNumbers` table since we can't determine
-                        // which entries correspond to the deleted pre-merge transactions
-                        info!(target: "reth::cli", "Clearing TransactionHashNumbers table after pre-merge expiry");
-                        let provider_rw = self.provider_factory().provider_rw()?;
-                        provider_rw.tx_ref().clear::<tables::TransactionHashNumbers>()?;
-                        provider_rw.commit()?;
+                        provider.delete_transactions_below(merge_block)?;
                     } else {
                         debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
                     }
