@@ -28,8 +28,7 @@ where
         SpecId::CANCUN
     } else if chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         SpecId::SHANGHAI
-    }
-    else if chain_spec.is_paris_active_at_block(block_number) {
+    } else if chain_spec.is_paris_active_at_block(block_number) {
         SpecId::MERGE
     } else if chain_spec.is_london_active_at_block(block_number) {
         SpecId::LONDON
