@@ -212,7 +212,7 @@ ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 reth-bench: ## Build the reth-bench binary into the `target` directory.
 	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
 
-.PHONY: install-reth-bech
+.PHONY: install-reth-bench
 install-reth-bench: ## Build and install the reth binary under `$(CARGO_HOME)/bin`.
 	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
 		--features "$(FEATURES)" \

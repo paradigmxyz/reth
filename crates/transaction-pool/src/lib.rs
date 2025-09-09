@@ -274,7 +274,8 @@ pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
     config::{
-        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+        DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS, DEFAULT_PRICE_BUMP,
         DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
@@ -380,12 +381,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool
-            .validator()
-            .validate_transactions_with_origin(origin, transactions)
-            .await
-            .into_iter()
-            .collect()
+        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
     }
 
     /// Validates all transactions with their individual origins.
@@ -395,6 +391,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, V::Transaction)>,
     ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
+        if transactions.len() == 1 {
+            let (origin, tx) = transactions.into_iter().next().unwrap();
+            let res = self.pool.validator().validate_transaction(origin, tx).await;
+            return vec![(origin, res)]
+        }
         let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
         let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
         origins.into_iter().zip(tx_outcomes).collect()
