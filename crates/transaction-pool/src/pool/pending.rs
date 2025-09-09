@@ -1,3 +1,5 @@
+//! Pending transactions
+
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::{
@@ -511,6 +513,21 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.len()
     }
 
+    /// All transactions grouped by id
+    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+        &self.by_id
+    }
+
+    /// Independent transactions
+    pub const fn independent_transactions(&self) -> &FxHashMap<SenderId, PendingTransaction<T>> {
+        &self.independent_transactions
+    }
+
+    /// Subscribes to new transactions
+    pub fn new_transaction_receiver(&self) -> broadcast::Receiver<PendingTransaction<T>> {
+        self.new_transaction_notifier.subscribe()
+    }
+
     /// Whether the pool is empty
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
@@ -570,18 +587,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
-pub(crate) struct PendingTransaction<T: TransactionOrdering> {
+pub struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
-    pub(crate) submission_id: u64,
+    pub submission_id: u64,
     /// Actual transaction.
-    pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// The priority value assigned by the used `Ordering` function.
-    pub(crate) priority: Priority<T::PriorityValue>,
+    pub priority: Priority<T::PriorityValue>,
 }
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// The next transaction of the sender: `nonce + 1`
-    pub(crate) fn unlocks(&self) -> TransactionId {
+    pub fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
     }
 }

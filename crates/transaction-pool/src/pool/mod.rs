@@ -113,7 +113,7 @@ mod best;
 mod blob;
 mod listener;
 mod parked;
-pub(crate) mod pending;
+pub mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
 pub mod txpool;
