@@ -172,6 +172,7 @@ members = [
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
     "testing/testing-utils",
+    "testing/runner",
     "crates/tracing-otlp",
 ]
 default-members = ["bin/reth"]
