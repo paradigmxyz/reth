@@ -1,11 +1,26 @@
 //! Node builder setup tests.
 
+use core::marker::PhantomData;
+use op_revm::{
+    precompiles::OpPrecompiles, OpContext, OpHaltReason, OpSpecId, OpTransaction,
+    OpTransactionError,
+};
 use reth_db::test_utils::create_test_rw_db;
+use reth_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
-use reth_node_builder::{Node, NodeBuilder, NodeConfig};
-use reth_optimism_chainspec::BASE_MAINNET;
-use reth_optimism_node::{args::RollupArgs, OpNode};
+use reth_node_builder::{
+    components::ExecutorBuilder, BuilderContext, FullNodeTypes, Node, NodeBuilder, NodeConfig,
+    NodeTypes,
+};
+use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET, OP_SEPOLIA};
+use reth_optimism_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory, OpRethReceiptBuilder};
+use reth_optimism_node::{args::RollupArgs, OpEvmConfig, OpExecutorBuilder, OpNode};
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::BlockchainProvider;
+use revm::{
+    context::TxEnv, context_interface::result::EVMError, inspector::NoOpInspector,
+    interpreter::interpreter::EthInterpreter, Inspector,
+};
 
 #[test]
 fn test_basic_setup() {
@@ -34,5 +49,105 @@ fn test_basic_setup() {
 
             Ok(())
         })
+        .check_launch();
+}
+
+#[test]
+fn test_setup_custom_precompiles() {
+    /// Unichain custom precompiles wrapper.
+    #[derive(Debug)]
+    struct UniPrecompiles;
+
+    impl UniPrecompiles {
+        /// The set of precompiles for Unichain.
+        fn precompiles() -> PrecompilesMap {
+            PrecompilesMap::from_static(
+                OpPrecompiles::default().precompiles(), // custom precompiles can be added here
+            )
+        }
+    }
+
+    /// Unichain EVM configuration.
+    #[derive(Debug, Clone, Default)]
+    struct UniEvmFactory;
+
+    impl EvmFactory for UniEvmFactory {
+        type Evm<DB: Database, I: Inspector<OpContext<DB>>> = OpEvm<DB, I, Self::Precompiles>;
+        type Context<DB: Database> = OpContext<DB>;
+        type Tx = OpTransaction<TxEnv>;
+        type Error<DBError: core::error::Error + Send + Sync + 'static> =
+            EVMError<DBError, OpTransactionError>;
+        type HaltReason = OpHaltReason;
+        type Spec = OpSpecId;
+        type Precompiles = PrecompilesMap;
+
+        fn create_evm<DB: Database>(
+            &self,
+            db: DB,
+            input: EvmEnv<OpSpecId>,
+        ) -> Self::Evm<DB, NoOpInspector> {
+            let mut op_evm = OpEvmFactory::default().create_evm(db, input);
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles();
+
+            op_evm
+        }
+
+        fn create_evm_with_inspector<
+            DB: Database,
+            I: Inspector<Self::Context<DB>, EthInterpreter>,
+        >(
+            &self,
+            db: DB,
+            input: EvmEnv<OpSpecId>,
+            inspector: I,
+        ) -> Self::Evm<DB, I> {
+            let mut op_evm =
+                OpEvmFactory::default().create_evm_with_inspector(db, input, inspector);
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles();
+
+            op_evm
+        }
+    }
+
+    /// Unichain executor builder.
+    #[derive(Debug, Default, Clone, Copy)]
+    struct UniExecutorBuilder;
+
+    impl<Node> ExecutorBuilder<Node> for UniExecutorBuilder
+    where
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    {
+        type EVM = OpEvmConfig<
+            OpChainSpec,
+            <Node::Types as NodeTypes>::Primitives,
+            OpRethReceiptBuilder,
+            UniEvmFactory,
+        >;
+
+        async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+            let op_evm_config = OpExecutorBuilder::default().build_evm(ctx).await?;
+            let uni_executor_factory = OpBlockExecutorFactory::new(
+                op_evm_config.executor_factory.receipt_builder().clone(),
+                ctx.chain_spec().clone(),
+                UniEvmFactory::default(),
+            );
+            let uni_evm_config = OpEvmConfig {
+                executor_factory: uni_executor_factory,
+                block_assembler: op_evm_config.block_assembler.clone(),
+                _pd: PhantomData,
+            };
+            Ok(uni_evm_config)
+        }
+    }
+
+    NodeBuilder::new(NodeConfig::new(OP_SEPOLIA.clone()))
+        .with_database(create_test_rw_db())
+        .with_types::<OpNode>()
+        .with_components(
+            OpNode::default()
+                .components()
+                // Custom EVM configuration
+                .executor(UniExecutorBuilder::default()),
+        )
         .check_launch();
 }
