@@ -29,7 +29,7 @@ use crate::{
 use alloy_consensus::Header;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_log_index::{
+use reth_log_index_common::{
     FilterMapColumns, FilterMapMeta as FilterMapMetadata, LogValueIndex, MapRowIndex,
 };
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};

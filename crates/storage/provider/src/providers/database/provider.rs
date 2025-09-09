@@ -13,10 +13,10 @@ use crate::{
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
     HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    LogIndexProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -44,10 +44,7 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_log_index::{
-    BlockBoundary, FilterError, FilterMapMeta, FilterMapParams, FilterResult, LogIndexProvider,
-    MapValueRows,
-};
+use reth_log_index_common::{BlockBoundary, FilterMapMeta, FilterMapParams, MapValueRows};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
@@ -3177,10 +3174,10 @@ impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX, N> {
-    fn get_metadata(&self) -> FilterResult<Option<FilterMapMeta>> {
+    fn get_metadata(&self) -> ProviderResult<Option<FilterMapMeta>> {
         self.tx_ref()
             .get::<tables::FilterMapMeta>(tables::FilterMapMetaKey)
-            .map_err(|e| FilterError::Database(e.to_string()))
+            .map_err(ProviderError::Database)
     }
 
     fn get_base_layer_rows_for_value(
@@ -3188,7 +3185,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_start: u32,
         map_end: u32,
         value: &B256,
-    ) -> FilterResult<Vec<Vec<u32>>> {
+    ) -> ProviderResult<Vec<Vec<u32>>> {
         let params = FilterMapParams::default();
 
         let total = (map_end - map_start + 1) as usize;
@@ -3197,7 +3194,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         let mut cursor = self
             .tx_ref()
             .cursor_read::<tables::FilterMapRows>()
-            .map_err(|e| FilterError::Database(e.to_string()))?;
+            .map_err(ProviderError::Database)?;
 
         // Epoch geometry
         let epoch_size: u32 = 1u32 << params.log_maps_per_epoch;
@@ -3216,13 +3213,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
             let start_key = params.map_row_index(seg_start, row_index);
             let end_key = params.map_row_index(seg_end, row_index);
 
-            let walker = cursor
-                .walk_range(start_key..=end_key)
-                .map_err(|e| FilterError::Database(e.to_string()))?;
-
-            for entry in walker {
-                let (map_row_idx, columns) =
-                    entry.map_err(|e| FilterError::Database(e.to_string()))?;
+            for entry in cursor.walk_range(start_key..=end_key).map_err(ProviderError::Database)? {
+                let (map_row_idx, columns) = entry.map_err(ProviderError::Database)?;
 
                 // Decode map index within this epoch, then rebase to absolute map index.
                 let in_epoch_mask = (1u64 << params.log_maps_per_epoch) - 1;
@@ -3252,29 +3244,27 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         &self,
         map_index: u32,
         value: &B256,
-    ) -> FilterResult<Vec<Vec<u32>>> {
+    ) -> ProviderResult<Vec<Vec<u32>>> {
         let params = FilterMapParams::default();
         let mut layers = Vec::new();
 
-        for layer in 1..reth_log_index::MAX_LAYERS {
+        for layer in 1..reth_log_index_common::MAX_LAYERS {
             let row_index = params.row_index(map_index, layer as u32, value);
             let map_row_index = params.map_row_index(map_index, row_index);
-
-            let row = self
-                .tx_ref()
-                .get::<tables::FilterMapRows>(map_row_index)
-                .map_err(|e| FilterError::Database(e.to_string()))?
-                .map(|columns| columns.indices)
-                .unwrap_or_default();
-
             let max_len = params.max_row_length(layer as u32) as usize;
 
-            if row.len() < max_len {
-                layers.push(row);
+            let columns = self
+                .tx_ref()
+                .get::<tables::FilterMapRows>(map_row_index)
+                .map_err(ProviderError::Database)?
+                .unwrap_or_default();
+
+            if columns.indices.len() < max_len {
+                layers.push(columns.indices);
                 break;
             }
 
-            layers.push(row);
+            layers.push(columns.indices);
         }
 
         Ok(layers)
@@ -3285,7 +3275,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
         map_start: u32,
         map_end: u32,
         values: &[B256],
-    ) -> FilterResult<Vec<MapValueRows>> {
+    ) -> ProviderResult<Vec<MapValueRows>> {
         let mut results = Vec::new();
 
         for value in values {
@@ -3313,18 +3303,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> LogIndexProvider for DatabaseProvider<TX,
     fn get_log_value_indices_range(
         &self,
         block_range: impl RangeBounds<BlockNumber>,
-    ) -> FilterResult<Vec<BlockBoundary>> {
+    ) -> ProviderResult<Vec<BlockBoundary>> {
         let mut cursor = self
             .tx_ref()
             .cursor_read::<tables::LogValueIndices>()
-            .map_err(|e| FilterError::Database(e.to_string()))?;
+            .map_err(ProviderError::Database)?;
         let mut boundaries = Vec::new();
 
-        for entry in
-            cursor.walk_range(block_range).map_err(|e| FilterError::Database(e.to_string()))?
-        {
-            let (block_number, log_value_index) =
-                entry.map_err(|e| FilterError::Database(e.to_string()))?;
+        for entry in cursor.walk_range(block_range).map_err(ProviderError::Database)? {
+            let (block_number, log_value_index) = entry.map_err(ProviderError::Database)?;
             boundaries.push(BlockBoundary { block_number, log_value_index });
         }
 

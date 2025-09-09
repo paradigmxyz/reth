@@ -1,12 +1,12 @@
 [package]
-name = "reth-log-index"
+name = "reth-log-index-common"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Log index implementation for efficient log indexing"
+description = "Common types for Log index implementation"
 
 [lints]
 workspace = true
@@ -14,28 +14,15 @@ workspace = true
 [dependencies]
 # alloy
 alloy-primitives.workspace = true
-alloy-rpc-types-eth.workspace = true
-
-auto_impl.workspace = true
 
 # reth
-reth-errors.workspace = true
-reth-primitives-traits.workspace = true
-reth-codecs.workspace = true
-modular-bitfield.workspace = true
-
-tracing.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 # misc
 serde = { workspace = true, features = ["derive"] }
-thiserror.workspace = true
-sha2.workspace = true
-fnv.workspace = true
-tokio = { workspace = true, features = ["rt"] }
-futures.workspace = true
-itertools.workspace = true
-
-# codecs
+thiserror = { workspace = true, default-features = false }
+sha2 = { workspace = true, default-features = false }
+fnv = { workspace = true, default-features = false }
 
 [dev-dependencies]
 # For tests
@@ -46,14 +33,12 @@ futures.workspace = true
 
 # For integration tests
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
-tokio = { workspace = true, features = ["full"] }
 reth-storage-errors.workspace = true
 
 [features]
 default = []
-reth-codecs = []
+reth-codec = ["dep:reth-codecs"]
 test-utils = [
     "reth-codecs/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
 ]

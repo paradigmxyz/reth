@@ -555,14 +555,13 @@ mod tests {
     use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_log_index::LogIndexProvider;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         StageCheckpointReader,
     };
     use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
-    use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
+    use reth_storage_api::{BlockReader, BlockReaderIdExt, LogIndexProvider, StateProviderFactory};
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 

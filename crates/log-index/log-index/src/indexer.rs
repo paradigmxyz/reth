@@ -1,80 +1,14 @@
-use crate::{
-    ColumnIndex, FilterError, FilterMapColumns, FilterMapParams, LogValueIndex, MapIndex,
-    MapRowIndex, MAX_LAYERS,
-};
 use alloy_primitives::{map::HashMap, B256};
+use reth_log_index_common::{
+    CompletedMap, FilterError, FilterMapColumns, FilterMapParams, LogValueIndex, MapIndex,
+    MapRowIndex, ProcessBatchResult, RowCell, MAX_LAYERS,
+};
 
 /// Type alias for count of filled entries in a row
 pub type Count = u32;
 
 // keep the cache bounded per map
 const ROW_CACHE_CAP: usize = 64 * 1024;
-
-/// Result of processing a batch of log values
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProcessBatchResult {
-    /// No maps were completed, all values added to current map
-    NoMapsCompleted {
-        /// Number of log values processed
-        values_processed: usize,
-    },
-    /// One or more maps were completed
-    MapsCompleted {
-        /// The completed maps with their data
-        completed_maps: Vec<CompletedMap>,
-        /// Number of log values processed
-        values_processed: usize,
-    },
-}
-
-impl ProcessBatchResult {
-    /// Check if any maps were completed
-    pub const fn has_completed_maps(&self) -> bool {
-        matches!(self, Self::MapsCompleted { .. })
-    }
-
-    /// Get completed maps if any
-    pub fn completed_maps(self) -> Vec<CompletedMap> {
-        match self {
-            Self::MapsCompleted { completed_maps, .. } => completed_maps,
-            Self::NoMapsCompleted { .. } => Vec::new(),
-        }
-    }
-
-    /// Get the number of values processed
-    pub const fn values_processed(&self) -> usize {
-        match self {
-            Self::NoMapsCompleted { values_processed } |
-            Self::MapsCompleted { values_processed, .. } => *values_processed,
-        }
-    }
-}
-
-/// Represents a storage-ready log value with its position in the filter maps.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RowCell {
-    /// The map index this log value belongs to
-    pub map: MapIndex,
-    /// The row within the map
-    pub map_row_index: MapRowIndex,
-    /// The column within the row
-    pub column_index: ColumnIndex,
-    /// The global log value index
-    pub index: LogValueIndex,
-}
-
-/// Information about a completed map
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletedMap {
-    /// The map index that was completed
-    pub map_index: MapIndex,
-    /// The first log value index in this map
-    pub start_log_value_index: LogValueIndex,
-    /// The last log value index in this map (inclusive)
-    pub end_log_value_index: LogValueIndex,
-    /// The rows that were completed for this map
-    pub rows: Vec<(MapRowIndex, FilterMapColumns)>,
-}
 
 /// Incrementally indexes log values into filter maps, maintaining state.
 #[derive(Debug, Clone)]

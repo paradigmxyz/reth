@@ -3,10 +3,9 @@
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_rpc_types_eth::Block;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_log_index::LogIndexProvider;
 use reth_rpc_convert::RpcConvert;
 pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
-use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::{LogIndexProvider, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
     error::Error,

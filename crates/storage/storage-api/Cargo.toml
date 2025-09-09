@@ -24,7 +24,7 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-log-index.workspace = true
+reth-log-index-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true

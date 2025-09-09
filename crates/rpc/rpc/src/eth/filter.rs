@@ -15,7 +15,8 @@ use futures::{
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_log_index::{query::spawn_query_logs_tasks, FilterMapParams, LogIndexProvider};
+use reth_log_index::query::spawn_query_logs_tasks;
+use reth_log_index_common::FilterMapParams;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
@@ -27,8 +28,8 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, LogIndexProvider,
+    ProviderBlock, ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};

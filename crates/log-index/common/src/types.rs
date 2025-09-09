@@ -1,9 +1,9 @@
 //! Core types used by the `FilterMaps` implementation.
 
-use alloy_primitives::BlockNumber;
-use reth_codecs::Compact;
+use alloc::{boxed::Box, string::String, vec::Vec};
+use alloy_primitives::{BlockNumber, B256};
 use serde::{Deserialize, Serialize};
-use std::vec::Vec;
+use thiserror::Error;
 
 /// Type alias for Map Index
 /// This represents the index of a filter map.
@@ -25,7 +25,8 @@ pub type LogValueIndex = u64;
 ///
 /// This struct maintains information about which blocks have been indexed and which filter maps
 /// have been generated. It is used to track progress and enable resuming of the indexing process.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Copy, Compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Copy)]
 pub struct FilterMapMeta {
     /// The first block number that has had its logs fully indexed.
     /// This represents the starting point of our complete log index.
@@ -59,7 +60,8 @@ pub struct FilterMapMeta {
 }
 
 /// A filter map row.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterMapRow {
     /// The index of the filter map row.
     pub map_row_index: u64,
@@ -68,7 +70,8 @@ pub struct FilterMapRow {
 }
 
 /// Filter map column.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterMapColumns {
     /// Indices of the columns in the filter map.
     pub indices: Vec<u32>,
@@ -77,7 +80,8 @@ pub struct FilterMapColumns {
 /// Represents the block boundaries for log value indices.
 ///
 /// Each entry indicates the starting log value index for a specific block number.
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockBoundary {
     /// The block number.
     pub block_number: BlockNumber,
@@ -86,7 +90,7 @@ pub struct BlockBoundary {
 }
 
 /// Errors that can occur when using `FilterMaps`.
-#[derive(Debug, thiserror::Error)]
+#[derive(Error, Debug)]
 pub enum FilterError {
     /// No filter constraints provided.
     #[error("no filter constraints provided")]
@@ -139,15 +143,10 @@ pub enum FilterError {
     /// Task error occurred.
     #[error("task error: {0}")]
     Task(String),
-}
 
-/// Result type for `FilterMaps` operations.
-pub type FilterResult<T> = Result<T, FilterError>;
-
-impl From<reth_errors::ProviderError> for FilterError {
-    fn from(err: reth_errors::ProviderError) -> Self {
-        Self::Provider(err.to_string())
-    }
+    /// Fatal error occurred.
+    #[error(transparent)]
+    Fatal(Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Result from a matcher containing matches for a specific map index.
@@ -158,4 +157,82 @@ pub struct MatcherResult {
     /// The potential matches found for this map
     /// None = wildcard (matches all), Some(vec) = specific matches
     pub matches: Vec<u64>,
+}
+
+/// Rows for a specific map and value combination
+#[derive(Debug, Clone)]
+pub struct MapValueRows {
+    /// The map index these rows are for
+    pub map_index: u32,
+    /// The value hash these rows are for
+    pub value: B256,
+    /// Rows across all layers for this (map, value) pair
+    /// Ordered by layer (`1..MAX_LAYERS`)
+    pub layers: Vec<Vec<u32>>,
+}
+
+/// Represents a storage-ready log value with its position in the filter maps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowCell {
+    /// The map index this log value belongs to
+    pub map: MapIndex,
+    /// The row within the map
+    pub map_row_index: MapRowIndex,
+    /// The column within the row
+    pub column_index: ColumnIndex,
+    /// The global log value index
+    pub index: LogValueIndex,
+}
+
+/// Information about a completed map
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedMap {
+    /// The map index that was completed
+    pub map_index: MapIndex,
+    /// The first log value index in this map
+    pub start_log_value_index: LogValueIndex,
+    /// The last log value index in this map (inclusive)
+    pub end_log_value_index: LogValueIndex,
+    /// The rows that were completed for this map
+    pub rows: Vec<(MapRowIndex, FilterMapColumns)>,
+}
+
+/// Result of processing a batch of log values
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessBatchResult {
+    /// No maps were completed, all values added to current map
+    NoMapsCompleted {
+        /// Number of log values processed
+        values_processed: usize,
+    },
+    /// One or more maps were completed
+    MapsCompleted {
+        /// The completed maps with their data
+        completed_maps: Vec<CompletedMap>,
+        /// Number of log values processed
+        values_processed: usize,
+    },
+}
+
+impl ProcessBatchResult {
+    /// Check if any maps were completed
+    pub const fn has_completed_maps(&self) -> bool {
+        matches!(self, Self::MapsCompleted { .. })
+    }
+
+    /// Get completed maps if any
+    pub fn completed_maps(self) -> Vec<CompletedMap> {
+        match self {
+            Self::MapsCompleted { completed_maps, .. } => completed_maps,
+            Self::NoMapsCompleted { .. } => Vec::new(),
+        }
+    }
+
+    /// Get the number of values processed
+    pub const fn values_processed(&self) -> usize {
+        match self {
+            Self::NoMapsCompleted { values_processed } |
+            Self::MapsCompleted { values_processed, .. } => *values_processed,
+        }
+    }
 }

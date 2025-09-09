@@ -11,13 +11,17 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_log_index::{
-    indexer::{LogIndexer, ProcessBatchResult},
+    indexer::LogIndexer,
     utils::{count_log_values_in_block, log_values_from_receipts},
-    FilterMapColumns, FilterMapMeta, FilterMapParams, LogIndexProvider, LogValueIndex, MapRowIndex,
 };
+use reth_log_index_common::{
+    FilterMapColumns, FilterMapMeta, FilterMapParams, LogValueIndex, MapRowIndex,
+    ProcessBatchResult,
+};
+
 use reth_provider::{
-    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter, ReceiptProvider,
-    StageCheckpointReader, StageCheckpointWriter,
+    BlockReader, DBProvider, LogIndexProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    ReceiptProvider, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_prune::PruneMode;
 use reth_stages_api::{

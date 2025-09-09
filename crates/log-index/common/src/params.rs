@@ -1,13 +1,34 @@
 //! Row and column mapping algorithms for `FilterMaps` based on EIP-7745.
 //! see: <https://eips.ethereum.org/EIPS/eip-7745>
 
+use crate::MAX_LAYERS;
+use alloc::vec::Vec;
 use alloy_primitives::B256;
 use fnv::FnvHasher;
 
+use core::hash::Hasher;
 use sha2::{Digest, Sha256};
-use std::hash::Hasher;
 
-use crate::constants::{DEFAULT_PARAMS, RANGE_TEST_PARAMS};
+/// Default parameters used on mainnet
+const DEFAULT_PARAMS: FilterMapParams = FilterMapParams {
+    log_map_height: 16,
+    log_map_width: 24,
+    log_maps_per_epoch: 10,
+    log_values_per_map: 16,
+    base_row_length_ratio: 8,
+    log_layer_diff: 4,
+};
+
+/// Test parameters that put one log value per epoch, ensuring block exact tail unindexing for
+/// testing
+const RANGE_TEST_PARAMS: FilterMapParams = FilterMapParams {
+    log_map_height: 4,
+    log_map_width: 24,
+    log_maps_per_epoch: 0,
+    log_values_per_map: 0,
+    base_row_length_ratio: 16, // baseRowLength >= 1
+    log_layer_diff: 4,
+};
 
 /// `FilterMaps` parameters based on EIP-7745
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,8 +253,6 @@ impl FilterMapParams {
     /// Determine which layer a row belongs to based on its current fill count.
     /// Returns the first layer where the row could fit, or MAX_LAYERS-1 if it doesn't fit anywhere.
     pub fn determine_layer(&self, fill_count: usize) -> usize {
-        use crate::MAX_LAYERS;
-
         // Find the first layer where this row could fit
         for layer in 0..MAX_LAYERS {
             if fill_count <= self.max_row_length(layer as u32) as usize {

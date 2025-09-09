@@ -2,7 +2,9 @@ use super::StageId;
 use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{map::HashMap, Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
-use reth_log_index::{BlockBoundary, FilterMapColumns, FilterMapRow, LogValueIndex, MapRowIndex};
+use reth_log_index_common::{
+    BlockBoundary, FilterMapColumns, FilterMapRow, LogValueIndex, MapRowIndex,
+};
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
 /// Saves the progress of Merkle stage.

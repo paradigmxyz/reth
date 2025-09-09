@@ -2,11 +2,10 @@
 
 use crate::{
     AccountReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, HashedPostStateProvider, StageCheckpointReader, StateProviderFactory,
-    StateReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, HashedPostStateProvider, LogIndexProvider, StageCheckpointReader,
+    StateProviderFactory, StateReader, StaticFileProviderFactory,
 };
 use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
-use reth_log_index::LogIndexProvider;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;

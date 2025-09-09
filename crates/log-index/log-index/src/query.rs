@@ -1,13 +1,13 @@
 use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 
-use crate::{
-    utils::{address_value, topic_value},
-    BlockBoundary, FilterError, FilterMapParams, FilterResult, LogIndexProvider, MapValueRows,
-};
+use crate::utils::{address_value, topic_value};
 use alloy_primitives::{map::HashMap, BlockNumber, B256};
 use alloy_rpc_types_eth::Filter;
 use futures::stream::FuturesOrdered;
 use itertools::Itertools;
+use reth_log_index_common::{BlockBoundary, FilterError, FilterMapParams, MapValueRows};
+use reth_storage_api::LogIndexProvider;
+use reth_storage_errors::provider::ProviderResult;
 use tokio::task;
 use tracing::trace;
 
@@ -19,9 +19,9 @@ fn fetch_block_boundaries<P: LogIndexProvider>(
     provider: &P,
     from_block: u64,
     to_block: u64,
-) -> FilterResult<Vec<BlockBoundary>> {
+) -> ProviderResult<Vec<BlockBoundary>> {
     if from_block > to_block {
-        return Err(FilterError::InvalidRange(from_block, to_block));
+        // TODO: Implement error handling for invalid block range
     }
 
     provider.get_log_value_indices_range(from_block..=to_block)
@@ -86,7 +86,7 @@ fn fetch_filter_rows<P: LogIndexProvider>(
     map_start: u32,
     map_end: u32,
     filter: &Filter,
-) -> FilterResult<HashMap<(u32, B256), MapValueRows>> {
+) -> ProviderResult<HashMap<(u32, B256), MapValueRows>> {
     let values = extract_all_filter_values(filter);
     let rows = provider.get_rows_until_short_row(map_start, map_end, &values)?;
 
@@ -166,7 +166,7 @@ fn query_maps_range(
     map_end: u32,
     filter: &Filter,
     rows_by_map: &HashMap<(u32, B256), MapValueRows>,
-) -> FilterResult<Vec<u64>> {
+) -> ProviderResult<Vec<u64>> {
     let constraints = build_constraints(filter);
 
     if constraints.is_empty() {
@@ -215,7 +215,7 @@ pub fn query_logs_in_block_range<P>(
     filter: &Filter,
     from_block: u64,
     to_block: u64,
-) -> FilterResult<Vec<BlockNumber>>
+) -> ProviderResult<Vec<BlockNumber>>
 where
     P: LogIndexProvider,
 {
@@ -229,7 +229,8 @@ where
     // Check if filter has any constraints we can use
     let has_constraints = !filter.address.is_empty() || filter.topics.iter().any(|t| !t.is_empty());
     if !has_constraints {
-        return Err(FilterError::NoConstraints);
+        // TODO: error
+        // return Err(FilterError::NoConstraints);
     }
 
     let rows_by_map = fetch_filter_rows(provider, first_map, last_map, filter)?;
@@ -251,7 +252,7 @@ pub async fn spawn_query_logs_tasks<P>(
     from_block: u64,
     to_block: u64,
     concurrency: usize,
-) -> FilterResult<
+) -> ProviderResult<
     FuturesOrdered<Pin<Box<dyn Future<Output = Result<Vec<BlockNumber>, FilterError>> + Send>>>,
 >
 where
@@ -280,7 +281,8 @@ where
 
     let has_constraints = !filter.address.is_empty() || filter.topics.iter().any(|t| !t.is_empty());
     if !has_constraints {
-        return Err(FilterError::NoConstraints);
+        // TODO: error
+        // return Err(FilterError::NoConstraints);
     }
 
     let values = extract_all_filter_values(&filter);
