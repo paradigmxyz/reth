@@ -43,7 +43,7 @@ where
         SpecId::BYZANTIUM
     } else if chain_spec.is_spurious_dragon_active_at_block(block_number) {
         SpecId::SPURIOUS_DRAGON
-    } else if chain_spec.is_tangerine_active_at_block(block_number) {
+    } else if chain_spec.is_tangerine_whistle_active_at_block(block_number) {
         SpecId::TANGERINE
     } else if chain_spec.is_homestead_active_at_block(block_number) {
         SpecId::HOMESTEAD
