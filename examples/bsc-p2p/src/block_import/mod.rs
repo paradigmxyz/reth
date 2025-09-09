@@ -37,9 +37,9 @@ impl<T: PayloadTypes> BlockImport<NewBlock<BscBlock<T>>> for BscBlockImport<T> {
         }
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ImportEvent<T>> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockImportOutcome<NewBlock<BscBlock<T>>>> {
         match ready!(self.handle.poll_outcome(cx)) {
-            Some(outcome) => Poll::Ready(outcome),
+            Some(outcome) => Poll::Ready(BlockImportOutcome::Imported(outcome)),
             None => Poll::Pending,
         }
     }
