@@ -5,7 +5,7 @@ use core::mem;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
 use tokio::sync::broadcast;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
@@ -51,7 +51,7 @@ where
             ) {
                 Ok(flashblocks) => flashblocks,
                 Err(err) => {
-                    warn!(target: "flashblocks", error = ?err, "Failed to create flashblock complete sequence");
+                    debug!(target: "flashblocks", error = ?err, "Failed to create full flashblock complete sequence");
                     return;
                 }
             };
@@ -109,10 +109,6 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
-    fn clear(&mut self) {
-        self.inner.clear();
-    }
-
     /// Returns the first block number
     pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
@@ -131,7 +127,7 @@ where
 
 /// A complete sequence of flashblocks, often corresponding to a full block.
 /// Ensure invariants of a complete flashblocks sequence.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
 
 impl FlashBlockCompleteSequence {
@@ -232,7 +228,6 @@ mod tests {
     };
     use alloy_eips::Encodable2718;
     use alloy_primitives::{hex, Signature, TxKind, U256};
-    use tokio::sync::broadcast::error::TryRecvError;
 
     #[test]
     fn test_sequence_stops_before_gap() {
@@ -300,7 +295,7 @@ mod tests {
                 .insert(FlashBlock {
                     payload_id: Default::default(),
                     index: idx,
-                    base: None,
+                    base: Some(ExecutionPayloadBaseV1::default()),
                     diff: Default::default(),
                     metadata: Default::default(),
                 })
@@ -309,20 +304,16 @@ mod tests {
 
         assert_eq!(sequence.count(), 10);
 
-        // We receive first an empty flashblock when we start building the sequence
-        let empty_flashblock = subscriber.try_recv().unwrap();
-        assert_eq!(empty_flashblock.count(), 0);
-
         // Then we don't receive anything until we insert a new flashblock
         let no_flashblock = subscriber.try_recv();
-        assert_eq!(no_flashblock, Err(TryRecvError::Empty));
+        assert!(no_flashblock.is_err());
 
         // Let's insert a new flashblock with index 0
         sequence
             .insert(FlashBlock {
                 payload_id: Default::default(),
                 index: 0,
-                base: None,
+                base: Some(ExecutionPayloadBaseV1::default()),
                 diff: Default::default(),
                 metadata: Default::default(),
             })

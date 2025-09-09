@@ -7,8 +7,6 @@ use reth_rpc_eth_types::PendingBlock;
 pub use service::FlashBlockService;
 pub use ws::{WsConnect, WsFlashBlockStream};
 
-use crate::sequence::FlashBlockCompleteSequence;
-
 mod payload;
 mod sequence;
 pub use sequence::FlashBlockCompleteSequence;
