@@ -44,17 +44,22 @@ where
         provider: &Provider,
         mut input: PruneInput,
     ) -> Result<SegmentOutput, PrunerError> {
-        // If TransactionLookup pruning is enabled on a node which had history pruning already
-        // enabled, then we can't start TransactionLookup pruning from 0 because there is no tx data
-        // from then. Instead we fallback to the Transactions prune checkpoint.
-        if input.previous_checkpoint.is_none() {
-            input.previous_checkpoint =
-                provider.get_prune_checkpoint(PruneSegment::Transactions)?;
-            debug!(
-                target: "pruner",
-                transactions_checkpoint = ?input.previous_checkpoint,
-                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
-            );
+        // It is not possible to prune TransactionLookup data for which we don't have transaction
+        // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
+        // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
+        // only prune from the tx checkpoint and onwards.
+        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? {
+            if input
+                .previous_checkpoint
+                .is_none_or(|checkpoint| checkpoint.block_number < txs_checkpoint.block_number)
+            {
+                input.previous_checkpoint = Some(txs_checkpoint);
+                debug!(
+                    target: "pruner",
+                    transactions_checkpoint = ?input.previous_checkpoint,
+                    "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
+                );
+            }
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {
