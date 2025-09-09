@@ -39,14 +39,14 @@ reth-storage-errors.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-primitives/std",
-	"serde?/std",
-	"alloy-consensus/std",
-	"fnv/std",
-	"reth-ethereum-primitives/std",
-	"reth-storage-errors/std",
-	"sha2/std",
-	"thiserror/std"
+    "alloy-primitives/std",
+    "serde?/std",
+    "alloy-consensus/std",
+    "fnv/std",
+    "reth-ethereum-primitives/std",
+    "reth-storage-errors/std",
+    "sha2/std",
+    "thiserror/std",
 ]
 reth-codec = ["dep:reth-codecs", "dep:modular-bitfield"]
 test-utils = [
@@ -54,10 +54,10 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
 ]
 serde = [
-	"dep:serde",
-	"alloy-primitives/serde",
-	"alloy-consensus/serde",
-	"reth-codecs?/serde",
-	"rand/serde",
-	"reth-ethereum-primitives/serde"
+    "dep:serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "reth-codecs?/serde",
+    "rand/serde",
+    "reth-ethereum-primitives/serde",
 ]
