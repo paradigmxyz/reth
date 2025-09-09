@@ -54,7 +54,7 @@ fn test_basic_setup() {
 
 #[test]
 fn test_setup_custom_precompiles() {
-    /// Unichain custom precompiles wrapper.
+    /// Unichain custom precompiles.
     struct UniPrecompiles;
 
     impl UniPrecompiles {
