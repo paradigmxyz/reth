@@ -55,7 +55,6 @@ fn test_basic_setup() {
 #[test]
 fn test_setup_custom_precompiles() {
     /// Unichain custom precompiles wrapper.
-    #[derive(Debug)]
     struct UniPrecompiles;
 
     impl UniPrecompiles {
@@ -68,7 +67,7 @@ fn test_setup_custom_precompiles() {
     }
 
     /// Unichain EVM configuration.
-    #[derive(Debug, Clone, Default)]
+    #[derive(Clone, Debug)]
     struct UniEvmFactory;
 
     impl EvmFactory for UniEvmFactory {
@@ -110,7 +109,6 @@ fn test_setup_custom_precompiles() {
     }
 
     /// Unichain executor builder.
-    #[derive(Debug, Default, Clone, Copy)]
     struct UniExecutorBuilder;
 
     impl<Node> ExecutorBuilder<Node> for UniExecutorBuilder
@@ -125,15 +123,16 @@ fn test_setup_custom_precompiles() {
         >;
 
         async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-            let op_evm_config = OpExecutorBuilder::default().build_evm(ctx).await?;
+            let OpEvmConfig { executor_factory, block_assembler, _pd: _ } =
+                OpExecutorBuilder::default().build_evm(ctx).await?;
             let uni_executor_factory = OpBlockExecutorFactory::new(
-                op_evm_config.executor_factory.receipt_builder().clone(),
-                ctx.chain_spec().clone(),
-                UniEvmFactory::default(),
+                *executor_factory.receipt_builder(),
+                ctx.chain_spec(),
+                UniEvmFactory,
             );
             let uni_evm_config = OpEvmConfig {
                 executor_factory: uni_executor_factory,
-                block_assembler: op_evm_config.block_assembler.clone(),
+                block_assembler,
                 _pd: PhantomData,
             };
             Ok(uni_evm_config)
@@ -147,7 +146,7 @@ fn test_setup_custom_precompiles() {
             OpNode::default()
                 .components()
                 // Custom EVM configuration
-                .executor(UniExecutorBuilder::default()),
+                .executor(UniExecutorBuilder),
         )
         .check_launch();
 }
