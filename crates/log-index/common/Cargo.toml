@@ -30,11 +30,6 @@ reth-codecs.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
 test-fuzz.workspace = true
-futures.workspace = true
-
-# For integration tests
-reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
-reth-storage-errors.workspace = true
 
 [features]
 default = ["std"]
@@ -43,15 +38,12 @@ std = [
     "serde?/std",
     "alloy-consensus/std",
     "fnv/std",
-    "reth-ethereum-primitives/std",
-    "reth-storage-errors/std",
     "sha2/std",
     "thiserror/std",
 ]
 reth-codec = ["dep:reth-codecs", "dep:modular-bitfield"]
 test-utils = [
     "reth-codecs/test-utils",
-    "reth-ethereum-primitives/test-utils",
 ]
 serde = [
     "dep:serde",
@@ -59,5 +51,4 @@ serde = [
     "alloy-consensus/serde",
     "reth-codecs?/serde",
     "rand/serde",
-    "reth-ethereum-primitives/serde",
 ]

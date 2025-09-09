@@ -36,7 +36,6 @@ itertools.workspace = true
 # For tests
 alloy-consensus.workspace = true
 rand.workspace = true
-test-fuzz.workspace = true
 futures.workspace = true
 
 # For integration tests
