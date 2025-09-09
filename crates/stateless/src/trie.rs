@@ -167,8 +167,8 @@ impl StatelessTrie for StatelessSparseTrie {
 /// The bytecode has a separate mapping because the [`SparseStateTrie`] does not store the
 /// contract bytecode, only the hash of it (code hash).
 ///
-/// If the roots do not match, it returns `None`, indicating the witness is invalid
-/// for the given `pre_state_root`.
+/// If the roots do not match, it returns an error indicating the witness is invalid
+/// for the given `pre_state_root` (see `StatelessValidationError::PreStateRootMismatch`).
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
 fn verify_execution_witness(
