@@ -952,7 +952,7 @@ where
     ///
     /// If the node is configured to prune pre-merge transactions and it has synced past the merge
     /// block, it will delete the pre-merge transaction static files if they still exist.
-    /// It will also clear the TransactionHashNumbers table since we can't determine which
+    /// It will also clear the `TransactionHashNumbers` table since we can't determine which
     /// entries correspond to deleted transactions.
     pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
     where
