@@ -23,6 +23,9 @@ use std::{
 };
 use tracing::{debug, trace};
 
+/// Delay in milliseconds to let other threads spawn before starting static file production
+const THREAD_SPAWN_DELAY_MS: u64 = 100;
+
 /// Result of [`StaticFileProducerInner::run`] execution.
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
@@ -403,7 +406,7 @@ mod tests {
                 let locked_producer = producer.lock();
                 if i == 0 {
                     // Let other threads spawn as well.
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(Duration::from_millis(THREAD_SPAWN_DELAY_MS));
                 }
                 let targets = locked_producer
                     .get_static_file_targets(HighestStaticFiles {
