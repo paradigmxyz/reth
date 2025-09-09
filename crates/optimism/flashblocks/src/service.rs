@@ -1,4 +1,8 @@
-use crate::{sequence::FlashBlockPendingSequence, worker::{BuildArgs, FlashBlockBuilder}, ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequence};
+use crate::{
+    sequence::FlashBlockPendingSequence,
+    worker::{BuildArgs, FlashBlockBuilder},
+    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequence,
+};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
@@ -16,8 +20,10 @@ use std::{
     task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::{pin, sync::oneshot};
-use tokio::sync::broadcast;
+use tokio::{
+    pin,
+    sync::{broadcast, oneshot},
+};
 use tracing::{debug, trace, warn};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of

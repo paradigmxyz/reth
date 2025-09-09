@@ -1,7 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
-use eyre::{bail, OptionExt};
 use core::mem;
+use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
 use tokio::sync::broadcast;
