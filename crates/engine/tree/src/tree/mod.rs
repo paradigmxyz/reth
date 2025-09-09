@@ -508,11 +508,10 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
-        // start timing for the entire new payload process
-        let new_payload_start = Instant::now();
+        // start timing for the new payload process
+        let start = Instant::now();
 
         // Phase A: Pre-execution (entry → execution start)
-        let pre_execution_start = Instant::now();
 
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -571,8 +570,8 @@ where
         }
 
         // record pre-execution phase duration
-        let pre_execution_elapsed = pre_execution_start.elapsed().as_secs_f64();
-        self.metrics.new_payload_phases.pre_execution_duration.record(pre_execution_elapsed);
+        let pre_execution_elapsed = start.elapsed().as_secs_f64();
+        self.metrics.block_validation.pre_execution_duration.record(pre_execution_elapsed);
         self.metrics.block_validation.record_payload_validation(pre_execution_elapsed);
 
         let status = if self.backfill_sync_state.is_idle() {
@@ -631,10 +630,7 @@ where
         }
 
         // record total newPayload duration
-        self.metrics
-            .new_payload_phases
-            .total_duration
-            .record(new_payload_start.elapsed().as_secs_f64());
+        self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
 
         Ok(outcome)
     }

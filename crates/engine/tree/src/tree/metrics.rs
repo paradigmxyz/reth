@@ -26,8 +26,6 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
-    /// Metrics for newPayload processing phases
-    pub(crate) new_payload_phases: NewPayloadPhaseMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub tree: TreeMetrics,
 }
@@ -175,6 +173,14 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
     pub(crate) payload_validation_histogram: Histogram,
+    /// Pre-execution phase duration (entry → execution start)
+    pub(crate) pre_execution_duration: Histogram,
+    /// Payload processor spawning duration
+    pub(crate) spawn_payload_processor: Histogram,
+    /// Post-execution validation duration
+    pub(crate) post_execution_validation_duration: Histogram,
+    /// Total duration of the new payload call
+    pub(crate) total_duration: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -192,22 +198,6 @@ impl BlockValidationMetrics {
         self.payload_validation_duration.set(elapsed_as_secs);
         self.payload_validation_histogram.record(elapsed_as_secs);
     }
-}
-
-/// Metrics for newPayload processing phases
-#[derive(Metrics)]
-#[metrics(scope = "engine.new_payload")]
-pub(crate) struct NewPayloadPhaseMetrics {
-    /// Pre-execution phase duration (entry → execution start)
-    pub(crate) pre_execution_duration: Histogram,
-    /// Payload processor spawning duration
-    pub(crate) spawn_payload_processor: Histogram,
-    /// Post-execution validation duration
-    pub(crate) post_execution_validation_duration: Histogram,
-    /// State root computation duration
-    pub(crate) state_root_duration: Histogram,
-    /// Total duration of the new payload call
-    pub(crate) total_duration: Histogram,
 }
 
 /// Metrics for the blockchain tree block buffer
