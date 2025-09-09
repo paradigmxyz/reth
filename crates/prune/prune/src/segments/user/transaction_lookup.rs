@@ -6,9 +6,9 @@ use crate::{
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
 use reth_db_api::{tables, transaction::DbTxMut};
-use reth_provider::{BlockReader, DBProvider};
+use reth_provider::{BlockReader, DBProvider, PruneCheckpointReader};
 use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 
 #[derive(Debug)]
 pub struct TransactionLookup {
@@ -23,7 +23,8 @@ impl TransactionLookup {
 
 impl<Provider> Segment<Provider> for TransactionLookup
 where
-    Provider: DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718>,
+    Provider:
+        DBProvider<Tx: DbTxMut> + BlockReader<Transaction: Encodable2718> + PruneCheckpointReader,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::TransactionLookup
@@ -38,7 +39,24 @@ where
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
+    fn prune(
+        &self,
+        provider: &Provider,
+        mut input: PruneInput,
+    ) -> Result<SegmentOutput, PrunerError> {
+        // If TransactionLookup pruning is enabled on a node which had history pruning already
+        // enabled, then we can't start TransactionLookup pruning from 0 because there is no tx data
+        // from then. Instead we fallback to the Transactions prune checkpoint.
+        if input.previous_checkpoint.is_none() {
+            input.previous_checkpoint =
+                provider.get_prune_checkpoint(PruneSegment::Transactions)?;
+            debug!(
+                target: "pruner",
+                transactions_checkpoint = ?input.previous_checkpoint,
+                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
+            );
+        }
+
         let (start, end) = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
