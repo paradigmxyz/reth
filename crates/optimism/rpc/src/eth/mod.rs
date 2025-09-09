@@ -335,7 +335,7 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
     /// Flashblocks receiver.
     ///
-    /// If set, then it provides sequences of [`FlashBlock`]s built.
+    /// If set, then it provides sequences of flashblock built.
     flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
 }
 
