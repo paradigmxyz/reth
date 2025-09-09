@@ -975,7 +975,7 @@ where
                         info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
                         static_provider.delete_transactions_below(merge_block)?;
 
-                        // Clear the entire TransactionHashNumbers table since we can't determine
+                        // Clear the entire `TransactionHashNumbers` table since we can't determine
                         // which entries correspond to the deleted pre-merge transactions
                         info!(target: "reth::cli", "Clearing TransactionHashNumbers table after pre-merge expiry");
                         let provider_rw = self.provider_factory().provider_rw()?;
