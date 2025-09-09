@@ -32,8 +32,8 @@ pub async fn submit_transaction<FC>(
     max_fee_per_gas: u128,
 ) -> eyre::Result<TxHash>
 where
-    // This enforces `EthPrimitives` types for this node, this unlocks the proper conversions when
-    FC: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
+    FC: FullNodeComponents,
+    FC::Types: NodeTypes<Primitives = EthPrimitives>,
 {
     // Create the transaction request
     let request = TransactionRequest::default()
@@ -64,15 +64,15 @@ where
     while let Some(event) = tx_events.next().await {
         match event {
             TransactionEvent::Mined(_) => {
-                println!("Transaction was mined: {:?}", tx_events.hash());
+                println!("Transaction was mined: {:?}", tx_hash);
                 break;
             }
             TransactionEvent::Pending => {
-                println!("Transaction added to pending pool: {:?}", tx_events.hash());
+                println!("Transaction added to pending pool: {:?}", tx_hash);
                 break;
             }
             TransactionEvent::Discarded => {
-                return Err(eyre::eyre!("Transaction discarded: {:?}", tx_events.hash(),));
+                return Err(eyre::eyre!("Transaction discarded: {:?}", tx_hash));
             }
             _ => {
                 // Continue waiting for added or rejected event
@@ -98,7 +98,8 @@ pub async fn submit_eth_transfer<FC>(
     max_fee_per_gas: u128,
 ) -> eyre::Result<AddedTransactionOutcome>
 where
-    FC: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
+    FC: FullNodeComponents,
+    FC::Types: NodeTypes<Primitives = EthPrimitives>,
 {
     // Create the transaction request for ETH transfer
     let request = TransactionRequest::default()
