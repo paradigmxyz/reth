@@ -11,7 +11,9 @@ use crate::sequence::FlashBlockCompleteSequence;
 
 mod payload;
 mod sequence;
+pub use sequence::FlashBlockCompleteSequence;
 mod service;
+mod worker;
 mod ws;
 
 /// Receiver of the most recent [`PendingBlock`] built out of [`FlashBlock`]s.

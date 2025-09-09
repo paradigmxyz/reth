@@ -1,7 +1,7 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
-use core::mem;
 use eyre::{bail, OptionExt};
+use core::mem;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::collections::BTreeMap;
 use tokio::sync::broadcast;
@@ -109,6 +109,10 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
     /// Returns the first block number
     pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
@@ -125,11 +129,18 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A complete sequence of flashblocks, often corresponding to a full block.
+/// Ensure invariants of a complete flashblocks sequence.
+#[derive(Debug)]
 pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
 
 impl FlashBlockCompleteSequence {
-    fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
+    /// Create a complete sequence from a vector of flashblocks.
+    /// Ensure that:
+    /// * vector is not empty
+    /// * first flashblock have the base payload
+    /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
+    pub fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
         // Ensure that first flashblock have base
@@ -148,17 +159,17 @@ impl FlashBlockCompleteSequence {
     }
 
     /// Returns the block number
-    fn block_number(&self) -> u64 {
+    pub fn block_number(&self) -> u64 {
         self.0.first().unwrap().metadata.block_number
     }
 
     /// Returns the payload base of the first flashblock.
-    fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
+    pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
         self.0.first().unwrap().base.as_ref().unwrap()
     }
 
     /// Returns the number of flashblocks in the sequence.
-    const fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.0.len()
     }
 }

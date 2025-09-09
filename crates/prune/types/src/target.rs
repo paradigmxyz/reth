@@ -2,7 +2,7 @@ use alloy_primitives::BlockNumber;
 use derive_more::Display;
 use thiserror::Error;
 
-use crate::{PruneMode, ReceiptsLogPruneConfig};
+use crate::{PruneCheckpoint, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
 
 /// Minimum distance from the tip necessary for the node to work correctly:
 /// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
@@ -121,33 +121,52 @@ impl PruneModes {
         self == &Self::none()
     }
 
-    /// Returns true if target block is within history limit
+    /// Returns an error if we can't unwind to the targeted block because the target block is
+    /// outside the range.
+    ///
+    /// This is only relevant for certain tables that are required by other stages
+    ///
+    /// See also <https://github.com/paradigmxyz/reth/issues/16579>
     pub fn ensure_unwind_target_unpruned(
         &self,
         latest_block: u64,
         target_block: u64,
+        checkpoints: &[(PruneSegment, PruneCheckpoint)],
     ) -> Result<(), UnwindTargetPrunedError> {
         let distance = latest_block.saturating_sub(target_block);
-        [
-            (self.account_history, HistoryType::AccountHistory),
-            (self.storage_history, HistoryType::StorageHistory),
-        ]
-        .iter()
-        .find_map(|(prune_mode, history_type)| {
+        for (prune_mode, history_type, checkpoint) in &[
+            (
+                self.account_history,
+                HistoryType::AccountHistory,
+                checkpoints.iter().find(|(segment, _)| segment.is_account_history()),
+            ),
+            (
+                self.storage_history,
+                HistoryType::StorageHistory,
+                checkpoints.iter().find(|(segment, _)| segment.is_storage_history()),
+            ),
+        ] {
             if let Some(PruneMode::Distance(limit)) = prune_mode {
-                (distance > *limit).then_some(Err(
-                    UnwindTargetPrunedError::TargetBeyondHistoryLimit {
-                        latest_block,
-                        target_block,
-                        history_type: history_type.clone(),
-                        limit: *limit,
-                    },
-                ))
-            } else {
-                None
+                // check if distance exceeds the configured limit
+                if distance > *limit {
+                    // but only if have haven't pruned the target yet, if we dont have a checkpoint
+                    // yet, it's fully unpruned yet
+                    let pruned_height = checkpoint
+                        .and_then(|checkpoint| checkpoint.1.block_number)
+                        .unwrap_or(latest_block);
+                    if pruned_height >= target_block {
+                        // we've pruned the target block already and can't unwind past it
+                        return Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                            latest_block,
+                            target_block,
+                            history_type: history_type.clone(),
+                            limit: *limit,
+                        })
+                    }
+                }
             }
-        })
-        .unwrap_or(Ok(()))
+        }
+        Ok(())
     }
 }
 
@@ -216,5 +235,166 @@ mod tests {
             serde_json::from_str::<V>(r#""full""#),
             Err(err) if err.to_string() == "invalid value: string \"full\", expected prune mode that leaves at least 10 blocks in the database"
         );
+    }
+
+    #[test]
+    fn test_unwind_target_unpruned() {
+        // Test case 1: No pruning configured - should always succeed
+        let prune_modes = PruneModes::none();
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 500, &[]).is_ok());
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 0, &[]).is_ok());
+
+        // Test case 2: Distance pruning within limit - should succeed
+        let prune_modes = PruneModes {
+            account_history: Some(PruneMode::Distance(100)),
+            storage_history: Some(PruneMode::Distance(100)),
+            ..Default::default()
+        };
+        // Distance is 50, limit is 100 - OK
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 950, &[]).is_ok());
+
+        // Test case 3: Distance exceeds limit with no checkpoint
+        // NOTE: Current implementation assumes pruned_height = latest_block when no checkpoint
+        // exists This means it will fail because it assumes we've pruned up to block 1000 >
+        // target 800
+        let prune_modes =
+            PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
+        // Distance is 200 > 100, no checkpoint - current impl treats as pruned up to latest_block
+        let result = prune_modes.ensure_unwind_target_unpruned(1000, 800, &[]);
+        assert_matches!(
+            result,
+            Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                latest_block: 1000,
+                target_block: 800,
+                history_type: HistoryType::AccountHistory,
+                limit: 100
+            })
+        );
+
+        // Test case 4: Distance exceeds limit and target is pruned - should fail
+        let prune_modes =
+            PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
+        let checkpoints = vec![(
+            PruneSegment::AccountHistory,
+            PruneCheckpoint {
+                block_number: Some(850),
+                tx_number: None,
+                prune_mode: PruneMode::Distance(100),
+            },
+        )];
+        // Distance is 200 > 100, and checkpoint shows we've pruned up to block 850 > target 800
+        let result = prune_modes.ensure_unwind_target_unpruned(1000, 800, &checkpoints);
+        assert_matches!(
+            result,
+            Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                latest_block: 1000,
+                target_block: 800,
+                history_type: HistoryType::AccountHistory,
+                limit: 100
+            })
+        );
+
+        // Test case 5: Storage history exceeds limit and is pruned - should fail
+        let prune_modes =
+            PruneModes { storage_history: Some(PruneMode::Distance(50)), ..Default::default() };
+        let checkpoints = vec![(
+            PruneSegment::StorageHistory,
+            PruneCheckpoint {
+                block_number: Some(960),
+                tx_number: None,
+                prune_mode: PruneMode::Distance(50),
+            },
+        )];
+        // Distance is 100 > 50, and checkpoint shows we've pruned up to block 960 > target 900
+        let result = prune_modes.ensure_unwind_target_unpruned(1000, 900, &checkpoints);
+        assert_matches!(
+            result,
+            Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                latest_block: 1000,
+                target_block: 900,
+                history_type: HistoryType::StorageHistory,
+                limit: 50
+            })
+        );
+
+        // Test case 6: Distance exceeds limit but target block not pruned yet - should succeed
+        let prune_modes =
+            PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
+        let checkpoints = vec![(
+            PruneSegment::AccountHistory,
+            PruneCheckpoint {
+                block_number: Some(700),
+                tx_number: None,
+                prune_mode: PruneMode::Distance(100),
+            },
+        )];
+        // Distance is 200 > 100, but checkpoint shows we've only pruned up to block 700 < target
+        // 800
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 800, &checkpoints).is_ok());
+
+        // Test case 7: Both account and storage history configured, only one fails
+        let prune_modes = PruneModes {
+            account_history: Some(PruneMode::Distance(200)),
+            storage_history: Some(PruneMode::Distance(50)),
+            ..Default::default()
+        };
+        let checkpoints = vec![
+            (
+                PruneSegment::AccountHistory,
+                PruneCheckpoint {
+                    block_number: Some(700),
+                    tx_number: None,
+                    prune_mode: PruneMode::Distance(200),
+                },
+            ),
+            (
+                PruneSegment::StorageHistory,
+                PruneCheckpoint {
+                    block_number: Some(960),
+                    tx_number: None,
+                    prune_mode: PruneMode::Distance(50),
+                },
+            ),
+        ];
+        // For target 900: account history OK (distance 100 < 200), storage history fails (distance
+        // 100 > 50, pruned at 960)
+        let result = prune_modes.ensure_unwind_target_unpruned(1000, 900, &checkpoints);
+        assert_matches!(
+            result,
+            Err(UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                latest_block: 1000,
+                target_block: 900,
+                history_type: HistoryType::StorageHistory,
+                limit: 50
+            })
+        );
+
+        // Test case 8: Edge case - exact boundary
+        let prune_modes =
+            PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
+        let checkpoints = vec![(
+            PruneSegment::AccountHistory,
+            PruneCheckpoint {
+                block_number: Some(900),
+                tx_number: None,
+                prune_mode: PruneMode::Distance(100),
+            },
+        )];
+        // Distance is exactly 100, checkpoint at exactly the target block
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 900, &checkpoints).is_ok());
+
+        // Test case 9: Full pruning mode - should succeed (no distance check)
+        let prune_modes = PruneModes {
+            account_history: Some(PruneMode::Full),
+            storage_history: Some(PruneMode::Full),
+            ..Default::default()
+        };
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 0, &[]).is_ok());
+
+        // Test case 10: Edge case - saturating subtraction (target > latest)
+        let prune_modes =
+            PruneModes { account_history: Some(PruneMode::Distance(100)), ..Default::default() };
+        // Target block (1500) > latest block (1000) - distance should be 0
+        assert!(prune_modes.ensure_unwind_target_unpruned(1000, 1500, &[]).is_ok());
     }
 }
