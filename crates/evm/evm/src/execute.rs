@@ -605,6 +605,14 @@ impl<TxEnv: Clone, T> ToTxEnv<TxEnv> for WithTxEnv<TxEnv, T> {
     }
 }
 
+impl<TxEnv, T: alloy_eips::eip2718::Typed2718> alloy_eips::eip2718::Typed2718
+    for WithTxEnv<TxEnv, T>
+{
+    fn ty(&self) -> u8 {
+        self.tx.ty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
