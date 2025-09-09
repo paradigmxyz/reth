@@ -787,6 +787,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Resets any existing hardforks from the builder.
+    pub fn reset(mut self) -> Self {
+        self.hardforks = ChainHardforks::default();
+        self
+    }
+
     /// Set the genesis block.
     pub fn genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
