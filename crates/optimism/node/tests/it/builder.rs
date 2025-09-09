@@ -67,6 +67,7 @@ fn test_setup_custom_precompiles() {
         /// Returns map of precompiles for Unichain.
         fn precompiles(spec_id: OpSpecId) -> PrecompilesMap {
             static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+
             PrecompilesMap::from_static(INSTANCE.get_or_init(|| {
                 let mut precompiles = OpPrecompiles::new_with_spec(spec_id).precompiles().clone();
                 // Custom precompile.
