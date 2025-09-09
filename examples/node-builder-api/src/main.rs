@@ -16,7 +16,7 @@ pub fn noop_network() {
                 .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use the Noop network that does nothing but
-                .with_components(EthereumNode::components().network(NoopNetworkBuilder::eth()))
+                .with_components(EthereumNode::components().network(NoopNetworkBuilder::default()))
                 .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
@@ -26,4 +26,6 @@ pub fn noop_network() {
         .unwrap();
 }
 
-fn main() {}
+fn main() {
+    noop_network();
+}
