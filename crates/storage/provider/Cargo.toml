@@ -100,4 +100,5 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
     "tokio",
+    "reth-log-index-common/test-utils",
 ]

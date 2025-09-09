@@ -37,38 +37,40 @@ auto_impl.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-chainspec/std",
-    "alloy-consensus/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "alloy-rpc-types-engine/std",
-    "reth-primitives-traits/std",
-    "reth-stages-types/std",
-    "revm-database/std",
-    "reth-ethereum-primitives/std",
-    "reth-execution-types/std",
-    "reth-prune-types/std",
-    "reth-storage-errors/std",
-    "reth-db-models/std",
-    "reth-trie-common/std",
+	"reth-chainspec/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-rpc-types-engine/std",
+	"reth-primitives-traits/std",
+	"reth-stages-types/std",
+	"revm-database/std",
+	"reth-ethereum-primitives/std",
+	"reth-execution-types/std",
+	"reth-prune-types/std",
+	"reth-storage-errors/std",
+	"reth-db-models/std",
+	"reth-trie-common/std",
+	"reth-log-index-common/std"
 ]
 
 db-api = ["dep:reth-db-api"]
 
 serde = [
-    "reth-ethereum-primitives/serde",
-    "reth-db-models/serde",
-    "reth-execution-types/serde",
-    "reth-primitives-traits/serde",
-    "reth-prune-types/serde",
-    "reth-stages-types/serde",
-    "reth-trie-common/serde",
-    "revm-database/serde",
-    "reth-ethereum-primitives/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-rpc-types-engine/serde",
+	"reth-ethereum-primitives/serde",
+	"reth-db-models/serde",
+	"reth-execution-types/serde",
+	"reth-primitives-traits/serde",
+	"reth-prune-types/serde",
+	"reth-stages-types/serde",
+	"reth-trie-common/serde",
+	"revm-database/serde",
+	"reth-ethereum-primitives/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"alloy-rpc-types-engine/serde",
+	"reth-log-index-common/serde"
 ]
 
 serde-bincode-compat = [

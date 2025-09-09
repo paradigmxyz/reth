@@ -50,4 +50,5 @@ reth-codecs = []
 test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-log-index-common/test-utils",
 ]

@@ -118,6 +118,7 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-log-index/test-utils",
+    "reth-log-index-common/test-utils",
 ]
 
 [[bench]]

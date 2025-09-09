@@ -20,14 +20,13 @@ reth-codecs = { workspace = true, optional = true }
 
 modular-bitfield = { workspace = true, optional = true }
 
-# misc
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true, optional = true }
 thiserror = { workspace = true, default-features = false }
 sha2 = { workspace = true, default-features = false }
 fnv = { workspace = true, default-features = false }
 
 [dev-dependencies]
-# For tests
+reth-codecs.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
 test-fuzz.workspace = true
@@ -38,9 +37,27 @@ reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 
 [features]
-default = []
-reth-codec = ["dep:reth-codecs", "dep:modular-bitfield",]
+default = ["std"]
+std = [
+	"alloy-primitives/std",
+	"serde?/std",
+	"alloy-consensus/std",
+	"fnv/std",
+	"reth-ethereum-primitives/std",
+	"reth-storage-errors/std",
+	"sha2/std",
+	"thiserror/std"
+]
+reth-codec = ["dep:reth-codecs", "dep:modular-bitfield"]
 test-utils = [
     "reth-codecs/test-utils",
     "reth-ethereum-primitives/test-utils",
+]
+serde = [
+	"dep:serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"reth-codecs?/serde",
+	"rand/serde",
+	"reth-ethereum-primitives/serde"
 ]

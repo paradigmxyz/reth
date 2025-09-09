@@ -70,6 +70,7 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-log-index-common/test-utils",
 ]
 arbitrary = [
     "reth-db-models/arbitrary",

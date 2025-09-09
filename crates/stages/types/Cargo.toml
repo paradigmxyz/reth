@@ -36,10 +36,11 @@ bytes.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-primitives/std",
-    "bytes?/std",
-    "reth-trie-common/std",
-    "serde?/std",
+	"alloy-primitives/std",
+	"bytes?/std",
+	"reth-trie-common/std",
+	"serde?/std",
+	"reth-log-index-common/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -52,6 +53,7 @@ test-utils = [
     "arbitrary",
     "reth-codecs?/test-utils",
     "reth-trie-common/test-utils",
+    "reth-log-index-common/test-utils",
 ]
 arbitrary = [
     "std",
@@ -67,4 +69,5 @@ serde = [
     "rand/serde",
     "reth-codecs?/serde",
     "reth-trie-common/serde",
+    "reth-log-index-common/serde",
 ]

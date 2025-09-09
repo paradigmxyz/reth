@@ -2,7 +2,6 @@
 
 use alloc::{boxed::Box, string::String, vec::Vec};
 use alloy_primitives::{BlockNumber, B256};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Type alias for Map Index
@@ -25,8 +24,9 @@ pub type LogValueIndex = u64;
 ///
 /// This struct maintains information about which blocks have been indexed and which filter maps
 /// have been generated. It is used to track progress and enable resuming of the indexing process.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Copy)]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FilterMapMeta {
     /// The first block number that has had its logs fully indexed.
     /// This represents the starting point of our complete log index.
@@ -61,7 +61,8 @@ pub struct FilterMapMeta {
 
 /// A filter map row.
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FilterMapRow {
     /// The index of the filter map row.
     pub map_row_index: u64,
@@ -71,7 +72,8 @@ pub struct FilterMapRow {
 
 /// Filter map column.
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FilterMapColumns {
     /// Indices of the columns in the filter map.
     pub indices: Vec<u32>,
@@ -81,7 +83,8 @@ pub struct FilterMapColumns {
 ///
 /// Each entry indicates the starting log value index for a specific block number.
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct BlockBoundary {
     /// The block number.
     pub block_number: BlockNumber,
