@@ -9,7 +9,7 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-clap = {workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive"] }
 ef-tests.path = "../ef-tests"
 
 [lints]
