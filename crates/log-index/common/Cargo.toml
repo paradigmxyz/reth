@@ -18,6 +18,8 @@ alloy-primitives.workspace = true
 # reth
 reth-codecs = { workspace = true, optional = true }
 
+modular-bitfield = { workspace = true, optional = true }
+
 # misc
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true, default-features = false }
@@ -37,7 +39,7 @@ reth-storage-errors.workspace = true
 
 [features]
 default = []
-reth-codec = ["dep:reth-codecs"]
+reth-codec = ["dep:reth-codecs", "dep:modular-bitfield",]
 test-utils = [
     "reth-codecs/test-utils",
     "reth-ethereum-primitives/test-utils",
