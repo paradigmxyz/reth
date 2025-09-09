@@ -78,11 +78,14 @@ where
     }
 
     /// Spawns all pending transactions as blocking tasks by first chunking them.
-    fn spawn_all(
-        &self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
-        actions_tx: Sender<PrewarmTaskEvent>,
-    ) {
+    ///
+    /// For Optimism chains, special handling is applied to the first transaction if it's a
+    /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
+    /// subsequent transactions in the block.
+    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
@@ -91,23 +94,59 @@ where
             let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
+            let mut is_first_tx = true;
+
             while let Ok(executable) = pending.recv() {
-                let task_idx = executing % max_concurrency;
+                // For Optimism chains: The first transaction is always a deposit transaction (type
+                // 126/0x7E) that sets critical metadata (L1 block info, fees)
+                // affecting all subsequent transactions. Since we cannot directly
+                // check the type due to trait constraints, we broadcast the first
+                // transaction to all workers. This ensures correctness on Optimism
+                // with minimal overhead on other chains (just one tx broadcast vs round-robin).
+                let should_broadcast = is_first_tx;
 
-                if handles.len() <= task_idx {
-                    let (tx, rx) = mpsc::channel();
-                    let sender = actions_tx.clone();
-                    let ctx = ctx.clone();
-                    let done_tx = done_tx.clone();
+                if should_broadcast {
+                    is_first_tx = false;
 
-                    executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
-                    });
+                    // Pre-spawn all worker tasks to ensure they're ready
+                    while handles.len() < max_concurrency {
+                        let (tx, rx) = mpsc::channel();
+                        let sender = actions_tx.clone();
+                        let ctx = ctx.clone();
+                        let done_tx = done_tx.clone();
 
-                    handles.push(tx);
+                        executor.spawn_blocking(move || {
+                            ctx.transact_batch(rx, sender, done_tx);
+                        });
+
+                        handles.push(tx);
+                    }
+
+                    // Send deposit transaction to ALL prewarm tasks
+                    // This ensures all workers have the updated L1 block info and fee parameters
+                    for handle in &handles {
+                        let _ = handle.send(executable.clone());
+                    }
+                } else {
+                    is_first_tx = false;
+                    // Normal round-robin distribution for other transactions
+                    let task_idx = executing % max_concurrency;
+
+                    if handles.len() <= task_idx {
+                        let (tx, rx) = mpsc::channel();
+                        let sender = actions_tx.clone();
+                        let ctx = ctx.clone();
+                        let done_tx = done_tx.clone();
+
+                        executor.spawn_blocking(move || {
+                            ctx.transact_batch(rx, sender, done_tx);
+                        });
+
+                        handles.push(tx);
+                    }
+
+                    let _ = handles[task_idx].send(executable);
                 }
-
-                let _ = handles[task_idx].send(executable);
 
                 executing += 1;
             }
@@ -154,11 +193,10 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    pub(super) fn run(
-        self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
-        actions_tx: Sender<PrewarmTaskEvent>,
-    ) {
+    pub(super) fn run<Tx>(self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 

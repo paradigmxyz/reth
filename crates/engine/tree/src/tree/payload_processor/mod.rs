@@ -247,6 +247,7 @@ where
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        I::Tx: Clone,
     {
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
@@ -284,15 +285,16 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    fn spawn_caching_with<P>(
+    fn spawn_caching_with<P, Tx>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
+        mut transactions: mpsc::Receiver<Tx>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
