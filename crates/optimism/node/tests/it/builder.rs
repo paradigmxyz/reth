@@ -1,5 +1,6 @@
 //! Node builder setup tests.
 
+use alloy_primitives::{address, Bytes};
 use core::marker::PhantomData;
 use op_revm::{
     precompiles::OpPrecompiles, OpContext, OpHaltReason, OpSpecId, OpTransaction,
@@ -18,9 +19,14 @@ use reth_optimism_node::{args::RollupArgs, OpEvmConfig, OpExecutorBuilder, OpNod
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::BlockchainProvider;
 use revm::{
-    context::TxEnv, context_interface::result::EVMError, inspector::NoOpInspector,
-    interpreter::interpreter::EthInterpreter, Inspector,
+    context::{Cfg, ContextTr, TxEnv},
+    context_interface::result::EVMError,
+    inspector::NoOpInspector,
+    interpreter::interpreter::EthInterpreter,
+    precompile::{Precompile, PrecompileId, PrecompileOutput, PrecompileResult, Precompiles},
+    Inspector,
 };
+use std::sync::OnceLock;
 
 #[test]
 fn test_basic_setup() {
@@ -58,15 +64,24 @@ fn test_setup_custom_precompiles() {
     struct UniPrecompiles;
 
     impl UniPrecompiles {
-        /// The set of precompiles for Unichain.
-        fn precompiles() -> PrecompilesMap {
-            PrecompilesMap::from_static(
-                OpPrecompiles::default().precompiles(), // custom precompiles can be added here
-            )
+        /// Returns map of precompiles for Unichain.
+        fn precompiles(spec_id: OpSpecId) -> PrecompilesMap {
+            static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+            PrecompilesMap::from_static(INSTANCE.get_or_init(|| {
+                let mut precompiles = OpPrecompiles::new_with_spec(spec_id).precompiles().clone();
+                // Custom precompile.
+                let precompile = Precompile::new(
+                    PrecompileId::custom("custom"),
+                    address!("0x0000000000000000000000000000000000756e69"),
+                    |_, _| PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new())),
+                );
+                precompiles.extend([precompile]);
+                precompiles
+            }))
         }
     }
 
-    /// Unichain EVM configuration.
+    /// Builds Unichain EVM configuration.
     #[derive(Clone, Debug)]
     struct UniEvmFactory;
 
@@ -86,7 +101,7 @@ fn test_setup_custom_precompiles() {
             input: EvmEnv<OpSpecId>,
         ) -> Self::Evm<DB, NoOpInspector> {
             let mut op_evm = OpEvmFactory::default().create_evm(db, input);
-            *op_evm.components_mut().2 = UniPrecompiles::precompiles();
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles(op_evm.ctx().cfg().spec());
 
             op_evm
         }
@@ -102,7 +117,7 @@ fn test_setup_custom_precompiles() {
         ) -> Self::Evm<DB, I> {
             let mut op_evm =
                 OpEvmFactory::default().create_evm_with_inspector(db, input, inspector);
-            *op_evm.components_mut().2 = UniPrecompiles::precompiles();
+            *op_evm.components_mut().2 = UniPrecompiles::precompiles(op_evm.ctx().cfg().spec());
 
             op_evm
         }
