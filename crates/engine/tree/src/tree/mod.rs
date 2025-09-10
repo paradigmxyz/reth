@@ -511,8 +511,6 @@ where
         // start timing for the new payload process
         let start = Instant::now();
 
-        // Phase A: Pre-execution (entry → execution start)
-
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
         //    - missing or invalid base fee
@@ -568,11 +566,6 @@ where
             let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
             return Ok(TreeOutcome::new(status));
         }
-
-        // record pre-execution phase duration
-        let pre_execution_elapsed = start.elapsed().as_secs_f64();
-        self.metrics.block_validation.pre_execution_duration.record(pre_execution_elapsed);
-        self.metrics.block_validation.record_payload_validation(pre_execution_elapsed);
 
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;

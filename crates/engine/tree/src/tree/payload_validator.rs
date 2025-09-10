@@ -405,7 +405,7 @@ where
             // Use state root task only if prefix sets are empty, otherwise proof generation is too
             // expensive because it requires walking over the paths in the prefix set in every
             // proof.
-            let prewarming_start = Instant::now();
+            let spawn_payload_processor_start = Instant::now();
             let handle = if trie_input.prefix_sets.is_empty() {
                 self.payload_processor.spawn(
                     env.clone(),
@@ -425,7 +425,7 @@ where
             self.metrics
                 .block_validation
                 .spawn_payload_processor
-                .record(prewarming_start.elapsed().as_secs_f64());
+                .record(spawn_payload_processor_start.elapsed().as_secs_f64());
             handle
         } else {
             let prewarming_start = Instant::now();
@@ -553,8 +553,7 @@ where
                             regular_state_root = ?result.0,
                             "Regular root task finished"
                         );
-                        let elapsed = root_time.elapsed();
-                        maybe_state_root = Some((result.0, result.1, elapsed));
+                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
@@ -570,10 +569,10 @@ where
             }
         }
 
-        let (state_root, trie_output, root_elapsed) = if let Some(ref maybe_state_root) =
+        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {
-            maybe_state_root.clone()
+            maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
             if self.config.state_root_fallback() {
@@ -587,9 +586,6 @@ where
                 ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
-
-        // record state root computation duration (Phase E)
-        self.metrics.block_validation.state_root_histogram.record(root_elapsed.as_secs_f64());
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
