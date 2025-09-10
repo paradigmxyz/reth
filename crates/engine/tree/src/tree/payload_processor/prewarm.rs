@@ -82,10 +82,11 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
-    where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
-    {
+    fn spawn_all<Tx>(
+        &self,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        actions_tx: Sender<PrewarmTaskEvent>,
+    ) {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
@@ -190,8 +191,11 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    pub(super) fn run<Tx>(self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
-    where
+    pub(super) fn run<Tx>(
+        self,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        actions_tx: Sender<PrewarmTaskEvent>,
+    ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         // spawn execution tasks.
@@ -453,4 +457,3 @@ pub(crate) struct PrewarmMetrics {
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
 }
-
