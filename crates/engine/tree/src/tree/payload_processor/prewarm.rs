@@ -11,7 +11,6 @@ use crate::tree::{
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
@@ -85,7 +84,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + std::any::Any + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
@@ -98,16 +97,11 @@ where
             let mut is_first_tx = true;
 
             while let Ok(executable) = pending.recv() {
-                // For Optimism chains: The first transaction is a deposit transaction (type
-                // 126/0x7E) that sets critical metadata (L1 block info, fees)
-                // affecting all subsequent transactions. We check if it's the first
-                // tx AND has type 126.
-                let should_broadcast = if is_first_tx {
-                    // Check if this is an Optimism deposit transaction (type 126)
-                    check_is_deposit_tx(&executable).unwrap_or(false)
-                } else {
-                    false
-                };
+                // For Optimism chains: The first transaction is always a deposit transaction
+                // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
+                // affecting all subsequent transactions. We broadcast the first transaction
+                // to all workers to ensure they have this critical state.
+                let should_broadcast = is_first_tx;
 
                 is_first_tx = false;
 
@@ -460,32 +454,3 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) cache_saving_duration: Gauge,
 }
 
-/// Helper function to check if a transaction is an Optimism deposit transaction.
-/// This uses a workaround to check the type when possible.
-fn check_is_deposit_tx<T>(tx: &T) -> Option<bool>
-where
-    T: std::any::Any,
-{
-    use alloy_consensus::{transaction::Recovered, Typed2718};
-
-    const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126; // 0x7E
-
-    // Try to downcast to known types that implement Typed2718
-    // This is a workaround since we can't directly check if T implements Typed2718
-
-    // Check if it's a Recovered<TransactionSigned>
-    if let Some(recovered) =
-        (tx as &dyn std::any::Any).downcast_ref::<Recovered<TransactionSigned>>()
-    {
-        // Use inner() to get the underlying transaction which implements Typed2718
-        return Some(recovered.inner().ty() == OPTIMISM_DEPOSIT_TX_TYPE);
-    }
-
-    // Check if it's a raw TransactionSigned
-    if let Some(tx_signed) = (tx as &dyn std::any::Any).downcast_ref::<TransactionSigned>() {
-        return Some(tx_signed.ty() == OPTIMISM_DEPOSIT_TX_TYPE);
-    }
-
-    // For other types, we can't determine the type
-    None
-}

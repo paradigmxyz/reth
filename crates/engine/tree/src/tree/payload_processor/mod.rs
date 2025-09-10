@@ -294,7 +294,7 @@ where
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Tx: ExecutableTxFor<Evm> + Clone + Send + std::any::Any + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
