@@ -243,8 +243,9 @@ where
     /// Performs validation, not requiring chain state, on single transaction.
     ///
     /// Returns unaltered input transaction if all checks pass, so transaction can continue
-    /// through to stateful validation as argument to. Failed checks return
-    /// [`TransactionValidationOutcome::Invalid`] wrapping the transaction or
+    /// through to stateful validation as argument to
+    /// [`apply_checks_against_state`](Self::apply_checks_against_state). Failed checks
+    /// return [`TransactionValidationOutcome::Invalid`] wrapping the transaction or
     /// [`TransactionValidationOutcome::Error`].
     ///
     /// Under the hood calls OP specific checks not requiring chain state
