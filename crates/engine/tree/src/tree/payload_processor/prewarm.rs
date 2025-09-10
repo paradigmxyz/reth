@@ -98,24 +98,35 @@ where
             let mut executing = 0;
             let mut is_first_tx = true;
 
+            // Helper to spawn a worker task
+            let spawn_worker = |executor: &WorkloadExecutor,
+                                ctx: PrewarmContext<N, P, Evm>,
+                                actions_tx: Sender<PrewarmTaskEvent>,
+                                done_tx: Sender<()>| {
+                let (tx, rx) = mpsc::channel();
+                executor.spawn_blocking(move || {
+                    ctx.transact_batch(rx, actions_tx, done_tx);
+                });
+                tx
+            };
+
             while let Ok(executable) = pending.recv() {
                 // For Optimism chains: The first transaction is always a deposit transaction
                 // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
                 // affecting all subsequent transactions. We broadcast the first transaction
                 // to all workers to ensure they have this critical state.
-                if is_first_tx && executable.tx().is_type(126) {
+                let should_broadcast = is_first_tx && executable.tx().is_type(126);
+                is_first_tx = false;
+
+                if should_broadcast {
                     // Pre-spawn all worker tasks to ensure they're ready
                     while handles.len() < max_concurrency {
-                        let (tx, rx) = mpsc::channel();
-                        let sender = actions_tx.clone();
-                        let ctx = ctx.clone();
-                        let done_tx = done_tx.clone();
-
-                        executor.spawn_blocking(move || {
-                            ctx.transact_batch(rx, sender, done_tx);
-                        });
-
-                        handles.push(tx);
+                        handles.push(spawn_worker(
+                            &executor,
+                            ctx.clone(),
+                            actions_tx.clone(),
+                            done_tx.clone(),
+                        ));
                     }
 
                     // Send deposit transaction to ALL prewarm tasks
@@ -127,23 +138,18 @@ where
                     // Normal round-robin distribution for other transactions
                     let task_idx = executing % max_concurrency;
 
+                    // Spawn worker on-demand if needed
                     if handles.len() <= task_idx {
-                        let (tx, rx) = mpsc::channel();
-                        let sender = actions_tx.clone();
-                        let ctx = ctx.clone();
-                        let done_tx = done_tx.clone();
-
-                        executor.spawn_blocking(move || {
-                            ctx.transact_batch(rx, sender, done_tx);
-                        });
-
-                        handles.push(tx);
+                        handles.push(spawn_worker(
+                            &executor,
+                            ctx.clone(),
+                            actions_tx.clone(),
+                            done_tx.clone(),
+                        ));
                     }
 
                     let _ = handles[task_idx].send(executable);
                 }
-
-                is_first_tx = false;
 
                 executing += 1;
             }
