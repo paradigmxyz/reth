@@ -407,14 +407,7 @@ impl ProduceBlockWithTransactionsViaEngineAPI {
             block_hash
         );
 
-        Ok((
-            PayloadContext {
-                payload_attributes,
-                execution_payload_envelope,
-                block_hash,
-            },
-            payload,
-        ))
+        Ok((PayloadContext { payload_attributes, execution_payload_envelope, block_hash }, payload))
     }
 
     /// Execute the payload via newPayload and make it canonical
