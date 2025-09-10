@@ -1,16 +1,12 @@
-//! Simplified test suite for reproducing the trie corruption bug
+//! Test suite for validating trie updates during fork and reorg scenarios.
 //!
-//! This test creates a minimal scenario that reproduces the trie corruption bug
-//! that occurred during reorgs, without needing real mainnet data.
+//! This test verifies that trie nodes are properly updated when:
+//! - Fork blocks are created with different storage values
+//! - Reorgs switch between canonical and fork chains
+//! - Storage slots are deleted after a reorg
 //!
-//! Bug scenario:
-//! 1. Block 1 (canonical): Sets storage slot 0x0f to value A
-//! 2. Block 1' (fork): Sets storage slot 0x0f to value B (creates trie node)
-//! 3. Reorg: Make Block 1' canonical
-//! 4. Block 2: Clears storage slot 0x0f (should delete trie node created in Block 1')
-//!
-//! Expected bug: Block 2's trie updates will be missing the deletion of node 0x0f
-//! because Block 1' (the fork block) had its trie updates discarded.
+//! The test specifically checks for a historical bug where fork blocks
+//! would have missing trie updates, causing incorrect state after reorgs.
 
 use alloy_eips::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
@@ -20,7 +16,11 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
-    actions::{CaptureBlock, ProduceBlockWithTransactionsViaEngineAPI, ReorgTo},
+    actions::{
+        AssertBranchNodeAtPrefix, AssertMissingTrieUpdates, CaptureBlock,
+        ProduceBlockWithTransactionsViaEngineAPI, ReorgTo, SendValidForkBlock,
+        VerifyAnyTrieUpdatesEmitted,
+    },
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -29,17 +29,7 @@ use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::{str::FromStr, sync::Arc};
 use tracing::info;
 
-mod verify_any_trie_updates;
-use verify_any_trie_updates::VerifyAnyTrieUpdatesEmitted;
-
-mod assert_branch_node_update;
-use assert_branch_node_update::AssertBranchNodeAtPrefix;
-
-mod assert_missing_trie_updates;
-use assert_missing_trie_updates::AssertMissingTrieUpdates;
-
-mod send_valid_fork_block;
-use send_valid_fork_block::SendValidForkBlock;
+// Trie-related actions are now available from the main actions module
 
 /// Storage contract address for our tests
 const STORAGE_CONTRACT: &str = "0x1234567890123456789012345678901234567890";
@@ -51,14 +41,15 @@ const TEST_PRIVATE_KEY_2: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 #[tokio::test]
-async fn test_simplified_trie_corruption_bug_reproduction() -> Result<()> {
+async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    println!("STARTING SIMPLIFIED TRIE CORRUPTION TEST");
-    println!("Genesis will have:");
-    println!("  - 40+ accounts with similar prefixes");
-    println!("  - 28 pre-populated storage slots in the contract");
-    println!("This should create a complex trie structure with branch nodes");
+    println!("\n=== TRIE FORK AND REORG TEST ===");
+    println!("Testing trie updates when:");
+    println!("  1. Creating fork blocks with different storage values");
+    println!("  2. Performing reorgs between chains");
+    println!("  3. Deleting storage after reorg");
+    println!("\nGenesis setup creates complex trie with branch nodes.");
 
     // Create chain spec with storage contract pre-deployed for our test
     let chain_spec = Arc::new(
@@ -78,73 +69,85 @@ async fn test_simplified_trie_corruption_bug_reproduction() -> Result<()> {
                 .with_always_compare_trie_updates(true),
         );
 
-    // Use optimized storage slots that hash to common prefixes, creating deeper trie branches
-    // These slots all hash to prefix 0x70e0, creating a branch node at depth 2
-    let slot_group1_a = U256::from(0x3649); // Slot A (will get same value in both blocks)
-    let slot_group1_b = U256::from(0x7651); // Slot B (will get different values)
-    let slot_group1_c = U256::from(0xb542); // Slot C (not used in fork, for variety)
-                                            // These slots hash to prefix 0x05f3, creating another branch at depth 2
-    let slot_group2_a = U256::from(0x1cd9); // Slot D (will get different values)
+    // ========================================
+    // STORAGE SLOT CONFIGURATION
+    // ========================================
+    // Slots are chosen to hash to common prefixes, creating branch nodes in the trie
+    
+    // Group 1: Slots hashing to prefix 0x70e0 (creates branch at depth 2)
+    let slot_a = U256::from(0x3649); // Same value in both canonical and fork
+    let slot_b = U256::from(0x7651); // Different values in canonical vs fork
+    let slot_c = U256::from(0xb542); // Only used in canonical chain
+    
+    // Group 2: Slots hashing to prefix 0x05f3 (creates another branch)
+    let slot_d = U256::from(0x1cd9); // Different values in canonical vs fork
 
-    // Values for canonical block 1
-    let value_1111 = U256::from(0x1111); // For slot A in both blocks (overlap)
-    let value_2222 = U256::from(0x2222); // For slot B in canonical
-    let value_3333 = U256::from(0x3333); // For slot C in canonical
-    let value_4444 = U256::from(0x4444); // For slot D in canonical
+    // ========================================
+    // STORAGE VALUES
+    // ========================================
+    
+    // Canonical chain values (Block 1)
+    let shared_value = U256::from(0x1111);     // Slot A: Same in both chains
+    let canonical_b = U256::from(0x2222);      // Slot B: Canonical only
+    let canonical_c = U256::from(0x3333);      // Slot C: Canonical only  
+    let canonical_d = U256::from(0x4444);      // Slot D: Canonical only
+    
+    // Fork chain values (Block 1')
+    let fork_b = U256::from(0x5555);           // Slot B: Different in fork
+    let fork_d = U256::from(0x6666);           // Slot D: Different in fork
+    
+    // Deletion value
+    let zero = U256::ZERO;
 
-    // Values for fork block 1'
-    // Slot A: same value (0x1111) - partial state overlap
-    let value_5555 = U256::from(0x5555); // For slot B in fork (DIFFERENT!)
-    let value_6666 = U256::from(0x6666); // For slot D in fork (DIFFERENT!)
+    // ========================================
+    // TRANSACTION CREATION
+    // ========================================
+    
+    // Canonical Block 1 transactions
+    let canonical_txs = vec![
+        create_storage_tx_with_signer(slot_a, shared_value, 0, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slot_b, canonical_b, 1, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slot_c, canonical_c, 2, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slot_d, canonical_d, 3, TEST_PRIVATE_KEY_1).await?,
+    ];
 
-    let value_zero = U256::ZERO; // For deletions in block 2
+    // Fork Block 1' transactions (different values for slots B and D)
+    let fork_txs = vec![
+        create_storage_tx_with_signer(slot_a, shared_value, 0, TEST_PRIVATE_KEY_2).await?, // Same as canonical
+        create_storage_tx_with_signer(slot_b, fork_b, 1, TEST_PRIVATE_KEY_2).await?,       // Different!
+        create_storage_tx_with_signer(slot_d, fork_d, 2, TEST_PRIVATE_KEY_2).await?,       // Different!
+    ];
 
-    // === CANONICAL BLOCK 1 TRANSACTIONS ===
-    // These set initial values in the storage
-    let tx1_canonical_a =
-        create_storage_tx_with_signer(slot_group1_a, value_1111, 0, TEST_PRIVATE_KEY_1).await?;
-    let tx1_canonical_b =
-        create_storage_tx_with_signer(slot_group1_b, value_2222, 1, TEST_PRIVATE_KEY_1).await?;
-    let tx1_canonical_c =
-        create_storage_tx_with_signer(slot_group1_c, value_3333, 2, TEST_PRIVATE_KEY_1).await?;
-    let tx1_canonical_d =
-        create_storage_tx_with_signer(slot_group2_a, value_4444, 3, TEST_PRIVATE_KEY_1).await?;
-
-    // === FORK BLOCK 1' TRANSACTIONS ===
-    // Same slots but DIFFERENT values (except slot A for partial overlap)
-    let tx1_fork_a =
-        create_storage_tx_with_signer(slot_group1_a, value_1111, 0, TEST_PRIVATE_KEY_2).await?; // SAME value as canonical
-    let tx1_fork_b =
-        create_storage_tx_with_signer(slot_group1_b, value_5555, 1, TEST_PRIVATE_KEY_2).await?; // DIFFERENT value!
-    let tx1_fork_d =
-        create_storage_tx_with_signer(slot_group2_a, value_6666, 2, TEST_PRIVATE_KEY_2).await?; // DIFFERENT value!
-
-    // Next block: delete values from deep branch nodes
-    let tx2_delete =
-        create_storage_tx_with_signer(slot_group1_a, value_zero, 2, TEST_PRIVATE_KEY_2).await?;
-    let tx2b_delete =
-        create_storage_tx_with_signer(slot_group2_a, value_zero, 3, TEST_PRIVATE_KEY_2).await?;
+    // Block 2 transactions: Delete storage slots
+    let deletion_txs = vec![
+        create_storage_tx_with_signer(slot_a, zero, 2, TEST_PRIVATE_KEY_2).await?,
+        create_storage_tx_with_signer(slot_d, zero, 3, TEST_PRIVATE_KEY_2).await?,
+    ];
 
     let storage_contract_addr = Address::from_str(STORAGE_CONTRACT)?;
 
+    // ========================================
+    // TEST EXECUTION
+    // ========================================
+    
     let test = TestBuilder::new()
         .with_setup(setup)
-        // Step 1: Send canonical block 1 via Engine API with initial values
+        
+        // ----------------------------------------
+        // PHASE 1: Create canonical chain
+        // ----------------------------------------
         .with_action({
-            info!("Step 1: Sending canonical block 1 via Engine API...");
-            info!("  Slots: A=0x1111, B=0x2222, C=0x3333, D=0x4444");
+            info!("Creating canonical Block 1 with storage values:");
+            info!("  Slot A: 0x1111, B: 0x2222, C: 0x3333, D: 0x4444");
             ProduceBlockWithTransactionsViaEngineAPI::new(
-                vec![
-                    tx1_canonical_a.clone(),
-                    tx1_canonical_b.clone(),
-                    tx1_canonical_c.clone(),
-                    tx1_canonical_d.clone(),
-                ],
+                canonical_txs.clone(),
                 "block_1_canonical",
             )
         })
         .with_action(CaptureBlock::new("block_1_canonical"))
         .with_action(VerifyAnyTrieUpdatesEmitted::new())
+        
+        // Verify branch nodes were created
         .with_action(
             AssertBranchNodeAtPrefix::new("block_1_canonical", storage_contract_addr, "70e0")
                 .expect_present(true)
@@ -155,52 +158,52 @@ async fn test_simplified_trie_corruption_bug_reproduction() -> Result<()> {
                 .expect_present(true)
                 .with_debug_contains("BranchNodeCompact"),
         )
-        // Step 2: Send fork block 1' as a valid competing block (same height, different state)
-        // This creates a fork at the same height as block_1_canonical
+        
+        // ----------------------------------------
+        // PHASE 2: Create competing fork
+        // ----------------------------------------
         .with_action({
-            info!("Step 2: Sending valid fork block 1'...");
-            info!("  Slots: A=0x1111 (SAME), B=0x5555 (DIFFERENT!), D=0x6666 (DIFFERENT!)");
-            info!("  This creates a valid fork that competes with block_1_canonical");
+            info!("Creating fork Block 1' with different storage:");
+            info!("  Slot A: 0x1111 (same), B: 0x5555 (different), D: 0x6666 (different)");
             SendValidForkBlock::new(
-                vec![
-                    tx1_fork_a.clone(), // Slot A: same value as canonical
-                    tx1_fork_b.clone(), // Slot B: DIFFERENT value!
-                    tx1_fork_d.clone(), // Slot D: DIFFERENT value!
-                ],
+                fork_txs.clone(),
                 "block_1_fork",
             )
         })
-        // Step 3: Verify that the fork block has MISSING trie updates
-        // This is the key bug condition - fork blocks get ExecutedTrieUpdates::Missing
+        
+        // Verify fork block has missing trie updates (the bug condition)
         .with_action({
-            info!("Step 3: Checking if fork block has missing trie updates (bug condition)...");
-            AssertMissingTrieUpdates::new("block_1_fork").expect_missing(true) // With bug, fork
-                                                                               // blocks should have
-                                                                               // missing updates
+            info!("Checking fork block trie updates (expecting missing due to bug)...");
+            AssertMissingTrieUpdates::new("block_1_fork").expect_missing(true)
         })
-        // Step 4: Now make the fork canonical via reorg
+        
+        // ----------------------------------------
+        // PHASE 3: Reorg to fork chain
+        // ----------------------------------------
         .with_action({
-            info!("Step 4: Triggering reorg to make fork block canonical...");
+            info!("Triggering reorg to make fork chain canonical...");
             ReorgTo::new_from_tag("block_1_fork")
         })
-        // Step 5: Send block 2 that builds on the fork
+        
+        // ----------------------------------------
+        // PHASE 4: Delete storage after reorg
+        // ----------------------------------------
         .with_action({
-            info!("Step 5: Sending block 2 with deletion transactions...");
+            info!("Creating Block 2 with storage deletions...");
             ProduceBlockWithTransactionsViaEngineAPI::new(
-                vec![tx2_delete.clone(), tx2b_delete.clone()],
+                deletion_txs.clone(),
                 "block_2_after_reorg",
             )
         })
-        // Step 6: Check the bug manifestation
-        // With the bug, deletions won't be properly tracked because fork block's trie updates were
-        // missing
+        
+        // ----------------------------------------
+        // PHASE 5: Verify bug manifestation
+        // ----------------------------------------
         .with_action({
-            info!("Step 6: Checking if deletions are missing (bug manifestation)...");
-            // The bug causes missing deletions - the 0x70e0 branch won't be in removed_nodes
+            info!("Verifying trie node deletions after reorg...");
+            info!("Bug manifests as missing deletion tracking for branch nodes.");
             AssertBranchNodeAtPrefix::new("block_2_after_reorg", storage_contract_addr, "70e0")
-                .expect_present(false) // Node should be gone
-                                       // BUT the removal might not be tracked properly due to the
-                                       // bug
+                .expect_present(false) // Should be deleted, but bug may prevent proper tracking
         });
 
     test.run::<EthereumNode>().await?;
@@ -208,8 +211,9 @@ async fn test_simplified_trie_corruption_bug_reproduction() -> Result<()> {
     Ok(())
 }
 
-/// Create a complex genesis with storage contract pre-deployed and multiple accounts
-/// This creates a more complex trie structure with branch nodes
+/// Creates a genesis state with:
+/// - A storage contract with pre-populated slots creating branch nodes
+/// - Multiple accounts with common address prefixes to force trie branching
 fn create_test_genesis() -> serde_json::Value {
     // Create multiple accounts with similar prefixes to force branch node creation
     let mut alloc = serde_json::json!({
@@ -310,7 +314,7 @@ fn create_test_genesis() -> serde_json::Value {
     })
 }
 
-/// Create a transaction that sets storage slot 0xf to a specific value
+/// Creates a transaction that modifies a storage slot in the test contract
 async fn create_storage_tx_with_signer(
     slot: U256,
     value: U256,
