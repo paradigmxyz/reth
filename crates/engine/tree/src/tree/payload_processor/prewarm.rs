@@ -108,7 +108,7 @@ where
                 // they have this critical state.
                 if is_first_tx && executable.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     is_first_tx = false;
-                    
+
                     // Pre-spawn all workers for the deposit transaction broadcast
                     for _ in handles.len()..max_concurrency {
                         let (tx, rx) = mpsc::channel();
