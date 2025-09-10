@@ -81,6 +81,15 @@ jobs:
           path: testing/ef-tests/ethereum-tests
           submodules: recursive
           fetch-depth: 1
+      - name: Download & extract EEST fixtures (public)
+        shell: bash
+        env:
+          EEST_TESTS_TAG: v4.5.0
+        run: |
+          set -euo pipefail
+          mkdir -p testing/ef-tests/execution-spec-tests
+          URL="https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_TESTS_TAG}/fixtures_stable.tar.gz"
+          curl -L "$URL" | tar -xz --strip-components=1 -C testing/ef-tests/execution-spec-tests
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest

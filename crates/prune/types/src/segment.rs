@@ -28,6 +28,14 @@ pub enum PruneSegment {
     Transactions,
 }
 
+#[cfg(test)]
+#[allow(clippy::derivable_impls)]
+impl Default for PruneSegment {
+    fn default() -> Self {
+        Self::SenderRecovery
+    }
+}
+
 impl PruneSegment {
     /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
@@ -41,6 +49,16 @@ impl PruneSegment {
             }
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
+    }
+
+    /// Returns true if this is [`Self::AccountHistory`].
+    pub const fn is_account_history(&self) -> bool {
+        matches!(self, Self::AccountHistory)
+    }
+
+    /// Returns true if this is [`Self::StorageHistory`].
+    pub const fn is_storage_history(&self) -> bool {
+        matches!(self, Self::StorageHistory)
     }
 }
 
@@ -71,11 +89,4 @@ pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
-}
-
-#[cfg(test)]
-impl Default for PruneSegment {
-    fn default() -> Self {
-        Self::SenderRecovery
-    }
 }

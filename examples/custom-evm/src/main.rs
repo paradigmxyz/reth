@@ -100,7 +100,7 @@ where
     }
 }
 
-/// Returns precompiles for Fjor spec.
+/// Returns precompiles for Prague spec.
 pub fn prague_custom() -> &'static Precompiles {
     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
     INSTANCE.get_or_init(|| {

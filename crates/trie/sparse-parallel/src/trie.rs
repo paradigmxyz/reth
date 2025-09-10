@@ -21,7 +21,7 @@ use std::{
     cmp::{Ord, Ordering, PartialOrd},
     sync::mpsc,
 };
-use tracing::{instrument, trace, warn};
+use tracing::{debug, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -334,7 +334,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     if let Some(reveal_path) = reveal_path {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
                         if subtrie.nodes.get(&reveal_path).expect("node must exist").is_hash() {
-                            warn!(
+                            debug!(
                                 target: "trie::parallel_sparse",
                                 child_path = ?reveal_path,
                                 leaf_full_path = ?full_path,
@@ -615,7 +615,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 let remaining_child_node =
                     match remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap() {
                         SparseNode::Hash(_) => {
-                            warn!(
+                            debug!(
                                 target: "trie::parallel_sparse",
                                 child_path = ?remaining_child_path,
                                 leaf_full_path = ?full_path,
@@ -1542,7 +1542,7 @@ impl SparseSubtrie {
                 LeafUpdateStep::Complete { reveal_path, .. } => {
                     if let Some(reveal_path) = reveal_path {
                         if self.nodes.get(&reveal_path).expect("node must exist").is_hash() {
-                            warn!(
+                            debug!(
                                 target: "trie::parallel_sparse",
                                 child_path = ?reveal_path,
                                 leaf_full_path = ?full_path,
@@ -5687,7 +5687,7 @@ mod tests {
         //   0xXY: Leaf { key: 0xZ... }
 
         // Create leaves that will force multiple subtries
-        let leaves = vec![
+        let leaves = [
             ctx.create_test_leaf([0x0, 0x0, 0x1, 0x2], 1),
             ctx.create_test_leaf([0x0, 0x1, 0x3, 0x4], 2),
             ctx.create_test_leaf([0x0, 0x2, 0x5, 0x6], 3),

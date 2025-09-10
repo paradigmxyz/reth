@@ -18,7 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
-use tracing::{debug, trace, trace_span};
+use tracing::{debug, instrument, trace};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -611,10 +611,8 @@ where
     ///
     /// The storage root, number of walked entries and trie updates
     /// for a given address if requested.
+    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address))]
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
-        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
-        let _enter = span.enter();
-
         trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =

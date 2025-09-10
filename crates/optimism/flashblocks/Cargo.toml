@@ -19,10 +19,10 @@ reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-execution-types = { workspace = true, features = ["serde"] }
 reth-evm.workspace = true
 reth-revm.workspace = true
-reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-errors.workspace = true
 reth-storage-api.workspace = true
+reth-tasks.workspace = true
 
 # alloy
 alloy-eips = { workspace = true, features = ["serde"] }
@@ -32,7 +32,7 @@ alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
 # io
 tokio.workspace = true
-tokio-tungstenite.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
@@ -46,3 +46,5 @@ tracing.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]
+test-case.workspace = true
+alloy-consensus.workspace = true

@@ -9,8 +9,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
-        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH, MAINNET_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
@@ -208,10 +208,7 @@ pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let hardforks = DEV_HARDFORKS.clone();
     ChainSpec {
         chain: Chain::dev(),
-        genesis_header: SealedHeader::new(
-            make_genesis_header(&genesis, &hardforks),
-            DEV_GENESIS_HASH,
-        ),
+        genesis_header: SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks)),
         genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
@@ -787,6 +784,12 @@ impl ChainSpecBuilder {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
+        self
+    }
+
+    /// Resets any existing hardforks from the builder.
+    pub fn reset(mut self) -> Self {
+        self.hardforks = ChainHardforks::default();
         self
     }
 
@@ -1603,7 +1606,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+                ForkId { hash: ForkHash([0x0b, 0x1a, 0x4e, 0xf7]), next: 0 },
             )],
         )
     }

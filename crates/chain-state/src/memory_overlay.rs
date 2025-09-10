@@ -21,7 +21,7 @@ pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
 > {
-    /// Historical state provider for state lookups that are not found in in-memory blocks.
+    /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,

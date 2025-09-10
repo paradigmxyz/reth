@@ -27,8 +27,8 @@ use reth_storage_api::{
     ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool,
 };
 use revm::context_interface::Block;
 use std::{
@@ -265,11 +265,14 @@ pub trait LoadPendingBlock:
 
         // Only include transactions if not configured as Empty
         if !self.pending_block_kind().is_empty() {
-            let mut best_txs =
-                self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
+            let mut best_txs = self
+                .pool()
+                .best_transactions_with_attributes(BestTransactionsAttributes::new(
                     block_env.basefee,
                     block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-                ));
+                ))
+                // freeze to get a block as fast as possible
+                .without_updates();
 
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction

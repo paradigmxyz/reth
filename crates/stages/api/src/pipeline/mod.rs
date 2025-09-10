@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
     ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter,
+    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -305,7 +305,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Get the actual pruning configuration
         let prune_modes = provider.prune_modes_ref();
 
-        prune_modes.ensure_unwind_target_unpruned(latest_block, to)?;
+        let checkpoints = provider.get_prune_checkpoints()?;
+        prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();

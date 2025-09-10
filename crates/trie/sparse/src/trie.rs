@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -640,7 +640,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                warn!(
+                                debug!(
                                     target: "trie::sparse",
                                     leaf_full_path = ?full_path,
                                     child_path = ?current,
@@ -815,7 +815,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            warn!(
+                            debug!(
                                 target: "trie::sparse",
                                 ?child_path,
                                 leaf_full_path = ?full_path,

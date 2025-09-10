@@ -5,7 +5,7 @@ use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
-use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;
 use serde::Deserialize;
@@ -294,9 +294,14 @@ pub enum ForkSpec {
     /// London
     London,
     /// Paris aka The Merge
+    #[serde(alias = "Paris")]
     Merge,
+    /// Paris to Shanghai at time 15k
+    ParisToShanghaiAtTime15k,
     /// Shanghai
     Shanghai,
+    /// Shanghai to Cancun at time 15k
+    ShanghaiToCancunAtTime15k,
     /// Merge EOF test
     #[serde(alias = "Merge+3540+3670")]
     MergeEOF,
@@ -308,39 +313,63 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
+    /// Cancun to Prague at time 15k
+    CancunToPragueAtTime15k,
     /// Prague
     Prague,
 }
 
 impl From<ForkSpec> for ChainSpec {
     fn from(fork_spec: ForkSpec) -> Self {
-        let spec_builder = ChainSpecBuilder::mainnet();
+        let spec_builder = ChainSpecBuilder::mainnet().reset();
 
         match fork_spec {
             ForkSpec::Frontier => spec_builder.frontier_activated(),
-            ForkSpec::Homestead | ForkSpec::FrontierToHomesteadAt5 => {
-                spec_builder.homestead_activated()
-            }
-            ForkSpec::EIP150 | ForkSpec::HomesteadToDaoAt5 | ForkSpec::HomesteadToEIP150At5 => {
-                spec_builder.tangerine_whistle_activated()
-            }
+            ForkSpec::FrontierToHomesteadAt5 => spec_builder
+                .frontier_activated()
+                .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(5)),
+            ForkSpec::Homestead => spec_builder.homestead_activated(),
+            ForkSpec::HomesteadToDaoAt5 => spec_builder
+                .homestead_activated()
+                .with_fork(EthereumHardfork::Dao, ForkCondition::Block(5)),
+            ForkSpec::HomesteadToEIP150At5 => spec_builder
+                .homestead_activated()
+                .with_fork(EthereumHardfork::Tangerine, ForkCondition::Block(5)),
+            ForkSpec::EIP150 => spec_builder.tangerine_whistle_activated(),
             ForkSpec::EIP158 => spec_builder.spurious_dragon_activated(),
-            ForkSpec::Byzantium |
-            ForkSpec::EIP158ToByzantiumAt5 |
-            ForkSpec::ConstantinopleFix |
-            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
+            ForkSpec::EIP158ToByzantiumAt5 => spec_builder
+                .spurious_dragon_activated()
+                .with_fork(EthereumHardfork::Byzantium, ForkCondition::Block(5)),
+            ForkSpec::Byzantium => spec_builder.byzantium_activated(),
+            ForkSpec::ByzantiumToConstantinopleAt5 => spec_builder
+                .byzantium_activated()
+                .with_fork(EthereumHardfork::Constantinople, ForkCondition::Block(5)),
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder
+                .byzantium_activated()
+                .with_fork(EthereumHardfork::Petersburg, ForkCondition::Block(5)),
+            ForkSpec::Constantinople => spec_builder.constantinople_activated(),
+            ForkSpec::ConstantinopleFix => spec_builder.petersburg_activated(),
             ForkSpec::Istanbul => spec_builder.istanbul_activated(),
             ForkSpec::Berlin => spec_builder.berlin_activated(),
-            ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
+            ForkSpec::BerlinToLondonAt5 => spec_builder
+                .berlin_activated()
+                .with_fork(EthereumHardfork::London, ForkCondition::Block(5)),
+            ForkSpec::London => spec_builder.london_activated(),
             ForkSpec::Merge |
             ForkSpec::MergeEOF |
             ForkSpec::MergeMeterInitCode |
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
+            ForkSpec::ParisToShanghaiAtTime15k => spec_builder
+                .paris_activated()
+                .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(15_000)),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
+            ForkSpec::ShanghaiToCancunAtTime15k => spec_builder
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(15_000)),
             ForkSpec::Cancun => spec_builder.cancun_activated(),
-            ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
-                panic!("Overridden with PETERSBURG")
-            }
+            ForkSpec::CancunToPragueAtTime15k => spec_builder
+                .cancun_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(15_000)),
             ForkSpec::Prague => spec_builder.prague_activated(),
         }
         .build()

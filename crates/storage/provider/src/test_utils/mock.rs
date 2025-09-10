@@ -944,6 +944,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
     }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(Some(Box::new(self.clone())))
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockBodyIndicesProvider

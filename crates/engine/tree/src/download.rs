@@ -121,7 +121,7 @@ where
             self.download_full_block(hash);
         } else {
             trace!(
-                target: "consensus::engine",
+                target: "engine::download",
                 ?hash,
                 ?count,
                 "start downloading full block range."
@@ -152,7 +152,7 @@ where
         });
 
         trace!(
-            target: "consensus::engine::sync",
+            target: "engine::download",
             ?hash,
             "Start downloading full block"
         );
@@ -213,7 +213,7 @@ where
         for idx in (0..self.inflight_full_block_requests.len()).rev() {
             let mut request = self.inflight_full_block_requests.swap_remove(idx);
             if let Poll::Ready(block) = request.poll_unpin(cx) {
-                trace!(target: "consensus::engine", block=?block.num_hash(), "Received single full block, buffering");
+                trace!(target: "engine::download", block=?block.num_hash(), "Received single full block, buffering");
                 self.set_buffered_blocks.push(Reverse(block.into()));
             } else {
                 // still pending
@@ -225,7 +225,7 @@ where
         for idx in (0..self.inflight_block_range_requests.len()).rev() {
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll_unpin(cx) {
-                trace!(target: "consensus::engine", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
+                trace!(target: "engine::download", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
                 self.set_buffered_blocks.extend(
                     blocks
                         .into_iter()

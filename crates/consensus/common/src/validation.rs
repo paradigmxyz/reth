@@ -7,8 +7,8 @@ use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
-    SealedHeader,
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
 
 /// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
@@ -326,6 +326,54 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
             timestamp: header.timestamp(),
         })
     }
+    Ok(())
+}
+
+/// Validates gas limit against parent gas limit.
+///
+/// The maximum allowable difference between self and parent gas limits is determined by the
+/// parent's gas limit divided by the [`GAS_LIMIT_BOUND_DIVISOR`].
+#[inline]
+pub fn validate_against_parent_gas_limit<
+    H: BlockHeader,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+>(
+    header: &SealedHeader<H>,
+    parent: &SealedHeader<H>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+    let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number()) &&
+        chain_spec.is_london_active_at_block(header.number())
+    {
+        parent.gas_limit() *
+            chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
+                as u64
+    } else {
+        parent.gas_limit()
+    };
+
+    // Check for an increase in gas limit beyond the allowed threshold.
+    if header.gas_limit() > parent_gas_limit {
+        if header.gas_limit() - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+            return Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit,
+                child_gas_limit: header.gas_limit(),
+            })
+        }
+    }
+    // Check for a decrease in gas limit beyond the allowed threshold.
+    else if parent_gas_limit - header.gas_limit() >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+        return Err(ConsensusError::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: header.gas_limit(),
+        })
+    }
+    // Check if the self gas limit is below the minimum required limit.
+    else if header.gas_limit() < MINIMUM_GAS_LIMIT {
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
+    }
+
     Ok(())
 }
 

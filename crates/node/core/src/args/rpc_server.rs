@@ -407,7 +407,7 @@ impl Default for RpcServerArgs {
     }
 }
 
-/// clap value parser for [`RpcModuleSelection`].
+/// clap value parser for [`RpcModuleSelection`] with configurable validation.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;
@@ -418,23 +418,20 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     fn parse_ref(
         &self,
         _cmd: &Command,
-        arg: Option<&Arg>,
+        _arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        val.parse::<RpcModuleSelection>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = RethRpcModule::all_variant_names().to_vec().join(",");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-        })
+        // This will now accept any module name, creating Other(name) for unknowns
+        Ok(val
+            .parse::<RpcModuleSelection>()
+            .expect("RpcModuleSelection parsing cannot fail with Other variant"))
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = RethRpcModule::all_variant_names().iter().map(PossibleValue::new);
+        // Only show standard modules in help text (excludes "other")
+        let values = RethRpcModule::standard_variant_names().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }

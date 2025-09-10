@@ -29,7 +29,6 @@ alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # misc
 bytes.workspace = true
-derive_more.workspace = true
 futures.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }

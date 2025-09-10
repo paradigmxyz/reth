@@ -102,7 +102,8 @@ pub trait EstimateCall: Call {
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
         if tx_env.gas_price() > 0 {
             // cap the highest gas limit by max gas caller can afford with given gas price
-            highest_gas_limit = highest_gas_limit.min(self.caller_gas_allowance(&mut db, &tx_env)?);
+            highest_gas_limit =
+                highest_gas_limit.min(self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
         }
 
         // If the provided gas limit is less than computed cap, use that

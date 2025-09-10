@@ -392,6 +392,23 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
     }
 }
 
+impl<T, Executor> ExecutorTx<Executor>
+    for WithTxEnv<<<Executor as BlockExecutor>::Evm as Evm>::Tx, T>
+where
+    T: ExecutorTx<Executor>,
+    Executor: BlockExecutor,
+    <<Executor as BlockExecutor>::Evm as Evm>::Tx: Clone,
+    Self: RecoveredTx<Executor::Transaction>,
+{
+    fn as_executable(&self) -> impl ExecutableTx<Executor> {
+        self
+    }
+
+    fn into_recovered(self) -> Recovered<Executor::Transaction> {
+        self.tx.into_recovered()
+    }
+}
+
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
     for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where

@@ -230,6 +230,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
+            ..Default::default()
         }
     }
 
