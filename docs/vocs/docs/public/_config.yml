@@ -1,0 +1,3 @@
+# Include the .vocs directory which contains the search index
+include:
+  - .vocs
