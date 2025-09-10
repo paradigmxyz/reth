@@ -510,7 +510,7 @@ where
 
                 let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
-                let state = Self::determine_transaction_state(&added, pool);
+                let state = added.transaction_state();
 
                 // transaction was successfully inserted into the pool
                 if let Some(sidecar) = maybe_sidecar {
@@ -1052,29 +1052,6 @@ where
             .collect();
         self.delete_blobs(blob_txs);
     }
-
-    /// Determines the specific reason why a transaction was added to the pool.
-    ///
-    /// Maps the transaction's subpool assignment to a granular `AddedTransactionState`
-    /// that indicates the specific condition preventing it from being pending.
-    fn determine_transaction_state<U: PoolTransaction>(
-        added: &AddedTransaction<U>,
-        _pool: &RwLockWriteGuard<'_, TxPool<T>>,
-    ) -> AddedTransactionState {
-        match added.subpool() {
-            SubPool::Pending => AddedTransactionState::Pending,
-            _ => {
-                // For non-pending transactions, use the queued reason directly from the
-                // AddedTransaction
-                if let Some(reason) = added.queued_reason() {
-                    AddedTransactionState::Queued(reason.clone())
-                } else {
-                    // Fallback - this shouldn't happen with the new implementation
-                    AddedTransactionState::Queued(QueuedReason::NonceGap)
-                }
-            }
-        }
-    }
 }
 
 impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
@@ -1257,6 +1234,23 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         match self {
             Self::Pending(_) => None,
             Self::Parked { queued_reason, .. } => queued_reason.as_ref(),
+        }
+    }
+
+    /// Returns the transaction state based on the subpool and queued reason.
+    pub(crate) fn transaction_state(&self) -> AddedTransactionState {
+        match self.subpool() {
+            SubPool::Pending => AddedTransactionState::Pending,
+            _ => {
+                // For non-pending transactions, use the queued reason directly from the
+                // AddedTransaction
+                if let Some(reason) = self.queued_reason() {
+                    AddedTransactionState::Queued(reason.clone())
+                } else {
+                    // Fallback - this shouldn't happen with the new implementation
+                    AddedTransactionState::Queued(QueuedReason::NonceGap)
+                }
+            }
         }
     }
 }
