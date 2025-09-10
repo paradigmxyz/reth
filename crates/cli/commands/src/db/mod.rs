@@ -12,6 +12,7 @@ mod checksum;
 mod clear;
 mod diff;
 mod get;
+mod inspect_account_history;
 mod list;
 mod repair_trie;
 mod stats;
@@ -51,6 +52,8 @@ pub enum Subcommands {
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
+    /// Inspects the AccountsHistory entries for a given account address
+    InspectAccountHistory(inspect_account_history::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -142,6 +145,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::InspectAccountHistory(command) => {
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
