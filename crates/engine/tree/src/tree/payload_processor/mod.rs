@@ -288,13 +288,12 @@ where
     fn spawn_caching_with<P, Tx>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<Tx>,
+        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for

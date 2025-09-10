@@ -103,7 +103,7 @@ where
                 // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
                 // affecting all subsequent transactions. We broadcast the first transaction
                 // to all workers to ensure they have this critical state.
-                let should_broadcast = is_first_tx && executable.tx().is_type(126) ;
+                let should_broadcast = is_first_tx && executable.tx().is_type(126);
 
                 is_first_tx = false;
 
