@@ -83,7 +83,7 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all<Tx>(
+    fn spawn_all(
         &self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
@@ -192,13 +192,11 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
-    pub(super) fn run<Tx>(
+    pub(super) fn run(
         self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
-    ) where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
-    {
+    ) {
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 
