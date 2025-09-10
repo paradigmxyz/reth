@@ -1210,18 +1210,19 @@ impl<T: TransactionOrdering> Drop for TxPool<T> {
     }
 }
 
-// Additional test impls
-#[cfg(any(test, feature = "test-utils"))]
 impl<T: TransactionOrdering> TxPool<T> {
-    pub(crate) const fn pending(&self) -> &PendingPool<T> {
+    /// Pending subpool
+    pub const fn pending(&self) -> &PendingPool<T> {
         &self.pending_pool
     }
 
-    pub(crate) const fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
+    /// Base fee subpool
+    pub const fn base_fee(&self) -> &ParkedPool<BasefeeOrd<T::Transaction>> {
         &self.basefee_pool
     }
 
-    pub(crate) const fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
+    /// Queued sub pool
+    pub const fn queued(&self) -> &ParkedPool<QueuedOrd<T::Transaction>> {
         &self.queued_pool
     }
 }

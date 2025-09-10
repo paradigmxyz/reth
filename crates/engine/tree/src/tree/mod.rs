@@ -1568,6 +1568,9 @@ where
     /// `(last_persisted_number .. canonical_head - threshold]`. The expected
     /// order is oldest -> newest.
     ///
+    /// If any blocks are missing trie updates, all blocks are persisted, not taking `threshold`
+    /// into account.
+    ///
     /// For those blocks that didn't have the trie updates calculated, runs the state root
     /// calculation, and saves the trie updates.
     ///
@@ -1582,13 +1585,31 @@ where
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
-
         let canonical_head_number = self.state.tree_state.canonical_block_number();
+        let all_blocks_have_trie_updates = self
+            .state
+            .tree_state
+            .blocks_by_hash
+            .values()
+            .all(|block| block.trie_updates().is_some());
 
-        let target_number =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let target_number = if all_blocks_have_trie_updates {
+            // Persist only up to block buffer target if all blocks have trie updates
+            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+        } else {
+            // Persist all blocks if any block is missing trie updates
+            canonical_head_number
+        };
 
-        debug!(target: "engine::tree", ?last_persisted_number, ?canonical_head_number, ?target_number, ?current_hash, "Returning canonical blocks to persist");
+        debug!(
+            target: "engine::tree",
+            ?current_hash,
+            ?last_persisted_number,
+            ?canonical_head_number,
+            ?all_blocks_have_trie_updates,
+            ?target_number,
+            "Returning canonical blocks to persist"
+        );
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             if block.recovered_block().number() <= last_persisted_number {
                 break;
@@ -2332,12 +2353,8 @@ where
             Ok(is_fork) => is_fork,
         };
 
-        let ctx = TreeCtx::new(
-            &mut self.state,
-            &self.persistence_state,
-            &self.canonical_in_memory_state,
-            is_fork,
-        );
+        let ctx =
+            TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
 

@@ -45,6 +45,7 @@ std = [
     "thiserror/std",
 ]
 test-utils = [
+    "std",
     "dep:arbitrary",
     "reth-codecs?/test-utils",
 ]
