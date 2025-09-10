@@ -283,6 +283,13 @@ where
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
+        debug!(
+            target: "engine::tree",
+            ?execution_err,
+            block = ?input.num_hash(),
+            "Block execution failed, checking for header validation errors"
+        );
+
         // If execution failed, we should first check if there are any header validation
         // errors that take precedence over the execution error
         let block = self.convert_to_block(input)?;
