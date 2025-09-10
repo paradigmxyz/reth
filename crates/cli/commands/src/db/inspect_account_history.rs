@@ -1,12 +1,7 @@
 use alloy_primitives::Address;
 use clap::Parser;
 use reth_db::Database;
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::ShardedKey,
-    tables,
-    transaction::DbTx,
-};
+use reth_db_api::{cursor::DbCursorRO, models::ShardedKey, tables, transaction::DbTx};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::ProviderFactory;
 use serde_json::json;
@@ -47,12 +42,12 @@ impl Command {
 
         // Start walking from the first possible shard for this address
         let start_key = ShardedKey::new(self.address, 0);
-        let mut walker = cursor.walk(Some(start_key))?;
+        let walker = cursor.walk(Some(start_key))?;
 
-        let mut found_any = false;
+        let mut total_blocks: usize = 0;
 
         // Walk through all shards for this address
-        while let Some(result) = walker.next() {
+        for result in walker {
             let (key, block_list) = result?;
 
             // Stop if we've moved to a different address
@@ -60,24 +55,30 @@ impl Command {
                 break;
             }
 
-            found_any = true;
+            let blocks: Vec<u64> = block_list.iter().collect();
+            total_blocks += blocks.len();
 
             // Display key in JSON format
             let key_json = json!({
                 "key": key.key.to_string(),
                 "highest_block_number": key.highest_block_number,
             });
-            println!("Key: {}", serde_json::to_string(&key_json)?);
+            let key_str = serde_json::to_string(&key_json)?;
 
             // Display value (block numbers)
-            let blocks: Vec<u64> = block_list.iter().collect();
-            println!("Value: {:?}", blocks);
-            println!();
+            match blocks.len() {
+                0 => println!("{key_str}: NO BLOCKS IN THIS ENTRY"),
+                1 => println!("{key_str}: [{}]", blocks[0]),
+                _ => println!(
+                    "{key_str}: [{}..={}] ({} blocks)",
+                    blocks[0],
+                    blocks[blocks.len() - 1],
+                    blocks.len()
+                ),
+            }
         }
 
-        if !found_any {
-            println!("No entries found for this address");
-        }
+        println!("Total blocks found: {total_blocks}");
 
         Ok(())
     }
