@@ -458,8 +458,11 @@ impl ProduceBlockWithTransactionsViaEngineAPI {
         )
         .await?;
 
-        debug!("Block made canonical via Engine API, FCU status: {:?}", fcu_result.payload_status.status);
-        
+        debug!(
+            "Block made canonical via Engine API, FCU status: {:?}",
+            fcu_result.payload_status.status
+        );
+
         // Wait a bit for the block to be fully processed and committed
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
@@ -509,25 +512,33 @@ where
             .await?;
 
             // Step 5: Update the environment's current block info with the newly produced block
-            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = full_payload.clone().into();
-            let block_hash = execution_payload_envelope.execution_payload.payload_inner.payload_inner.block_hash;
-            let block_number = execution_payload_envelope.execution_payload.payload_inner.payload_inner.block_number;
-            let block_timestamp = execution_payload_envelope.execution_payload.payload_inner.payload_inner.timestamp;
-            
+            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
+                full_payload.clone().into();
+            let block_hash =
+                execution_payload_envelope.execution_payload.payload_inner.payload_inner.block_hash;
+            let block_number = execution_payload_envelope
+                .execution_payload
+                .payload_inner
+                .payload_inner
+                .block_number;
+            let block_timestamp =
+                execution_payload_envelope.execution_payload.payload_inner.payload_inner.timestamp;
+
             env.set_current_block_info(BlockInfo {
                 hash: block_hash,
                 number: block_number,
                 timestamp: block_timestamp,
             })?;
-            
+
             // Also update the active node state
             env.active_node_state_mut()?.latest_header_time = block_timestamp;
             env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash = block_hash;
-            
+
             // IMPORTANT: For testing, we need to simulate trie updates being available
-            // In reality, the sparse trie task generates them but they get lost in the Chain notification
-            // Here we create a synthetic trie update event for testing purposes
-            if let Some(ref mut rx) = env.trie_update_rx {
+            // In reality, the sparse trie task generates them but they get lost in the Chain
+            // notification Here we create a synthetic trie update event for testing
+            // purposes
+            if let Some(ref mut _rx) = env.trie_update_rx {
                 // Check if we can send a synthetic event
                 // This is a workaround for the fact that Chain doesn't preserve trie updates
                 debug!(
