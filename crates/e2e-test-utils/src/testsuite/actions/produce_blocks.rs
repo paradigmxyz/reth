@@ -7,8 +7,7 @@ use crate::testsuite::{
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2},
-    BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes,
-    PayloadStatusEnum,
+    BlobsBundleV1, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
@@ -19,9 +18,9 @@ use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
 
-/// Convert ExecutionPayloadEnvelopeV2 to V3 for compatibility
+/// Convert `ExecutionPayloadEnvelopeV2` to V3 for compatibility
 ///
-/// V3 adds blob bundle and should_override_builder fields, which we set to safe defaults
+/// V3 adds blob bundle and `should_override_builder` fields, which we set to safe defaults
 fn convert_v2_to_v3(v2_envelope: ExecutionPayloadEnvelopeV2) -> Result<ExecutionPayloadEnvelopeV3> {
     // Convert the execution payload field to V3
     let execution_payload_v3 = match v2_envelope.execution_payload {
@@ -62,10 +61,9 @@ fn convert_v2_to_v3(v2_envelope: ExecutionPayloadEnvelopeV2) -> Result<Execution
 /// - If withdrawals is Some -> use v2 (Shanghai)
 /// - Otherwise -> use v1 (Paris)
 const fn determine_fcu_version(payload_attributes: &PayloadAttributes) -> u8 {
-    if payload_attributes.parent_beacon_block_root.is_some() {
-        3 // Cancun+ - use v3
-    } else if payload_attributes.withdrawals.is_some() {
-        2 // Shanghai - use v2
+    // Note: v3 is not supported in our test environment, so we use v2 for Cancun
+    if payload_attributes.withdrawals.is_some() {
+        2 // Shanghai/Cancun - use v2
     } else {
         1 // Paris
     }
@@ -161,14 +159,6 @@ where
                    version);
 
             let fcu_result = match version {
-                3 => {
-                    EngineApiClient::<Engine>::fork_choice_updated_v3(
-                        &engine_client,
-                        fork_choice_state,
-                        Some(self.payload_attributes.clone()),
-                    )
-                    .await?
-                }
                 2 => {
                     EngineApiClient::<Engine>::fork_choice_updated_v2(
                         &engine_client,
@@ -277,7 +267,7 @@ where
                 prev_randao: B256::random(),
                 suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
+                parent_beacon_block_root: None,
             };
 
             env.active_node_state_mut()?
@@ -364,7 +354,7 @@ where
                     prev_randao: B256::random(),
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
-                    parent_beacon_block_root: Some(B256::ZERO),
+                    parent_beacon_block_root: None,
                 };
 
                 let fresh_version = determine_fcu_version(&fresh_payload_attributes);
@@ -773,13 +763,9 @@ where
                 .ok_or_else(|| eyre::eyre!("No next built payload found"))?
                 .clone();
 
-            // Determine version based on payload attributes
-            let concrete_attrs: PayloadAttributes = next_new_payload.clone().into();
-            let version = determine_fcu_version(&concrete_attrs);
-
             // parent_beacon_block_root is optional (only required for Cancun+)
             let parent_beacon_block_root =
-                next_new_payload.parent_beacon_block_root.unwrap_or_else(|| B256::ZERO);
+                next_new_payload.parent_beacon_block_root.unwrap_or(B256::ZERO);
 
             let payload_envelope = env
                 .active_node_state()?
@@ -791,20 +777,22 @@ where
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
             let execution_payload = execution_payload_envelope.execution_payload;
 
-            // For simplicity, we'll use new_payload_v3 since we're working with V3 payloads
-            // The test infrastructure should handle this
+            // Convert V3 payload to V2 for API compatibility
+            // The execution_payload is V3, but we need to use v2 API
+            let execution_payload_v2 = alloy_rpc_types_engine::ExecutionPayloadInputV2 {
+                withdrawals: Some(execution_payload.withdrawals().clone()),
+                execution_payload: execution_payload.payload_inner.payload_inner.clone(),
+            };
 
             if self.active_node_only {
                 // Send only to the active node
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
 
-                // Use v3 since we have V3 payload
-                let result = EngineApiClient::<Engine>::new_payload_v3(
+                // Use v2 API since v3 is not supported
+                let result = EngineApiClient::<Engine>::new_payload_v2(
                     &engine,
-                    execution_payload.clone(),
-                    vec![],
-                    parent_beacon_block_root,
+                    execution_payload_v2.clone(),
                 )
                 .await?;
 
@@ -832,12 +820,10 @@ where
                     let engine = client.engine.http_client();
 
                     // Broadcast the execution payload
-                    // Use v3 since we have V3 payload
-                    let result = EngineApiClient::<Engine>::new_payload_v3(
+                    // Use v2 API since v3 is not supported
+                    let result = EngineApiClient::<Engine>::new_payload_v2(
                         &engine,
-                        execution_payload.clone(),
-                        vec![],
-                        parent_beacon_block_root,
+                        execution_payload_v2.clone(),
                     )
                     .await?;
 
@@ -1199,16 +1185,16 @@ where
 
                     // send the corrupted payload via newPayload
                     let engine_client = env.node_clients[0].engine.http_client();
-                    // for simplicity, we'll use empty versioned hashes for invalid block testing
-                    let versioned_hashes = Vec::new();
-                    // use a random parent beacon block root since this is for invalid block testing
-                    let parent_beacon_block_root = B256::random();
 
-                    let new_payload_response = EngineApiClient::<Engine>::new_payload_v3(
+                    // Convert V3 payload to V2 for API compatibility
+                    let corrupted_payload_v2 = alloy_rpc_types_engine::ExecutionPayloadInputV2 {
+                        withdrawals: Some(corrupted_payload.withdrawals().clone()),
+                        execution_payload: corrupted_payload.payload_inner.payload_inner.clone(),
+                    };
+
+                    let new_payload_response = EngineApiClient::<Engine>::new_payload_v2(
                         &engine_client,
-                        corrupted_payload.clone(),
-                        versioned_hashes,
-                        parent_beacon_block_root,
+                        corrupted_payload_v2,
                     )
                     .await?;
 
