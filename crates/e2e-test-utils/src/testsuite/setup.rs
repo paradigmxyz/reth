@@ -167,7 +167,8 @@ where
         let mut import_result = self.create_nodes_with_import::<N>(rlp_path).await?;
 
         // Create channel for trie updates
-        let (trie_tx, trie_rx) = tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
+        let (trie_tx, trie_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
 
         // Start trie update forwarders for each node
         for (idx, node) in import_result.nodes.iter_mut().enumerate() {
@@ -245,7 +246,8 @@ where
         .await;
 
         // Create channel for trie updates
-        let (trie_tx, trie_rx) = tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
+        let (trie_tx, trie_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::testsuite::TrieUpdateEvent>();
 
         let mut node_clients = Vec::new();
         match result {
@@ -254,7 +256,7 @@ where
                 for (idx, node) in nodes.iter_mut().enumerate() {
                     node.start_trie_update_forwarder(idx, trie_tx.clone());
                 }
-                
+
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
                     let rpc = node
