@@ -44,13 +44,9 @@ pub struct ParkedPool<T: ParkedOrd> {
 
 impl<T: ParkedOrd> ParkedPool<T> {
     /// Adds a new transactions to the pending queue.
-    ///
-    /// # Panics
-    ///
-    /// If the transaction is already included.
     pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
-        assert!(
+        debug_assert!(
             !self.contains(&id),
             "transaction already included {:?}",
             self.get(&id).unwrap().transaction.transaction
@@ -295,18 +291,43 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         transactions
     }
 
+    /// Removes all transactions from this subpool that can afford the given basefee,
+    /// invoking the provided handler for each transaction as it is removed.
+    ///
+    /// This method enforces the basefee constraint by identifying transactions that now
+    /// satisfy the basefee requirement (typically after a basefee decrease) and processing
+    /// them via the provided transaction handler closure.
+    ///
+    /// Respects per-sender nonce ordering: if the lowest-nonce transaction for a sender
+    /// still cannot afford the basefee, higher-nonce transactions from that sender are skipped.
+    ///
+    /// Note: the transactions are not returned in a particular order.
+    pub(crate) fn enforce_basefee_with<F>(&mut self, basefee: u64, mut tx_handler: F)
+    where
+        F: FnMut(Arc<ValidPoolTransaction<T>>),
+    {
+        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
+
+        for id in to_remove {
+            if let Some(tx) = self.remove_transaction(&id) {
+                tx_handler(tx);
+            }
+        }
+    }
+
     /// Removes all transactions and their dependent transaction from the subpool that no longer
     /// satisfy the given basefee.
     ///
+    /// Legacy method maintained for compatibility with read-only queries.
+    /// For basefee enforcement, prefer `enforce_basefee_with` for better performance.
+    ///
     /// Note: the transactions are not returned in a particular order.
+    #[cfg(test)]
     pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
-
-        let mut removed = Vec::with_capacity(to_remove.len());
-        for id in to_remove {
-            removed.push(self.remove_transaction(&id).expect("transaction exists"));
-        }
-
+        let mut removed = Vec::new();
+        self.enforce_basefee_with(basefee, |tx| {
+            removed.push(tx);
+        });
         removed
     }
 }
@@ -1038,5 +1059,69 @@ mod tests {
         let removed = pool.remove_transaction(&tx_id);
         assert!(removed.is_some());
         assert!(!pool.contains(&tx_id));
+    }
+
+    #[test]
+    fn test_enforce_basefee_with_handler_zero_allocation() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
+
+        // Add multiple transactions across different fee ranges
+        let sender_a = address!("0x000000000000000000000000000000000000000a");
+        let sender_b = address!("0x000000000000000000000000000000000000000b");
+
+        // Add transactions where nonce ordering allows proper processing:
+        // Sender A: both transactions can afford basefee (500 >= 400, 600 >= 400)
+        // Sender B: transaction cannot afford basefee (300 < 400)
+        let txs = vec![
+            f.validated_arc(
+                MockTransaction::eip1559()
+                    .set_sender(sender_a)
+                    .set_nonce(0)
+                    .set_max_fee(500)
+                    .clone(),
+            ),
+            f.validated_arc(
+                MockTransaction::eip1559()
+                    .set_sender(sender_a)
+                    .set_nonce(1)
+                    .set_max_fee(600)
+                    .clone(),
+            ),
+            f.validated_arc(
+                MockTransaction::eip1559()
+                    .set_sender(sender_b)
+                    .set_nonce(0)
+                    .set_max_fee(300)
+                    .clone(),
+            ),
+        ];
+
+        let expected_affordable = vec![txs[0].clone(), txs[1].clone()]; // Both sender A txs
+        for tx in txs {
+            pool.add_transaction(tx);
+        }
+
+        // Test the handler approach with zero allocations
+        let mut processed_txs = Vec::new();
+        let mut handler_call_count = 0;
+
+        pool.enforce_basefee_with(400, |tx| {
+            processed_txs.push(tx);
+            handler_call_count += 1;
+        });
+
+        // Verify correct number of transactions processed
+        assert_eq!(handler_call_count, 2);
+        assert_eq!(processed_txs.len(), 2);
+
+        // Verify the correct transactions were processed (those with fee >= 400)
+        let processed_ids: Vec<_> = processed_txs.iter().map(|tx| *tx.id()).collect();
+        for expected_tx in expected_affordable {
+            assert!(processed_ids.contains(expected_tx.id()));
+        }
+
+        // Verify transactions were removed from pool
+        assert_eq!(pool.len(), 1); // Only the 300 fee tx should remain
     }
 }

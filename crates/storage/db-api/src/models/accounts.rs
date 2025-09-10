@@ -107,13 +107,13 @@ impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
     use rand::{rng, Rng};
-    use std::str::FromStr;
 
     #[test]
     fn test_block_number_address() {
         let num = 1u64;
-        let hash = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let hash = address!("0xba5e000000000000000000000000000000000000");
         let key = BlockNumberAddress((num, hash));
 
         let mut bytes = [0u8; 28];
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_address_storage_key() {
         let storage_key = StorageKey::random();
-        let address = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let address = address!("0xba5e000000000000000000000000000000000000");
         let key = AddressStorageKey((address, storage_key));
 
         let mut bytes = [0u8; 52];

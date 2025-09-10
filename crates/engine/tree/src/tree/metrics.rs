@@ -11,9 +11,11 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
+use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -62,7 +64,7 @@ impl EngineApiMetrics {
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
         DB: alloy_evm::Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -74,7 +76,12 @@ impl EngineApiMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx?)?;
+                let tx = tx?;
+                let span =
+                    debug_span!(target: "engine::tree", "execute_tx", tx_hash=?tx.tx().tx_hash());
+                let _enter = span.enter();
+                trace!(target: "engine::tree", "Executing transaction");
+                executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -144,7 +151,8 @@ pub(crate) struct EngineMetrics {
     pub(crate) failed_new_payload_response_deliveries: Counter,
     /// Tracks the how often we failed to deliver a forkchoice update response.
     pub(crate) failed_forkchoice_updated_response_deliveries: Counter,
-    // TODO add latency metrics
+    /// block insert duration
+    pub(crate) block_insert_total_duration: Histogram,
 }
 
 /// Metrics for non-execution related block validation.
@@ -155,9 +163,9 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
     pub(crate) state_root_parallel_fallback_total: Counter,
-    /// Histogram of state root duration
+    /// Histogram of state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_histogram: Histogram,
-    /// Latest state root duration
+    /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,

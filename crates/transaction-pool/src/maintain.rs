@@ -800,7 +800,7 @@ mod tests {
         let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
-            validator.clone(),
+            validator,
             CoinbaseTipOrdering::default(),
             blob_store.clone(),
             Default::default(),

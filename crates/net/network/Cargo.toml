@@ -92,7 +92,6 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
 
 # misc
-tempfile.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 
