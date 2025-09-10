@@ -146,10 +146,10 @@ where
             }
 
             if included_count == tx_hashes.len() {
-                debug!("  ✓ All {} transactions included in block", tx_hashes.len());
+                debug!("   All {} transactions included in block", tx_hashes.len());
             } else {
                 debug!(
-                    "Only {}/{} transactions included in block",
+                    "WARNING:  Only {}/{} transactions included in block",
                     included_count,
                     tx_hashes.len()
                 );
