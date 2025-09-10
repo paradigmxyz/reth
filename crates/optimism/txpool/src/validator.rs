@@ -244,14 +244,14 @@ where
     ///
     /// Returns unaltered input transaction if all checks pass, so transaction can continue
     /// through to stateful validation as argument to
-    /// [`apply_checks_against_state`](Self::apply_checks_against_state). Failed checks
+    /// [`Self::apply_checks_against_state`]. Failed checks
     /// return [`TransactionValidationOutcome::Invalid`] wrapping the transaction or
     /// [`TransactionValidationOutcome::Error`].
     ///
     /// Under the hood calls OP specific checks not requiring chain state
     /// [`apply_op_checks_no_state`](Self::apply_op_checks_no_state), then checks inherited from
     /// L1 that don't require chain state
-    /// [`apply_checks_no_state`](EthTransactionValidator::apply_checks_no_state).
+    /// [`EthTransactionValidator::apply_checks_no_state`].
     pub fn apply_checks_no_state(
         &self,
         origin: TransactionOrigin,
@@ -266,7 +266,7 @@ where
     /// Validates single transaction using given state.
     ///
     /// Under the hood calls checks against chain state inherited from L1
-    /// [`apply_checks_against_state`](EthTransactionValidator::apply_checks_against_state), then
+    /// [`EthTransactionValidator::apply_checks_against_state`], then
     /// OP specific checks against chain state
     /// [`apply_op_checks_against_state`](Self::apply_op_checks_against_state).
     pub fn apply_checks_against_state<P>(
@@ -291,7 +291,7 @@ where
     ///
     /// Returns the unmodified transaction if all checks pass, ready to be passed onto the next set
     /// of checks in the validation pipeline, namely the checks not requiring chain state that are
-    /// inherited from l1 [`apply_checks_no_state`](EthTransactionValidator::apply_checks_no_state).
+    /// inherited from l1 [`EthTransactionValidator::apply_checks_no_state`].
     ///
     /// Applies OP-protocol specific checks that don't require chain state:
     /// - ensures tx is not eip4844
@@ -314,7 +314,7 @@ where
     /// relevant state.
     ///
     /// Takes as parameter a transaction that has successfully passed pipeline for inherited L1
-    /// checks [`apply_checks_against_state`](EthTransactionValidator::apply_checks_against_state).
+    /// checks [`EthTransactionValidator::apply_checks_against_state`].
     ///
     /// Applies OP-protocol specific checks against chain state:
     /// - ensures that the account has enough balance to cover the L1 gas cost
@@ -420,7 +420,7 @@ where
         validation_outcome
     }
 
-    /// Wrapper for [`is_valid_cross_tx`](SupervisorClient::is_valid_cross_tx).
+    /// Wrapper for [`SupervisorClient::is_valid_cross_tx`].
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
