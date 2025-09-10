@@ -131,7 +131,7 @@ where
                 .ok_or_else(|| eyre::eyre!("Block not found"))?;
 
             debug!(
-                "  ✓ Block {} created with {} transactions",
+                "   Block {} created with {} transactions",
                 block_info.number,
                 block.transactions.len()
             );
