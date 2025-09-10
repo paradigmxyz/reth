@@ -174,7 +174,11 @@ pub(crate) fn block_to_new_payload(
                             payload,
                             cancun.versioned_hashes.clone(),
                             cancun.parent_beacon_block_root,
-                            prague.requests.requests_hash(),
+                            if let alloy_eips::eip7685::RequestsOrHash::Requests(requests) = &prague.requests {
+                                requests.iter().collect::<Vec<_>>()
+                            } else {
+                                Vec::new()
+                            },
                         ))?,
                     )
                 }
