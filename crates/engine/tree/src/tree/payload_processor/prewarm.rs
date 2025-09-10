@@ -28,6 +28,10 @@ use std::{
 };
 use tracing::{debug, trace};
 
+/// Optimism deposit transaction type (0x7E/126).
+/// These transactions set critical metadata (L1 block info, fees) that affect all subsequent transactions.
+const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126;
+
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
 ///
@@ -112,10 +116,11 @@ where
 
             while let Ok(executable) = pending.recv() {
                 // For Optimism chains: The first transaction is always a deposit transaction
-                // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
-                // affecting all subsequent transactions. We broadcast the first transaction
-                // to all workers to ensure they have this critical state.
-                let should_broadcast = is_first_tx && executable.tx().is_type(126);
+                // that sets critical metadata (L1 block info, fees) affecting all subsequent
+                // transactions. We broadcast the first transaction to all workers to ensure
+                // they have this critical state.
+                let should_broadcast =
+                    is_first_tx && executable.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE);
                 is_first_tx = false;
 
                 if should_broadcast {
