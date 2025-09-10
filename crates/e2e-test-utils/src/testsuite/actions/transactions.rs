@@ -29,8 +29,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
-use reth_rpc_api::clients::EthApiClient;
-use std::str::FromStr;
+use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use tracing::debug;
 
 /// Action to produce blocks with real storage-modifying transactions.
@@ -254,15 +253,270 @@ pub async fn create_transfer_tx(
     Ok(Bytes::from(encoded))
 }
 
-/// Helper to create approve transaction for the default test token contract.
-/// The default contract address is 0x77d34361f991fa724ff1db9b1d760063a16770db
-/// which is used in the trie corruption tests.
-pub async fn create_test_approve_tx(
-    spender: Address,
-    amount: U256,
-    nonce: u64,
-    chain_id: u64,
-) -> Result<Bytes> {
-    let token_address = Address::from_str("0x77d34361f991fa724ff1db9b1d760063a16770db")?;
-    create_approve_tx(token_address, spender, amount, nonce, chain_id).await
+/// Helper struct to hold payload-related data together
+struct PayloadContext {
+    payload_attributes: PayloadAttributes,
+    execution_payload_envelope: ExecutionPayloadEnvelopeV3,
+    block_hash: B256,
+}
+
+/// Action to produce blocks with transactions using Engine API instead of RPC.
+///
+/// This action:
+/// 1. Sends transactions to the txpool (same as `ProduceBlockWithTransactions`)
+/// 2. Uses payload builder + Engine API to create blocks (different approach)
+/// 3. This should generate proper trie updates unlike the RPC approach
+#[derive(Debug)]
+pub struct ProduceBlockWithTransactionsViaEngineAPI {
+    /// Transactions to send (as raw signed transaction bytes)
+    pub transactions: Vec<Bytes>,
+    /// Tag to capture the block with
+    pub block_tag: String,
+    /// Optional node index to send transactions to
+    pub node_idx: Option<usize>,
+}
+
+impl ProduceBlockWithTransactionsViaEngineAPI {
+    /// Create a new action with transactions and block tag
+    pub fn new(transactions: Vec<Bytes>, block_tag: impl Into<String>) -> Self {
+        Self { transactions, block_tag: block_tag.into(), node_idx: None }
+    }
+
+    /// Set which node to use (defaults to node 0)
+    pub const fn with_node_idx(mut self, node_idx: usize) -> Self {
+        self.node_idx = Some(node_idx);
+        self
+    }
+
+    /// Send transactions to the node's transaction pool
+    async fn send_transactions_to_pool<Engine>(
+        &self,
+        env: &Environment<Engine>,
+        node_idx: usize,
+    ) -> Result<Vec<B256>>
+    where
+        Engine: EngineTypes + PayloadTypes,
+    {
+        let mut tx_hashes = Vec::new();
+
+        for (idx, tx_bytes) in self.transactions.iter().enumerate() {
+            let tx_hash = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                Block,
+                Receipt,
+                Header,
+            >::send_raw_transaction(&env.node_clients[node_idx].rpc, tx_bytes.clone()).await?;
+
+            tx_hashes.push(tx_hash);
+            debug!("Sent transaction {}: hash {}", idx + 1, tx_hash);
+        }
+
+        // Wait for transactions to be in the pool
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        Ok(tx_hashes)
+    }
+
+    /// Get the latest block and build payload attributes
+    async fn build_payload_attributes<Engine>(
+        &self,
+        env: &Environment<Engine>,
+        node_idx: usize,
+    ) -> Result<(Block, PayloadAttributes)>
+    where
+        Engine: EngineTypes + PayloadTypes,
+    {
+        let latest_block = EthApiClient::<
+            TransactionRequest,
+            Transaction,
+            Block,
+            Receipt,
+            Header,
+        >::block_by_number(
+            &env.node_clients[node_idx].rpc,
+            alloy_eips::BlockNumberOrTag::Latest,
+            false,
+        )
+        .await?
+        .ok_or_else(|| eyre::eyre!("No latest block"))?;
+
+        let payload_attributes = PayloadAttributes {
+            timestamp: latest_block.header.timestamp + 1,
+            prev_randao: latest_block.header.mix_hash,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(B256::ZERO),
+        };
+
+        Ok((latest_block, payload_attributes))
+    }
+
+    /// Trigger payload building via forkchoice update and get the built payload
+    async fn build_payload<Engine>(
+        &self,
+        env: &Environment<Engine>,
+        node_idx: usize,
+        latest_block: &Block,
+        payload_attributes: PayloadAttributes,
+    ) -> Result<(PayloadContext, Engine::ExecutionPayloadEnvelopeV3)>
+    where
+        Engine: EngineTypes + PayloadTypes,
+        Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+        Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3> + Clone,
+    {
+        let engine_client = env.node_clients[node_idx].engine.http_client();
+
+        // Send forkchoice update to trigger payload building
+        let forkchoice_state = alloy_rpc_types_engine::ForkchoiceState {
+            head_block_hash: latest_block.header.hash,
+            safe_block_hash: latest_block.header.hash,
+            finalized_block_hash: latest_block.header.hash,
+        };
+
+        let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+            &engine_client,
+            forkchoice_state,
+            Some(payload_attributes.clone().into()),
+        )
+        .await?;
+
+        let payload_id = fcu_result
+            .payload_id
+            .ok_or_else(|| eyre::eyre!("No payload ID returned from forkchoice update"))?;
+
+        // Wait for payload to be built
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+        // Get the built payload
+        let payload = EngineApiClient::<Engine>::get_payload_v3(&engine_client, payload_id).await?;
+        let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload.clone().into();
+
+        // Extract block hash once to avoid repetition
+        let block_hash =
+            execution_payload_envelope.execution_payload.payload_inner.payload_inner.block_hash;
+
+        debug!(
+            "Built payload with {} transactions, block hash: {}",
+            execution_payload_envelope
+                .execution_payload
+                .payload_inner
+                .payload_inner
+                .transactions
+                .len(),
+            block_hash
+        );
+
+        Ok((
+            PayloadContext {
+                payload_attributes,
+                execution_payload_envelope,
+                block_hash,
+            },
+            payload,
+        ))
+    }
+
+    /// Execute the payload via newPayload and make it canonical
+    async fn execute_payload<Engine>(
+        &self,
+        env: &mut Environment<Engine>,
+        node_idx: usize,
+        payload_context: &PayloadContext,
+        latest_block_number: u64,
+        full_payload: Engine::ExecutionPayloadEnvelopeV3,
+    ) -> Result<()>
+    where
+        Engine: EngineTypes + PayloadTypes,
+        Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    {
+        let engine_client = env.node_clients[node_idx].engine.http_client();
+
+        // Update node state before execution
+        let node_state = env.node_state_mut(node_idx)?;
+        node_state.latest_payload_built = Some(payload_context.payload_attributes.clone());
+        node_state.latest_payload_envelope = Some(full_payload);
+        node_state
+            .payload_attributes
+            .insert(latest_block_number + 1, payload_context.payload_attributes.clone());
+
+        // Send the payload via newPayload
+        let new_payload_result = EngineApiClient::<Engine>::new_payload_v3(
+            &engine_client,
+            payload_context.execution_payload_envelope.execution_payload.clone(),
+            vec![],
+            B256::ZERO,
+        )
+        .await?;
+
+        debug!("New payload result: {:?}", new_payload_result.status);
+
+        // Make the payload canonical with another forkchoice update
+        let new_forkchoice_state = alloy_rpc_types_engine::ForkchoiceState {
+            head_block_hash: payload_context.block_hash,
+            safe_block_hash: payload_context.block_hash,
+            finalized_block_hash: payload_context.block_hash,
+        };
+
+        EngineApiClient::<Engine>::fork_choice_updated_v3(
+            &engine_client,
+            new_forkchoice_state,
+            None,
+        )
+        .await?;
+
+        debug!("Block made canonical via Engine API");
+
+        Ok(())
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlockWithTransactionsViaEngineAPI
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3> + Clone,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Validate node index
+            let node_idx = self.node_idx.unwrap_or(0);
+            if node_idx >= env.node_clients.len() {
+                return Err(eyre::eyre!("Node index {} out of bounds", node_idx));
+            }
+
+            debug!(
+                "ProduceBlockWithTransactionsViaEngineAPI: Processing {} transactions on node {}",
+                self.transactions.len(),
+                node_idx
+            );
+
+            // Step 1: Send transactions to pool
+            let _tx_hashes = self.send_transactions_to_pool(env, node_idx).await?;
+
+            // Step 2: Build payload attributes
+            let (latest_block, payload_attributes) =
+                self.build_payload_attributes(env, node_idx).await?;
+
+            // Step 3: Build payload via Engine API
+            let (payload_context, full_payload) =
+                self.build_payload(env, node_idx, &latest_block, payload_attributes).await?;
+
+            // Step 4: Execute payload and make canonical
+            self.execute_payload(
+                env,
+                node_idx,
+                &payload_context,
+                latest_block.header.number,
+                full_payload,
+            )
+            .await?;
+
+            // Step 5: Capture the block
+            let mut capture = CaptureBlock::new(&self.block_tag);
+            capture.execute(env).await?;
+
+            Ok(())
+        })
+    }
 }
