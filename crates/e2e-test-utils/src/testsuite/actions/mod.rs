@@ -16,6 +16,7 @@ pub mod node_ops;
 pub mod produce_blocks;
 pub mod reorg;
 pub mod transactions;
+pub mod trie;
 
 pub use custom_fcu::{BlockReference, FinalizeBlock, SendForkchoiceUpdate};
 pub use engine_api::{
@@ -34,7 +35,11 @@ pub use produce_blocks::{
     UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
-pub use transactions::ProduceBlockWithTransactions;
+pub use transactions::{ProduceBlockWithTransactions, ProduceBlockWithTransactionsViaEngineAPI};
+pub use trie::{
+    AssertBranchNodeAtPrefix, AssertMissingTrieUpdates, SendValidForkBlock,
+    VerifyAnyTrieUpdatesEmitted,
+};
 
 /// An action that can be performed on an instance.
 ///
