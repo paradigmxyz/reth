@@ -247,7 +247,6 @@ where
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
-        I::Tx: Clone,
     {
         let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
         let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
