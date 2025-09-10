@@ -29,8 +29,6 @@ use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::{str::FromStr, sync::Arc};
 use tracing::info;
 
-// Trie-related actions are now available from the main actions module
-
 /// Storage contract address for our tests
 const STORAGE_CONTRACT: &str = "0x1234567890123456789012345678901234567890";
 
@@ -40,99 +38,61 @@ const TEST_PRIVATE_KEY_1: &str =
 const TEST_PRIVATE_KEY_2: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
+/// Storage slot configuration for trie fork tests.
+/// 
+/// These slots are specifically chosen to create branch nodes in the Merkle Patricia Trie
+/// by having common hash prefixes. This allows us to test trie update behavior during
+/// fork and reorg scenarios.
+struct StorageSlots {
+    slot_a: U256, // Group 1: 0x70e0 prefix - Same value in both chains
+    slot_b: U256, // Group 1: 0x70e0 prefix - Different values
+    slot_c: U256, // Group 1: 0x70e0 prefix - Canonical only
+    slot_d: U256, // Group 2: 0x05f3 prefix - Different values
+}
+
+/// Storage values used to test different chain states.
+/// 
+/// These values are designed to create specific trie node patterns:
+/// - Shared values test partial state overlap between chains
+/// - Different values force trie node updates during reorgs
+/// - Zero values (via deletion) test trie node removal
+struct StorageValues {
+    shared: U256,      // Used in both chains
+    canonical_b: U256, // Canonical chain value for slot B
+    canonical_c: U256, // Canonical chain value for slot C
+    canonical_d: U256, // Canonical chain value for slot D
+    fork_b: U256,      // Fork chain value for slot B
+    fork_d: U256,      // Fork chain value for slot D
+}
+
+/// Test transactions for different blocks
+struct TestTransactions {
+    /// Transactions for canonical Block 1 (sets initial storage values)
+    canonical: Vec<Bytes>,
+    /// Transactions for fork Block 1' (creates competing state)
+    fork: Vec<Bytes>,
+    /// Transactions for Block 2 (deletes storage after reorg)
+    deletion: Vec<Bytes>,
+}
+
+/// Test trie updates during fork and reorg scenarios
 #[tokio::test]
 async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
     reth_tracing::init_test_tracing();
 
-    println!("\n=== TRIE FORK AND REORG TEST ===");
-    println!("Testing trie updates when:");
-    println!("  1. Creating fork blocks with different storage values");
-    println!("  2. Performing reorgs between chains");
-    println!("  3. Deleting storage after reorg");
-    println!("\nGenesis setup creates complex trie with branch nodes.");
-
-    // Create chain spec with storage contract pre-deployed for our test
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(serde_json::from_value(create_test_genesis()).unwrap())
-            .cancun_activated()
-            .build(),
-    );
-
-    let setup = Setup::<EthEngineTypes>::default()
-        .with_chain_spec(chain_spec)
-        .with_network(NetworkSetup::single_node())
-        .with_tree_config(
-            TreeConfig::default()
-                .with_state_root_fallback(false)
-                .with_always_compare_trie_updates(true),
-        );
-
-    // ========================================
-    // STORAGE SLOT CONFIGURATION
-    // ========================================
-    // Slots are chosen to hash to common prefixes, creating branch nodes in the trie
-    
-    // Group 1: Slots hashing to prefix 0x70e0 (creates branch at depth 2)
-    let slot_a = U256::from(0x3649); // Same value in both canonical and fork
-    let slot_b = U256::from(0x7651); // Different values in canonical vs fork
-    let slot_c = U256::from(0xb542); // Only used in canonical chain
-    
-    // Group 2: Slots hashing to prefix 0x05f3 (creates another branch)
-    let slot_d = U256::from(0x1cd9); // Different values in canonical vs fork
-
-    // ========================================
-    // STORAGE VALUES
-    // ========================================
-    
-    // Canonical chain values (Block 1)
-    let shared_value = U256::from(0x1111);     // Slot A: Same in both chains
-    let canonical_b = U256::from(0x2222);      // Slot B: Canonical only
-    let canonical_c = U256::from(0x3333);      // Slot C: Canonical only  
-    let canonical_d = U256::from(0x4444);      // Slot D: Canonical only
-    
-    // Fork chain values (Block 1')
-    let fork_b = U256::from(0x5555);           // Slot B: Different in fork
-    let fork_d = U256::from(0x6666);           // Slot D: Different in fork
-    
-    // Deletion value
-    let zero = U256::ZERO;
-
-    // ========================================
-    // TRANSACTION CREATION
-    // ========================================
-    
-    // Canonical Block 1 transactions
-    let canonical_txs = vec![
-        create_storage_tx_with_signer(slot_a, shared_value, 0, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slot_b, canonical_b, 1, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slot_c, canonical_c, 2, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slot_d, canonical_d, 3, TEST_PRIVATE_KEY_1).await?,
-    ];
-
-    // Fork Block 1' transactions (different values for slots B and D)
-    let fork_txs = vec![
-        create_storage_tx_with_signer(slot_a, shared_value, 0, TEST_PRIVATE_KEY_2).await?, // Same as canonical
-        create_storage_tx_with_signer(slot_b, fork_b, 1, TEST_PRIVATE_KEY_2).await?,       // Different!
-        create_storage_tx_with_signer(slot_d, fork_d, 2, TEST_PRIVATE_KEY_2).await?,       // Different!
-    ];
-
-    // Block 2 transactions: Delete storage slots
-    let deletion_txs = vec![
-        create_storage_tx_with_signer(slot_a, zero, 2, TEST_PRIVATE_KEY_2).await?,
-        create_storage_tx_with_signer(slot_d, zero, 3, TEST_PRIVATE_KEY_2).await?,
-    ];
-
+    // Initialize test configuration
+    let setup = create_test_setup();
+    let slots = init_storage_slots();
+    let values = init_storage_values();
+    let txs = create_test_transactions(&slots, &values).await?;
     let storage_contract_addr = Address::from_str(STORAGE_CONTRACT)?;
 
     // ========================================
     // TEST EXECUTION
     // ========================================
-    
+
     let test = TestBuilder::new()
         .with_setup(setup)
-        
         // ----------------------------------------
         // PHASE 1: Create canonical chain
         // ----------------------------------------
@@ -140,13 +100,12 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
             info!("Creating canonical Block 1 with storage values:");
             info!("  Slot A: 0x1111, B: 0x2222, C: 0x3333, D: 0x4444");
             ProduceBlockWithTransactionsViaEngineAPI::new(
-                canonical_txs.clone(),
+                txs.canonical.clone(),
                 "block_1_canonical",
             )
         })
         .with_action(CaptureBlock::new("block_1_canonical"))
         .with_action(VerifyAnyTrieUpdatesEmitted::new())
-        
         // Verify branch nodes were created
         .with_action(
             AssertBranchNodeAtPrefix::new("block_1_canonical", storage_contract_addr, "70e0")
@@ -158,25 +117,19 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
                 .expect_present(true)
                 .with_debug_contains("BranchNodeCompact"),
         )
-        
         // ----------------------------------------
         // PHASE 2: Create competing fork
         // ----------------------------------------
         .with_action({
             info!("Creating fork Block 1' with different storage:");
             info!("  Slot A: 0x1111 (same), B: 0x5555 (different), D: 0x6666 (different)");
-            SendValidForkBlock::new(
-                fork_txs.clone(),
-                "block_1_fork",
-            )
+            SendValidForkBlock::new(txs.fork.clone(), "block_1_fork")
         })
-        
         // Verify fork block has missing trie updates (the bug condition)
         .with_action({
             info!("Checking fork block trie updates (expecting missing due to bug)...");
             AssertMissingTrieUpdates::new("block_1_fork").expect_missing(true)
         })
-        
         // ----------------------------------------
         // PHASE 3: Reorg to fork chain
         // ----------------------------------------
@@ -184,18 +137,16 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
             info!("Triggering reorg to make fork chain canonical...");
             ReorgTo::new_from_tag("block_1_fork")
         })
-        
         // ----------------------------------------
         // PHASE 4: Delete storage after reorg
         // ----------------------------------------
         .with_action({
             info!("Creating Block 2 with storage deletions...");
             ProduceBlockWithTransactionsViaEngineAPI::new(
-                deletion_txs.clone(),
+                txs.deletion.clone(),
                 "block_2_after_reorg",
             )
         })
-        
         // ----------------------------------------
         // PHASE 5: Verify bug manifestation
         // ----------------------------------------
@@ -346,4 +297,111 @@ async fn create_storage_tx_with_signer(
         <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &wallet).await?;
 
     Ok(signed_tx.encoded_2718().into())
+}
+
+/// Creates the test environment setup with proper configuration for trie testing.
+/// 
+/// This setup includes:
+/// - A chain spec with pre-deployed storage contract and test accounts
+/// - Single node network configuration
+/// - Tree config with trie update comparison enabled to detect the bug
+/// 
+/// The configuration specifically enables `always_compare_trie_updates` which
+/// is crucial for detecting missing trie updates in fork blocks.
+fn create_test_setup() -> Setup<EthEngineTypes> {
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_value(create_test_genesis()).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    Setup::<EthEngineTypes>::default()
+        .with_chain_spec(chain_spec)
+        .with_network(NetworkSetup::single_node())
+        .with_tree_config(
+            TreeConfig::default()
+                .with_state_root_fallback(false)
+                .with_always_compare_trie_updates(true),
+        )
+}
+
+/// Initializes storage slots that deliberately create branch nodes in the trie.
+/// 
+/// The slot values are carefully chosen so their keccak256 hashes share common prefixes:
+/// - Slots a, b, c hash to prefix 0x70e0, creating a branch node at depth 2
+/// - Slot d hashes to prefix 0x05f3, creating another branch node
+/// 
+/// This trie structure is essential for reproducing the bug where fork blocks
+/// have missing trie updates for branch nodes.
+fn init_storage_slots() -> StorageSlots {
+    StorageSlots {
+        // Group 1: Slots hashing to prefix 0x70e0 (creates branch at depth 2)
+        slot_a: U256::from(0x3649),
+        slot_b: U256::from(0x7651),
+        slot_c: U256::from(0xb542),
+        // Group 2: Slots hashing to prefix 0x05f3 (creates another branch)
+        slot_d: U256::from(0x1cd9),
+    }
+}
+
+/// Initializes storage values that create specific test conditions.
+/// 
+/// The values are designed to:
+/// - Create partial state overlap (shared value 0x1111)
+/// - Force trie updates during reorgs (different values for b and d)
+/// - Test trie node deletion (values will be set to zero in deletion phase)
+/// 
+/// These specific values help expose the bug where trie updates are missing
+/// in fork blocks, leading to incorrect state after reorgs.
+fn init_storage_values() -> StorageValues {
+    StorageValues {
+        shared: U256::from(0x1111),
+        canonical_b: U256::from(0x2222),
+        canonical_c: U256::from(0x3333),
+        canonical_d: U256::from(0x4444),
+        fork_b: U256::from(0x5555),
+        fork_d: U256::from(0x6666),
+    }
+}
+
+/// Creates all test transactions for the different phases of the test.
+/// 
+/// Generates three sets of transactions:
+/// 1. Canonical transactions: Set up initial storage state with all slots populated
+/// 2. Fork transactions: Create competing state with some overlapping values
+/// 3. Deletion transactions: Clear storage slots to test trie node removal
+/// 
+/// Each transaction is signed with test private keys and properly sequenced with
+/// incrementing nonces to ensure correct execution order.
+async fn create_test_transactions(
+    slots: &StorageSlots,
+    values: &StorageValues,
+) -> Result<TestTransactions> {
+    // Canonical Block 1 transactions
+    let canonical = vec![
+        create_storage_tx_with_signer(slots.slot_a, values.shared, 0, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_b, values.canonical_b, 1, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_c, values.canonical_c, 2, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_d, values.canonical_d, 3, TEST_PRIVATE_KEY_1)
+            .await?,
+    ];
+
+    // Fork Block 1' transactions (different values for slots B and D)
+    let fork = vec![
+        create_storage_tx_with_signer(slots.slot_a, values.shared, 0, TEST_PRIVATE_KEY_2).await?,
+        create_storage_tx_with_signer(slots.slot_b, values.fork_b, 1, TEST_PRIVATE_KEY_2).await?,
+        create_storage_tx_with_signer(slots.slot_d, values.fork_d, 2, TEST_PRIVATE_KEY_2).await?,
+    ];
+
+    // Block 2 transactions: Delete storage slots
+    let deletion = vec![
+        create_storage_tx_with_signer(slots.slot_a, U256::ZERO, 2, TEST_PRIVATE_KEY_2).await?,
+        create_storage_tx_with_signer(slots.slot_d, U256::ZERO, 3, TEST_PRIVATE_KEY_2).await?,
+    ];
+
+    Ok(TestTransactions { canonical, fork, deletion })
 }
