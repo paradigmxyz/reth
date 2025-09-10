@@ -182,7 +182,7 @@ where
         let executor = self.evm_config.batch_executor(cached_db);
 
         let mut accessed_blacklisted = None;
-        let output = executor.execute_with_state_closure((&block).into(), |state| {
+        let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by scanning
                 // the `State`'s cache that records everything read from database during execution.

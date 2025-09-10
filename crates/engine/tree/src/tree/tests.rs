@@ -6,7 +6,9 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1};
+use alloy_rpc_types_engine::{
+    ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+};
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -491,7 +493,6 @@ fn test_disconnected_block() {
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-    // TODO Pelle:
     let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
     assert_eq!(
         outcome,

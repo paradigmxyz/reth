@@ -8,7 +8,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -25,7 +25,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{ConfigureEvm, OnStateHook};
-use reth_payload_builder::{PayloadBuilderError, PayloadBuilderHandle, PayloadId};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
@@ -2353,7 +2353,6 @@ where
         );
 
         let start = Instant::now();
-        //here
         let executed = execute(&mut self.payload_validator, input, ctx)?;
 
         // if the parent is the canonical head, we can insert the block as the pending block

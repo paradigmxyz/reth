@@ -82,15 +82,14 @@ fn eip_4788_non_genesis_call() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute a block without parent beacon block root, expect err
-    let block = RecoveredBlock::new_unhashed(
-        Block {
-            header: header.clone(),
-            body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-        },
-        vec![],
-    );
     let err = executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block {
+                header: header.clone(),
+                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            },
+            vec![],
+        ))
         .expect_err("Executing cancun block without parent beacon block root field should fail");
 
     assert!(matches!(
@@ -102,14 +101,15 @@ fn eip_4788_non_genesis_call() {
     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
 
     // Now execute a block with the fixed header, ensure that it does not fail
-    let block = RecoveredBlock::new_unhashed(
-        Block {
-            header: header.clone(),
-            body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-        },
-        vec![],
-    );
-    executor.execute_one(&block).unwrap();
+    executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block {
+                header: header.clone(),
+                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            },
+            vec![],
+        ))
+        .unwrap();
 
     // check the actual storage of the contract - it should be:
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
@@ -160,16 +160,15 @@ fn eip_4788_no_code_cancun() {
     let provider = EthEvmConfig::new(chain_spec);
 
     // attempt to execute an empty block with parent beacon block root, this should not fail
-    let block = RecoveredBlock::new_unhashed(
-        Block {
-            header,
-            body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-        },
-        vec![],
-    );
     provider
         .batch_executor(db)
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while cancun is active should not fail");
 }
 
@@ -204,15 +203,14 @@ fn eip_4788_empty_account_call() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute an empty block with parent beacon block root, this should not fail
-    let block = RecoveredBlock::new_unhashed(
-        Block {
-            header,
-            body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
-        },
-        vec![],
-    );
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
+            },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while cancun is active should not fail");
 
     // ensure that the nonce of the system address account has not changed
@@ -239,22 +237,27 @@ fn eip_4788_genesis_call() {
 
     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
-    let block = RecoveredBlock::new_unhashed(
-        Block { header: header.clone(), body: Default::default() },
-        vec![],
-    );
-    let _err = executor.execute_one(&block).expect_err(
-        "Executing genesis cancun block with non-zero parent beacon block root field\
+    let _err = executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header: header.clone(), body: Default::default() },
+            vec![],
+        ))
+        .expect_err(
+            "Executing genesis cancun block with non-zero parent beacon block root field
     should fail",
-    );
+        );
 
     // fix header
     header.parent_beacon_block_root = Some(B256::ZERO);
 
     // now try to process the genesis block again, this time ensuring that a system contract
     // call does not occur
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
-    executor.execute_one(&block).unwrap();
+    executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
+        .unwrap();
 
     // there is no system contract call so there should be NO STORAGE CHANGES
     // this means we'll check the transition state
@@ -294,11 +297,12 @@ fn eip_4788_high_base_fee() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // Now execute a block with the fixed header, ensure that it does not fail
-    let block = RecoveredBlock::new_unhashed(
-        Block { header: header.clone(), body: Default::default() },
-        vec![],
-    );
-    executor.execute_one(&block).unwrap();
+    executor
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header: header.clone(), body: Default::default() },
+            vec![],
+        ))
+        .unwrap();
 
     // check the actual storage of the contract - it should be:
     // * The storage value at header.timestamp % HISTORY_BUFFER_LENGTH should be
@@ -359,9 +363,11 @@ fn eip_2935_pre_fork() {
     let header = Header { timestamp: 1, number: 1, ..Header::default() };
 
     // attempt to execute an empty block, this should not fail
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // ensure that the block hash was *not* written to storage, since this is before the fork
@@ -392,9 +398,11 @@ fn eip_2935_fork_activation_genesis() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute genesis block, this should not fail
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // ensure that the block hash was *not* written to storage, since there are no blocks
@@ -434,9 +442,11 @@ fn eip_2935_fork_activation_within_window_bounds() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the fork activation block, this should not fail
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
@@ -484,9 +494,11 @@ fn eip_2935_fork_activation_outside_window_bounds() {
     };
 
     // attempt to execute the fork activation block, this should not fail
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the hash for the ancestor of the fork activation block should be present
@@ -514,9 +526,11 @@ fn eip_2935_state_transition_inside_fork() {
     let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block, this should not fail
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // nothing should be written as the genesis has no ancestors
@@ -540,9 +554,11 @@ fn eip_2935_state_transition_inside_fork() {
     };
     let header_hash = header.hash_slow();
 
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the block hash of genesis should now be in storage, but not block 1
@@ -569,9 +585,11 @@ fn eip_2935_state_transition_inside_fork() {
         ..Header::default()
     };
 
-    let block = RecoveredBlock::new_unhashed(Block { header, body: Default::default() }, vec![]);
     executor
-        .execute_one(&block)
+        .execute_one(&RecoveredBlock::new_unhashed(
+            Block { header, body: Default::default() },
+            vec![],
+        ))
         .expect("Executing a block with no transactions while Prague is active should not fail");
 
     // the block hash of genesis and block 1 should now be in storage, but not block 2
@@ -646,10 +664,13 @@ fn eip_7002() {
 
     let mut executor = provider.batch_executor(db);
 
-    let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
-        .try_into_recovered()
+    let BlockExecutionResult { receipts, requests, .. } = executor
+        .execute_one(
+            &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+                .try_into_recovered()
+                .unwrap(),
+        )
         .unwrap();
-    let BlockExecutionResult { receipts, requests, .. } = executor.execute_one(&block).unwrap();
 
     let receipt = receipts.first().unwrap();
     assert!(receipt.success);
@@ -719,10 +740,11 @@ fn block_gas_limit_error() {
     let mut executor = evm_config.batch_executor(db);
 
     // Execute the block and capture the result
-    let block = Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
-        .try_into_recovered()
-        .unwrap();
-    let exec_result = executor.execute_one(&block);
+    let exec_result = executor.execute_one(
+        &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
+            .try_into_recovered()
+            .unwrap(),
+    );
 
     // Check if the execution result is an error and assert the specific error type
     match exec_result {
@@ -767,7 +789,7 @@ fn test_balance_increment_not_duplicated() {
         ..Header::default()
     };
 
-    let block = RecoveredBlock::new_unhashed(
+    let block = &RecoveredBlock::new_unhashed(
         Block {
             header,
             body: BlockBody {
@@ -786,7 +808,7 @@ fn test_balance_increment_not_duplicated() {
     let tx_clone = tx.clone();
 
     let _output = executor
-        .execute_with_state_hook(&block, move |_, state: &EvmState| {
+        .execute_with_state_hook(block, move |_, state: &EvmState| {
             if let Some(account) = state.get(&withdrawal_recipient) {
                 let _ = tx_clone.send(account.info.balance);
             }

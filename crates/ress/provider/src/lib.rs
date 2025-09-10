@@ -153,7 +153,7 @@ where
         // We allow block execution to fail, since we still want to record all accessed state by
         // invalid blocks.
         if let Err(error) = self.evm_config.batch_executor(&mut db).execute_with_state_closure(
-            (&*block).into(),
+            &block,
             |state: &State<_>| {
                 record.record_executed_state(state);
             },

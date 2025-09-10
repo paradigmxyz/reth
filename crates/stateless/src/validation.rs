@@ -198,7 +198,7 @@ where
     // Execute the block
     let executor = evm_config.executor(db);
     let output = executor
-        .execute((&current_block).into())
+        .execute(&current_block)
         .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
 
     // Post validation checks

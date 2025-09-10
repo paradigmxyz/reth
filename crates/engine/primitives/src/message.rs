@@ -1,10 +1,7 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError,
-    BeaconUpdatePayloadWithInclusionListError, EngineApiMessageVersion, ExecutionPayload,
-    ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
+    ExecutionPayload, ForkchoiceStatus,
 };
-use alloc::vec::Vec;
-use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
     PayloadStatus, PayloadStatusEnum,

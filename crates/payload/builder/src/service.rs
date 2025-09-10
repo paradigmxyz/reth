@@ -8,7 +8,6 @@ use crate::{
     PayloadJob,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;

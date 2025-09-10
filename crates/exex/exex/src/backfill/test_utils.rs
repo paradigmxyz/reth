@@ -70,7 +70,7 @@ where
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
-        .execute(block.into())?;
+        .execute(block)?;
     block_execution_output.state.reverts.sort();
 
     // Convert the block execution output to an execution outcome for committing to the database
@@ -207,8 +207,7 @@ where
     let executor = evm_config
         .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
 
-    let inputs = vec![&block1, &block2];
-    let mut execution_outcome = executor.execute_batch(inputs)?;
+    let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();
 
     // Commit the block's execution outcome to the database

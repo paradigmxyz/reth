@@ -34,13 +34,13 @@ async fn test_build_inclusion_list_respects_size_limit() {
 
     let tx1 = factory.validated(MockTransaction::legacy().with_gas_price(1_000_000_000u128));
     let tx2 = factory.validated(MockTransaction::legacy().with_gas_price(1_000_000_000u128));
-    
+
     let consensus_tx = tx1.transaction.clone().into_consensus().into_inner();
     let tx_sz = consensus_tx.encoded_2718().len();
-    
+
     let _ = pool.add_transaction(TransactionOrigin::External, tx1.transaction.clone()).await;
     let _ = pool.add_transaction(TransactionOrigin::External, tx2.transaction.clone()).await;
-    
+
     // Too small of a size limit
     let il_small = pool.build_inclusion_list(1_000_000_000, tx_sz.saturating_sub(1));
     assert!(il_small.is_empty(), "Inclusion list must respect a tiny size limit");
@@ -49,7 +49,8 @@ async fn test_build_inclusion_list_respects_size_limit() {
     let il_large = pool.build_inclusion_list(1_000_000_000, tx_sz);
     assert!(
         il_large.len() == 1,
-        "There should only be room for one Tx. IL Size: {:?}", il_large.len()
+        "There should only be room for one Tx. IL Size: {:?}",
+        il_large.len()
     );
 }
 

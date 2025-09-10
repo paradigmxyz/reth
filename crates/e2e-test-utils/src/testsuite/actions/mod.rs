@@ -317,7 +317,6 @@ pub fn expect_fcu_not_syncing_or_accepted(
             Ok(())
         }
         PayloadStatusEnum::InclusionListUnsatisfied => {
-            // Inclusion list unsatisfied is considered "not SYNCING or ACCEPTED" (i.e., an invalid-like status).
             debug!(
                 "{}: FCU status is INCLUSION_LIST_UNSATISFIED as expected (not SYNCING or ACCEPTED).",
                 context

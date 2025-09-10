@@ -258,7 +258,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.20.1"
-source = "git+https://github.com/PelleKrab/evm.git?branch=focil-20.1#88b9607c74df00c397ba86f296a0a20b87c3b588"
+source = "git+https://github.com/PelleKrab/evm.git?branch=focil-20.1#b076842c257917fbe9c84bb8c45ff82373319e89"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -290,7 +290,7 @@ dependencies = [
 [[package]]
 name = "alloy-hardforks"
 version = "0.3.0"
-source = "git+https://github.com/PelleKrab/hardforks.git?branch=focil-0.3.0#d9b89da561c7f536ce01045f339d3edb5c79cdd7"
+source = "git+https://github.com/PelleKrab/hardforks.git?branch=focil-0.3.0#947a35a81db76dbd1affc6e1d53b8c7d8f0650cb"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -3195,7 +3195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4484,7 +4484,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4940,7 +4940,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6841,7 +6841,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11222,7 +11222,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11235,7 +11235,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11293,7 +11293,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12092,7 +12092,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.8",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

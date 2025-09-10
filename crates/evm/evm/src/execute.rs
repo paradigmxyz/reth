@@ -514,7 +514,6 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        // Execute the block
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
@@ -533,14 +532,12 @@ where
     where
         H: OnStateHook + 'static,
     {
-        // 1) Execute the block’s native transactions with state hook
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
             .with_state_hook(Some(Box::new(state_hook)))
             .execute_block(block.transactions_recovered())?;
 
-        // 3) Revert dry-run transitions so only real block transitions remain
         self.db.merge_transitions(BundleRetention::Reverts);
 
         Ok(result)

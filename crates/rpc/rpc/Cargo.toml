@@ -42,7 +42,7 @@ reth-node-api.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
-alloy-evm = { workspace = true }
+alloy-evm = { workspace = true, features = ["overrides"] }
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
@@ -63,11 +63,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
-revm = { workspace = true, features = [
-    "optional_block_gas_limit",
-    "optional_eip3607",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc

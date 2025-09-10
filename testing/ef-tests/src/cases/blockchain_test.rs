@@ -237,7 +237,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         let executor = executor_provider.batch_executor(state_db);
 
         let output = executor
-            .execute_with_state_closure((&(*block).clone()).into(), |statedb: &State<_>| {
+            .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                 witness_record.record_executed_state(statedb);
             })
             .map_err(|err| Error::block_failed(block_number, err))?;

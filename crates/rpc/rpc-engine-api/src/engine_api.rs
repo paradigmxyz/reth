@@ -5,7 +5,6 @@ use crate::{
 
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip2718::Encodable2718,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,

@@ -13,11 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-revm = { workspace = true, features = [
-    "optional_block_gas_limit",
-    "optional_eip3607",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 reth-chain-state.workspace = true
 revm-inspectors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
@@ -36,7 +32,7 @@ reth-node-api.workspace = true
 reth-trie-common = { workspace = true, features = ["eip1186"] }
 
 # ethereum
-alloy-evm = { workspace = true }
+alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-rlp.workspace = true
 alloy-serde.workspace = true
 alloy-eips.workspace = true

@@ -98,14 +98,15 @@ mod tests {
         });
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
-        let block = RecoveredBlock::new_unhashed(
-            Block {
-                header,
-                body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
-            },
-            vec![addr, addr],
-        );
-        let output = executor.execute(&block).unwrap();
+        let output = executor
+            .execute(&RecoveredBlock::new_unhashed(
+                Block {
+                    header,
+                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                },
+                vec![addr, addr],
+            ))
+            .unwrap();
 
         let receipts = &output.receipts;
         let tx_receipt = &receipts[0];
@@ -170,15 +171,14 @@ mod tests {
         });
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
-        let block = RecoveredBlock::new_unhashed(
-            Block {
-                header,
-                body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
-            },
-            vec![addr, addr],
-        );
         let output = executor
-            .execute(&block)
+            .execute(&RecoveredBlock::new_unhashed(
+                Block {
+                    header,
+                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                },
+                vec![addr, addr],
+            ))
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = &output.receipts;

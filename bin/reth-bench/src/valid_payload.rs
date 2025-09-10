@@ -244,7 +244,6 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
     match message_version {
-        // TODO: (pelle) impl FCUv4 to alloy and _wait
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |

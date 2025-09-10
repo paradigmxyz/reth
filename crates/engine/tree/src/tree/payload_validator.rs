@@ -954,8 +954,7 @@ where
             let tx = recovered.inner();
             let h = tx.tx_hash();
 
-            // Skip blob (EIP-4844) transactions - IL handling for blobs is different and
-            // such transactions shouldn't be enforced by this inclusion-list check.
+            // Skip blob (EIP-4844) transactions
             if tx.is_eip4844() {
                 continue;
             }
