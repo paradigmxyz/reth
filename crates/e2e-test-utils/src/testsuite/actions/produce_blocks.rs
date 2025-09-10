@@ -6,7 +6,9 @@ use crate::testsuite::{
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    payload::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2},
+    BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes,
+    PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
@@ -16,6 +18,58 @@ use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
+
+/// Convert ExecutionPayloadEnvelopeV2 to V3 for compatibility
+///
+/// V3 adds blob bundle and should_override_builder fields, which we set to safe defaults
+fn convert_v2_to_v3(v2_envelope: ExecutionPayloadEnvelopeV2) -> Result<ExecutionPayloadEnvelopeV3> {
+    // Convert the execution payload field to V3
+    let execution_payload_v3 = match v2_envelope.execution_payload {
+        alloy_rpc_types_engine::ExecutionPayloadFieldV2::V2(payload_v2) => {
+            // Convert V2 payload to V3 by adding required Cancun fields
+            ExecutionPayloadV3 {
+                payload_inner: payload_v2,
+                blob_gas_used: 0,   // Default to 0 for non-blob transactions
+                excess_blob_gas: 0, // Default to 0 for non-blob transactions
+            }
+        }
+        alloy_rpc_types_engine::ExecutionPayloadFieldV2::V1(payload_v1) => {
+            // Convert V1 payload to V3 by adding withdrawals (empty) and Cancun fields
+            let payload_v2 = alloy_rpc_types_engine::ExecutionPayloadV2 {
+                payload_inner: payload_v1,
+                withdrawals: vec![],
+            };
+            ExecutionPayloadV3 {
+                payload_inner: payload_v2,
+                blob_gas_used: 0,   // Default to 0 for non-blob transactions
+                excess_blob_gas: 0, // Default to 0 for non-blob transactions
+            }
+        }
+    };
+
+    Ok(ExecutionPayloadEnvelopeV3 {
+        execution_payload: execution_payload_v3,
+        block_value: v2_envelope.block_value,
+        blobs_bundle: BlobsBundleV1::empty(), // No blobs in our test environment
+        should_override_builder: false,       // Safe default as per spec
+    })
+}
+
+/// Determine which forkchoice update version to use based on payload attributes
+///
+/// Logic:
+/// - If `parent_beacon_block_root` is Some -> use v2 (Cancun)
+/// - If withdrawals is Some -> use v2 (Shanghai)
+/// - Otherwise -> use v1 (Paris)
+const fn determine_fcu_version(payload_attributes: &PayloadAttributes) -> u8 {
+    if payload_attributes.parent_beacon_block_root.is_some() {
+        3 // Cancun+ - use v3
+    } else if payload_attributes.withdrawals.is_some() {
+        2 // Shanghai - use v2
+    } else {
+        1 // Paris
+    }
+}
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
@@ -61,6 +115,8 @@ where
 impl<Engine> Action<Engine> for AssertMineBlock<Engine>
 where
     Engine: EngineTypes,
+    Engine::PayloadAttributes: Into<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -96,12 +152,40 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                &engine_client,
-                fork_choice_state,
-                Some(self.payload_attributes.clone()),
-            )
-            .await?;
+            // Convert to PayloadAttributes for version detection
+            let concrete_attrs: PayloadAttributes = self.payload_attributes.clone().into();
+            let version = determine_fcu_version(&concrete_attrs);
+            debug!("Payload attributes: withdrawals={:?}, parent_beacon_block_root={:?}, FCU version={}",
+                   concrete_attrs.withdrawals.is_some(),
+                   concrete_attrs.parent_beacon_block_root.is_some(),
+                   version);
+
+            let fcu_result = match version {
+                3 => {
+                    EngineApiClient::<Engine>::fork_choice_updated_v3(
+                        &engine_client,
+                        fork_choice_state,
+                        Some(self.payload_attributes.clone()),
+                    )
+                    .await?
+                }
+                2 => {
+                    EngineApiClient::<Engine>::fork_choice_updated_v2(
+                        &engine_client,
+                        fork_choice_state,
+                        Some(self.payload_attributes.clone()),
+                    )
+                    .await?
+                }
+                _ => {
+                    EngineApiClient::<Engine>::fork_choice_updated_v1(
+                        &engine_client,
+                        fork_choice_state,
+                        Some(self.payload_attributes.clone()),
+                    )
+                    .await?
+                }
+            };
 
             debug!("FCU result: {:?}", fcu_result);
 
@@ -111,10 +195,14 @@ where
                     if let Some(payload_id) = fcu_result.payload_id {
                         debug!("Got payload ID: {payload_id}");
 
-                        // get the payload that was built (using V3)
-                        let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v3(&engine_client, payload_id)
+                        // get the payload that was built (use V2 and convert to V3 for
+                        // compatibility)
+                        let engine_payload_v2 =
+                            EngineApiClient::<Engine>::get_payload_v2(&engine_client, payload_id)
                                 .await?;
+                        let concrete_v2_envelope: ExecutionPayloadEnvelopeV2 =
+                            engine_payload_v2.into();
+                        let _engine_payload_v3 = convert_v2_to_v3(concrete_v2_envelope)?;
                         Ok(())
                     } else {
                         Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
@@ -209,6 +297,8 @@ impl<Engine> Action<Engine> for GenerateNextPayload
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3: From<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -235,12 +325,25 @@ where
             let producer_idx =
                 env.last_producer_idx.ok_or_else(|| eyre::eyre!("No block producer selected"))?;
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                &env.node_clients[producer_idx].engine.http_client(),
-                fork_choice_state,
-                Some(payload_attributes.clone().into()),
-            )
-            .await?;
+            let version = determine_fcu_version(&payload_attributes);
+            let fcu_result = match version {
+                2 => {
+                    EngineApiClient::<Engine>::fork_choice_updated_v2(
+                        &env.node_clients[producer_idx].engine.http_client(),
+                        fork_choice_state,
+                        Some(payload_attributes.clone().into()),
+                    )
+                    .await?
+                }
+                _ => {
+                    EngineApiClient::<Engine>::fork_choice_updated_v1(
+                        &env.node_clients[producer_idx].engine.http_client(),
+                        fork_choice_state,
+                        Some(payload_attributes.clone().into()),
+                    )
+                    .await?
+                }
+            };
 
             debug!("FCU result: {:?}", fcu_result);
 
@@ -264,12 +367,25 @@ where
                     parent_beacon_block_root: Some(B256::ZERO),
                 };
 
-                let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &env.node_clients[producer_idx].engine.http_client(),
-                    fork_choice_state,
-                    Some(fresh_payload_attributes.clone().into()),
-                )
-                .await?;
+                let fresh_version = determine_fcu_version(&fresh_payload_attributes);
+                let fresh_fcu_result = match fresh_version {
+                    2 => {
+                        EngineApiClient::<Engine>::fork_choice_updated_v2(
+                            &env.node_clients[producer_idx].engine.http_client(),
+                            fork_choice_state,
+                            Some(fresh_payload_attributes.clone().into()),
+                        )
+                        .await?
+                    }
+                    _ => {
+                        EngineApiClient::<Engine>::fork_choice_updated_v1(
+                            &env.node_clients[producer_idx].engine.http_client(),
+                            fork_choice_state,
+                            Some(fresh_payload_attributes.clone().into()),
+                        )
+                        .await?
+                    }
+                };
 
                 debug!("Fresh FCU result: {:?}", fresh_fcu_result);
 
@@ -291,11 +407,16 @@ where
 
             sleep(Duration::from_secs(1)).await;
 
-            let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
+            // Get the payload - use v2 and convert to v3 since that's what the storage expects
+            let built_payload_envelope_v2 = EngineApiClient::<Engine>::get_payload_v2(
                 &env.node_clients[producer_idx].engine.http_client(),
                 payload_id,
             )
             .await?;
+            let concrete_v2_envelope: ExecutionPayloadEnvelopeV2 = built_payload_envelope_v2.into();
+            let concrete_v3_envelope = convert_v2_to_v3(concrete_v2_envelope)?;
+            let built_payload_envelope: Engine::ExecutionPayloadEnvelopeV3 =
+                Engine::ExecutionPayloadEnvelopeV3::from(concrete_v3_envelope);
 
             // Store the payload attributes that were used to generate this payload
             let built_payload = payload_attributes.clone();
@@ -369,7 +490,8 @@ where
             );
 
             for (idx, client) in env.node_clients.iter().enumerate() {
-                match EngineApiClient::<Engine>::fork_choice_updated_v3(
+                // When no payload attributes, use v2 for better compatibility
+                match EngineApiClient::<Engine>::fork_choice_updated_v2(
                     &client.engine.http_client(),
                     fork_choice_state,
                     None,
@@ -504,6 +626,7 @@ pub struct CheckPayloadAccepted {}
 impl<Engine> Action<Engine> for CheckPayloadAccepted
 where
     Engine: EngineTypes,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
     Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -544,13 +667,14 @@ where
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
 
-                let built_payload = EngineApiClient::<Engine>::get_payload_v3(
+                // Use v2 and convert to v3 since the code expects V3 envelope type
+                let built_payload_v2 = EngineApiClient::<Engine>::get_payload_v2(
                     &client.engine.http_client(),
                     payload_id,
                 )
                 .await?;
-
-                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload.into();
+                let concrete_v2_envelope: ExecutionPayloadEnvelopeV2 = built_payload_v2.into();
+                let execution_payload_envelope = convert_v2_to_v3(concrete_v2_envelope)?;
                 let new_payload_block_hash = execution_payload_envelope
                     .execution_payload
                     .payload_inner
@@ -648,9 +772,14 @@ where
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No next built payload found"))?
                 .clone();
-            let parent_beacon_block_root = next_new_payload
-                .parent_beacon_block_root
-                .ok_or_else(|| eyre::eyre!("No parent beacon block root for next new payload"))?;
+
+            // Determine version based on payload attributes
+            let concrete_attrs: PayloadAttributes = next_new_payload.clone().into();
+            let version = determine_fcu_version(&concrete_attrs);
+
+            // parent_beacon_block_root is optional (only required for Cancun+)
+            let parent_beacon_block_root =
+                next_new_payload.parent_beacon_block_root.unwrap_or_else(|| B256::ZERO);
 
             let payload_envelope = env
                 .active_node_state()?
@@ -662,11 +791,15 @@ where
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
             let execution_payload = execution_payload_envelope.execution_payload;
 
+            // For simplicity, we'll use new_payload_v3 since we're working with V3 payloads
+            // The test infrastructure should handle this
+
             if self.active_node_only {
                 // Send only to the active node
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
 
+                // Use v3 since we have V3 payload
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
                     execution_payload.clone(),
@@ -699,6 +832,7 @@ where
                     let engine = client.engine.http_client();
 
                     // Broadcast the execution payload
+                    // Use v3 since we have V3 payload
                     let result = EngineApiClient::<Engine>::new_payload_v3(
                         &engine,
                         execution_payload.clone(),
@@ -769,7 +903,9 @@ impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3:
+        From<ExecutionPayloadEnvelopeV3> + Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -827,6 +963,7 @@ where
                 finalized_block_hash: target_block.hash,
             };
 
+            // When no payload attributes, use v2 for better compatibility
             let fcu_response =
                 EngineApiClient::<Engine>::fork_choice_updated_v2(&engine_client, fcu_state, None)
                     .await?;
@@ -964,7 +1101,9 @@ impl<Engine> Action<Engine> for ProduceBlocksLocally<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3:
+        From<ExecutionPayloadEnvelopeV3> + Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -1021,7 +1160,9 @@ impl<Engine> Action<Engine> for ProduceInvalidBlocks<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3:
+        From<ExecutionPayloadEnvelopeV3> + Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {

@@ -141,6 +141,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .unwrap(),
                 )
                 .paris_activated()
+                .cancun_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -158,7 +159,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .as_secs(),
                 prev_randao: B256::random(),
                 suggested_fee_recipient: Address::random(),
-                withdrawals: None,
+                withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             },
         ));
