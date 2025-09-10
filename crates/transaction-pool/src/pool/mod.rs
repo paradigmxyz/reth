@@ -75,7 +75,7 @@ use crate::{
             BlobTransactionSidecarListener, PendingTransactionHashListener, PoolEventBroadcast,
             TransactionListener,
         },
-        state::{SubPool, TxState},
+        state::SubPool,
         txpool::{SenderInfo, TxPool},
         update::UpdateOutcome,
     },
@@ -1059,38 +1059,19 @@ where
     /// that indicates the specific condition preventing it from being pending.
     fn determine_transaction_state<U: PoolTransaction>(
         added: &AddedTransaction<U>,
-        pool: &RwLockWriteGuard<'_, TxPool<T>>,
+        _pool: &RwLockWriteGuard<'_, TxPool<T>>,
     ) -> AddedTransactionState {
         match added.subpool() {
             SubPool::Pending => AddedTransactionState::Pending,
-            SubPool::Queued => {
-                let tx_id = match added {
-                    AddedTransaction::Pending(pending_tx) => pending_tx.transaction.id(),
-                    AddedTransaction::Parked { transaction, .. } => transaction.id(),
-                };
-
-                if let Some(internal_tx) = pool.all().get(tx_id) {
-                    let state = internal_tx.state;
-
-                    if !state.contains(TxState::NO_NONCE_GAPS) {
-                        AddedTransactionState::Queued(QueuedReason::NonceGap)
-                    } else if !state.contains(TxState::ENOUGH_BALANCE) {
-                        AddedTransactionState::Queued(QueuedReason::InsufficientBalance)
-                    } else if !state.contains(TxState::NO_PARKED_ANCESTORS) {
-                        AddedTransactionState::Queued(QueuedReason::ParkedAncestors)
-                    } else if !state.contains(TxState::NOT_TOO_MUCH_GAS) {
-                        AddedTransactionState::Queued(QueuedReason::TooMuchGas)
-                    } else {
-                        // Fallback for unexpected queued state - could be due to other conditions
-                        AddedTransactionState::Queued(QueuedReason::NonceGap)
-                    }
+            _ => {
+                // For non-pending transactions, use the queued reason directly from the AddedTransaction
+                if let Some(reason) = added.queued_reason() {
+                    AddedTransactionState::Queued(reason.clone())
                 } else {
-                    // Fallback if we can't find the transaction in the pool
+                    // Fallback - this shouldn't happen with the new implementation
                     AddedTransactionState::Queued(QueuedReason::NonceGap)
                 }
             }
-            SubPool::BaseFee => AddedTransactionState::Queued(QueuedReason::InsufficientBaseFee),
-            SubPool::Blob => AddedTransactionState::Queued(QueuedReason::InsufficientBlobFee),
         }
     }
 }
@@ -1198,6 +1179,8 @@ pub enum AddedTransaction<T: PoolTransaction> {
         replaced: Option<Arc<ValidPoolTransaction<T>>>,
         /// The subpool it was moved to.
         subpool: SubPool,
+        /// The specific reason why the transaction is queued (if applicable).
+        queued_reason: Option<QueuedReason>,
     },
 }
 
@@ -1265,6 +1248,14 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         match self {
             Self::Pending(added) => added.transaction.id(),
             Self::Parked { transaction, .. } => transaction.id(),
+        }
+    }
+
+    /// Returns the queued reason if the transaction is parked with a queued reason.
+    pub(crate) const fn queued_reason(&self) -> Option<&QueuedReason> {
+        match self {
+            Self::Pending(_) => None,
+            Self::Parked { queued_reason, .. } => queued_reason.as_ref(),
         }
     }
 }

@@ -15,7 +15,7 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate, UpdateOutcome},
-        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome, QueuedReason,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
     PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
@@ -654,6 +654,31 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// requirement, or blob fee requirement. Transactions become executable only if the
     /// transaction `feeCap` is greater than the block's `baseFee` and the `maxBlobFee` is greater
     /// than the block's `blobFee`.
+    
+    /// Determines the specific reason why a transaction is queued based on its subpool and state.
+    fn determine_queued_reason(subpool: SubPool, state: TxState) -> Option<QueuedReason> {
+        match subpool {
+            SubPool::Pending => None, // Not queued
+            SubPool::Queued => {
+                // Check state flags to determine specific reason
+                if !state.contains(TxState::NO_NONCE_GAPS) {
+                    Some(QueuedReason::NonceGap)
+                } else if !state.contains(TxState::ENOUGH_BALANCE) {
+                    Some(QueuedReason::InsufficientBalance)
+                } else if !state.contains(TxState::NO_PARKED_ANCESTORS) {
+                    Some(QueuedReason::ParkedAncestors)
+                } else if !state.contains(TxState::NOT_TOO_MUCH_GAS) {
+                    Some(QueuedReason::TooMuchGas)
+                } else {
+                    // Fallback for unexpected queued state
+                    Some(QueuedReason::NonceGap)
+                }
+            }
+            SubPool::BaseFee => Some(QueuedReason::InsufficientBaseFee),
+            SubPool::Blob => Some(QueuedReason::InsufficientBlobFee),
+        }
+    }
+
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
@@ -674,7 +699,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             .update(on_chain_nonce, on_chain_balance);
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
+            Ok(InsertOk { transaction, move_to, replaced_tx, updates, state }) => {
                 // replace the new tx and remove the replaced in the subpool(s)
                 self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
@@ -692,7 +717,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         replaced,
                     })
                 } else {
-                    AddedTransaction::Parked { transaction, subpool: move_to, replaced }
+                    // Determine the specific queued reason based on the transaction state
+                    let queued_reason = Self::determine_queued_reason(move_to, state);
+                    AddedTransaction::Parked { transaction, subpool: move_to, replaced, queued_reason }
                 };
 
                 // Update size metrics after adding and potentially moving transactions.
