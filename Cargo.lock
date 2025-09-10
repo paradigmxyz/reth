@@ -272,8 +272,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#186ffd3a2bb727983545ecbfeeb28db4738fd17e"
+version = "0.20.1"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#2b47ac4fc497456d5a4abcf9ca9d26add481b1e7"
 dependencies = [
  "alloy-block-access-list",
  "alloy-consensus",
@@ -384,8 +384,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.18.4"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#186ffd3a2bb727983545ecbfeeb28db4738fd17e"
+version = "0.20.1"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#2b47ac4fc497456d5a4abcf9ca9d26add481b1e7"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -14234,8 +14234,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "alloy-op-hardforks"
-version = "0.3.0"
-source = "git+https://github.com/Rimeeeeee/hardforks?branch=amsterdam#052dddaa0f6935a2a3c4ba1c06f1c17f9585b533"
