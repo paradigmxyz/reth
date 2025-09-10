@@ -794,7 +794,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> ProviderResult<bool> {
         let provider = self.provider.database_provider_ro()?;
-        let last_persisted_block = provider.last_block_number()?;
+        let last_persisted_block = provider.best_block_number()?;
         let last_persisted_hash = provider
             .block_hash(last_persisted_block)?
             .ok_or(ProviderError::HeaderNotFound(last_persisted_block.into()))?;
