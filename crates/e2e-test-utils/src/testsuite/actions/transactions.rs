@@ -350,7 +350,7 @@ impl ProduceBlockWithTransactionsViaEngineAPI {
             prev_randao: latest_block.header.mix_hash,
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::ZERO),
+            parent_beacon_block_root: None,
         };
 
         Ok((latest_block, payload_attributes))

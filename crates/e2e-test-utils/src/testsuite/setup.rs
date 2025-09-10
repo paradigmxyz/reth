@@ -314,7 +314,7 @@ where
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
+                parent_beacon_block_root: None,
             };
             EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
         };
@@ -346,7 +346,7 @@ where
                 prev_randao: B256::ZERO,
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
+                parent_beacon_block_root: None,
             };
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
