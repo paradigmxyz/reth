@@ -41,7 +41,7 @@ impl OpReceiptBuilder for OpRethReceiptBuilder {
         }
     }
 
-    fn build_deposit_receipt(&self, inner: OpDepositReceipt) -> Self::Receipt {
+    fn build_deposit_receipt(&self, inner: op_alloy_consensus::OpDepositReceipt) -> Self::Receipt {
         OpReceipt::Deposit(inner)
     }
 }

@@ -11,6 +11,7 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
+    "crates/block-access-list/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
@@ -174,7 +175,6 @@ members = [
     "testing/testing-utils",
     "testing/runner",
     "crates/tracing-otlp",
-    "crates/block-access-list",
 ]
 default-members = ["bin/reth"]
 exclude = ["docs/cli"]
@@ -228,7 +228,7 @@ manual_clamp = "warn"
 manual_is_variant_and = "warn"
 manual_string_new = "warn"
 match_same_arms = "warn"
-# missing-const-for-fn = "warn"
+missing-const-for-fn = "warn"
 mutex_integer = "warn"
 naive_bytecount = "warn"
 needless_bitwise_bool = "warn"
@@ -309,8 +309,8 @@ strip = "symbols"
 panic = "unwind"
 codegen-units = 16
 
-# Use the --profile profiling flag to show symbols in release mode.
-# e.g. cargo build --profile profiling
+# Use the `--profile profiling` flag to show symbols in release mode.
+# e.g. `cargo build --profile profiling`
 [profile.profiling]
 inherits = "release"
 debug = "full"
@@ -329,6 +329,7 @@ codegen-units = 1
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
+reth-block-access-list = { path = "crates/block-access-list" }
 reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
@@ -459,7 +460,6 @@ reth-trie-sparse-parallel = { path = "crates/trie/sparse-parallel" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
-reth-block-access-list = { path = "crates/reth/block-access-list" }
 
 # revm
 revm = { version = "29.0.0", default-features = false }
@@ -477,36 +477,29 @@ revm-inspectors = "0.29.0"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
-alloy-dyn-abi = "1.3.0"
+alloy-dyn-abi = "1.3.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-evm = { version = "0.20.1", default-features = false }
-alloy-primitives = { version = "1.3.0", default-features = false, features = [
-    "map-foldhash",
-] }
-alloy-rlp = { version = "0.3.10", default-features = false, features = [
-    "core-net",
-] }
-alloy-sol-macro = "1.3.0"
-alloy-sol-types = { version = "1.3.0", default-features = false }
-alloy-trie = { version = "0.9.0", default-features = false }
+alloy-primitives = { version = "1.3.1", default-features = false, features = ["map-foldhash"] }
+alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
+alloy-sol-macro = "1.3.1"
+alloy-sol-types = { version = "1.3.1", default-features = false }
+alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.3.1"
 
 alloy-consensus = { version = "1.0.30", default-features = false }
+alloy-block-access-list = { version = "1.0.30", default-features = false }
 alloy-contract = { version = "1.0.30", default-features = false }
 alloy-eips = { version = "1.0.30", default-features = false }
 alloy-genesis = { version = "1.0.30", default-features = false }
 alloy-json-rpc = { version = "1.0.30", default-features = false }
 alloy-network = { version = "1.0.30", default-features = false }
 alloy-network-primitives = { version = "1.0.30", default-features = false }
-alloy-provider = { version = "1.0.30", features = [
-    "reqwest",
-], default-features = false }
+alloy-provider = { version = "1.0.30", features = ["reqwest"], default-features = false }
 alloy-pubsub = { version = "1.0.30", default-features = false }
 alloy-rpc-client = { version = "1.0.30", default-features = false }
-alloy-rpc-types = { version = "1.0.30", features = [
-    "eth",
-], default-features = false }
+alloy-rpc-types = { version = "1.0.30", features = ["eth"], default-features = false }
 alloy-rpc-types-admin = { version = "1.0.30", default-features = false }
 alloy-rpc-types-anvil = { version = "1.0.30", default-features = false }
 alloy-rpc-types-beacon = { version = "1.0.30", default-features = false }
@@ -520,12 +513,9 @@ alloy-serde = { version = "1.0.30", default-features = false }
 alloy-signer = { version = "1.0.30", default-features = false }
 alloy-signer-local = { version = "1.0.30", default-features = false }
 alloy-transport = { version = "1.0.30" }
-alloy-transport-http = { version = "1.0.30", features = [
-    "reqwest-rustls-tls",
-], default-features = false }
+alloy-transport-http = { version = "1.0.30", features = ["reqwest-rustls-tls"], default-features = false }
 alloy-transport-ipc = { version = "1.0.30", default-features = false }
 alloy-transport-ws = { version = "1.0.30", default-features = false }
-alloy-block-access-list = { version = "1.0.30", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.20.1", default-features = false }
@@ -537,20 +527,16 @@ op-alloy-consensus = { version = "0.19.0", default-features = false }
 op-alloy-rpc-jsonrpsee = { version = "0.19.0", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
-
 # misc
 either = { version = "1.15.0", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
-backon = { version = "1.2", default-features = false, features = [
-    "std-blocking-sleep",
-    "tokio-sleep",
-] }
+backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
 bincode = "1.3"
 bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
 bytes = { version = "1.5", default-features = false }
-brotli = "3.3.4"
+brotli = "8"
 cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"
@@ -566,13 +552,9 @@ itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 lz4 = "1.28.1"
 modular-bitfield = "0.11.2"
-notify = { version = "8.0.0", default-features = false, features = [
-    "macos_fsevent",
-] }
+notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.4.2", default-features = false }
-once_cell = { version = "1.19", default-features = false, features = [
-    "critical-section",
-] }
+once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
 paste = "1.0"
 rand = "0.9"
@@ -636,11 +618,11 @@ discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
-jsonrpsee = "0.25.1"
-jsonrpsee-core = "0.25.1"
-jsonrpsee-server = "0.25.1"
-jsonrpsee-http-client = "0.25.1"
-jsonrpsee-types = "0.25.1"
+jsonrpsee = "0.26.0"
+jsonrpsee-core = "0.26.0"
+jsonrpsee-server = "0.26.0"
+jsonrpsee-http-client = "0.26.0"
+jsonrpsee-types = "0.26.0"
 
 # http
 http = "1.0"
@@ -652,10 +634,7 @@ proptest-arbitrary-interop = "0.1.0"
 # crypto
 enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.30", default-features = false, features = [
-    "global-context",
-    "recovery",
-] }
+secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
 # rand 8 for secp256k1
 rand_08 = { package = "rand", version = "0.8" }
 
@@ -687,11 +666,6 @@ tikv-jemallocator = "0.6"
 tracy-client = "0.18.0"
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
-# TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
-# get the wrong path, update this when the workflow has been updated
-#
-# See: https://github.com/eira-fransham/crunchy/issues/13
-crunchy = "=0.2.2"
 aes = "0.8.1"
 ahash = "0.8"
 anyhow = "1.0"
