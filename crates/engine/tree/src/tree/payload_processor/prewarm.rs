@@ -103,11 +103,7 @@ where
                 // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
                 // affecting all subsequent transactions. We broadcast the first transaction
                 // to all workers to ensure they have this critical state.
-                let should_broadcast = is_first_tx && executable.tx().is_type(126);
-
-                is_first_tx = false;
-
-                if should_broadcast {
+                if is_first_tx && executable.tx().is_type(126) {
                     // Pre-spawn all worker tasks to ensure they're ready
                     while handles.len() < max_concurrency {
                         let (tx, rx) = mpsc::channel();
@@ -146,6 +142,8 @@ where
 
                     let _ = handles[task_idx].send(executable);
                 }
+
+                is_first_tx = false;
 
                 executing += 1;
             }
