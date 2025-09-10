@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use op_alloy_consensus::{
-    decode_holocene_extra_data, decode_min_base_fee_extra_data, EIP1559ParamError,
+    decode_holocene_extra_data, decode_jovian_extra_data, EIP1559ParamError,
 };
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_optimism_forks::OpHardforks;
@@ -30,7 +30,12 @@ where
     Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
 }
 
-pub fn decode_min_base_fee<H>(
+/// Extracts the Jovian 1599 parameters from the encoded extra data from the parent header.
+///
+/// Caution: Caller must ensure that jovian is active in the parent header.
+///
+/// See how the [minimum base fee is enforced](https://specs.optimism.io/protocol/jovian/exec-engine.html).
+pub fn decode_jovian_base_fee<H>(
     chain_spec: impl EthChainSpec + OpHardforks,
     parent: &H,
     timestamp: u64,
@@ -40,7 +45,7 @@ where
 {
     // TODO: function is in op-alloy
     let (elasticity, denominator, min_base_fee) =
-        decode_min_base_fee_extra_data(parent.extra_data())?;
+        decode_jovian_extra_data(parent.extra_data())?;
     let base_fee_params = if elasticity == 0 && denominator == 0 {
         chain_spec.base_fee_params_at_timestamp(timestamp)
     } else {

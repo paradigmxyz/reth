@@ -13,7 +13,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PayloadId,
 };
 use op_alloy_consensus::{
-    decode_min_base_fee_factors, encode_holocene_extra_data, encode_min_base_fee_extra_data,
+    encode_holocene_extra_data, encode_jovian_extra_data,
     EIP1559ParamError,
 };
 use op_alloy_rpc_types_engine::{
@@ -75,18 +75,17 @@ impl<T> OpPayloadBuilderAttributes<T> {
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 
-    /// Extracts the `eip1559` parameters for the payload along with the min_base_fee
-    /// factors.
+    /// Extracts the `eip1559` parameters for the payload along with the min_base_fee.
     ///
     /// Returns encoded extra data containing both EIP-1559 parameters and minimum base fee
     /// configuration, if min_base_fee is present.
-    pub fn get_min_base_fee_extra_data(
+    pub fn get_jovian_extra_data(
         &self,
         default_base_fee_params: BaseFeeParams,
     ) -> Result<Bytes, EIP1559ParamError> {
         self.eip_1559_params
             .map(|params| {
-                encode_min_base_fee_extra_data(
+                encode_jovian_extra_data(
                     params,
                     default_base_fee_params,
                     self.min_base_fee.unwrap_or_default(),
