@@ -1,6 +1,7 @@
 //! Transaction types.
 
-pub use alloy_consensus::transaction::{PooledTransaction, Recovered};
+use crate::Recovered;
+pub use alloy_consensus::transaction::PooledTransaction;
 use once_cell as _;
 #[expect(deprecated)]
 pub use pooled::PooledTransactionsElementEcRecovered;
