@@ -24,7 +24,9 @@ use alloy_consensus::TxLegacy;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV3, PayloadAttributes};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, PayloadAttributes,
+};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -63,7 +65,9 @@ impl<Engine> Action<Engine> for ProduceBlockWithTransactions
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3:
+        From<ExecutionPayloadEnvelopeV3> + Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {

@@ -193,7 +193,7 @@ where
     pub block_registry: HashMap<String, (BlockInfo, usize)>,
     /// Currently active node index for backward compatibility with single-node actions
     pub active_node_idx: usize,
-    /// Node contexts for accessing canonical streams (wrapped in Arc<Mutex> for sharing)
+    /// Node contexts for accessing canonical streams (wrapped in `Arc<Mutex>` for sharing)
     pub node_contexts: Option<Arc<Mutex<Vec<NodeHelperType<EthereumNode>>>>>,
     /// Shared storage for trie updates captured from canonical state notifications
     pub shared_trie_updates: Option<SharedTrieUpdatesStorage>,

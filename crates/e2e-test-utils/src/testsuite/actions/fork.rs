@@ -4,7 +4,9 @@ use crate::testsuite::{
     actions::{produce_blocks::ProduceBlocks, Sequence},
     Action, BlockInfo, Environment,
 };
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes,
+};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -53,8 +55,9 @@ impl<Engine> Action<Engine> for CreateFork<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3:
-        Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
+    Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
+    Engine::ExecutionPayloadEnvelopeV3: From<ExecutionPayloadEnvelopeV3>
+        + Into<alloy_rpc_types_engine::payload::ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
