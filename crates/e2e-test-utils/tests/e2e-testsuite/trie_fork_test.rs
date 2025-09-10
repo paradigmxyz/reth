@@ -160,14 +160,28 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
                 "block_2_after_reorg",
             )
         })
+        .with_action(CaptureBlock::new("block_2_after_reorg"))
+        // Verify block 2 has trie updates (it should, since it's built on canonical chain)
+        .with_action({
+            info!("Verifying Block 2 has trie updates present...");
+            AssertMissingTrieUpdates::new("block_2_after_reorg").expect_missing(false)
+        })
         // ----------------------------------------
         // PHASE 5: Verify bug manifestation
         // ----------------------------------------
         .with_action({
             info!("Verifying trie node deletions after reorg...");
             info!("Bug manifests as missing deletion tracking for branch nodes.");
+            info!("The branch node at 0x70e0 should be deleted, but may not be properly tracked");
+            info!("due to the missing trie updates from the fork block (block_1_fork).");
             AssertBranchNodeAtPrefix::new("block_2_after_reorg", storage_contract_addr, "70e0")
                 .expect_present(false) // Should be deleted, but bug may prevent proper tracking
+        })
+        // Also check the other branch node that should still exist
+        .with_action({
+            info!("Verifying branch node at 0x05f3 is properly removed...");
+            AssertBranchNodeAtPrefix::new("block_2_after_reorg", storage_contract_addr, "05f3")
+                .expect_present(false) // This one should also be deleted since slot D was cleared
         });
 
     test.run::<EthereumNode>().await?;
