@@ -3,7 +3,10 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::{transaction::SignerRecoverable, EthereumTxEnvelope, Transaction};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TxHashRef},
+    EthereumTxEnvelope, Transaction,
+};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -155,17 +158,21 @@ where
     }
 }
 
-impl<B, T> SignedTransaction for Extended<B, T>
+impl<B, T> TxHashRef for Extended<B, T>
 where
-    B: SignedTransaction + IsTyped2718,
-    T: SignedTransaction,
+    B: TxHashRef,
+    T: TxHashRef,
 {
     fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::BuiltIn(tx) => tx.tx_hash(),
-            Self::Other(tx) => tx.tx_hash(),
-        }
+        delegate!(self => tx.tx_hash())
     }
+}
+
+impl<B, T> SignedTransaction for Extended<B, T>
+where
+    B: SignedTransaction + IsTyped2718 + TxHashRef,
+    T: SignedTransaction + TxHashRef,
+{
 }
 
 impl<B, T> Typed2718 for Extended<B, T>

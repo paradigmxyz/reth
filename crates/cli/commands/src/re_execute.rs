@@ -4,14 +4,14 @@ use crate::common::{
     AccessRights, CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment,
     EnvironmentArgs,
 };
-use alloy_consensus::{BlockHeader, TxReceipt};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_consensus::FullConsensus;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected, SignedTransaction};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
     StaticFileProviderFactory, TransactionVariant,

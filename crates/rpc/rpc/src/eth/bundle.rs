@@ -1,13 +1,13 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::{EnvKzgSettings, Transaction as _};
+use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::SignedTransaction;
+
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -67,13 +67,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         let transactions = txs
@@ -119,7 +119,7 @@ where
                     EthBundleError::Eip4844BlobGasExceeded(blob_params.max_blob_gas_per_block())
                         .to_string(),
                 )
-                .into())
+                .into());
             }
         }
 
@@ -129,7 +129,7 @@ where
             if gas_limit > evm_env.block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                )
+                );
             }
             evm_env.block_env.gas_limit = gas_limit;
         }
