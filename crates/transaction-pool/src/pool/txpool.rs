@@ -654,9 +654,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// requirement, or blob fee requirement. Transactions become executable only if the
     /// transaction `feeCap` is greater than the block's `baseFee` and the `maxBlobFee` is greater
     /// than the block's `blobFee`.
-    
+    ///
     /// Determines the specific reason why a transaction is queued based on its subpool and state.
-    fn determine_queued_reason(subpool: SubPool, state: TxState) -> Option<QueuedReason> {
+    const fn determine_queued_reason(subpool: SubPool, state: TxState) -> Option<QueuedReason> {
         match subpool {
             SubPool::Pending => None, // Not queued
             SubPool::Queued => {
@@ -719,7 +719,12 @@ impl<T: TransactionOrdering> TxPool<T> {
                 } else {
                     // Determine the specific queued reason based on the transaction state
                     let queued_reason = Self::determine_queued_reason(move_to, state);
-                    AddedTransaction::Parked { transaction, subpool: move_to, replaced, queued_reason }
+                    AddedTransaction::Parked {
+                        transaction,
+                        subpool: move_to,
+                        replaced,
+                        queued_reason,
+                    }
                 };
 
                 // Update size metrics after adding and potentially moving transactions.
@@ -2128,7 +2133,6 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
-    #[cfg_attr(not(test), expect(dead_code))]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,

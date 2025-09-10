@@ -1064,7 +1064,8 @@ where
         match added.subpool() {
             SubPool::Pending => AddedTransactionState::Pending,
             _ => {
-                // For non-pending transactions, use the queued reason directly from the AddedTransaction
+                // For non-pending transactions, use the queued reason directly from the
+                // AddedTransaction
                 if let Some(reason) = added.queued_reason() {
                     AddedTransactionState::Queued(reason.clone())
                 } else {
