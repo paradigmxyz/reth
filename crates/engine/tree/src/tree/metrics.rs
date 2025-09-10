@@ -167,6 +167,10 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
+    /// Payload conversion and validation latency
+    pub(crate) payload_validation_duration: Gauge,
+    /// Histogram of payload validation latency
+    pub(crate) payload_validation_histogram: Histogram,
     /// Payload processor spawning duration
     pub(crate) spawn_payload_processor: Histogram,
     /// Post-execution validation duration
@@ -181,6 +185,13 @@ impl BlockValidationMetrics {
         self.state_root_storage_tries_updated_total
             .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
+    }
+
+    /// Records a new payload validation time, updating both the histogram and the payload
+    /// validation gauge
+    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
+        self.payload_validation_duration.set(elapsed_as_secs);
+        self.payload_validation_histogram.record(elapsed_as_secs);
     }
 }
 
