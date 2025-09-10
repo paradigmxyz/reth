@@ -10,7 +10,7 @@
 
 use alloy_eips::eip2718::Encodable2718;
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{Address, Bytes, TxKind, U256};
+use alloy_primitives::{address, Address, Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
 use alloy_signer_local::PrivateKeySigner;
 use eyre::Result;
@@ -30,7 +30,7 @@ use std::{str::FromStr, sync::Arc};
 use tracing::info;
 
 /// Storage contract address for our tests
-const STORAGE_CONTRACT: &str = "0x1234567890123456789012345678901234567890";
+const STORAGE_CONTRACT: Address = address!("1234567890123456789012345678901234567890");
 
 /// Test account private keys (from common test accounts)
 const TEST_PRIVATE_KEY_1: &str =
@@ -39,7 +39,7 @@ const TEST_PRIVATE_KEY_2: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
 /// Storage slot configuration for trie fork tests.
-/// 
+///
 /// These slots are specifically chosen to create branch nodes in the Merkle Patricia Trie
 /// by having common hash prefixes. This allows us to test trie update behavior during
 /// fork and reorg scenarios.
@@ -51,7 +51,7 @@ struct StorageSlots {
 }
 
 /// Storage values used to test different chain states.
-/// 
+///
 /// These values are designed to create specific trie node patterns:
 /// - Shared values test partial state overlap between chains
 /// - Different values force trie node updates during reorgs
@@ -85,7 +85,7 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
     let slots = init_storage_slots();
     let values = init_storage_values();
     let txs = create_test_transactions(&slots, &values).await?;
-    let storage_contract_addr = Address::from_str(STORAGE_CONTRACT)?;
+    let storage_contract_addr = STORAGE_CONTRACT;
 
     // ========================================
     // TEST EXECUTION
@@ -105,6 +105,11 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
             )
         })
         .with_action(CaptureBlock::new("block_1_canonical"))
+        // Verify canonical block has trie updates present
+        .with_action({
+            info!("Verifying canonical block 1 has trie updates...");
+            AssertMissingTrieUpdates::new("block_1_canonical").expect_missing(false)
+        })
         .with_action(VerifyAnyTrieUpdatesEmitted::new())
         // Verify branch nodes were created
         .with_action(
@@ -137,6 +142,14 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
             info!("Triggering reorg to make fork chain canonical...");
             ReorgTo::new_from_tag("block_1_fork")
         })
+        // After reorg, the fork block should now be canonical but still have missing trie updates
+        // This is a key part of the bug - the trie updates don't get regenerated after reorg
+        .with_action({
+            info!(
+                "Verifying fork block still has missing trie updates after becoming canonical..."
+            );
+            AssertMissingTrieUpdates::new("block_1_fork").expect_missing(true)
+        })
         // ----------------------------------------
         // PHASE 4: Delete storage after reorg
         // ----------------------------------------
@@ -168,7 +181,7 @@ async fn test_trie_updates_during_fork_and_reorg() -> Result<()> {
 fn create_test_genesis() -> serde_json::Value {
     // Create multiple accounts with similar prefixes to force branch node creation
     let mut alloc = serde_json::json!({
-        STORAGE_CONTRACT: {
+        format!("{:?}", STORAGE_CONTRACT): {
             "balance": "0x0",
             "code": "0x6000356020359055",
             // Optimized storage slots that create deeper trie structures by having common hash prefixes
@@ -283,7 +296,7 @@ async fn create_storage_tx_with_signer(
     let tx_request = TransactionRequest {
         nonce: Some(nonce),
         value: Some(U256::ZERO),
-        to: Some(TxKind::Call(Address::from_str(STORAGE_CONTRACT)?)),
+        to: Some(TxKind::Call(STORAGE_CONTRACT)),
         gas: Some(100_000),
         max_fee_per_gas: Some(20_000_000_000),
         max_priority_fee_per_gas: Some(20_000_000_000),
@@ -300,12 +313,12 @@ async fn create_storage_tx_with_signer(
 }
 
 /// Creates the test environment setup with proper configuration for trie testing.
-/// 
+///
 /// This setup includes:
 /// - A chain spec with pre-deployed storage contract and test accounts
 /// - Single node network configuration
 /// - Tree config with trie update comparison enabled to detect the bug
-/// 
+///
 /// The configuration specifically enables `always_compare_trie_updates` which
 /// is crucial for detecting missing trie updates in fork blocks.
 fn create_test_setup() -> Setup<EthEngineTypes> {
@@ -328,11 +341,11 @@ fn create_test_setup() -> Setup<EthEngineTypes> {
 }
 
 /// Initializes storage slots that deliberately create branch nodes in the trie.
-/// 
+///
 /// The slot values are carefully chosen so their keccak256 hashes share common prefixes:
 /// - Slots a, b, c hash to prefix 0x70e0, creating a branch node at depth 2
 /// - Slot d hashes to prefix 0x05f3, creating another branch node
-/// 
+///
 /// This trie structure is essential for reproducing the bug where fork blocks
 /// have missing trie updates for branch nodes.
 fn init_storage_slots() -> StorageSlots {
@@ -347,12 +360,12 @@ fn init_storage_slots() -> StorageSlots {
 }
 
 /// Initializes storage values that create specific test conditions.
-/// 
+///
 /// The values are designed to:
 /// - Create partial state overlap (shared value 0x1111)
 /// - Force trie updates during reorgs (different values for b and d)
 /// - Test trie node deletion (values will be set to zero in deletion phase)
-/// 
+///
 /// These specific values help expose the bug where trie updates are missing
 /// in fork blocks, leading to incorrect state after reorgs.
 fn init_storage_values() -> StorageValues {
@@ -367,12 +380,12 @@ fn init_storage_values() -> StorageValues {
 }
 
 /// Creates all test transactions for the different phases of the test.
-/// 
+///
 /// Generates three sets of transactions:
 /// 1. Canonical transactions: Set up initial storage state with all slots populated
 /// 2. Fork transactions: Create competing state with some overlapping values
 /// 3. Deletion transactions: Clear storage slots to test trie node removal
-/// 
+///
 /// Each transaction is signed with test private keys and properly sequenced with
 /// incrementing nonces to ensure correct execution order.
 async fn create_test_transactions(

@@ -1,4 +1,7 @@
-use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext};
+use crate::{
+    network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext,
+    testsuite::TrieUpdateEvent,
+};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
@@ -24,10 +27,9 @@ use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
 use std::pin::Pin;
+use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use url::Url;
-use crate::testsuite::TrieUpdateEvent;
-use tokio::sync::mpsc;
 
 /// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
@@ -310,24 +312,31 @@ where
 
     /// Start a background task that forwards trie updates from canonical state notifications
     /// to the test environment via the provided channel
-    pub fn start_trie_update_forwarder(&mut self, node_idx: usize, tx: mpsc::UnboundedSender<TrieUpdateEvent>)
-    where
+    pub fn start_trie_update_forwarder(
+        &mut self,
+        node_idx: usize,
+        tx: mpsc::UnboundedSender<TrieUpdateEvent>,
+    ) where
         AddOns: RethRpcAddOns<Node> + 'static,
     {
         // Take the canonical stream (we can't clone it, so we move it into the task)
         // This means each node can only have one forwarder, which is fine for our use case
         let canonical_stream = std::mem::replace(
             &mut self.canonical_stream,
-            self.inner.provider.canonical_state_stream()
+            self.inner.provider.canonical_state_stream(),
         );
-        
+
         tokio::spawn(async move {
             println!("Starting trie update forwarder for node {}", node_idx);
             tracing::debug!("Starting trie update forwarder for node {}", node_idx);
-            
+
             let mut stream = canonical_stream;
             while let Some(notification) = stream.next().await {
-                println!("Node {} received canonical state notification: {:?}", node_idx, std::mem::discriminant(&notification));
+                println!(
+                    "Node {} received canonical state notification: {:?}",
+                    node_idx,
+                    std::mem::discriminant(&notification)
+                );
                 match notification {
                     CanonStateNotification::Commit { new } => {
                         // Extract trie updates from committed chain
@@ -335,24 +344,28 @@ where
                             // Get the tip block hash from the chain
                             if let Some(tip_header) = new.headers().last() {
                                 let tip_hash: alloy_primitives::B256 = tip_header.hash();
-                                
+
                                 let event = TrieUpdateEvent {
                                     node_idx,
                                     block_hash: tip_hash,
                                     trie_updates: trie_updates.clone(),
                                 };
-                                
+
                                 // Send the event, ignore errors if receiver is dropped
                                 let _ = tx.send(event);
-                                
+
                                 tracing::debug!(
                                     "Forwarded trie updates for committed block {} from node {}",
-                                    tip_hash, node_idx
+                                    tip_hash,
+                                    node_idx
                                 );
                             }
                         } else {
                             println!("Node {}: No trie updates in committed chain", node_idx);
-                            tracing::debug!("No trie updates in committed chain for node {}", node_idx);
+                            tracing::debug!(
+                                "No trie updates in committed chain for node {}",
+                                node_idx
+                            );
                         }
                     }
                     CanonStateNotification::Reorg { old: _old, new } => {
@@ -361,29 +374,33 @@ where
                             // Get all blocks in the new chain and forward their trie updates
                             for header in new.headers() {
                                 let block_hash: alloy_primitives::B256 = header.hash();
-                                
+
                                 let event = TrieUpdateEvent {
                                     node_idx,
                                     block_hash,
                                     trie_updates: trie_updates.clone(),
                                 };
-                                
+
                                 // Send the event, ignore errors if receiver is dropped
                                 let _ = tx.send(event);
-                                
+
                                 tracing::debug!(
                                     "Forwarded trie updates for reorged block {} from node {}",
-                                    block_hash, node_idx
+                                    block_hash,
+                                    node_idx
                                 );
                             }
                         } else {
                             println!("Node {}: No trie updates in reorged chain", node_idx);
-                            tracing::debug!("No trie updates in reorged chain for node {}", node_idx);
+                            tracing::debug!(
+                                "No trie updates in reorged chain for node {}",
+                                node_idx
+                            );
                         }
                     }
                 }
             }
-            
+
             tracing::debug!("Trie update forwarder ended for node {}", node_idx);
         });
     }
