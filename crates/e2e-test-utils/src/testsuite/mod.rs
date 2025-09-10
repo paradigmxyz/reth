@@ -2,19 +2,21 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,
+    NodeBuilderHelper, NodeHelperType, PayloadAttributesBuilder,
 };
 use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
+use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::PayloadId;
 use reth_trie_common::updates::TrieUpdates;
-use crate::NodeHelperType;
-use reth_node_ethereum::EthereumNode;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
+
+/// Type alias for shared trie updates storage
+type SharedTrieUpdatesStorage = Vec<Arc<Mutex<HashMap<B256, TrieUpdates>>>>;
 pub mod actions;
 pub mod setup;
 use crate::testsuite::setup::Setup;
@@ -194,7 +196,7 @@ where
     /// Node contexts for accessing canonical streams (wrapped in Arc<Mutex> for sharing)
     pub node_contexts: Option<Arc<Mutex<Vec<NodeHelperType<EthereumNode>>>>>,
     /// Shared storage for trie updates captured from canonical state notifications
-    pub shared_trie_updates: Option<Vec<Arc<Mutex<HashMap<alloy_primitives::B256, TrieUpdates>>>>>,
+    pub shared_trie_updates: Option<SharedTrieUpdatesStorage>,
     /// Receiver for trie update events from canonical state notifications
     pub trie_update_rx: Option<mpsc::UnboundedReceiver<TrieUpdateEvent>>,
 }
@@ -214,7 +216,10 @@ where
             .field("block_registry", &format!("<{} entries>", self.block_registry.len()))
             .field("active_node_idx", &self.active_node_idx)
             .field("node_contexts", &self.node_contexts.as_ref().map(|_| "<node contexts>"))
-            .field("shared_trie_updates", &self.shared_trie_updates.as_ref().map(|v| format!("<{} nodes>", v.len())))
+            .field(
+                "shared_trie_updates",
+                &self.shared_trie_updates.as_ref().map(|v| format!("<{} nodes>", v.len())),
+            )
             .field("trie_update_rx", &self.trie_update_rx.as_ref().map(|_| "<receiver>"))
             .finish()
     }
@@ -301,41 +306,28 @@ where
         self.node_contexts = Some(node_contexts);
     }
 
-    /// Start monitoring canonical state notifications from all nodes
-    /// NOTE: This is a placeholder implementation that will be enhanced once
-    /// canonical stream sharing challenges are resolved
-    pub fn start_trie_update_monitoring(&mut self) -> Result<(), eyre::Error> {
-        tracing::info!("Trie update monitoring initialized (placeholder implementation)");
-        
-        // Create empty shared storage for now
-        let shared_trie_updates: Vec<Arc<Mutex<HashMap<alloy_primitives::B256, TrieUpdates>>>> = 
-            (0..self.node_count()).map(|_| Arc::new(Mutex::new(HashMap::new()))).collect();
-        
-        // Store the shared trie updates for access by actions
-        self.shared_trie_updates = Some(shared_trie_updates);
-        
-        Ok(())
-    }
-
     /// Drain all pending trie update events from the receiver and persist them to node states
     /// This should be called before asserting on trie updates to ensure all events are processed
     pub fn drain_trie_updates(&mut self) {
         let mut events = Vec::new();
-        
+
         // First, collect all events without holding the borrow on self
         if let Some(rx) = &mut self.trie_update_rx {
             while let Ok(event) = rx.try_recv() {
                 events.push(event);
             }
         }
-        
+
         // Then, process each event
         for event in events {
             if event.node_idx < self.node_states.len() {
-                self.node_states[event.node_idx].block_trie_updates.insert(event.block_hash, event.trie_updates);
+                self.node_states[event.node_idx]
+                    .block_trie_updates
+                    .insert(event.block_hash, event.trie_updates);
                 tracing::debug!(
                     "Persisted trie updates for block {} from node {}",
-                    event.block_hash, event.node_idx
+                    event.block_hash,
+                    event.node_idx
                 );
             } else {
                 tracing::warn!(
@@ -347,7 +339,11 @@ where
     }
 
     /// Get trie updates for a specific block on a specific node
-    pub async fn get_trie_updates(&self, node_idx: usize, block_hash: alloy_primitives::B256) -> Option<TrieUpdates> {
+    pub async fn get_trie_updates(
+        &self,
+        node_idx: usize,
+        block_hash: alloy_primitives::B256,
+    ) -> Option<TrieUpdates> {
         if let Some(shared_updates) = &self.shared_trie_updates {
             if let Some(node_updates) = shared_updates.get(node_idx) {
                 let map = node_updates.lock().await;
