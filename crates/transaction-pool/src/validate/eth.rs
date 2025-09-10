@@ -201,9 +201,10 @@ where
     ///
     /// If `state` is `None`, a new state provider will be created.
     ///
-    /// Convenience method for applying stateless and stateful checks on transaction. Under the
-    /// hood this calls same validations as [`apply_checks_no_state`](Self::apply_checks_no_state)
-    /// followed by [`apply_checks_against_state`](Self::apply_checks_against_state).
+    /// Convenience method for applying both checks that don't require chain state and that do
+    /// require chain state on given transaction,
+    /// [`apply_checks_no_state`](Self::apply_checks_no_state) and
+    /// [`apply_checks_against_state`](Self::apply_checks_against_state).
     pub fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
