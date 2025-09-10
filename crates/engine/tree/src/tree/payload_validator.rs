@@ -472,7 +472,6 @@ where
             };
         }
 
-        // Phase D: Post-execution validation
         let post_execution_start = Instant::now();
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
         // validate block consensus rules
