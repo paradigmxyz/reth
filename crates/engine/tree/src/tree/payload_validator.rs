@@ -457,17 +457,16 @@ where
         );
 
         // Execute the block and handle any execution errors
-        let execution_result = if self.config.state_provider_metrics() {
+        let output = match if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let result = self.execute_block(&state_provider, env, &input, &mut handle);
             state_provider.record_total_latency();
             result
         } else {
             self.execute_block(&state_provider, env, &input, &mut handle)
-        };
-
-        let Ok(output) = execution_result else {
-            return self.handle_execution_error(input, execution_result.unwrap_err(), &parent_block)
+        } {
+            Ok(output) => output,
+            Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
 
         // after executing the block we can stop executing transactions
