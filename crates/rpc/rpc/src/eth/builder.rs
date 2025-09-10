@@ -366,11 +366,6 @@ where
         &self.gas_oracle_config
     }
 
-    /// Returns a reference to the optional gas oracle.
-    pub const fn get_gas_oracle(&self) -> Option<&GasPriceOracle<N::Provider>> {
-        self.gas_oracle.as_ref()
-    }
-
     /// Returns the max batch size.
     pub const fn get_max_batch_size(&self) -> usize {
         self.max_batch_size
