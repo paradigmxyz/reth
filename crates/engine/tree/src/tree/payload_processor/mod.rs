@@ -285,7 +285,7 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    fn spawn_caching_with<P, Tx>(
+    fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
