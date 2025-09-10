@@ -919,13 +919,25 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                    );
-                    chain
-                }));
+                // For single-block chains, preserve trie updates for testing
+                // This maintains backwards compatibility while allowing tests to access trie
+                // updates
+                let new = if new.len() == 1 {
+                    let block = new.first().unwrap();
+                    Arc::new(Chain::from_block(
+                        block.recovered_block().clone(),
+                        block.execution_outcome().clone(),
+                        block.trie_updates().cloned(),
+                    ))
+                } else {
+                    Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+                        chain.append_block(
+                            exec.recovered_block().clone(),
+                            exec.execution_outcome().clone(),
+                        );
+                        chain
+                    }))
+                };
                 CanonStateNotification::Commit { new }
             }
             Self::Reorg { new, old } => {
