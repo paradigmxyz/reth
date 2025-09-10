@@ -87,11 +87,17 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
         let numbers = self.numbers.read();
-        if let Some((earliest_block_number, _)) = numbers.first_key_value() {
-            self.metrics.earliest_block.set(*earliest_block_number as f64);
-        }
-        if let Some((latest_block_number, _)) = numbers.last_key_value() {
-            self.metrics.latest_block.set(*latest_block_number as f64);
+        if numbers.is_empty() {
+            // No in-memory blocks: reset gauges to zero to avoid stale values
+            self.metrics.earliest_block.set(0.0);
+            self.metrics.latest_block.set(0.0);
+        } else {
+            if let Some((earliest_block_number, _)) = numbers.first_key_value() {
+                self.metrics.earliest_block.set(*earliest_block_number as f64);
+            }
+            if let Some((latest_block_number, _)) = numbers.last_key_value() {
+                self.metrics.latest_block.set(*latest_block_number as f64);
+            }
         }
         self.metrics.num_blocks.set(numbers.len() as f64);
     }
@@ -318,7 +324,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         {
             if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
                 // do nothing
-                return
+                return;
             }
         }
 
@@ -542,7 +548,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) =
                 block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
             {
-                return Some(tx.clone())
+                return Some(tx.clone());
             }
         }
         None
