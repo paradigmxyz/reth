@@ -141,6 +141,7 @@ mod manager;
 mod metrics;
 mod network;
 mod session;
+mod shadowfork_filter;
 mod state;
 mod swarm;
 mod trusted_peers_resolver;
