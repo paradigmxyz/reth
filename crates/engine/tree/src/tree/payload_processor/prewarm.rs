@@ -8,6 +8,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
+use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
@@ -102,7 +103,7 @@ where
                 // (type 126/0x7E) that sets critical metadata (L1 block info, fees)
                 // affecting all subsequent transactions. We broadcast the first transaction
                 // to all workers to ensure they have this critical state.
-                let should_broadcast = is_first_tx;
+                let should_broadcast = is_first_tx && executable.tx().is_type(126) ;
 
                 is_first_tx = false;
 
