@@ -3,12 +3,15 @@ use alloy_eips::eip2718::WithEncoded;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use tokio::sync::broadcast;
 use tracing::{debug, trace, warn};
 
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
+
+/// Maximum number of block sequences to cache
+const FLASHBLOCK_CACHE_SIZE: usize = 3;
 
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
@@ -20,6 +23,8 @@ pub(crate) struct FlashBlockPendingSequence<T> {
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
+    /// Cache of completed sequences by block number (last 3 blocks)
+    cache: VecDeque<(u64, BTreeMap<u64, PreparedFlashBlock<T>>)>,
 }
 
 impl<T> FlashBlockPendingSequence<T>
@@ -30,7 +35,7 @@ where
         // Note: if the channel is full, send will not block but rather overwrite the oldest
         // messages. Order is preserved.
         let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
-        Self { inner: BTreeMap::new(), block_broadcaster: tx }
+        Self { inner: BTreeMap::new(), block_broadcaster: tx, cache: VecDeque::with_capacity(FLASHBLOCK_CACHE_SIZE) }
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
@@ -43,6 +48,18 @@ where
     // Clears the state and broadcasts the blocks produced to subscribers.
     fn clear_and_broadcast_blocks(&mut self) {
         let flashblocks = mem::take(&mut self.inner);
+
+        if !flashblocks.is_empty() {
+            let block_number = flashblocks.values().next().unwrap().block().metadata.block_number;
+            
+            // Add to cache before broadcasting
+            self.cache.push_back((block_number, flashblocks.clone()));
+            
+            // Keep only the last FLASHBLOCK_CACHE_SIZE entries
+            while self.cache.len() > FLASHBLOCK_CACHE_SIZE {
+                self.cache.pop_front();
+            }
+        }
 
         // If there are any subscribers, send the flashblocks to them.
         if self.block_broadcaster.receiver_count() > 0 {
@@ -109,6 +126,31 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
+    /// Get ready transactions for a specific block number, checking both current and cached sequences
+    pub(crate) fn ready_transactions_for_block(
+        &self,
+        target_block_number: u64,
+    ) -> Option<impl Iterator<Item = WithEncoded<Recovered<T>>> + '_> {
+        // First check current sequence
+        if self.block_number() == Some(target_block_number) {
+            return Some(Box::new(self.ready_transactions()) as Box<dyn Iterator<Item = _>>);
+        }
+        
+        // Then check cache
+        for (block_number, cached_blocks) in self.cache.iter().rev() {
+            if *block_number == target_block_number {
+                let iter = cached_blocks
+                    .values()
+                    .enumerate()
+                    .take_while(|(idx, block)| block.block().index == *idx as u64)
+                    .flat_map(|(_, block)| block.txs.clone());
+                return Some(Box::new(iter) as Box<dyn Iterator<Item = _>>);
+            }
+        }
+        
+        None
+    }
+
     /// Returns the first block number
     pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
@@ -117,6 +159,23 @@ where
     /// Returns the payload base of the first tracked flashblock.
     pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
         self.inner.values().next()?.block().base.clone()
+    }
+
+    /// Get payload base for a specific block number
+    pub(crate) fn payload_base_for_block(&self, target_block_number: u64) -> Option<ExecutionPayloadBaseV1> {
+        // Check current sequence first
+        if self.block_number() == Some(target_block_number) {
+            return self.payload_base();
+        }
+        
+        // Check cache
+        for (block_number, cached_blocks) in self.cache.iter().rev() {
+            if *block_number == target_block_number {
+                return cached_blocks.values().next()?.block().base.clone();
+            }
+        }
+        
+        None
     }
 
     /// Returns the number of tracked flashblocks.
@@ -179,7 +238,7 @@ impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PreparedFlashBlock<T> {
     /// The prepared transactions, ready for execution
     txs: Vec<WithEncoded<Recovered<T>>>,

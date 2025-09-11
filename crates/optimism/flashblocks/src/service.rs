@@ -107,7 +107,9 @@ where
     fn build_args(
         &mut self,
     ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
-        let Some(base) = self.blocks.payload_base() else {
+        let target_block_number = self.builder.provider().latest_header().ok().flatten()?.number() + 1;
+        
+        let Some(base) = self.blocks.payload_base_for_block(target_block_number) else {
             trace!(
                 flashblock_number = ?self.blocks.block_number(),
                 count = %self.blocks.count(),
@@ -127,7 +129,7 @@ where
 
         Some(BuildArgs {
             base,
-            transactions: self.blocks.ready_transactions().collect::<Vec<_>>(),
+            transactions: self.blocks.ready_transactions_for_block(target_block_number)?.collect::<Vec<_>>(),
             cached_state: self.cached_state.take(),
         })
     }
