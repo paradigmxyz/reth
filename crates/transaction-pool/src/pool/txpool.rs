@@ -791,7 +791,11 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if txs_by_sender.peek().is_none() {
             // Transaction with gapped nonce is not supported for delegated accounts
-            if transaction.nonce() > on_chain_nonce {
+            // but transaction can arrive out of order if more slots are allowed
+            // by default with a slot limit of 1 this will fail if the transaction's nonce >
+            // on_chain
+            let nonce_gap_distance = transaction.nonce().saturating_sub(on_chain_nonce);
+            if nonce_gap_distance >= self.config.max_inflight_delegated_slot_limit as u64 {
                 return Err(PoolError::new(
                     *transaction.hash(),
                     PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
