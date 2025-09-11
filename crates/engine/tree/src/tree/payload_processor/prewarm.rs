@@ -268,26 +268,6 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
 {
-    /// Spawns a worker task for transaction execution and returns its sender channel.
-    fn spawn_worker<Tx>(
-        &self,
-        executor: &WorkloadExecutor,
-        actions_tx: Sender<PrewarmTaskEvent>,
-        done_tx: Sender<()>,
-    ) -> mpsc::Sender<Tx>
-    where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
-    {
-        let (tx, rx) = mpsc::channel();
-        let ctx = self.clone();
-
-        executor.spawn_blocking(move || {
-            ctx.transact_batch(rx, actions_tx, done_tx);
-        });
-
-        tx
-    }
-
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
     fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
@@ -396,6 +376,26 @@ where
 
         // send a message to the main task to flag that we're done
         let _ = done_tx.send(());
+    }
+
+    /// Spawns a worker task for transaction execution and returns its sender channel.
+    fn spawn_worker<Tx>(
+        &self,
+        executor: &WorkloadExecutor,
+        actions_tx: Sender<PrewarmTaskEvent>,
+        done_tx: Sender<()>,
+    ) -> mpsc::Sender<Tx>
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let ctx = self.clone();
+
+        executor.spawn_blocking(move || {
+            ctx.transact_batch(rx, actions_tx, done_tx);
+        });
+
+        tx
     }
 }
 
