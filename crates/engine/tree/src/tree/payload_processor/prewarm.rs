@@ -102,11 +102,7 @@ where
             // Spawn all txn processing workers upfront as txns > max_concurrency
             let mut handles = Vec::with_capacity(max_concurrency);
             for _ in 0..max_concurrency {
-                handles.push(ctx.spawn_worker(
-                    &executor,
-                    actions_tx.clone(),
-                    done_tx.clone(),
-                ));
+                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
             }
 
             // Handle first transaction - special case for Optimism deposit
