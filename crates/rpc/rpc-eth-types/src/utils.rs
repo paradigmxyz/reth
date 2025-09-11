@@ -13,13 +13,13 @@ use std::future::Future;
 /// that the entire input buffer is consumed and no trailing bytes are allowed.
 ///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
-pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<Recovered<T>> {
+pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction =
-        T::decode_2718_exact(&mut data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+    let transaction = T::decode_2718_exact(data)
+        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     SignedTransaction::try_into_recovered(transaction)
         .or(Err(EthApiError::InvalidTransactionSignature))
