@@ -161,7 +161,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
         let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+            (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
         };
 
         self.with_runner_and_components::<EthereumNode>(
