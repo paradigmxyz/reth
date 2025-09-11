@@ -18,8 +18,8 @@ pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<R
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction = T::decode_2718_exact(data)
-        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+    let transaction =
+        T::decode_2718_exact(data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     SignedTransaction::try_into_recovered(transaction)
         .or(Err(EthApiError::InvalidTransactionSignature))
