@@ -91,9 +91,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             .unwrap_or_default()
             .into_iter()
             .map(|data| {
-                let tx = Decodable2718::decode_2718_exact(data.as_ref())?;
-
-                Ok::<_, alloy_eips::eip2718::Eip2718Error>(WithEncoded::new(data, tx))
+                Decodable2718::decode_2718_exact(data.as_ref()).map(|tx| WithEncoded::new(data, tx))
             })
             .collect::<Result<_, _>>()?;
 
