@@ -94,9 +94,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
-    /// List of block hashes to check for shadowfork testing.
+    /// List of block hashes to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
-    pub shadowfork_block_hashes: Vec<B256>,
+    pub required_block_hashes: Vec<B256>,
 }
 
 // === impl NetworkConfig ===
@@ -224,8 +224,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
-    /// List of block hashes to check for shadowfork testing.
-    shadowfork_block_hashes: Vec<B256>,
+    /// List of block hashes to check for required blocks.
+    required_block_hashes: Vec<B256>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -266,7 +266,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
-            shadowfork_block_hashes: Vec::new(),
+            required_block_hashes: Vec::new(),
         }
     }
 
@@ -551,9 +551,9 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
-    /// Sets the shadowfork block hashes for peer filtering.
-    pub fn shadowfork_block_hashes(mut self, hashes: Vec<B256>) -> Self {
-        self.shadowfork_block_hashes = hashes;
+    /// Sets the required block hashes for peer filtering.
+    pub fn required_block_hashes(mut self, hashes: Vec<B256>) -> Self {
+        self.required_block_hashes = hashes;
         self
     }
 
@@ -619,7 +619,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
-            shadowfork_block_hashes,
+            required_block_hashes,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -688,7 +688,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
-            shadowfork_block_hashes,
+            required_block_hashes,
         }
     }
 }

@@ -181,10 +181,10 @@ pub struct NetworkArgs {
     )]
     pub propagation_mode: TransactionPropagationMode,
 
-    /// Comma separated list of block hashes for shadowfork testing.
+    /// Comma separated list of required block hashes.
     /// Peers that don't have these blocks will be filtered out.
-    #[arg(long = "shadowfork-block-hashes", value_delimiter = ',', value_parser = parse_block_hash)]
-    pub shadowfork_block_hashes: Vec<B256>,
+    #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_hash)]
+    pub required_block_hashes: Vec<B256>,
 }
 
 impl NetworkArgs {
@@ -297,7 +297,7 @@ impl NetworkArgs {
                 self.discovery.port,
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
-            .shadowfork_block_hashes(self.shadowfork_block_hashes.clone())
+            .required_block_hashes(self.required_block_hashes.clone())
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -371,7 +371,7 @@ impl Default for NetworkArgs {
             tx_propagation_policy: TransactionPropagationKind::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
-            shadowfork_block_hashes: vec![],
+            required_block_hashes: vec![],
         }
     }
 }
@@ -661,29 +661,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_shadowfork_block_hashes() {
+    fn parse_required_block_hashes() {
         let args = CommandParser::<NetworkArgs>::parse_from([
             "reth",
-            "--shadowfork-block-hashes",
+            "--required-block-hashes",
             "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
         ])
         .args;
 
-        assert_eq!(args.shadowfork_block_hashes.len(), 2);
+        assert_eq!(args.required_block_hashes.len(), 2);
         assert_eq!(
-            args.shadowfork_block_hashes[0].to_string(),
+            args.required_block_hashes[0].to_string(),
             "0x1111111111111111111111111111111111111111111111111111111111111111"
         );
         assert_eq!(
-            args.shadowfork_block_hashes[1].to_string(),
+            args.required_block_hashes[1].to_string(),
             "0x2222222222222222222222222222222222222222222222222222222222222222"
         );
     }
 
     #[test]
-    fn parse_empty_shadowfork_block_hashes() {
+    fn parse_empty_required_block_hashes() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
-        assert!(args.shadowfork_block_hashes.is_empty());
+        assert!(args.required_block_hashes.is_empty());
     }
 }
 
