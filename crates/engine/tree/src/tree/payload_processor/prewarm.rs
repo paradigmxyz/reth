@@ -96,74 +96,51 @@ where
         let max_concurrency = self.max_concurrency;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
 
-            // Handle first transaction separately if it's an Optimism deposit transaction
-            if let Ok(first_executable) = pending.recv() {
-                if first_executable.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
+            // Spawn all txn processing workers upfront as txns > max_concurrency
+            let mut handles = Vec::with_capacity(max_concurrency);
+            for _ in 0..max_concurrency {
+                handles.push(ctx.spawn_worker(
+                    &executor,
+                    actions_tx.clone(),
+                    done_tx.clone(),
+                ));
+            }
+
+            // Handle first transaction - special case for Optimism deposit
+            if let Ok(first_tx) = pending.recv() {
+                if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     // For Optimism chains: The first transaction is always a deposit transaction
                     // that sets critical metadata (L1 block info, fees) affecting all subsequent
                     // transactions. We broadcast the first transaction to all workers to ensure
                     // they have this critical state.
-                    
-                    // Pre-spawn all workers for the deposit transaction broadcast
-                    for _ in 0..max_concurrency {
-                        handles.push(ctx.spawn_worker(
-                            &executor,
-                            actions_tx.clone(),
-                            done_tx.clone(),
-                        ));
-                    }
-
-                    // Send deposit transaction to ALL prewarm tasks
-                    // This ensures all workers have the updated L1 block info and fee parameters
                     for handle in &handles {
-                        if handle.send(first_executable.clone()).is_err() {
+                        if handle.send(first_tx.clone()).is_err() {
                             warn!(
                                 target: "engine::tree::prewarm",
-                                tx_hash = %first_executable.tx().tx_hash(),
+                                tx_hash = %first_tx.tx().tx_hash(),
                                 "Failed to send deposit transaction to worker"
                             );
                         }
                     }
                 } else {
-                    // Not a deposit transaction, handle normally
-                    let task_idx = executing % max_concurrency;
-                    
-                    if handles.len() <= task_idx {
-                        handles.push(ctx.spawn_worker(
-                            &executor,
-                            actions_tx.clone(),
-                            done_tx.clone(),
-                        ));
-                    }
-
-                    if handles[task_idx].send(first_executable).is_err() {
+                    // Not a deposit, send to first worker via round-robin
+                    if handles[0].send(first_tx).is_err() {
                         warn!(
                             target: "engine::tree::prewarm",
-                            task_idx,
+                            task_idx = 0,
                             "Failed to send transaction to worker"
                         );
                     }
                 }
-                
                 executing += 1;
             }
 
-            // Process remaining transactions with normal round-robin distribution
+            // Process remaining transactions with round-robin distribution
             while let Ok(executable) = pending.recv() {
                 let task_idx = executing % max_concurrency;
-
-                if handles.len() <= task_idx {
-                    handles.push(ctx.spawn_worker(
-                        &executor,
-                        actions_tx.clone(),
-                        done_tx.clone(),
-                    ));
-                }
-
                 if handles[task_idx].send(executable).is_err() {
                     warn!(
                         target: "engine::tree::prewarm",
@@ -171,7 +148,6 @@ where
                         "Failed to send transaction to worker"
                     );
                 }
-
                 executing += 1;
             }
 
