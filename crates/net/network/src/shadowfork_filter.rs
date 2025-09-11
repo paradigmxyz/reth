@@ -28,7 +28,7 @@ where
     N: NetworkEventListenerProvider + Peers + Clone + Send + Sync + 'static,
 {
     /// Creates a new shadowfork peer filter.
-    pub fn new(network: N, block_hashes: Vec<B256>) -> Self {
+    pub const fn new(network: N, block_hashes: Vec<B256>) -> Self {
         Self { network, block_hashes }
     }
 
@@ -54,8 +54,7 @@ where
         let mut event_stream = self.network.event_listener();
 
         while let Some(event) = event_stream.next().await {
-            match event {
-                NetworkEvent::ActivePeerSession { info, messages } => {
+            if let NetworkEvent::ActivePeerSession { info, messages } = event {
                     let peer_id = info.peer_id;
                     debug!("New peer session established: {}", peer_id);
 
@@ -64,10 +63,8 @@ where
                     let block_hashes = self.block_hashes.clone();
 
                     tokio::spawn(async move {
-                        Self::check_peer_blocks(network, peer_id, messages, block_hashes).await;
-                    });
-                }
-                _ => {}
+                    Self::check_peer_blocks(network, peer_id, messages, block_hashes).await;
+                });
             }
         }
     }
@@ -109,9 +106,8 @@ where
                         );
                         network.reputation_change(peer_id, ReputationChangeKind::BadProtocol);
                         return; // No need to check more blocks if one is missing
-                    } else {
-                        trace!("Peer {} has required block {}", peer_id, block_hash);
-                    }
+                    } 
+                    trace!("Peer {} has required block {}", peer_id, block_hash);
                 }
                 Ok(Err(e)) => {
                     debug!("Error getting block {} from peer {}: {:?}", block_hash, peer_id, e);
