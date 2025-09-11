@@ -139,16 +139,7 @@ where
 
                 // Lazily spawn worker if needed
                 if handles.len() <= task_idx {
-                    let (tx, rx) = mpsc::channel();
-                    let sender = actions_tx.clone();
-                    let ctx = ctx.clone();
-                    let done_tx = done_tx.clone();
-
-                    executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
-                    });
-
-                    handles.push(tx);
+                    handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
                 }
 
                 if handles[task_idx].send(executable).is_err() {
