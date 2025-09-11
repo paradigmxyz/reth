@@ -602,31 +602,22 @@ where
     }
 
     fn build_inclusion_list(&self, base_fee: u64, max_size: usize) -> Vec<Bytes> {
-        let mut il = Vec::new();
-        let mut il_size = 0usize;
-
         let attrs = BestTransactionsAttributes::base_fee(base_fee);
-        let mut best_txs = self.best_transactions_with_attributes(attrs);
-
-        while let Some(pool_tx) = best_txs.next() {
-            let tx = pool_tx.to_consensus().into_inner();
-
-            // Skip blob (EIP-4844) transactions: IL should not include blob txs
-            if tx.is_eip4844() {
-                continue;
-            }
-
-            let tx_len = tx.encode_2718_len();
-
-            if il_size + tx_len > max_size {
-                continue;
-            }
-
-            il.push(tx.encoded_2718().into());
-            il_size += tx_len;
-        }
-
-        il
+        let mut il_size = 0usize;
+    
+        self.best_transactions_with_attributes(attrs)
+            .map(|pool_tx| pool_tx.to_consensus().into_inner())
+            .filter(|tx| !tx.is_eip4844())
+            .filter_map(|tx| {
+                let tx_len = tx.encode_2718_len();
+                if il_size + tx_len > max_size {
+                    None
+                } else {
+                    il_size += tx_len;
+                    Some(tx.encoded_2718().into())
+                }
+            })
+            .collect()
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

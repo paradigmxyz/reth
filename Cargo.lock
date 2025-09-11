@@ -258,7 +258,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.20.1"
-source = "git+https://github.com/PelleKrab/evm.git?branch=focil-20.1#b076842c257917fbe9c84bb8c45ff82373319e89"
+source = "git+https://github.com/PelleKrab/evm.git?branch=focil#b076842c257917fbe9c84bb8c45ff82373319e89"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",

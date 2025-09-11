@@ -1332,7 +1332,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7685::{Requests, RequestsOrHash};
+
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, MAINNET};

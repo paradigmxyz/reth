@@ -494,14 +494,10 @@ where
         // we may not want to `flat_map` here so that IL indices of invalid transactions are
         // preserved.
         let il: Option<Vec<Recovered<TransactionSigned>>> = input.inclusion_list().map(|il| {
-            il.into_iter()
-                .flat_map(|tx| {
-                    let Some(signed) = TransactionSigned::decode(&mut tx.as_ref()).ok() else {
-                        return None;
-                    };
-                    let Ok(signer) = signed.recover_signer() else {
-                        return None;
-                    };
+            il.iter()
+                .filter_map(|tx| {
+                    let signed = TransactionSigned::decode(&mut tx.as_ref()).ok()?;
+                    let signer = signed.recover_signer().ok()?;
                     Some(Recovered::new_unchecked(signed, signer))
                 })
                 .collect()
@@ -1038,7 +1034,7 @@ where
     }
 
     fn validate_block_inclusion_list<S>(
-        &mut self,
+        &self,
         state_provider: S,
         block: &RecoveredBlock<N::Block>,
         il: impl AsRef<[Recovered<TransactionSigned>]>,
@@ -1074,8 +1070,8 @@ where
             // Get nonce
             let account_nonce = match state_provider.account_nonce(&sender) {
                 Ok(Some(nonce)) => nonce,
-                Ok(None) => continue, // account does not exist, skip
-                Err(_) => continue,   // error reading nonce, skip
+                Ok(None) | Err(_) => continue, /* account does not exist or error reading nonce,
+                                                * skip */
             };
 
             // Check nonce
@@ -1087,8 +1083,8 @@ where
 
                 let account_balance = match state_provider.account_balance(&sender) {
                     Ok(Some(balance)) => balance,
-                    Ok(None) => continue, // account does not exist, skip
-                    Err(_) => continue,   // error reading balance, skip
+                    Ok(None) | Err(_) => continue, /* account does not exist or error reading
+                                                    * balance, skip */
                 };
 
                 if account_balance >= max_cost {
