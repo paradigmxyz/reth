@@ -6,7 +6,7 @@ use crate::testsuite::{
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    payload::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadInputV2},
+    payload::{ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3},
     BlobsBundleV1, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
@@ -764,8 +764,6 @@ where
                 .clone();
 
             // parent_beacon_block_root is optional (only required for Cancun+)
-            let parent_beacon_block_root =
-                next_new_payload.parent_beacon_block_root.unwrap_or(B256::ZERO);
 
             let payload_envelope = env
                 .active_node_state()?
