@@ -17,7 +17,13 @@ RUN apt-get update && apt-get install --assume-yes --no-install-recommends git
 
 RUN git clone https://github.com/cross-rs/cross /cross
 WORKDIR /cross/docker
-RUN git checkout 9e2298e17170655342d3248a9c8ac37ef92ba38f
+RUN git checkout baf457efc2555225af47963475bd70e8d2f5993f
+
+# xargo doesn't work with Rust 1.89 and higher: https://github.com/cross-rs/cross/issues/1701.
+#
+# When this PR https://github.com/cross-rs/cross/pull/1580 is merged,
+# we can update the checkout above and remove this replacement.
+RUN sed -i 's|sh rustup-init.sh -y --no-modify-path --profile minimal|sh rustup-init.sh -y --no-modify-path --profile minimal --default-toolchain=1.88.0|' xargo.sh
 
 RUN cp common.sh lib.sh / && /common.sh
 RUN cp cmake.sh / && /cmake.sh
