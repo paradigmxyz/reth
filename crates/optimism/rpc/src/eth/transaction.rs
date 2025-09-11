@@ -15,7 +15,6 @@ use reth_rpc_eth_api::{
     try_into_op_tx_info, FromEthApiError, RpcConvert, RpcReceipt, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::TransactionsProvider;
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
@@ -84,16 +83,19 @@ where
     {
         let this = self.clone();
         async move {
+            // First try the historical lookup (original behavior)
             match this.load_transaction_and_receipt(hash).await? {
                 Some((tx, meta, receipt)) => {
                     return this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
                 }
                 None => {
+                    // If not found historically, check the pending flashblock
                     if let Ok(Some(pending_block)) = this.pending_flashblock() {
                         let block = pending_block.0;
                         let receipts = pending_block.1;
 
-                        if let Some((index, (signer, tx))) = block
+                        // Find the transaction in the pending block
+                        if let Some((index, (_signer, tx))) = block
                             .transactions_with_sender()
                             .enumerate()
                             .find(|(_, (_, tx))| *tx.tx_hash() == hash)
@@ -111,25 +113,34 @@ where
                                     timestamp: block.timestamp(),
                                 };
 
-                                // Convert the transaction to the expected type
+                                // Convert the transaction to the expected provider type
+                                // We need to convert the transaction from the block to the provider transaction type
                                 let provider_tx = this
                                     .provider()
                                     .transaction_by_hash(hash)
                                     .map_err(Self::Error::from_eth_err)?
-                                    .ok_or(EthApiError::TransactionNotFound)?;
-
-                                if let Some((_, _, provider_receipt)) =
-                                    this.load_transaction_and_receipt(hash).await?
-                                {
-                                    let rpc_receipt = this
-                                        .build_transaction_receipt(
-                                            provider_tx,
-                                            meta,
-                                            provider_receipt,
+                                    .ok_or_else(|| {
+                                        Self::Error::from_eth_err(
+                                            reth_rpc_eth_types::EthApiError::TransactionNotFound,
                                         )
-                                        .await?;
-                                    return Ok(Some(rpc_receipt));
-                                }
+                                    })?;
+
+                                // Convert the receipt to the expected provider receipt type
+                                let provider_receipt = this
+                                    .provider()
+                                    .receipt_by_hash(hash)
+                                    .map_err(Self::Error::from_eth_err)?
+                                    .ok_or_else(|| {
+                                        Self::Error::from_eth_err(
+                                            reth_rpc_eth_types::EthApiError::TransactionNotFound,
+                                        )
+                                    })?;
+
+                                // Build the receipt using the converted transaction and receipt
+                                let rpc_receipt = this
+                                    .build_transaction_receipt(provider_tx, meta, provider_receipt)
+                                    .await?;
+                                return Ok(Some(rpc_receipt));
                             }
                         };
                     }
