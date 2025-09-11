@@ -8,7 +8,6 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
-use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
@@ -27,9 +26,6 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, trace, warn};
-
-/// Optimism deposit transaction type (0x7E/126).
-const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -83,9 +79,9 @@ where
 
     /// Spawns all pending transactions as blocking tasks by first chunking them.
     ///
-    /// For Optimism chains, special handling is applied to the first transaction if it's a
-    /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
-    /// subsequent transactions in the block.
+    /// For some chains like OP based chains, special handling is applied to the first transaction
+    /// if it's a systems transaction which sets critical metadata that affects all subsequent
+    /// transactions in the block.
     fn spawn_all(
         &self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
@@ -101,35 +97,22 @@ where
 
             let mut handles = Vec::with_capacity(max_concurrency);
 
-            // Handle first transaction - special case for Optimism deposit
+            // We execute the first transaction first on main worker and share the state with the
+            // other workers via the cache. This is because on some chains like
+            // Optimism, the first transaction is a deposit transaction
+            // that sets critical metadata (L1 block info, fees) affecting all subsequent
+            // transactions in the block. This will allow the other workers to use the
+            // prewarm state that most likely will be used for execution.
             if let Ok(first_tx) = pending.recv() {
                 // Spawn the first worker since we'll definitely need at least one
                 handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
-
-                if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
-                    // For Optimism chains: The first transaction is always a deposit transaction
-                    // that sets critical metadata (L1 block info, fees) affecting all subsequent
-                    // transactions. We broadcast the first transaction to all workers to ensure
-                    // they have this critical state.
-                    for handle in &handles {
-                        if handle.send(first_tx.clone()).is_err() {
-                            warn!(
-                                target: "engine::tree::prewarm",
-                                tx_hash = %first_tx.tx().tx_hash(),
-                                "Failed to send deposit transaction to worker"
-                            );
-                        }
-                    }
-                } else {
-                    // Not a deposit, send to first worker via round-robin
-                    if handles[0].send(first_tx).is_err() {
-                        warn!(
-                            target: "engine::tree::prewarm",
-                            task_idx = 0,
-                            "Failed to send transaction to worker"
-                        );
-                    }
-                }
+                if handles[0].send(first_tx.clone()).is_err() {
+                    warn!(
+                        target: "engine::tree::prewarm",
+                        tx_hash = %first_tx.tx().tx_hash(),
+                        "Failed to send deposit transaction to worker"
+                    );
+                };
                 executing += 1;
             }
 
