@@ -214,7 +214,9 @@ pub trait LoadPendingBlock:
             let pending = self.pending_block_env_and_cfg()?;
 
             Ok(match pending.origin {
-                PendingBlockEnvOrigin::ActualPending(block, receipts) => Some((block, receipts)),
+                PendingBlockEnvOrigin::ActualPending(block, receipts) => {
+                    Some(PendingBlockAndReceipts { block, receipts })
+                }
                 PendingBlockEnvOrigin::DerivedFromLatest(..) => {
                     self.pool_pending_block().await?.map(PendingBlock::into_block_and_receipts)
                 }
