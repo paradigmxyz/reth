@@ -26,7 +26,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// Optimism deposit transaction type (0x7E/126).
 const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126;
@@ -121,7 +121,13 @@ where
                     // Send deposit transaction to ALL prewarm tasks
                     // This ensures all workers have the updated L1 block info and fee parameters
                     for handle in &handles {
-                        let _ = handle.send(executable.clone());
+                        if handle.send(executable.clone()).is_err() {
+                            warn!(
+                                target: "engine::tree::prewarm",
+                                tx_hash = %executable.tx().tx_hash(),
+                                "Failed to send deposit transaction to worker"
+                            );
+                        }
                     }
                 } else {
                     // Normal round-robin distribution
@@ -136,7 +142,13 @@ where
                         ));
                     }
 
-                    let _ = handles[task_idx].send(executable);
+                    if handles[task_idx].send(executable).is_err() {
+                        warn!(
+                            target: "engine::tree::prewarm",
+                            task_idx,
+                            "Failed to send transaction to worker"
+                        );
+                    }
                 }
 
                 executing += 1;
