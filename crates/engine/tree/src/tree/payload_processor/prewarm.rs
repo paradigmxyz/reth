@@ -99,7 +99,7 @@ where
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
 
-            // Spawn all txn processing workers upfront as txns > max_concurrency
+            // Spawn all txn processing workers upfront as txns > max_concurrency (64) 99% of the time
             let mut handles = Vec::with_capacity(max_concurrency);
             for _ in 0..max_concurrency {
                 handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
