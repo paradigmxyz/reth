@@ -628,7 +628,7 @@ where
             tx_backups
                 .into_iter()
                 .filter_map(|backup| {
-                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
+                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
                         &mut backup.rlp.as_ref(),
                     )
                     .ok()?;
