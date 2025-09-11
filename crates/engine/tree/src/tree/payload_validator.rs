@@ -116,19 +116,19 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub fn persisting_kind_for(&self, block: BlockWithParent) -> PersistingKind {
         // Check that we're currently persisting.
         let Some(action) = self.persistence().current_action() else {
-            return PersistingKind::NotPersisting;
+            return PersistingKind::NotPersisting
         };
         // Check that the persistince action is saving blocks, not removing them.
         let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant;
+            return PersistingKind::PersistingNotDescendant
         };
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number
-            && self.state().tree_state.is_descendant(*highest, block)
+        if block.block.number > highest.number &&
+            self.state().tree_state.is_descendant(*highest, block)
         {
-            return PersistingKind::PersistingDescendant;
+            return PersistingKind::PersistingDescendant
         }
 
         // In all other cases, the block is not a descendant.
@@ -303,7 +303,7 @@ where
                         let block = self.convert_to_block(input)?;
                         return Err(
                             InsertBlockError::new(block.into_sealed_block(), e.into()).into()
-                        );
+                        )
                     }
                 }
             };
@@ -321,7 +321,7 @@ where
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into());
+            .into())
         };
 
         let state_provider = ensure_ok!(provider_builder.build());
@@ -333,7 +333,7 @@ where
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into());
+            .into())
         };
 
         let evm_env = self.evm_env_for(&input);
@@ -363,9 +363,9 @@ where
         //    accounting for the prefix sets.
         let has_ancestors_with_missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-        let mut use_state_root_task = run_parallel_state_root
-            && self.config.use_state_root_task()
-            && !has_ancestors_with_missing_trie_updates;
+        let mut use_state_root_task = run_parallel_state_root &&
+            self.config.use_state_root_task() &&
+            !has_ancestors_with_missing_trie_updates;
 
         debug!(
             target: "engine::tree",
@@ -482,13 +482,13 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into());
+            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
         }
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
@@ -498,7 +498,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
         }
 
         // record post-execution validation duration
@@ -608,7 +608,7 @@ where
                 )
                 .into(),
             )
-            .into());
+            .into())
         }
 
         // terminate prewarming task with good state output
@@ -653,12 +653,12 @@ where
     fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e);
+            return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e);
+            return Err(e)
         }
 
         Ok(())
@@ -792,7 +792,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )));
+            )))
         }
 
         // Check if the block is persisted
@@ -800,7 +800,7 @@ where
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
@@ -818,7 +818,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return;
+            return
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
@@ -869,7 +869,7 @@ where
                 } else {
                     // If the block is higher than the best block number, stop filtering, as it's
                     // the first block that's not in the database.
-                    break;
+                    break
                 }
             }
 
