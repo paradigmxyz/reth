@@ -14,7 +14,7 @@ use std::borrow::Cow;
 /// This type allows runtime selection between different sparse trie implementations,
 /// providing flexibility in choosing the appropriate implementation based on workload
 /// characteristics.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ConfiguredSparseTrie {
     /// Serial implementation of the sparse trie.
     Serial(Box<SerialSparseTrie>),

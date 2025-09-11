@@ -270,6 +270,48 @@ where
         }
     }
 
+    /// Handles execution errors by checking if header validation errors should take precedence.
+    ///
+    /// When an execution error occurs, this function checks if there are any header validation
+    /// errors that should be reported instead, as header validation errors have higher priority.
+    fn handle_execution_error<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+        &self,
+        input: BlockOrPayload<T>,
+        execution_err: InsertBlockErrorKind,
+        parent_block: &SealedHeader<N::BlockHeader>,
+    ) -> Result<ExecutedBlockWithTrieUpdates<N>, InsertPayloadError<N::Block>>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
+        debug!(
+            target: "engine::tree",
+            ?execution_err,
+            block = ?input.num_hash(),
+            "Block execution failed, checking for header validation errors"
+        );
+
+        // If execution failed, we should first check if there are any header validation
+        // errors that take precedence over the execution error
+        let block = self.convert_to_block(input)?;
+
+        // Validate block consensus rules which includes header validation
+        if let Err(consensus_err) = self.validate_block_inner(&block) {
+            // Header validation error takes precedence over execution error
+            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+        }
+
+        // Also validate against the parent
+        if let Err(consensus_err) =
+            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
+        {
+            // Parent validation error takes precedence over execution error
+            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+        }
+
+        // No header validation errors, return the original execution error
+        Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
+    }
+
     /// Validates a block that has already been converted from a payload.
     ///
     /// This method performs:
@@ -421,13 +463,17 @@ where
             handle.cache_metrics(),
         );
 
-        let output = if self.config.state_provider_metrics() {
+        // Execute the block and handle any execution errors
+        let output = match if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let output = ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle));
+            let result = self.execute_block(&state_provider, env, &input, &mut handle);
             state_provider.record_total_latency();
-            output
+            result
         } else {
-            ensure_ok!(self.execute_block(&state_provider, env, &input, &mut handle))
+            self.execute_block(&state_provider, env, &input, &mut handle)
+        } {
+            Ok(output) => output,
+            Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
 
         // after executing the block we can stop executing transactions
@@ -768,7 +814,7 @@ where
         block: &RecoveredBlock<N::Block>,
     ) -> ProviderResult<bool> {
         let provider = self.provider.database_provider_ro()?;
-        let last_persisted_block = provider.last_block_number()?;
+        let last_persisted_block = provider.best_block_number()?;
         let last_persisted_hash = provider
             .block_hash(last_persisted_block)?
             .ok_or(ProviderError::HeaderNotFound(last_persisted_block.into()))?;
