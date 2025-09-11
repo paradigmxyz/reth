@@ -29,8 +29,8 @@ use crate::{
     peers::PeersManager,
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
+    required_block_filter::RequiredBlockFilter,
     session::SessionManager,
-    shadowfork_filter::ShadowforkPeerFilter,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
@@ -251,7 +251,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             transactions_manager_config: _,
             nat,
             handshake,
-            shadowfork_block_hashes,
+            required_block_hashes,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -337,9 +337,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             nat,
         );
 
-        // Spawn shadowfork peer filter if configured
-        if !shadowfork_block_hashes.is_empty() {
-            let filter = ShadowforkPeerFilter::new(handle.clone(), shadowfork_block_hashes);
+        // Spawn required block peer filter if configured
+        if !required_block_hashes.is_empty() {
+            let filter = RequiredBlockFilter::new(handle.clone(), required_block_hashes);
             filter.spawn();
         }
 
@@ -653,7 +653,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return;
+                    return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -1150,7 +1150,7 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
         if maybe_more_handle_messages || maybe_more_swarm_events {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         this.update_poll_metrics(start, poll_durations);
