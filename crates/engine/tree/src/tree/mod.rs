@@ -1409,7 +1409,7 @@ where
             .map(|hash| BlockNumHash { hash, number: backfill_height })
         else {
             debug!(target: "engine::tree", ?ctrl, "Backfill block not found");
-            return Ok(());
+            return Ok(())
         };
 
         if ctrl.is_unwind() {
