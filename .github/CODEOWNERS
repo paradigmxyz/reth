@@ -5,7 +5,7 @@ crates/chain-state/         @fgimenez @mattsse @rkrasiuk
 crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @mattsse
 crates/consensus/           @rkrasiuk @mattsse @Rjected
-crates/e2e-test-utils/      @mattsse @Rjected
+crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
 crates/engine               @rkrasiuk @mattsse @Rjected
 crates/engine/              @rkrasiuk @mattsse @Rjected @fgimenez
 crates/era/                 @mattsse @RomanHodulak
