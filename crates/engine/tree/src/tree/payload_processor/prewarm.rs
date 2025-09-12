@@ -105,27 +105,16 @@ where
             let mut executing = 0;
 
             // Initially cap workers based on transaction count hint
-            let initial_workers = transaction_count_hint.min(max_concurrency);
             let mut handles = Vec::with_capacity(max_concurrency);
-            let mut workers_spawned = 0;
+            let workers_needed = transaction_count_hint.min(max_concurrency);
+
+            // Spawn the required number of workers
+            for _ in 0..workers_needed {
+                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
+            }
 
             // Handle first transaction - special case for Optimism deposit
             if let Ok(first_tx) = pending.recv() {
-                // Determine how many workers we actually need
-                let workers_needed = if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
-                    // For deposit transactions, we need all workers since we broadcast to all
-                    max_concurrency
-                } else {
-                    // For regular transactions, use the hint-based count
-                    initial_workers
-                };
-
-                // Spawn the required number of workers
-                for _ in 0..workers_needed {
-                    handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
-                    workers_spawned += 1;
-                }
-
                 if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     // For Optimism chains: The first transaction is always a deposit transaction
                     // that sets critical metadata (L1 block info, fees) affecting all subsequent
@@ -155,7 +144,7 @@ where
 
             // Process remaining transactions with round-robin distribution
             while let Ok(executable) = pending.recv() {
-                let task_idx = executing % workers_spawned;
+                let task_idx = executing % workers_needed;
                 if handles[task_idx].send(executable).is_err() {
                     warn!(
                         target: "engine::tree::prewarm",
