@@ -332,7 +332,7 @@ where
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
     ///
-    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
+    /// Note: Since here are no ordering guarantees this won't be the state the txs produce when
     /// executed sequentially.
     fn transact_batch(
         self,
