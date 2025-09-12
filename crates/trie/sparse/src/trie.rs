@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::{trace, warn};
+use tracing::{debug, trace};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -42,7 +42,7 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum SparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
@@ -130,6 +130,13 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// ```
     pub const fn blind() -> Self {
         Self::Blind(None)
+    }
+
+    /// Creates a new blind sparse trie, clearing and later reusing the given
+    /// [`SparseTrieInterface`].
+    pub fn blind_from(mut trie: T) -> Self {
+        trie.clear();
+        Self::Blind(Some(Box::new(trie)))
     }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
@@ -640,7 +647,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                warn!(
+                                debug!(
                                     target: "trie::sparse",
                                     leaf_full_path = ?full_path,
                                     child_path = ?current,
@@ -815,7 +822,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            warn!(
+                            debug!(
                                 target: "trie::sparse",
                                 ?child_path,
                                 leaf_full_path = ?full_path,

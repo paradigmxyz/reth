@@ -194,4 +194,9 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     /// If the block couldn't be found, returns `None`.
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
+
+    /// Returns a pending [`StateProvider`] if it exists.
+    ///
+    /// This will return `None` if there's no pending state.
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>>;
 }

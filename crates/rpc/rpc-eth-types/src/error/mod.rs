@@ -289,9 +289,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     block_id_to_str(end_id),
                 ),
             ),
-            err @ EthApiError::TransactionConfirmationTimeout { .. } => {
-                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), err.to_string())
-            }
+            err @ EthApiError::TransactionConfirmationTimeout { .. } => rpc_error_with_code(
+                EthRpcErrorCode::TransactionConfirmationTimeout.code(),
+                err.to_string(),
+            ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),

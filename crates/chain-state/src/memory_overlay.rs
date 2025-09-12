@@ -21,7 +21,7 @@ pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
 > {
-    /// Historical state provider for state lookups that are not found in in-memory blocks.
+    /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
@@ -84,12 +84,14 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
     ) -> ProviderResult<Vec<B256>> {
         let range = start..end;
         let mut earliest_block_number = None;
-        let mut in_memory_hashes = Vec::new();
+        let mut in_memory_hashes = Vec::with_capacity(range.size_hint().0);
 
+        // iterate in ascending order (oldest to newest = low to high)
         for block in &self.in_memory {
-            if range.contains(&block.recovered_block().number()) {
+            let block_num = block.recovered_block().number();
+            if range.contains(&block_num) {
                 in_memory_hashes.push(block.recovered_block().hash());
-                earliest_block_number = Some(block.recovered_block().number());
+                earliest_block_number = Some(block_num);
             }
         }
 
