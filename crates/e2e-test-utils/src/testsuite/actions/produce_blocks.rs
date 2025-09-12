@@ -590,7 +590,7 @@ where
                 // at least one client passes all the check, save the header in Env
                 if !accepted_check {
                     accepted_check = true;
-                    // save the header in Env
+                    // save the current block info in Env
                     env.set_current_block_info(BlockInfo {
                         hash: rpc_latest_header.hash,
                         number: rpc_latest_header.inner.number,
