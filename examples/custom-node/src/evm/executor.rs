@@ -17,7 +17,10 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ExecutionResult, database::State};
+use revm::{
+    context::result::{ExecutionResult, ResultAndState},
+    database::State,
+};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -47,6 +50,31 @@ where
                 Recovered::new_unchecked(op_tx, *tx.signer()),
                 f,
             ),
+            CustomTransaction::Payment(..) => todo!(),
+        }
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        match tx.tx() {
+            CustomTransaction::Op(op_tx) => self
+                .inner
+                .execute_transaction_without_commit(Recovered::new_unchecked(op_tx, *tx.signer())),
+            CustomTransaction::Payment(..) => todo!(),
+        }
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        match tx.tx() {
+            CustomTransaction::Op(op_tx) => {
+                self.inner.commit_transaction(output, Recovered::new_unchecked(op_tx, *tx.signer()))
+            }
             CustomTransaction::Payment(..) => todo!(),
         }
     }
