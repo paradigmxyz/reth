@@ -29,10 +29,7 @@ once_cell.workspace = true
 
 [dev-dependencies]
 # eth
-reth-primitives-traits = { workspace = true, features = [
-    "arbitrary",
-    "test-utils",
-] }
+reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -92,6 +89,7 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "reth-ethereum-primitives/serde-bincode-compat",
+    "alloy-genesis/serde-bincode-compat",
 ]
 
 [[bench]]

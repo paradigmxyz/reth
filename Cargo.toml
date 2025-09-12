@@ -528,10 +528,7 @@ op-alloy-flz = { version = "0.13.1", default-features = false }
 either = { version = "1.15.0", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
-backon = { version = "1.2", default-features = false, features = [
-    "std-blocking-sleep",
-    "tokio-sleep",
-] }
+backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }
 bincode = "1.3"
 bitflags = "2.4"
 boyer-moore-magiclen = "0.2.16"
@@ -552,13 +549,9 @@ itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 lz4 = "1.28.1"
 modular-bitfield = "0.11.2"
-notify = { version = "8.0.0", default-features = false, features = [
-    "macos_fsevent",
-] }
+notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.4.2", default-features = false }
-once_cell = { version = "1.19", default-features = false, features = [
-    "critical-section",
-] }
+once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
 paste = "1.0"
 rand = "0.9"
@@ -638,10 +631,7 @@ proptest-arbitrary-interop = "0.1.0"
 # crypto
 enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.30", default-features = false, features = [
-    "global-context",
-    "recovery",
-] }
+secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
 # rand 8 for secp256k1
 rand_08 = { package = "rand", version = "0.8" }
 

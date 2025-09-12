@@ -2545,7 +2545,7 @@ where
             // The test also expects the error to contain
             // "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"
             error_str =
-                format!("TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST: {}", error_str);
+                format!("TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST: {error_str}");
         }
 
         // If the validation error is specifically an inclusion-list failure,

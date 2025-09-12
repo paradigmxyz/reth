@@ -81,8 +81,8 @@ pub(crate) struct ForkchoiceUpdatedResponseMetrics {
     /// [`Accepted`](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
     pub(crate) forkchoice_updated_accepted: Counter,
     /// The total count of forkchoice updated messages that we responded to with
-    /// [`InclusionListUnsatisfied`](alloy_rpc_types_engine::PayloadStatusEnum#
-    /// InclusionListUnsatisfied).
+    /// [`InclusionListUnsatisfied`]
+    /// (`alloy_rpc_types_engine::PayloadStatusEnum#InclusionListUnsatisfied`).
     pub(crate) forkchoice_updated_inclusion_list_unsatisfied: Counter,
     /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
     /// with an error type that is not a [`PayloadStatusEnum`].
@@ -108,8 +108,8 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     /// [Accepted](alloy_rpc_types_engine::PayloadStatusEnum#Accepted).
     pub(crate) new_payload_accepted: Counter,
     /// The total count of new payload messages that we responded to with
-    /// [InclusionListUnsatisfied](alloy_rpc_types_engine::PayloadStatusEnum#
-    /// InclusionListUnsatisfied).
+    /// [`InclusionListUnsatisfied`]
+    /// (`alloy_rpc_types_engine::PayloadStatusEnum#InclusionListUnsatisfied`).
     pub(crate) new_payload_inclusion_list_unsatisfied: Counter,
     /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
     /// error type that is not a [`PayloadStatusEnum`].

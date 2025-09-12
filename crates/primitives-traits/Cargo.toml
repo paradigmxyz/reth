@@ -60,11 +60,7 @@ alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
-secp256k1 = { workspace = true, features = [
-    "recovery",
-    "global-context",
-    "rand",
-] }
+secp256k1 = { workspace = true, features = ["recovery", "global-context", "rand"] }
 bincode.workspace = true
 byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -129,6 +125,8 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "op-alloy-consensus?/serde",
     "op-alloy-consensus?/serde-bincode-compat",
+    "alloy-genesis/serde-bincode-compat",
+    "alloy-rpc-types-eth?/serde-bincode-compat",
 ]
 serde = [
     "dep:serde",

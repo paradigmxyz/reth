@@ -117,7 +117,7 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
         // ensure we're also receiving the built payload as event
-        Ok(self.payload.expect_built_payload().await?)
+        self.payload.expect_built_payload().await
     }
 
     /// Triggers payload building job and submits it to the engine.
