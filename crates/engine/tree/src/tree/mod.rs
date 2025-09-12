@@ -1752,7 +1752,7 @@ where
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
         if self.sealed_header_by_hash(parent_hash)?.is_some() {
-            return Ok(Some(parent_hash));
+            return Ok(Some(parent_hash))
         }
 
         // iterate over ancestors in the invalid cache
