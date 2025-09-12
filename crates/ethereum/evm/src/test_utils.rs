@@ -3,12 +3,14 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_evm::precompiles::PrecompilesMap;
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::ExecutionData;
 use parking_lot::Mutex;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     block::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
+        ExecutableTx,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
     ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
@@ -17,7 +19,7 @@ use reth_evm::{
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::result::{ExecutionResult, HaltReason},
+    context::result::{ExecutionResult, HaltReason, Output, ResultAndState, SuccessReason},
     database::State,
     Inspector,
 };
@@ -94,6 +96,30 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         _f: impl FnOnce(&ExecutionResult<HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         Ok(Some(0))
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        _tx: impl ExecutableTx<Self>,
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        Ok(ResultAndState::new(
+            ExecutionResult::Success {
+                reason: SuccessReason::Return,
+                gas_used: 0,
+                gas_refunded: 0,
+                logs: vec![],
+                output: Output::Call(Bytes::from(vec![])),
+            },
+            Default::default(),
+        ))
+    }
+
+    fn commit_transaction(
+        &mut self,
+        _output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        _tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        Ok(0)
     }
 
     fn finish(
