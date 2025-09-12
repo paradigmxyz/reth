@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization, NumHash};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -48,6 +48,8 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         propagate: bool,
         /// The authorities of EIP-7702 transaction.
         authorities: Option<Vec<Address>>,
+        /// Block number and hash at the time of validation.
+        block_info: NumHash
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
