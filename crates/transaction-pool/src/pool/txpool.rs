@@ -15,7 +15,7 @@ use crate::{
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate, UpdateOutcome},
-        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome, QueuedReason,
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
     PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
@@ -641,56 +641,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
     }
 
-    /// Adds the transaction into the pool.
-    ///
-    /// This pool consists of four sub-pools: `Queued`, `Pending`, `BaseFee`, and `Blob`.
-    ///
-    /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
-    /// additional transactions that are note yet present in the pool. And transactions that the
-    /// sender can not afford with the current balance.
-    ///
-    /// The `Pending` pool contains all transactions that have no nonce gaps, and can be afforded by
-    /// the sender. It only contains transactions that are ready to be included in the pending
-    /// block. The pending pool contains all transactions that could be listed currently, but not
-    /// necessarily independently. However, this pool never contains transactions with nonce gaps. A
-    /// transaction is considered `ready` when it has the lowest nonce of all transactions from the
-    /// same sender. Which is equals to the chain nonce of the sender in the pending pool.
-    ///
-    /// The `BaseFee` pool contains transactions that currently can't satisfy the dynamic fee
-    /// requirement. With EIP-1559, transactions can become executable or not without any changes to
-    /// the sender's balance or nonce and instead their `feeCap` determines whether the
-    /// transaction is _currently_ (on the current state) ready or needs to be parked until the
-    /// `feeCap` satisfies the block's `baseFee`.
-    ///
-    /// The `Blob` pool contains _blob_ transactions that currently can't satisfy the dynamic fee
-    /// requirement, or blob fee requirement. Transactions become executable only if the
-    /// transaction `feeCap` is greater than the block's `baseFee` and the `maxBlobFee` is greater
-    /// than the block's `blobFee`.
-    ///
-    /// Determines the specific reason why a transaction is queued based on its subpool and state.
-    const fn determine_queued_reason(subpool: SubPool, state: TxState) -> Option<QueuedReason> {
-        match subpool {
-            SubPool::Pending => None, // Not queued
-            SubPool::Queued => {
-                // Check state flags to determine specific reason
-                if !state.contains(TxState::NO_NONCE_GAPS) {
-                    Some(QueuedReason::NonceGap)
-                } else if !state.contains(TxState::ENOUGH_BALANCE) {
-                    Some(QueuedReason::InsufficientBalance)
-                } else if !state.contains(TxState::NO_PARKED_ANCESTORS) {
-                    Some(QueuedReason::ParkedAncestors)
-                } else if !state.contains(TxState::NOT_TOO_MUCH_GAS) {
-                    Some(QueuedReason::TooMuchGas)
-                } else {
-                    // Fallback for unexpected queued state
-                    Some(QueuedReason::NonceGap)
-                }
-            }
-            SubPool::BaseFee => Some(QueuedReason::InsufficientBaseFee),
-            SubPool::Blob => Some(QueuedReason::InsufficientBlobFee),
-        }
-    }
-
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
@@ -730,7 +680,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     })
                 } else {
                     // Determine the specific queued reason based on the transaction state
-                    let queued_reason = Self::determine_queued_reason(move_to, state);
+                    let queued_reason = state.determine_queued_reason(move_to);
                     AddedTransaction::Parked {
                         transaction,
                         subpool: move_to,
