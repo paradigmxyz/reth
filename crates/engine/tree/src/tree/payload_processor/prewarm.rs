@@ -99,6 +99,7 @@ where
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
 
+            // Spawn workers lazily as needed to avoid wasting resources on testnets/devnets
             let mut handles = Vec::with_capacity(max_concurrency);
 
             // Handle first transaction - special case for Optimism deposit
