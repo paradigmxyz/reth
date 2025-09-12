@@ -333,7 +333,7 @@ pub const fn validate_il_presence<T: EthereumHardforks>(
             //
             // the IL is not part of the execution payload, so we only check for the payload
             // attributes
-            if std::matches!(message_validation_kind, MessageValidationKind::PayloadAttributes) &&
+            if core::matches!(message_validation_kind, MessageValidationKind::PayloadAttributes) &&
                 !has_il
             {
                 return Err(message_validation_kind

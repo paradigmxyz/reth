@@ -1081,7 +1081,11 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                if self.config.always_process_payload_attributes_on_canonical_head() {
+                    // TODO(mattsse): This behavior is technically a different setting and we need a
+                    // new config setting for this
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
             }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a

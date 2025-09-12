@@ -628,10 +628,11 @@ where
             tx_backups
                 .into_iter()
                 .filter_map(|backup| {
-                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
-                        &mut backup.rlp.as_ref(),
-                    )
-                    .ok()?;
+                    let tx_signed =
+                        <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
+                            backup.rlp.as_ref(),
+                        )
+                        .ok()?;
                     let recovered = tx_signed.try_into_recovered().ok()?;
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;
