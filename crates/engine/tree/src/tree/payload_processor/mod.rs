@@ -200,10 +200,15 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
 
-        let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, provider_builder, to_multi_proof.clone());
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            prewarm_rx,
+            size_hint,
+            provider_builder,
+            to_multi_proof.clone(),
+        );
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -248,8 +253,9 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
-        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -259,6 +265,7 @@ where
     }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    /// Returns the receivers and a size hint for the number of transactions.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
@@ -266,7 +273,11 @@ where
     ) -> (
         mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
+        usize,
     ) {
+        // Get the size hint before moving the iterator
+        let size_hint = transactions.size_hint().0;
+
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
@@ -280,7 +291,7 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx)
+        (prewarm_rx, execute_rx, size_hint)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -288,6 +299,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
@@ -319,6 +331,7 @@ where
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
+            transaction_count_hint,
         );
 
         // spawn pre-warm task

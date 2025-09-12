@@ -48,6 +48,8 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
+    /// The number of transactions to be processed
+    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -66,6 +68,7 @@ where
         execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
+        transaction_count_hint: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
         (
@@ -74,6 +77,7 @@ where
                 execution_cache,
                 ctx,
                 max_concurrency: 64,
+                transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
             },
@@ -94,19 +98,34 @@ where
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
+        let transaction_count_hint = self.transaction_count_hint;
 
         self.executor.spawn_blocking(move || {
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
 
-            // Spawn all txn processing workers upfront as txns > max_concurrency (64)
+            // Initially cap workers based on transaction count hint
+            let initial_workers = transaction_count_hint.min(max_concurrency);
             let mut handles = Vec::with_capacity(max_concurrency);
-            for _ in 0..max_concurrency {
-                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
-            }
+            let mut workers_spawned = 0;
 
             // Handle first transaction - special case for Optimism deposit
             if let Ok(first_tx) = pending.recv() {
+                // Determine how many workers we actually need
+                let workers_needed = if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
+                    // For deposit transactions, we need all workers since we broadcast to all
+                    max_concurrency
+                } else {
+                    // For regular transactions, use the hint-based count
+                    initial_workers
+                };
+
+                // Spawn the required number of workers
+                for _ in 0..workers_needed {
+                    handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
+                    workers_spawned += 1;
+                }
+
                 if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     // For Optimism chains: The first transaction is always a deposit transaction
                     // that sets critical metadata (L1 block info, fees) affecting all subsequent
@@ -136,7 +155,7 @@ where
 
             // Process remaining transactions with round-robin distribution
             while let Ok(executable) = pending.recv() {
-                let task_idx = executing % max_concurrency;
+                let task_idx = executing % workers_spawned;
                 if handles[task_idx].send(executable).is_err() {
                     warn!(
                         target: "engine::tree::prewarm",
