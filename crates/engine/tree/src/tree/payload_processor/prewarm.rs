@@ -99,14 +99,14 @@ where
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
 
-            // Spawn workers lazily as needed to avoid wasting resources on testnets/devnets
+            // Spawn all txn processing workers upfront as txns > max_concurrency (64)
             let mut handles = Vec::with_capacity(max_concurrency);
+            for _ in 0..max_concurrency {
+                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
+            }
 
             // Handle first transaction - special case for Optimism deposit
             if let Ok(first_tx) = pending.recv() {
-                // Spawn the first worker since we'll definitely need at least one
-                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
-
                 if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     // For Optimism chains: The first transaction is always a deposit transaction
                     // that sets critical metadata (L1 block info, fees) affecting all subsequent
@@ -137,21 +137,6 @@ where
             // Process remaining transactions with round-robin distribution
             while let Ok(executable) = pending.recv() {
                 let task_idx = executing % max_concurrency;
-
-                // Lazily spawn worker if needed
-                if handles.len() <= task_idx {
-                    let (tx, rx) = mpsc::channel();
-                    let sender = actions_tx.clone();
-                    let ctx = ctx.clone();
-                    let done_tx = done_tx.clone();
-
-                    executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
-                    });
-
-                    handles.push(tx);
-                }
-
                 if handles[task_idx].send(executable).is_err() {
                     warn!(
                         target: "engine::tree::prewarm",
