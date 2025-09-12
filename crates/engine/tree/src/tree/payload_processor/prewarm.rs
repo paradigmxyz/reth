@@ -113,7 +113,7 @@ where
                 handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
             }
 
-            // Handle first transaction - special case for Optimism deposit
+            // Handle first transaction - special case for Optimism deposit / systems txs
             if let Ok(first_tx) = pending.recv() {
                 if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
                     // For Optimism chains: The first transaction is always a deposit transaction
