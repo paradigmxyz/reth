@@ -165,6 +165,8 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_parallel_fallback_total: Counter,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
+    /// Histogram for state root duration ie the time spent blocked waiting for the state root
+    pub(crate) state_root_histogram: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency
@@ -185,6 +187,7 @@ impl BlockValidationMetrics {
         self.state_root_storage_tries_updated_total
             .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
+        self.state_root_histogram.record(elapsed_as_secs);
     }
 
     /// Records a new payload validation time, updating both the histogram and the payload
