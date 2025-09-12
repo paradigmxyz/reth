@@ -1049,7 +1049,7 @@ where
                         ProviderError::HeaderNotFound(state.head_block_hash.into())
                     })?;
                 let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated));
+                return Ok(TreeOutcome::new(updated))
             }
 
             // the head block is already canonical
