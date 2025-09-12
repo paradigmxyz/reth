@@ -18,8 +18,9 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{args::LogArgs, version::version_metadata};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::FileWorkerGuard;
-use std::{ffi::OsString, fmt, future::Future, sync::Arc};
+use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::info;
 
 /// The main reth cli interface.
@@ -27,8 +28,11 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<
+    C: ChainSpecParser = EthereumChainSpecParser,
+    Ext: clap::Args + fmt::Debug = NoArgs,
+    Rpc: RpcModuleValidator = DefaultRpcModuleValidator,
+> {
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<C, Ext>,
@@ -36,6 +40,10 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// Type marker for the RPC module validator
+    #[arg(skip)]
+    pub _phantom: PhantomData<Rpc>,
 }
 
 impl Cli {
@@ -54,7 +62,7 @@ impl Cli {
     }
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> Cli<C, Ext, Rpc> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -153,7 +161,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
         let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+            (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
         };
 
         self.with_runner_and_components::<EthereumNode>(
@@ -190,9 +198,20 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         let _ = install_prometheus_recorder();
 
         match self.command {
-            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
-            }),
+            Commands::Node(command) => {
+                // Validate RPC modules using the configured validator
+                if let Some(http_api) = &command.rpc.http_api {
+                    Rpc::validate_selection(http_api, "http.api")
+                        .map_err(|e| eyre::eyre!("{e}"))?;
+                }
+                if let Some(ws_api) = &command.rpc.ws_api {
+                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre::eyre!("{e}"))?;
+                }
+
+                runner.run_command_until_exit(|ctx| {
+                    command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+                })
+            }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<N>())
@@ -416,5 +435,73 @@ mod tests {
         ])
         .unwrap();
         assert!(reth.run(async move |_, _| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn test_rpc_module_validation() {
+        use reth_rpc_server_types::RethRpcModule;
+
+        // Test that standard modules are accepted
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "eth,admin,debug"]).unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                // Should contain the expected modules
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Admin));
+                assert!(modules.contains(&RethRpcModule::Debug));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+
+        // Test that unknown modules are parsed as Other variant
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "eth,customrpc"]).unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Other("customrpc".to_string())));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+    }
+
+    #[test]
+    fn test_rpc_module_unknown_rejected() {
+        use reth_cli_runner::CliRunner;
+
+        // Test that unknown module names are rejected during validation
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "unknownmodule"]).unwrap();
+
+        // When we try to run the CLI with validation, it should fail
+        let runner = CliRunner::try_default_runtime().unwrap();
+        let result = cli.with_runner(runner, |_, _| async { Ok(()) });
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+
+        // The error should mention it's an unknown module
+        assert!(
+            err_msg.contains("Unknown RPC module"),
+            "Error should mention unknown module: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("'unknownmodule'"),
+            "Error should mention the module name: {}",
+            err_msg
+        );
     }
 }

@@ -30,6 +30,11 @@ EF_TESTS_TAG := v17.0
 EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
 EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 
+# The release tag of https://github.com/ethereum/execution-spec-tests to use for EEST tests
+EEST_TESTS_TAG := v4.5.0
+EEST_TESTS_URL := https://github.com/ethereum/execution-spec-tests/releases/download/$(EEST_TESTS_TAG)/fixtures_stable.tar.gz
+EEST_TESTS_DIR := ./testing/ef-tests/execution-spec-tests
+
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
@@ -202,9 +207,18 @@ $(EF_TESTS_DIR):
 	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
 	rm ethereum-tests.tar.gz
 
+# Downloads and unpacks EEST tests in the `$(EEST_TESTS_DIR)` directory.
+#
+# Requires `wget` and `tar`
+$(EEST_TESTS_DIR):
+	mkdir $(EEST_TESTS_DIR)
+	wget $(EEST_TESTS_URL) -O execution-spec-tests.tar.gz
+	tar -xzf execution-spec-tests.tar.gz --strip-components=1 -C $(EEST_TESTS_DIR)
+	rm execution-spec-tests.tar.gz
+
 .PHONY: ef-tests
-ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
-	cargo nextest run -p ef-tests --features ef-tests
+ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
+	cargo nextest run -p ef-tests --release --features ef-tests
 
 ##@ reth-bench
 
