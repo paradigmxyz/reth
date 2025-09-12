@@ -49,7 +49,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         /// The authorities of EIP-7702 transaction.
         authorities: Option<Vec<Address>>,
         /// Block number and hash at the time of validation.
-        block_info: NumHash
+        block_info: NumHash,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.

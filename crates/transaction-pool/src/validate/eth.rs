@@ -414,9 +414,9 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !is_local
-            && transaction.is_dynamic_fee()
-            && transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        if !is_local &&
+            transaction.is_dynamic_fee() &&
+            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
@@ -495,8 +495,8 @@ where
         }
 
         // Osaka validation of max tx gas.
-        if self.fork_tracker.is_osaka_activated()
-            && transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
+        if self.fork_tracker.is_osaka_activated() &&
+            transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
         {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
