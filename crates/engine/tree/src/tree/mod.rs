@@ -2654,7 +2654,7 @@ where
         // invalid
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
         if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
-            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)));
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
         if !self.backfill_sync_state.is_idle() {
