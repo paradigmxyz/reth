@@ -83,7 +83,7 @@ where
     {
         let this = self.clone();
         async move {
-            // First try the historical lookup (original behavior)
+            // First try to load from historical data
             match this.load_transaction_and_receipt(hash).await? {
                 Some((tx, meta, receipt)) => {
                     return this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
@@ -91,15 +91,17 @@ where
                 None => {
                     // If not found historically, check the pending flashblock
                     if let Ok(Some(pending_block)) = this.pending_flashblock() {
-                        let block = pending_block.0;
-                        let receipts = pending_block.1;
+                        let block = pending_block.block;
+                        let receipts = pending_block.receipts;
 
                         // Find the transaction in the pending block
-                        if let Some((index, (_signer, tx))) = block
+                        if let Some((index, tx_with_sender)) = block
                             .transactions_with_sender()
                             .enumerate()
                             .find(|(_, (_, tx))| *tx.tx_hash() == hash)
                         {
+                            let (signer, tx) = tx_with_sender;
+                            
                             // Get the corresponding receipt
                             if let Some(receipt) = receipts.get(index) {
                                 // Create TransactionMeta for the pending transaction
@@ -114,7 +116,6 @@ where
                                 };
 
                                 // Convert the transaction to the expected provider type
-                                // We need to convert the transaction from the block to the provider transaction type
                                 let provider_tx = this
                                     .provider()
                                     .transaction_by_hash(hash)
