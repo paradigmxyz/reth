@@ -265,7 +265,6 @@ where
     }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
-    /// Returns the receivers and a size hint for the number of transactions.
     #[expect(clippy::type_complexity)]
     fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
