@@ -604,7 +604,7 @@ where
     fn build_inclusion_list(&self, base_fee: u64, max_size: usize) -> Vec<Bytes> {
         let attrs = BestTransactionsAttributes::base_fee(base_fee);
         let mut il_size = 0usize;
-    
+
         self.best_transactions_with_attributes(attrs)
             .map(|pool_tx| pool_tx.to_consensus().into_inner())
             .filter(|tx| !tx.is_eip4844())
