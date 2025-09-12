@@ -644,9 +644,6 @@ pub enum RpcInvalidTransactionError {
         /// Minimum required priority fee.
         minimum_priority_fee: u128,
     },
-    /// Thrown if the block number or block hash cannot be obtained.
-    #[error("cannot obtain block number or hash")]
-    CannotObtainBlockNumberOrHash,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -999,9 +996,6 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
                 Self::Invalid(RpcInvalidTransactionError::PriorityFeeBelowMinimum {
                     minimum_priority_fee,
                 })
-            }
-            InvalidPoolTransactionError::CannotObtainBlockNumberOrHash => {
-                Self::Invalid(RpcInvalidTransactionError::CannotObtainBlockNumberOrHash)
             }
         }
     }

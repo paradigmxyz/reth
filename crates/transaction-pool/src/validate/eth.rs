@@ -549,15 +549,7 @@ where
         };
 
         let authorities = self.recover_authorities(&transaction);
-        let block_info = match self.current_block_info() {
-            Some(info) => info,
-            None => {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::CannotObtainBlockNumberOrHash,
-                )
-            }
-        };
+        let block_info = self.current_block_info().unwrap_or_default();
 
         // Return the valid transaction
         TransactionValidationOutcome::Valid {

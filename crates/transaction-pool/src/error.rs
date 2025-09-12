@@ -273,9 +273,6 @@ pub enum InvalidPoolTransactionError {
         /// Minimum required priority fee.
         minimum_priority_fee: u128,
     },
-    /// Thrown if the block number or block hash cannot be obtained.
-    #[error("cannot obtain block number or hash")]
-    CannotObtainBlockNumberOrHash,
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -391,7 +388,6 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
             Self::PriorityFeeBelowMinimum { .. } => false,
-            Self::CannotObtainBlockNumberOrHash => false,
         }
     }
 
