@@ -84,7 +84,7 @@ where
     }
 
     /// Returns a subscriber to the flashblock sequence.
-    pub fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence> {
+    pub fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence<N::SignedTx>> {
         self.blocks.subscribe_block_sequence()
     }
 
@@ -107,9 +107,10 @@ where
     fn build_args(
         &mut self,
     ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
-        let target_block_number = self.builder.provider().latest_header().ok().flatten()?.number() + 1;
+        let latest_header = self.builder.provider().latest_header().ok().flatten()?;
+        let parent_hash = latest_header.hash();
         
-        let Some(base) = self.blocks.payload_base_for_block(target_block_number) else {
+        let Some(base) = self.blocks.payload_base_for_parent_hash(parent_hash) else {
             trace!(
                 flashblock_number = ?self.blocks.block_number(),
                 count = %self.blocks.count(),
@@ -120,16 +121,14 @@ where
         };
 
         // attempt an initial consecutive check
-        if let Some(latest) = self.builder.provider().latest_header().ok().flatten() {
-            if latest.hash() != base.parent_hash {
-                trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
-                return None;
-            }
+        if parent_hash != base.parent_hash {
+            trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest_header.num_hash(), "Skipping non consecutive build attempt");
+            return None;
         }
 
         Some(BuildArgs {
             base,
-            transactions: self.blocks.ready_transactions_for_block(target_block_number)?.collect::<Vec<_>>(),
+            transactions: self.blocks.ready_transactions_for_parent_hash(parent_hash)?.collect::<Vec<_>>(),
             cached_state: self.cached_state.take(),
         })
     }
