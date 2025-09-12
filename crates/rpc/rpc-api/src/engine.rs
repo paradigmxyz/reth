@@ -135,9 +135,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
     /// `InclusionListTransactions` field in the `payloadAttributes`.
     ///
-    /// See also <github.com/jihoonsong/execution-apis/blob/
-    /// ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#
-    /// engine_forkchoiceupdatedv4>
+    /// TODO: Update link
     #[method(name = "forkchoiceUpdatedV4")]
     async fn fork_choice_updated_v4(
         &self,
