@@ -101,7 +101,7 @@ where
                             .find(|(_, (_, tx))| *tx.tx_hash() == hash)
                         {
                             let (signer, tx) = tx_with_sender;
-                            
+
                             // Get the corresponding receipt
                             if let Some(receipt) = receipts.get(index) {
                                 // Create TransactionMeta for the pending transaction
