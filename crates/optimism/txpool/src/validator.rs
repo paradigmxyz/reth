@@ -232,6 +232,7 @@ where
             propagate,
             bytecode_hash,
             authorities,
+            block_info
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
@@ -269,6 +270,7 @@ where
                 propagate,
                 bytecode_hash,
                 authorities,
+                block_info
             }
         }
         outcome
