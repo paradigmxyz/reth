@@ -1069,7 +1069,7 @@ where
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     let updated =
                         self.process_payload_attributes(attr, &canonical_header, state, version);
-                    return Ok(TreeOutcome::new(updated));
+                    return Ok(TreeOutcome::new(updated))
                 }
 
                 // At this point, no alternative block has been triggered, so we need effectively
