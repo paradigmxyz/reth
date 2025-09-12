@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::B256;
+use alloy_primitives::{BlockHash, B256};
 use derive_more::Constructor;
 use reth_chain_state::{
     BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -84,7 +84,13 @@ pub type PendingBlockReceipts<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
 
 /// A type alias for a pair of an [`Arc`] wrapped [`RecoveredBlock`] and a vector of
 /// [`NodePrimitives::Receipt`].
-pub type PendingBlockAndReceipts<N> = (PendingRecoveredBlock<N>, PendingBlockReceipts<N>);
+#[derive(Debug)]
+pub struct PendingBlockAndReceipts<N: NodePrimitives> {
+    /// The pending recovered block.
+    pub block: PendingRecoveredBlock<N>,
+    /// The receipts for the pending block.
+    pub receipts: PendingBlockReceipts<N>,
+}
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Clone, Constructor)]
@@ -118,13 +124,24 @@ impl<N: NodePrimitives> PendingBlock<N> {
     /// Converts this [`PendingBlock`] into a pair of [`RecoveredBlock`] and a vector of
     /// [`NodePrimitives::Receipt`]s, taking self.
     pub fn into_block_and_receipts(self) -> PendingBlockAndReceipts<N> {
-        (self.executed_block.recovered_block, self.receipts)
+        PendingBlockAndReceipts {
+            block: self.executed_block.recovered_block,
+            receipts: self.receipts,
+        }
     }
 
     /// Returns a pair of [`RecoveredBlock`] and a vector of  [`NodePrimitives::Receipt`]s by
     /// cloning from borrowed self.
     pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
-        (self.executed_block.recovered_block.clone(), self.receipts.clone())
+        PendingBlockAndReceipts {
+            block: self.executed_block.recovered_block.clone(),
+            receipts: self.receipts.clone(),
+        }
+    }
+
+    /// Returns a hash of the parent block for this `executed_block`.
+    pub fn parent_hash(&self) -> BlockHash {
+        self.executed_block.recovered_block().parent_hash()
     }
 }
 

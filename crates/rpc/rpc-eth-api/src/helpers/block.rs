@@ -185,8 +185,8 @@ pub trait EthBlocks:
                 }
 
                 // If no pending block from provider, build the pending block locally.
-                if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block, receipts)));
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some((pending.block, pending.receipts)));
                 }
             }
 
@@ -296,7 +296,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(block)),
+                    Some(pending) => Ok(Some(pending.block)),
                     None => Ok(None),
                 };
             }

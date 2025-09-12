@@ -442,7 +442,10 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
         } else {
@@ -961,7 +964,10 @@ where
                 let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
                 if latest.number() > merge_block {
                     let provider = self.blockchain_db().static_file_provider();
-                    if provider.get_lowest_transaction_static_file_block() < Some(merge_block) {
+                    if provider
+                        .get_lowest_transaction_static_file_block()
+                        .is_some_and(|lowest| lowest < merge_block)
+                    {
                         info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
                         provider.delete_transactions_below(merge_block)?;
                     } else {
