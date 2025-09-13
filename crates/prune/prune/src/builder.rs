@@ -7,7 +7,8 @@ use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
-    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
+    NodePrimitivesProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;
@@ -80,6 +81,7 @@ impl PrunerBuilder {
     where
         PF: DatabaseProviderFactory<
                 ProviderRW: PruneCheckpointWriter
+                                + PruneCheckpointReader
                                 + BlockReader<Transaction: Encodable2718>
                                 + StaticFileProviderFactory<
                     Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
@@ -111,7 +113,8 @@ impl PrunerBuilder {
                 Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
             > + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
-            + PruneCheckpointWriter,
+            + PruneCheckpointWriter
+            + PruneCheckpointReader,
     {
         let segments = SegmentSet::<Provider>::from_components(static_file_provider, self.segments);
 

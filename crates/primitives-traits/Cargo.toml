@@ -22,7 +22,6 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["k256"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
-alloy-block-access-list.workspace = true
 revm-primitives.workspace = true
 revm-bytecode.workspace = true
 revm-state.workspace = true
@@ -71,7 +70,6 @@ rand_08.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
-modular-bitfield.workspace = true
 
 [features]
 default = ["std"]

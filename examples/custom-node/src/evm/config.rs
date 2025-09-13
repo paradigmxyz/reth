@@ -23,6 +23,7 @@ use reth_op::{
     node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
     primitives::SignedTransaction,
 };
+use reth_optimism_flashblocks::ExecutionPayloadBaseV1;
 use reth_rpc_api::eth::helpers::pending_block::BuildPendingEnv;
 use std::sync::Arc;
 
@@ -134,6 +135,12 @@ impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
 pub struct CustomNextBlockEnvAttributes {
     inner: OpNextBlockEnvAttributes,
     extension: u64,
+}
+
+impl From<ExecutionPayloadBaseV1> for CustomNextBlockEnvAttributes {
+    fn from(value: ExecutionPayloadBaseV1) -> Self {
+        Self { inner: value.into(), extension: 0 }
+    }
 }
 
 impl BuildPendingEnv<CustomHeader> for CustomNextBlockEnvAttributes {
