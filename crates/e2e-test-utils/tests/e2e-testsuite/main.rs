@@ -1,5 +1,7 @@
 //! Example tests using the test suite framework.
 
+mod trie_fork_test;
+
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
@@ -139,6 +141,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .unwrap(),
                 )
                 .paris_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -156,7 +159,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .as_secs(),
                 prev_randao: B256::random(),
                 suggested_fee_recipient: Address::random(),
-                withdrawals: None,
+                withdrawals: Some(vec![]),
                 parent_beacon_block_root: None,
             },
         ));
@@ -180,7 +183,7 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
                     ))
                     .unwrap(),
                 )
-                .cancun_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -209,7 +212,7 @@ async fn test_testsuite_create_fork() -> Result<()> {
                     ))
                     .unwrap(),
                 )
-                .cancun_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -239,7 +242,7 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
                     ))
                     .unwrap(),
                 )
-                .cancun_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -271,7 +274,7 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
                     ))
                     .unwrap(),
                 )
-                .cancun_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node())
@@ -321,7 +324,7 @@ async fn test_testsuite_multinode_block_production() -> Result<()> {
                     ))
                     .unwrap(),
                 )
-                .cancun_activated()
+                .shanghai_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::multi_node(2)) // Create 2 nodes
