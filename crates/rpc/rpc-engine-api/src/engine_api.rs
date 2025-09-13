@@ -11,8 +11,8 @@ use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -282,6 +282,46 @@ where
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
     }
+
+    /// New payload version 5
+    pub async fn new_payload_v5(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner.validator.validate_version_specific_fields(
+            EngineApiMessageVersion::V6,
+            /* //todo */
+            payload_or_attrs,
+        )?;
+
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(payload)
+            .await
+            .inspect(|_| self.inner.on_new_payload_response())?)
+    }
+
+    /// Metrics version of `new_payload_v5`
+    pub async fn new_payload_v5_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+        let gas_used = payload.gas_used();
+
+        let res = Self::new_payload_v5(self, payload).await;
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
+        Ok(res?)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -536,6 +576,27 @@ where
         let start = Instant::now();
         let res = Self::get_payload_v5(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v5.record(start.elapsed());
+        res
+    }
+
+    /// Handler for `engine_getPayloadV6`
+    ///
+    /// For BAL
+    pub async fn get_payload_v6(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await
+    }
+
+    /// Metrics version of `get_payload_v6`
+    pub async fn get_payload_v6_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV6> {
+        let start = Instant::now();
+        let res = Self::get_payload_v6(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
         res
     }
 
@@ -913,6 +974,32 @@ where
         };
 
         Ok(self.new_payload_v4_metered(payload).await?)
+    }
+
+    /// Handler for `engine_newPayloadV5`
+    async fn new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV5");
+
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+            ),
+        };
+
+        Ok(self.new_payload_v5_metered(payload).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV1`
