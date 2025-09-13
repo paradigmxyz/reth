@@ -5,7 +5,6 @@ use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
 };
-use dashmap::DashMap;
 use reth_db_api::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
@@ -15,6 +14,7 @@ use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
+    collections::HashMap,
     marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -33,8 +33,7 @@ pub struct Tx<K: TransactionKind> {
     pub inner: Transaction<K>,
 
     /// Cached MDBX DBIs for reuse.
-    /// TODO: Reuse DBIs even among transactions, ideally with no synchronization overhead.
-    dbis: DashMap<&'static str, MDBX_dbi>,
+    dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
     /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
@@ -44,17 +43,12 @@ pub struct Tx<K: TransactionKind> {
 }
 
 impl<K: TransactionKind> Tx<K> {
-    /// Creates new `Tx` object with a `RO` or `RW` transaction.
-    #[inline]
-    pub fn new(inner: Transaction<K>) -> Self {
-        Self::new_inner(inner, None)
-    }
-
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub(crate) fn new_with_metrics(
+    pub(crate) fn new(
         inner: Transaction<K>,
+        dbis: Arc<HashMap<&'static str, MDBX_dbi>>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
         let metrics_handler = env_metrics
@@ -65,12 +59,7 @@ impl<K: TransactionKind> Tx<K> {
                 Ok(handler)
             })
             .transpose()?;
-        Ok(Self::new_inner(inner, metrics_handler))
-    }
-
-    #[inline]
-    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
-        Self { inner, metrics_handler, dbis: DashMap::new() }
+        Ok(Self { inner, dbis, metrics_handler })
     }
 
     /// Gets this transaction ID.
@@ -80,17 +69,13 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
-        match self.dbis.entry(T::NAME) {
-            dashmap::Entry::Occupied(occ) => Ok(*occ.get()),
-            dashmap::Entry::Vacant(vac) => {
-                let dbi = self
-                    .inner
-                    .open_db(Some(T::NAME))
-                    .map(|db| db.dbi())
-                    .map_err(|e| DatabaseError::Open(e.into()))?;
-                vac.insert(dbi);
-                Ok(dbi)
-            }
+        if let Some(dbi) = self.dbis.get(T::NAME) {
+            Ok(*dbi)
+        } else {
+            self.inner
+                .open_db(Some(T::NAME))
+                .map(|db| db.dbi())
+                .map_err(|e| DatabaseError::Open(e.into()))
         }
     }
 

@@ -23,6 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
+    collections::HashMap,
     ops::{Deref, Range},
     path::Path,
     sync::Arc,
@@ -190,6 +191,12 @@ impl DatabaseArguments {
 pub struct DatabaseEnv {
     /// Libmdbx-sys environment.
     inner: Environment,
+    /// Opened DBIs for reuse.
+    /// Important: Do not manually close these DBIs, like via `mdbx_dbi_close`.
+    /// More generally, do not dynamically create, re-open, or drop tables at
+    /// runtime. It's better to perform table creation and migration only once
+    /// at startup.
+    dbis: Arc<HashMap<&'static str, ffi::MDBX_dbi>>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     /// Write lock for when dealing with a read-write environment.
@@ -201,16 +208,18 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Tx::new_with_metrics(
+        Tx::new(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.dbis.clone(),
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Tx::new_with_metrics(
+        Tx::new(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
+            self.dbis.clone(),
             self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
@@ -445,6 +454,7 @@ impl DatabaseEnv {
 
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
+            dbis: Arc::default(),
             metrics: None,
             _lock_file,
         };
@@ -459,23 +469,27 @@ impl DatabaseEnv {
     }
 
     /// Creates all the tables defined in [`Tables`], if necessary.
-    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+    pub fn create_tables(&mut self) -> Result<(), DatabaseError> {
         self.create_tables_for::<Tables>()
     }
 
     /// Creates all the tables defined in the given [`TableSet`], if necessary.
-    pub fn create_tables_for<TS: TableSet>(&self) -> Result<(), DatabaseError> {
+    pub fn create_tables_for<TS: TableSet>(&mut self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        let mut dbis = HashMap::with_capacity(Tables::ALL.len());
 
         for table in TS::tables() {
             let flags =
                 if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
 
-            tx.create_db(Some(table.name()), flags)
+            let db = tx
+                .create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
+            dbis.insert(table.name(), db.dbi());
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+        self.dbis = Arc::new(dbis);
 
         Ok(())
     }
@@ -543,8 +557,9 @@ mod tests {
 
     /// Create database for testing with specified path
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
-        let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
-            .expect(ERROR_DB_CREATION);
+        let mut env =
+            DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
+                .expect(ERROR_DB_CREATION);
         env.create_tables().expect(ERROR_TABLE_CREATION);
         env
     }
