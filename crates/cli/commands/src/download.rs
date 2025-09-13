@@ -15,12 +15,10 @@ use std::{
 use tar::Archive;
 use tokio::task;
 use tracing::info;
-use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
-const EXTENSION_TAR_LZ4: &str = ".tar.lz4";
-const EXTENSION_TAR_ZSTD: &str = ".tar.zst";
+const MERKLE_BASE_URL: &str = "https://snapshots.merkle.io";
+const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
 #[derive(Debug, Parser)]
 pub struct DownloadCommand<C: ChainSpecParser> {
@@ -34,7 +32,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
         long_help = "Specify a snapshot URL or let the command propose a default one.\n\
         \n\
         Available snapshot sources:\n\
-        - https://www.merkle.io/snapshots (default, mainnet archive)\n\
+        - https://snapshots.merkle.io (default, mainnet archive)\n\
         - https://publicnode.com/snapshots (full nodes & testnets)\n\
         \n\
         If no URL is provided, the latest mainnet archive snapshot\n\
@@ -150,27 +148,7 @@ impl<R: Read> Read for ProgressReader<R> {
     }
 }
 
-/// Supported compression formats for snapshots
-#[derive(Debug, Clone, Copy)]
-enum CompressionFormat {
-    Lz4,
-    Zstd,
-}
-
-impl CompressionFormat {
-    /// Detect compression format from file extension
-    fn from_url(url: &str) -> Result<Self> {
-        if url.ends_with(EXTENSION_TAR_LZ4) {
-            Ok(Self::Lz4)
-        } else if url.ends_with(EXTENSION_TAR_ZSTD) {
-            Ok(Self::Zstd)
-        } else {
-            Err(eyre::eyre!("Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}", url))
-        }
-    }
-}
-
-/// Downloads and extracts a snapshot, blocking until finished.
+/// Downloads and extracts a snapshot with blocking approach
 fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     let client = reqwest::blocking::Client::builder().build()?;
     let response = client.get(url).send()?.error_for_status()?;
@@ -182,18 +160,11 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     })?;
 
     let progress_reader = ProgressReader::new(response, total_size);
-    let format = CompressionFormat::from_url(url)?;
 
-    match format {
-        CompressionFormat::Lz4 => {
-            let decoder = Decoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
-        }
-        CompressionFormat::Zstd => {
-            let decoder = ZstdDecoder::new(progress_reader)?;
-            Archive::new(decoder).unpack(target_dir)?;
-        }
-    }
+    let decoder = Decoder::new(progress_reader)?;
+    let mut archive = Archive::new(decoder);
+
+    archive.unpack(target_dir)?;
 
     info!(target: "reth::cli", "Extraction complete.");
     Ok(())
@@ -219,6 +190,10 @@ async fn get_latest_snapshot_url() -> Result<String> {
         .await?
         .trim()
         .to_string();
+
+    if !filename.ends_with(EXTENSION_TAR_FILE) {
+        return Err(eyre::eyre!("Unexpected snapshot filename format: {}", filename));
+    }
 
     Ok(format!("{MERKLE_BASE_URL}/{filename}"))
 }

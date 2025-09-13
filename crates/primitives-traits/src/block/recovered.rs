@@ -621,12 +621,6 @@ impl<'a, B: Block> IndexedTx<'a, B> {
         self.tx
     }
 
-    /// Returns the recovered transaction with the sender.
-    pub fn recovered_tx(&self) -> Recovered<&<B::Body as BlockBody>::Transaction> {
-        let sender = self.block.senders[self.index];
-        Recovered::new_unchecked(self.tx, sender)
-    }
-
     /// Returns the transaction hash.
     pub fn tx_hash(&self) -> TxHash {
         self.tx.trie_hash()

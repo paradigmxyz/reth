@@ -10,9 +10,6 @@ export default defineConfig({
   ogImageUrl: '/reth-prod.png',
   sidebar,
   basePath,
-  search: {
-    fuzzy: true
-  },
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk' },
@@ -21,7 +18,7 @@ export default defineConfig({
     },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.7.0',
+      text: 'v1.6.0',
       items: [
         {
           text: 'Releases',

@@ -13,9 +13,6 @@ pub mod constants;
 pub mod result;
 
 mod module;
-pub use module::{
-    DefaultRpcModuleValidator, LenientRpcModuleValidator, RethRpcModule, RpcModuleSelection,
-    RpcModuleValidator,
-};
+pub use module::{RethRpcModule, RpcModuleSelection};
 
 pub use result::ToRpcResult;

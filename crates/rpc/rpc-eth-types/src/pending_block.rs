@@ -6,14 +6,14 @@ use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockHash, B256};
+use alloy_primitives::B256;
 use derive_more::Constructor;
 use reth_chain_state::{
     BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
-use reth_primitives_traits::{Block, IndexedTx, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -84,27 +84,7 @@ pub type PendingBlockReceipts<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
 
 /// A type alias for a pair of an [`Arc`] wrapped [`RecoveredBlock`] and a vector of
 /// [`NodePrimitives::Receipt`].
-#[derive(Debug)]
-pub struct PendingBlockAndReceipts<N: NodePrimitives> {
-    /// The pending recovered block.
-    pub block: PendingRecoveredBlock<N>,
-    /// The receipts for the pending block.
-    pub receipts: PendingBlockReceipts<N>,
-}
-
-impl<N: NodePrimitives> PendingBlockAndReceipts<N> {
-    /// Finds a transaction by hash and returns it along with its corresponding receipt.
-    ///
-    /// Returns `None` if the transaction is not found in this pending block.
-    pub fn find_transaction_and_receipt_by_hash(
-        &self,
-        tx_hash: alloy_primitives::TxHash,
-    ) -> Option<(IndexedTx<'_, N::Block>, &N::Receipt)> {
-        let indexed_tx = self.block.find_indexed(tx_hash)?;
-        let receipt = self.receipts.get(indexed_tx.index())?;
-        Some((indexed_tx, receipt))
-    }
-}
+pub type PendingBlockAndReceipts<N> = (PendingRecoveredBlock<N>, PendingBlockReceipts<N>);
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Clone, Constructor)]
@@ -138,24 +118,7 @@ impl<N: NodePrimitives> PendingBlock<N> {
     /// Converts this [`PendingBlock`] into a pair of [`RecoveredBlock`] and a vector of
     /// [`NodePrimitives::Receipt`]s, taking self.
     pub fn into_block_and_receipts(self) -> PendingBlockAndReceipts<N> {
-        PendingBlockAndReceipts {
-            block: self.executed_block.recovered_block,
-            receipts: self.receipts,
-        }
-    }
-
-    /// Returns a pair of [`RecoveredBlock`] and a vector of  [`NodePrimitives::Receipt`]s by
-    /// cloning from borrowed self.
-    pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
-        PendingBlockAndReceipts {
-            block: self.executed_block.recovered_block.clone(),
-            receipts: self.receipts.clone(),
-        }
-    }
-
-    /// Returns a hash of the parent block for this `executed_block`.
-    pub fn parent_hash(&self) -> BlockHash {
-        self.executed_block.recovered_block().parent_hash()
+        (self.executed_block.recovered_block, self.receipts)
     }
 }
 

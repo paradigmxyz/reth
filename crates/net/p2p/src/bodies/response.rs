@@ -22,7 +22,7 @@ where
         }
     }
 
-    /// Return the difficulty of the response header
+    /// Return the reference to the response header
     pub fn difficulty(&self) -> U256 {
         match self {
             Self::Full(block) => block.difficulty(),

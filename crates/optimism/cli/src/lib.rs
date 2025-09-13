@@ -35,9 +35,8 @@ pub mod ovm_file_codec;
 pub use app::CliApp;
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 
-use std::{ffi::OsString, fmt, marker::PhantomData, sync::Arc};
+use std::{ffi::OsString, fmt, sync::Arc};
 
 use chainspec::OpChainSpecParser;
 use clap::{command, Parser};
@@ -60,11 +59,8 @@ use reth_node_metrics as _;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<
-    Spec: ChainSpecParser = OpChainSpecParser,
-    Ext: clap::Args + fmt::Debug = RollupArgs,
-    Rpc: RpcModuleValidator = DefaultRpcModuleValidator,
-> {
+pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = RollupArgs>
+{
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<Spec, Ext>,
@@ -72,10 +68,6 @@ pub struct Cli<
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
-
-    /// Type marker for the RPC module validator
-    #[arg(skip)]
-    _phantom: PhantomData<Rpc>,
 }
 
 impl Cli {
@@ -94,17 +86,16 @@ impl Cli {
     }
 }
 
-impl<C, Ext, Rpc> Cli<C, Ext, Rpc>
+impl<C, Ext> Cli<C, Ext>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
-    Rpc: RpcModuleValidator,
 {
     /// Configures the CLI and returns a [`CliApp`] instance.
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
     /// [`CliApp`] that can be further configured before running.
-    pub fn configure(self) -> CliApp<C, Ext, Rpc> {
+    pub fn configure(self) -> CliApp<C, Ext> {
         CliApp::new(self)
     }
 

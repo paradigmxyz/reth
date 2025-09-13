@@ -7,27 +7,25 @@ use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_node::{OpExecutorProvider, OpNode};
-use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
 use tracing::info;
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
-pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> {
-    cli: Cli<Spec, Ext, Rpc>,
+pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
+    cli: Cli<Spec, Ext>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
 }
 
-impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
+impl<C, Ext> CliApp<C, Ext>
 where
     C: ChainSpecParser<ChainSpec = OpChainSpec>,
     Ext: clap::Args + fmt::Debug,
-    Rpc: RpcModuleValidator,
 {
-    pub(crate) fn new(cli: Cli<C, Ext, Rpc>) -> Self {
+    pub(crate) fn new(cli: Cli<C, Ext>) -> Self {
         Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
     }
 
@@ -68,19 +66,11 @@ where
         let _ = install_prometheus_recorder();
 
         let components = |spec: Arc<OpChainSpec>| {
-            (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
+            (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
         };
 
         match self.cli.command {
             Commands::Node(command) => {
-                // Validate RPC modules using the configured validator
-                if let Some(http_api) = &command.rpc.http_api {
-                    Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
-                }
-                if let Some(ws_api) = &command.rpc.ws_api {
-                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
-                }
-
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {

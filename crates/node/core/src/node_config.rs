@@ -494,10 +494,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
-    where
-        Pool: TransactionPool + Unpin,
-    {
+    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
         if let Some(interval) = self.dev.block_time {
             MiningMode::interval(interval)
         } else {

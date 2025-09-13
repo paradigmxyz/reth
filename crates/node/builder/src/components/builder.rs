@@ -7,7 +7,6 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
-use reth_chainspec::EthChainSpec;
 use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
@@ -494,13 +493,6 @@ impl<Tx> Default for NoopTransactionPoolBuilder<Tx> {
 #[derive(Debug, Clone)]
 pub struct NoopNetworkBuilder<Net = EthNetworkPrimitives>(PhantomData<Net>);
 
-impl NoopNetworkBuilder {
-    /// Returns the instance with ethereum types.
-    pub fn eth() -> Self {
-        Self::default()
-    }
-}
-
 impl<N, Pool, Net> NetworkBuilder<N, Pool> for NoopNetworkBuilder<Net>
 where
     N: FullNodeTypes,
@@ -516,10 +508,10 @@ where
 
     async fn build_network(
         self,
-        ctx: &BuilderContext<N>,
+        _ctx: &BuilderContext<N>,
         _pool: Pool,
     ) -> eyre::Result<Self::Network> {
-        Ok(NoopNetwork::new().with_chain_id(ctx.chain_spec().chain_id()))
+        Ok(NoopNetwork::new())
     }
 }
 

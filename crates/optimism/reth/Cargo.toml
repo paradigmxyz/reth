@@ -108,7 +108,6 @@ node = [
     "provider",
     "consensus",
     "evm",
-    "network",
     "node-api",
     "dep:reth-optimism-node",
     "dep:reth-node-builder",

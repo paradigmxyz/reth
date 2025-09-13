@@ -1,5 +1,5 @@
 [package]
-name = "ef-test-runner"
+name = "reth-block-access-list"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
-[dependencies]
-clap = { workspace = true, features = ["derive"] }
-ef-tests.path = "../ef-tests"
-
 [lints]
 workspace = true
+
+[dependencies]

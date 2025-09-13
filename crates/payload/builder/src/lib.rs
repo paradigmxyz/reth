@@ -75,10 +75,6 @@
 //!     Ok(self.attributes.clone())
 //! }
 //!
-//! fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
-//!     Ok(self.attributes.timestamp)
-//! }
-//!
 //! fn resolve_kind(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
 //!        (futures_util::future::ready(payload), KeepPayloadJobAlive::No)

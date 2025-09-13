@@ -44,7 +44,6 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
                 &state_sorted,
             ))
             .with_prefix_sets_mut(input.prefix_sets)
-            .always_include_root_node()
             .compute(target)
     }
 }

@@ -88,7 +88,7 @@ where
         let max_concurrency = self.max_concurrency;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::with_capacity(max_concurrency);
+            let mut handles = Vec::new();
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
@@ -175,7 +175,6 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
-                    trace!(target: "engine::tree::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
                     if finished_execution {
@@ -184,7 +183,6 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
-                    trace!(target: "engine::tree::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
@@ -197,8 +195,6 @@ where
                 }
             }
         }
-
-        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {

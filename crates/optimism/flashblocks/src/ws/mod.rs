@@ -1,4 +1,4 @@
-pub use stream::{WsConnect, WsFlashBlockStream};
+pub use stream::FlashBlockWsStream;
 
 mod decoding;
 mod stream;

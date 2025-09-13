@@ -3,7 +3,7 @@
 use alloy_primitives::Bytes;
 use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
-use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
+use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use schnellru::LruMap;
 use std::{
@@ -148,12 +148,8 @@ where
         spec_id: S,
         metrics: Option<CachedPrecompileMetrics>,
     ) -> DynPrecompile {
-        let precompile_id = precompile.precompile_id().clone();
         let wrapped = Self::new(precompile, cache, spec_id, metrics);
-        (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
-            wrapped.call(input)
-        })
-            .into()
+        move |input: PrecompileInput<'_>| -> PrecompileResult { wrapped.call(input) }.into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
@@ -185,10 +181,6 @@ impl<S> Precompile for CachedPrecompile<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn precompile_id(&self) -> &PrecompileId {
-        self.precompile.precompile_id()
-    }
-
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         let key = CacheKeyRef::new(self.spec_id.clone(), input.data);
 
@@ -309,7 +301,7 @@ mod tests {
         let mut cache_map = PrecompileCacheMap::default();
 
         // create the first precompile with a specific output
-        let precompile1: DynPrecompile = (PrecompileId::custom("custom"), {
+        let precompile1: DynPrecompile = {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
@@ -319,11 +311,11 @@ mod tests {
                     reverted: false,
                 })
             }
-        })
-            .into();
+        }
+        .into();
 
         // create the second precompile with a different output
-        let precompile2: DynPrecompile = (PrecompileId::custom("custom"), {
+        let precompile2: DynPrecompile = {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
@@ -333,8 +325,8 @@ mod tests {
                     reverted: false,
                 })
             }
-        })
-            .into();
+        }
+        .into();
 
         let wrapped_precompile1 = CachedPrecompile::wrap(
             precompile1,

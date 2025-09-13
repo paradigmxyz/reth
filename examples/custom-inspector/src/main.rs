@@ -27,7 +27,7 @@ use reth_ethereum::{
             interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
         },
     },
-    node::{builder::FullNodeFor, EthereumNode},
+    node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };
@@ -36,10 +36,8 @@ fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let handle = builder.node(EthereumNode::default()).launch().await?;
-
-            let node: FullNodeFor<EthereumNode> = handle.node;
-            let node_exit_future = handle.node_exit_future;
+            let NodeHandle { node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch().await?;
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();

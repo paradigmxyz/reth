@@ -13,12 +13,14 @@ exclude.workspace = true
 # alloy
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # reth
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-etl.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-stages-types.workspace = true
@@ -41,6 +43,7 @@ reth-db-common.workspace = true
 
 # async
 tokio-util.workspace = true
+futures.workspace = true
 bytes.workspace = true
 
 # http

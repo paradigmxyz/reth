@@ -210,45 +210,6 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
     Ok(())
 }
 
-/// Validates the presence of the `block access lists` field according to the payload timestamp.
-/// After Amsterdam, block access list field must be [Some].
-/// Before Amsterdam, block access list field must be [None];
-pub fn validate_block_access_list_presence<T: EthereumHardforks>(
-    chain_spec: &T,
-    version: EngineApiMessageVersion,
-    message_validation_kind: MessageValidationKind,
-    timestamp: u64,
-    has_block_access_list: bool,
-) -> Result<(), EngineObjectValidationError> {
-    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
-
-    match version {
-        EngineApiMessageVersion::V1 |
-        EngineApiMessageVersion::V2 |
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
-            if has_block_access_list {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::BlockAccessListNotSupportedBeforeV6))
-            }
-        }
-
-        EngineApiMessageVersion::V6 => {
-            if is_amsterdam_active && !has_block_access_list {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoBlockAccessListPostAmsterdam))
-            }
-            if !is_amsterdam_active && has_block_access_list {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasBlockAccessListPreAmsterdam))
-            }
-        }
-    };
-
-    Ok(())
-}
-
 /// Validate the presence of the `parentBeaconBlockRoot` field according to the given timestamp.
 /// This method is meant to be used with either a `payloadAttributes` field or a full payload, with
 /// the `engine_forkchoiceUpdated` and `engine_newPayload` methods respectively.

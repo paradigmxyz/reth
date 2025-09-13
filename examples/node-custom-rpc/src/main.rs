@@ -79,10 +79,6 @@ pub trait TxpoolExtApi {
     #[method(name = "transactionCount")]
     fn transaction_count(&self) -> RpcResult<usize>;
 
-    /// Clears the transaction pool.
-    #[method(name = "clearTxpool")]
-    fn clear_txpool(&self) -> RpcResult<()>;
-
     /// Creates a subscription that returns the number of transactions in the pool every 10s.
     #[subscription(name = "subscribeTransactionCount", item = usize)]
     fn subscribe_transaction_count(
@@ -103,12 +99,6 @@ where
 {
     fn transaction_count(&self) -> RpcResult<usize> {
         Ok(self.pool.pool_size().total)
-    }
-
-    fn clear_txpool(&self) -> RpcResult<()> {
-        let all_tx_hashes = self.pool.all_transaction_hashes();
-        self.pool.remove_transactions(all_tx_hashes);
-        Ok(())
     }
 
     fn subscribe_transaction_count(
@@ -158,12 +148,6 @@ mod tests {
             Ok(self.pool.pool_size().total)
         }
 
-        fn clear_txpool(&self) -> RpcResult<()> {
-            let all_tx_hashes = self.pool.all_transaction_hashes();
-            self.pool.remove_transactions(all_tx_hashes);
-            Ok(())
-        }
-
         fn subscribe_transaction_count(
             &self,
             pending: PendingSubscriptionSink,
@@ -202,16 +186,6 @@ mod tests {
         let server_addr = start_server().await;
         let uri = format!("http://{server_addr}");
         let client = HttpClientBuilder::default().build(&uri).unwrap();
-        let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_call_clear_txpool_http() {
-        let server_addr = start_server().await;
-        let uri = format!("http://{server_addr}");
-        let client = HttpClientBuilder::default().build(&uri).unwrap();
-        TxpoolExtApiClient::clear_txpool(&client).await.unwrap();
         let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
         assert_eq!(count, 0);
     }

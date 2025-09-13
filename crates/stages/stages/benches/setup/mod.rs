@@ -161,9 +161,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         let offset = transitions.len() as u64;
 
-        db.insert_changesets(transitions, None).unwrap();
-
         let provider_rw = db.factory.provider_rw().unwrap();
+        db.insert_changesets(transitions, None).unwrap();
         provider_rw.write_trie_updates(&updates).unwrap();
         provider_rw.commit().unwrap();
 

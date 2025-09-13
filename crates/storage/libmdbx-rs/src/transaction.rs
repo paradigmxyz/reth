@@ -7,6 +7,7 @@ use crate::{
     Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
+use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     ffi::{c_uint, c_void},
@@ -93,6 +94,7 @@ where
 
         let inner = TransactionInner {
             txn,
+            primed_dbis: Mutex::new(IndexSet::new()),
             committed: AtomicBool::new(false),
             env,
             _marker: Default::default(),
@@ -171,25 +173,50 @@ where
     ///
     /// Any pending operations will be saved.
     pub fn commit(self) -> Result<(bool, CommitLatency)> {
-        let result = self.txn_execute(|txn| {
-            if K::IS_READ_ONLY {
-                #[cfg(feature = "read-tx-timeouts")]
-                self.env().txn_manager().remove_active_read_transaction(txn);
+        self.commit_and_rebind_open_dbs().map(|v| (v.0, v.1))
+    }
 
-                let mut latency = CommitLatency::new();
-                mdbx_result(unsafe { ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency()) })
+    pub fn prime_for_permaopen(&self, db: Database) {
+        self.inner.primed_dbis.lock().insert(db.dbi());
+    }
+
+    /// Commits the transaction and returns table handles permanently open until dropped.
+    pub fn commit_and_rebind_open_dbs(self) -> Result<(bool, CommitLatency, Vec<Database>)> {
+        let result = {
+            let result = self.txn_execute(|txn| {
+                if K::IS_READ_ONLY {
+                    #[cfg(feature = "read-tx-timeouts")]
+                    self.env().txn_manager().remove_active_read_transaction(txn);
+
+                    let mut latency = CommitLatency::new();
+                    mdbx_result(unsafe {
+                        ffi::mdbx_txn_commit_ex(txn, latency.mdb_commit_latency())
+                    })
                     .map(|v| (v, latency))
-            } else {
-                let (sender, rx) = sync_channel(0);
-                self.env()
-                    .txn_manager()
-                    .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
-                rx.recv().unwrap()
-            }
-        })?;
+                } else {
+                    let (sender, rx) = sync_channel(0);
+                    self.env()
+                        .txn_manager()
+                        .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
+                    rx.recv().unwrap()
+                }
+            })?;
 
-        self.inner.set_committed();
-        result
+            self.inner.set_committed();
+            result
+        };
+        result.map(|(v, latency)| {
+            (
+                v,
+                latency,
+                self.inner
+                    .primed_dbis
+                    .lock()
+                    .iter()
+                    .map(|&dbi| Database::new_from_ptr(dbi, self.env().clone()))
+                    .collect(),
+            )
+        })
     }
 
     /// Opens a handle to an MDBX database.
@@ -281,6 +308,8 @@ where
 {
     /// The transaction pointer itself.
     txn: TransactionPtr,
+    /// A set of database handles that are primed for permaopen.
+    primed_dbis: Mutex<IndexSet<ffi::MDBX_dbi>>,
     /// Whether the transaction has committed.
     committed: AtomicBool,
     env: Environment,

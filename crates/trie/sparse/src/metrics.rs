@@ -21,20 +21,19 @@ pub(crate) struct SparseStateTrieMetrics {
 
 impl SparseStateTrieMetrics {
     /// Record the metrics into the histograms
-    pub(crate) fn record(&mut self) {
-        use core::mem::take;
+    pub(crate) fn record(&self) {
         self.histograms
             .multiproof_skipped_account_nodes
-            .record(take(&mut self.multiproof_skipped_account_nodes) as f64);
+            .record(self.multiproof_skipped_account_nodes as f64);
         self.histograms
             .multiproof_total_account_nodes
-            .record(take(&mut self.multiproof_total_account_nodes) as f64);
+            .record(self.multiproof_total_account_nodes as f64);
         self.histograms
             .multiproof_skipped_storage_nodes
-            .record(take(&mut self.multiproof_skipped_storage_nodes) as f64);
+            .record(self.multiproof_skipped_storage_nodes as f64);
         self.histograms
             .multiproof_total_storage_nodes
-            .record(take(&mut self.multiproof_total_storage_nodes) as f64);
+            .record(self.multiproof_total_storage_nodes as f64);
     }
 
     /// Increment the skipped account nodes counter by the given count

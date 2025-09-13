@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
-  pull_request:
-    branches:
-      - main
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -32,10 +30,10 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: Rimeeeeee/hive
+          repository: ethereum/hive
           path: hivetests
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
           go-version: "^1.13.1"
       - run: go version
@@ -92,61 +90,57 @@ jobs:
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
-              # - eth_blockNumber
+              - eth_blockNumber
               - eth_call
-              # - eth_chainId
-              # - eth_createAccessList
-              # - eth_estimateGas
-              # - eth_feeHistory
-              # - eth_getBalance
-              # - eth_getBlockBy
-              # - eth_getBlockTransactionCountBy
-              # - eth_getCode
-              # - eth_getProof
-              # - eth_getStorage
-              # - eth_getTransactionBy
-              # - eth_getTransactionCount
-              # - eth_getTransactionReceipt
-              # - eth_sendRawTransaction
-              # - eth_syncing
-              # # debug_ rpc methods
-              # - debug_
+              - eth_chainId
+              - eth_createAccessList
+              - eth_estimateGas
+              - eth_feeHistory
+              - eth_getBalance
+              - eth_getBlockBy
+              - eth_getBlockTransactionCountBy
+              - eth_getCode
+              - eth_getProof
+              - eth_getStorage
+              - eth_getTransactionBy
+              - eth_getTransactionCount
+              - eth_getTransactionReceipt
+              - eth_sendRawTransaction
+              - eth_syncing
+              # debug_ rpc methods
+              - debug_
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/amsterdam.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/prague.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/cancun.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/shanghai.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/berlin.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/istanbul.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/homestead.*
-          # - sim: ethereum/eest/consume-engine
-          #   limit: .*tests/frontier.*
+            limit: .*tests/prague.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/cancun.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/berlin.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/homestead.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/frontier.*
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/amsterdam.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/prague.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/cancun.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/shanghai.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/berlin.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/istanbul.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/homestead.*
-          # - sim: ethereum/eest/consume-rlp
-          #   limit: .*tests/frontier.*
+            limit: .*tests/prague.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/cancun.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/berlin.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/homestead.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/frontier.*
     needs:
       - prepare-reth
       - prepare-hive
@@ -182,7 +176,7 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v5
         with:
-          repository: Rimeeeeee/hive
+          repository: ethereum/hive
           ref: master
           path: hivetests
 
@@ -207,12 +201,12 @@ jobs:
           find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml --ignored .github/assets/hive/ignored_tests.yaml
 
       - name: Print simulator output
-        if: true
+        if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/*simulator*.log
 
       - name: Print reth client logs
-        if: true
+        if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
   notify-on-error:

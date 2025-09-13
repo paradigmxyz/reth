@@ -12,7 +12,7 @@ use jsonrpsee::{
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
-    node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
+    node::{api::FullNodeComponents, EthereumNode},
 };
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
@@ -178,7 +178,7 @@ fn main() -> eyre::Result<()> {
 
         let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());
 
-        let handle: NodeHandleFor<EthereumNode> = builder
+        let handle = builder
             .node(EthereumNode::default())
             .extend_rpc_modules(move |ctx| {
                 ctx.modules.merge_configured(StorageWatcherApiServer::into_rpc(rpc))?;

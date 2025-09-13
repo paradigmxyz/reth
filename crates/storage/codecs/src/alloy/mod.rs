@@ -21,8 +21,7 @@ cond_mod!(
     signature,
     trie,
     txkind,
-    withdrawal,
-    block_access_list
+    withdrawal
 );
 
 pub mod transaction;

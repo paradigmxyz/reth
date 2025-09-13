@@ -30,8 +30,8 @@ pub struct ClearedSparseStateTrie<
 
 impl<A, S> ClearedSparseStateTrie<A, S>
 where
-    A: SparseTrieInterface,
-    S: SparseTrieInterface,
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
 {
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
@@ -108,18 +108,12 @@ impl<A, S> SparseStateTrie<A, S> {
         self.state = trie;
         self
     }
-
-    /// Set the default trie which will be cloned when creating new storage [`SparseTrie`]s.
-    pub fn with_default_storage_trie(mut self, trie: SparseTrie<S>) -> Self {
-        self.storage.default_trie = trie;
-        self
-    }
 }
 
 impl<A, S> SparseStateTrie<A, S>
 where
     A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default + Clone,
+    S: SparseTrieInterface + Default,
 {
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
@@ -807,11 +801,9 @@ struct StorageTries<S = SerialSparseTrie> {
     revealed_paths: B256Map<HashSet<Nibbles>>,
     /// Cleared revealed storage trie path collections, kept for re-use.
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
-    /// A default cleared trie instance, which will be cloned when creating new tries.
-    default_trie: SparseTrie<S>,
 }
 
-impl<S: SparseTrieInterface> StorageTries<S> {
+impl<S: SparseTrieInterface + Default> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
@@ -821,9 +813,7 @@ impl<S: SparseTrieInterface> StorageTries<S> {
             set
         }));
     }
-}
 
-impl<S: SparseTrieInterface + Clone> StorageTries<S> {
     /// Returns the set of already revealed trie node paths for an account's storage, creating the
     /// set if it didn't previously exist.
     fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
@@ -838,9 +828,10 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
         &mut self,
         account: B256,
     ) -> (&mut SparseTrie<S>, &mut HashSet<Nibbles>) {
-        let trie = self.tries.entry(account).or_insert_with(|| {
-            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
-        });
+        let trie = self
+            .tries
+            .entry(account)
+            .or_insert_with(|| self.cleared_tries.pop().unwrap_or_default());
 
         let revealed_paths = self
             .revealed_paths
@@ -854,9 +845,7 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
     /// doesn't already exist.
     #[cfg(feature = "std")]
     fn take_or_create_trie(&mut self, account: &B256) -> SparseTrie<S> {
-        self.tries.remove(account).unwrap_or_else(|| {
-            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
-        })
+        self.tries.remove(account).unwrap_or_else(|| self.cleared_tries.pop().unwrap_or_default())
     }
 
     /// Takes the revealed paths set from the account from the internal `HashMap`, creating one if

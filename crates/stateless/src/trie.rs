@@ -167,8 +167,8 @@ impl StatelessTrie for StatelessSparseTrie {
 /// The bytecode has a separate mapping because the [`SparseStateTrie`] does not store the
 /// contract bytecode, only the hash of it (code hash).
 ///
-/// If the roots do not match, it returns an error indicating the witness is invalid
-/// for the given `pre_state_root` (see `StatelessValidationError::PreStateRootMismatch`).
+/// If the roots do not match, it returns `None`, indicating the witness is invalid
+/// for the given `pre_state_root`.
 // Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
 // would explain why they have for the most part re-implemented this function.
 fn verify_execution_witness(
@@ -286,6 +286,7 @@ fn calculate_state_root(
         state.accounts.into_iter().sorted_unstable_by_key(|(addr, _)| *addr)
     {
         let nibbles = Nibbles::unpack(hashed_address);
+        let account = account.unwrap_or_default();
 
         // Determine which storage root should be used for this account
         let storage_root = if let Some(storage_trie) = trie.storage_trie_mut(&hashed_address) {
@@ -297,12 +298,12 @@ fn calculate_state_root(
         };
 
         // Decide whether to remove or update the account leaf
-        if let Some(account) = account {
+        if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
+            trie.remove_account_leaf(&nibbles, &provider_factory)?;
+        } else {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
             trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
-        } else {
-            trie.remove_account_leaf(&nibbles, &provider_factory)?;
         }
     }
 

@@ -1,4 +1,4 @@
-use alloy_eips::{eip4895::Withdrawals, eip7928::BlockAccessList};
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::TxNumber;
 use core::ops::Range;
 
@@ -107,51 +107,6 @@ impl reth_codecs::Compact for StaticFileBlockWithdrawals {
             (Self { withdrawals: Some(w) }, buf)
         } else {
             (Self { withdrawals: None }, buf)
-        }
-    }
-}
-
-/// The storage representation of block access lists.
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct StoredBlockAccessList {
-    /// The `block_access_list` .
-    pub block_access_list: BlockAccessList,
-}
-
-/// A storage representation of block access lists that is static file friendly. An inner None
-/// represents a pre-merge block.
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct StaticFileBlockAccessList {
-    /// The block access lists. A None value represents a pre-merge block.
-    pub block_access_list: Option<BlockAccessList>,
-}
-
-#[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for StaticFileBlockAccessList {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        buf.put_u8(self.block_access_list.is_some() as u8);
-        if let Some(block_access_list) = &self.block_access_list {
-            return 1 + block_access_list.to_compact(buf);
-        }
-        1
-    }
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        use bytes::Buf;
-        if buf.get_u8() == 1 {
-            let (b, buf) = BlockAccessList::from_compact(buf, buf.len());
-            (Self { block_access_list: Some(b) }, buf)
-        } else {
-            (Self { block_access_list: None }, buf)
         }
     }
 }

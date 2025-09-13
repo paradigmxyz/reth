@@ -18,13 +18,13 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
-    validate_against_parent_eip1559_base_fee, validate_against_parent_gas_limit,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_block_pre_execution, validate_body_against_header, validate_header_base_fee,
-    validate_header_extra_data, validate_header_gas,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
+    validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
+    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
     Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 
@@ -46,9 +46,53 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         Self { chain_spec }
     }
 
-    /// Returns the chain spec associated with this consensus engine.
-    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+    /// Checks the gas limit for consistency between parent and self headers.
+    ///
+    /// The maximum allowable difference between self and parent gas limits is determined by the
+    /// parent's gas limit divided by the [`GAS_LIMIT_BOUND_DIVISOR`].
+    fn validate_against_parent_gas_limit<H: BlockHeader>(
+        &self,
+        header: &SealedHeader<H>,
+        parent: &SealedHeader<H>,
+    ) -> Result<(), ConsensusError> {
+        // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
+            self.chain_spec.is_london_active_at_block(header.number())
+        {
+            parent.gas_limit() *
+                self.chain_spec
+                    .base_fee_params_at_timestamp(header.timestamp())
+                    .elasticity_multiplier as u64
+        } else {
+            parent.gas_limit()
+        };
+
+        // Check for an increase in gas limit beyond the allowed threshold.
+        if header.gas_limit() > parent_gas_limit {
+            if header.gas_limit() - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+                return Err(ConsensusError::GasLimitInvalidIncrease {
+                    parent_gas_limit,
+                    child_gas_limit: header.gas_limit(),
+                })
+            }
+        }
+        // Check for a decrease in gas limit beyond the allowed threshold.
+        else if parent_gas_limit - header.gas_limit() >=
+            parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR
+        {
+            return Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit,
+                child_gas_limit: header.gas_limit(),
+            })
+        }
+        // Check if the self gas limit is below the minimum required limit.
+        else if header.gas_limit() < MINIMUM_GAS_LIMIT {
+            return Err(ConsensusError::GasLimitInvalidMinimum {
+                child_gas_limit: header.gas_limit(),
+            })
+        }
+
+        Ok(())
     }
 }
 
@@ -62,13 +106,7 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(
-            block,
-            &self.chain_spec,
-            &result.receipts,
-            &result.requests,
-            &result.block_access_list,
-        )
+        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
     }
 }
 
@@ -169,15 +207,6 @@ where
         } else if header.requests_hash().is_some() {
             return Err(ConsensusError::RequestsHashUnexpected)
         }
-        // if self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
-        //     header.block_access_list_hash().is_none()
-        // {
-        //     return Err(ConsensusError::BlockAccessListHashMissing)
-        // } else if !self.chain_spec.is_amsterdam_active_at_timestamp(header.timestamp()) &&
-        //     header.block_access_list_hash().is_some()
-        // {
-        //     return Err(ConsensusError::BlockAccessListHashUnexpected)
-        // }
 
         Ok(())
     }
@@ -191,7 +220,7 @@ where
 
         validate_against_parent_timestamp(header.header(), parent.header())?;
 
-        validate_against_parent_gas_limit(header, parent, &self.chain_spec)?;
+        self.validate_against_parent_gas_limit(header, parent)?;
 
         validate_against_parent_eip1559_base_fee(
             header.header(),
@@ -213,11 +242,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_consensus_common::validation::validate_against_parent_gas_limit;
-    use reth_primitives_traits::{
-        constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-        proofs,
-    };
+    use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
@@ -230,7 +255,8 @@ mod tests {
         let child = header_with_gas_limit((parent.gas_limit + 5) as u64);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
             Ok(())
         );
     }
@@ -241,7 +267,8 @@ mod tests {
         let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit as u64 })
         );
     }
@@ -254,7 +281,8 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,
@@ -268,7 +296,8 @@ mod tests {
         let child = header_with_gas_limit(parent.gas_limit - 5);
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
             Ok(())
         );
     }
@@ -281,7 +310,8 @@ mod tests {
         );
 
         assert_eq!(
-            validate_against_parent_gas_limit(&child, &parent, &ChainSpec::default()),
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,

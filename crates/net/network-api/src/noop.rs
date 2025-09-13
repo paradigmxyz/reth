@@ -31,7 +31,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct NoopNetwork<Net = EthNetworkPrimitives> {
-    chain_id: u64,
     peers_handle: PeersHandle,
     _marker: PhantomData<Net>,
 }
@@ -41,23 +40,15 @@ impl<Net> NoopNetwork<Net> {
     pub fn new() -> Self {
         let (tx, _) = mpsc::unbounded_channel();
 
-        Self {
-            chain_id: 1, // mainnet
-            peers_handle: PeersHandle::new(tx),
-            _marker: PhantomData,
-        }
-    }
-
-    /// Creates a new [`NoopNetwork`] from an existing one but with a new chain id.
-    pub const fn with_chain_id(mut self, chain_id: u64) -> Self {
-        self.chain_id = chain_id;
-        self
+        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
     }
 }
 
 impl Default for NoopNetwork<EthNetworkPrimitives> {
     fn default() -> Self {
-        Self::new()
+        let (tx, _) = mpsc::unbounded_channel();
+
+        Self { peers_handle: PeersHandle::new(tx), _marker: PhantomData }
     }
 }
 
@@ -86,7 +77,8 @@ where
     }
 
     fn chain_id(&self) -> u64 {
-        self.chain_id
+        // mainnet
+        1
     }
 
     fn is_syncing(&self) -> bool {

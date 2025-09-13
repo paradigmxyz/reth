@@ -196,11 +196,7 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-
-            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
-                let nibbles = Nibbles::unpack(hashed_address);
-                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
-            }
+            sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)?;
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);

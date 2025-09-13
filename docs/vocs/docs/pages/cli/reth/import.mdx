@@ -1,12 +1,12 @@
 # reth import
 
-This syncs RLP encoded blocks from a file or files
+This syncs RLP encoded blocks from a file
 
 ```bash
 $ reth import --help
 ```
 ```txt
-Usage: reth import [OPTIONS] <IMPORT_PATH>...
+Usage: reth import [OPTIONS] <IMPORT_PATH>
 
 Options:
   -h, --help
@@ -76,11 +76,11 @@ Database:
       --chunk-len <CHUNK_LEN>
           Chunk byte length to read from file.
 
-  <IMPORT_PATH>...
-          The path(s) to block file(s) for import.
+  <IMPORT_PATH>
+          The path to a block file for import.
 
           The online stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed. Multiple files will be imported sequentially.
+          remaining stages are executed.
 
 Logging:
       --log.stdout.format <FORMAT>
