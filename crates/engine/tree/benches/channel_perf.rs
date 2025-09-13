@@ -26,7 +26,6 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 nonce: 10,
                 code_hash: B256::from_slice(&rng.random::<[u8; 32]>()),
                 code: Default::default(),
-                ..Default::default()
             },
             storage,
             status: AccountStatus::empty(),
