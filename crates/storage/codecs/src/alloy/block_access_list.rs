@@ -1,4 +1,4 @@
-//! Compact implementation for [AlloyAccountChanges] and related types.
+//! Compact implementation for [`AlloyAccountChanges`] and related types.
 
 use crate::Compact;
 use alloc::vec::Vec;
@@ -10,7 +10,7 @@ use alloy_eips::eip7928::{
 use alloy_primitives::{Address, Bytes, StorageKey, B256, U256};
 use reth_codecs_derive::add_arbitrary_tests;
 
-/// AccountChanges acts as bridge which simplifies Compact implementation for `AlloyAccountChanges`.
+/// `AccountChanges` acts as bridge which simplifies Compact implementation for `AlloyAccountChanges`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -34,7 +34,7 @@ pub(crate) struct AccountChanges {
     pub code_changes: Vec<CodeChange>,
 }
 
-/// BalanceChange acts as bridge which simplifies Compact implementation for `AlloyBalanceChange`.
+/// `BalanceChange` acts as bridge which simplifies Compact implementation for `AlloyBalanceChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -50,7 +50,7 @@ pub(crate) struct BalanceChange {
     pub post_balance: U256,
 }
 
-/// CodeChange acts as bridge which simplifies Compact implementation for `AlloyCodeChange`.
+/// `CodeChange` acts as bridge which simplifies Compact implementation for `AlloyCodeChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -66,7 +66,7 @@ pub(crate) struct CodeChange {
     pub new_code: Bytes,
 }
 
-/// NonceChange acts as bridge which simplifies Compact implementation for `AlloyNonceChange`.
+/// `NonceChange` acts as bridge which simplifies Compact implementation for `AlloyNonceChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -82,7 +82,7 @@ pub(crate) struct NonceChange {
     pub new_nonce: u64,
 }
 
-/// SlotChanges acts as bridge which simplifies Compact implementation for `AlloySlotChange`.
+/// `SlotChanges` acts as bridge which simplifies Compact implementation for `AlloySlotChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
@@ -98,7 +98,7 @@ pub(crate) struct SlotChanges {
     pub changes: Vec<StorageChange>,
 }
 
-/// StorageChange acts as bridge which simplifies Compact implementation for `AlloyStorageChange`.
+/// `StorageChange` acts as bridge which simplifies Compact implementation for `AlloyStorageChange`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
 #[cfg_attr(
     any(test, feature = "test-utils"),
