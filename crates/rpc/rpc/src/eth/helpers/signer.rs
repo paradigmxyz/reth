@@ -7,7 +7,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_signer::SignerSync;
-use alloy_signer_local::PrivateKeySigner;
+use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 use reth_rpc_convert::{RpcConvert, RpcTypes, SignableTxRequest};
 use reth_rpc_eth_api::{
     helpers::{signer::Result, AddDevSigners, EthSigner},
@@ -24,8 +24,13 @@ where
         Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
     >,
 {
-    fn with_dev_accounts(&self) {
-        *self.inner.signers().write() = DevSigner::random_signers(20)
+    fn with_dev_accounts(&self, dev_mnemonic: Option<String>) {
+        const DEFAULT_MNEMONIC: &str =
+            "test test test test test test test test test test test junk";
+        let phrase = dev_mnemonic.as_deref().unwrap_or(DEFAULT_MNEMONIC);
+
+        let signers = DevSigner::from_mnemonic(phrase, 20);
+        *self.inner.signers().write() = signers;
     }
 }
 
@@ -52,6 +57,32 @@ impl DevSigner {
             let accounts = HashMap::from([(address, sk)]);
             signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, TxReq>>);
         }
+        signers
+    }
+
+    /// Generates dev signers deterministically from a fixed mnemonic.
+    /// Uses the Ethereum derivation path: `m/44'/60'/0'/0/{index}`
+    pub fn from_mnemonic<T: Decodable2718, TxReq: SignableTxRequest<T>>(
+        mnemonic: &str,
+        num: u32,
+    ) -> Vec<Box<dyn EthSigner<T, TxReq> + 'static>> {
+        let mut signers = Vec::with_capacity(num as usize);
+
+        for i in 0..num {
+            let sk = MnemonicBuilder::<English>::default()
+                .phrase(mnemonic)
+                .index(i)
+                .expect("invalid derivation path")
+                .build()
+                .expect("failed to build signer from mnemonic");
+
+            let address = sk.address();
+            let addresses = vec![address];
+            let accounts = HashMap::from([(address, sk)]);
+
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, TxReq>>);
+        }
+
         signers
     }
 
