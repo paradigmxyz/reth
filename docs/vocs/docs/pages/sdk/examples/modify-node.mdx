@@ -8,6 +8,31 @@ One of the most common modifications is adding custom RPC methods to expose addi
 
 ### Basic Custom RPC Module
 
+To create a custom RPC module:
+
+- Define the RPC trait interface using `jsonrpsee``#[rpc]` macro with your desired namespace
+- Specify method signatures for both regular methods and subscriptions as needed
+- Create a struct to hold any required dependencies (like transaction pools, databases, etc.)
+- Implement the trait for your struct, providing the actual functionality
+
+To add your custom RPC module to a Reth node:
+
+- Extend the CLI parser to include your custom arguments structure
+- Use the node builder pattern with `extend_rpc_modules()` to register your custom namespace
+- Access node components throught RPC context to get pool, providers and their services
+- Merge your RPC module into the configured transports using `merge_configured()`
+
+This integration happens during node initialization, allowing you to conditionally enable feature based on CLI flags.
+
+You can extend the default Reth CLI with custom flags by:
+
+Creating a struct that derives `clap::Args`
+Adding your custom fields with appropriate `#[arg()]` attributes
+Passing it as a generic parameter to the CLI parser
+
+### Usage
+
+Start the node with your custom flags enabled (as shown in the [node-custom-rpc](https://github.com/paradigmxyz/reth/blob/main/examples/node-custom-rpc/src/main.rs#L1-L1) example).
 
 ## Next Steps
 
