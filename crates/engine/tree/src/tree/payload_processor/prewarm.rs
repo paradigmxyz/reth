@@ -8,6 +8,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
+use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
@@ -25,7 +26,10 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
+
+/// Optimism deposit transaction type (0x7E/126).
+const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -44,6 +48,8 @@ where
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
+    /// The number of transactions to be processed
+    transaction_count_hint: usize,
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
@@ -62,6 +68,7 @@ where
         execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
+        transaction_count_hint: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
         (
@@ -70,6 +77,7 @@ where
                 execution_cache,
                 ctx,
                 max_concurrency: 64,
+                transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
             },
@@ -78,37 +86,72 @@ where
     }
 
     /// Spawns all pending transactions as blocking tasks by first chunking them.
+    ///
+    /// For Optimism chains, special handling is applied to the first transaction if it's a
+    /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
+    /// subsequent transactions in the block.
     fn spawn_all(
         &self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
+        let transaction_count_hint = self.transaction_count_hint;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
-            while let Ok(executable) = pending.recv() {
-                let task_idx = executing % max_concurrency;
 
-                if handles.len() <= task_idx {
-                    let (tx, rx) = mpsc::channel();
-                    let sender = actions_tx.clone();
-                    let ctx = ctx.clone();
-                    let done_tx = done_tx.clone();
+            // Initially cap workers based on transaction count hint
+            let mut handles = Vec::with_capacity(max_concurrency);
+            let workers_needed = transaction_count_hint.min(max_concurrency);
 
-                    executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender, done_tx);
-                    });
+            // Spawn the required number of workers
+            for _ in 0..workers_needed {
+                handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
+            }
 
-                    handles.push(tx);
+            // Handle first transaction - special case for Optimism deposit / systems txs
+            if let Ok(first_tx) = pending.recv() {
+                if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
+                    // For Optimism chains: The first transaction is always a deposit transaction
+                    // that sets critical metadata (L1 block info, fees) affecting all subsequent
+                    // transactions. We broadcast the first transaction to all workers to ensure
+                    // they have this critical state.
+                    for handle in &handles {
+                        if handle.send(first_tx.clone()).is_err() {
+                            warn!(
+                                target: "engine::tree::prewarm",
+                                tx_hash = %first_tx.tx().tx_hash(),
+                                "Failed to send deposit transaction to worker"
+                            );
+                        }
+                    }
+                } else {
+                    // Not a deposit, send to first worker via round-robin
+                    if handles[0].send(first_tx).is_err() {
+                        warn!(
+                            target: "engine::tree::prewarm",
+                            task_idx = 0,
+                            "Failed to send transaction to worker"
+                        );
+                    }
                 }
+                executing += 1;
+            }
 
-                let _ = handles[task_idx].send(executable);
-
+            // Process remaining transactions with round-robin distribution
+            while let Ok(executable) = pending.recv() {
+                let task_idx = executing % workers_needed;
+                if handles[task_idx].send(executable).is_err() {
+                    warn!(
+                        target: "engine::tree::prewarm",
+                        task_idx,
+                        "Failed to send transaction to worker"
+                    );
+                }
                 executing += 1;
             }
 
@@ -156,7 +199,7 @@ where
     /// was cancelled.
     pub(super) fn run(
         self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
+        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         // spawn execution tasks.
@@ -297,7 +340,7 @@ where
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
     ///
-    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
+    /// Note: Since here are no ordering guarantees this won't be the state the txs produce when
     /// executed sequentially.
     fn transact_batch(
         self,
@@ -341,6 +384,26 @@ where
 
         // send a message to the main task to flag that we're done
         let _ = done_tx.send(());
+    }
+
+    /// Spawns a worker task for transaction execution and returns its sender channel.
+    fn spawn_worker<Tx>(
+        &self,
+        executor: &WorkloadExecutor,
+        actions_tx: Sender<PrewarmTaskEvent>,
+        done_tx: Sender<()>,
+    ) -> mpsc::Sender<Tx>
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel();
+        let ctx = self.clone();
+
+        executor.spawn_blocking(move || {
+            ctx.transact_batch(rx, actions_tx, done_tx);
+        });
+
+        tx
     }
 }
 
