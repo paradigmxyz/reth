@@ -7,7 +7,7 @@ use crate::{
     },
     EthApiError, RevertError,
 };
-use alloy_consensus::{BlockHeader, Transaction as _};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
@@ -19,9 +19,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
 };
-use reth_primitives_traits::{
-    BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
-};
+use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;

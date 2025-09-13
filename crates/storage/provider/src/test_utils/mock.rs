@@ -5,7 +5,11 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
     TransactionsProvider,
 };
-use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{
+    constants::EMPTY_ROOT_HASH,
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
@@ -22,7 +26,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignedTransaction, SignerRecoverable,
+    SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -404,7 +408,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> TransactionsProvider
                         excess_blob_gas: block.header().excess_blob_gas(),
                         timestamp: block.header().timestamp(),
                     };
-                    return Ok(Some((tx.clone(), meta)))
+                    return Ok(Some((tx.clone(), meta)));
                 }
             }
         }
@@ -416,7 +420,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> TransactionsProvider
         let mut current_tx_number: TxNumber = 0;
         for block in lock.values() {
             if current_tx_number + (block.body().transaction_count() as TxNumber) > id {
-                return Ok(Some(block.header().number()))
+                return Ok(Some(block.header().number()));
             }
             current_tx_number += block.body().transaction_count() as TxNumber;
         }
