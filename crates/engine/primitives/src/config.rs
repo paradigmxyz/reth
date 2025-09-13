@@ -385,6 +385,12 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for whether to unwind canonical header to ancestor during forkchoice updates.
+    pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
+        self.unwind_canonical_header = unwind_canonical_header;
+        self
+    }
+
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root

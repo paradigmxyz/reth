@@ -1078,7 +1078,9 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
-                if self.config.unwind_canonical_header() {
+                if self.config.always_process_payload_attributes_on_canonical_head() ||
+                    self.config.unwind_canonical_header()
+                {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
             }
