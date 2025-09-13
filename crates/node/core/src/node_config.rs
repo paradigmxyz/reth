@@ -27,13 +27,12 @@ use reth_transaction_pool::TransactionPool;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
-    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tracing::*;
 
-use crate::args::EraArgs;
+use crate::args::{EraArgs, MetricsArgs};
 pub use reth_engine_primitives::{
     DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
     DEFAULT_RESERVED_CPU_CORES,
@@ -103,10 +102,8 @@ pub struct NodeConfig<ChainSpec> {
     /// Possible values are either a built-in chain or the path to a chain specification file.
     pub chain: Arc<ChainSpec>,
 
-    /// Enable Prometheus metrics.
-    ///
-    /// The metrics will be served at the given interface and port.
-    pub metrics: Option<SocketAddr>,
+    /// Enable to configure metrics export to endpoints
+    pub metrics: MetricsArgs,
 
     /// Add a new instance of a node.
     ///
@@ -171,7 +168,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         Self {
             config: None,
             chain,
-            metrics: None,
+            metrics: MetricsArgs::default(),
             instance: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
@@ -225,8 +222,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the metrics address for the node
-    pub const fn with_metrics(mut self, metrics: SocketAddr) -> Self {
-        self.metrics = Some(metrics);
+    pub const fn with_metrics(mut self, metrics: MetricsArgs) -> Self {
+        self.metrics = metrics;
         self
     }
 
@@ -517,7 +514,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
         Self {
             chain: self.chain.clone(),
             config: self.config.clone(),
-            metrics: self.metrics,
+            metrics: self.metrics.clone(),
             instance: self.instance,
             network: self.network.clone(),
             rpc: self.rpc.clone(),

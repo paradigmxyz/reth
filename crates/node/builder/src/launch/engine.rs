@@ -108,6 +108,8 @@ where
                 info!(target: "reth::cli", "Database opened");
             })
             .with_prometheus_server().await?
+            // Export (only) metrics to otlp collector
+            .with_otlp_collector().await?
             .inspect(|this| {
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
