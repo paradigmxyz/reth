@@ -1642,7 +1642,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
 
 impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
+        Ok(if let Some(encoded) = id.get_pre_encoded() {
+            self.tx.get_by_encoded_key::<tables::StageCheckpoints>(encoded)?
+        } else {
+            self.tx.get::<tables::StageCheckpoints>(id.to_string())?
+        })
     }
 
     /// Get stage checkpoint progress.

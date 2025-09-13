@@ -455,6 +455,10 @@ where
         Ok(self.config.attributes.clone())
     }
 
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.config.attributes.timestamp())
+    }
+
     fn resolve_kind(
         &mut self,
         kind: PayloadKind,
@@ -852,10 +856,12 @@ pub trait PayloadBuilder: Send + Sync + Clone {
 /// Tells the payload builder how to react to payload request if there's no payload available yet.
 ///
 /// This situation can occur if the CL requests a payload before the first payload has been built.
+#[derive(Default)]
 pub enum MissingPayloadBehaviour<Payload> {
     /// Await the regular scheduled payload process.
     AwaitInProgress,
     /// Race the in progress payload process with an empty payload.
+    #[default]
     RaceEmptyPayload,
     /// Race the in progress payload process with this job.
     RacePayload(Box<dyn FnOnce() -> Result<Payload, PayloadBuilderError> + Send>),
@@ -870,12 +876,6 @@ impl<Payload> fmt::Debug for MissingPayloadBehaviour<Payload> {
             }
             Self::RacePayload(_) => write!(f, "RacePayload"),
         }
-    }
-}
-
-impl<Payload> Default for MissingPayloadBehaviour<Payload> {
-    fn default() -> Self {
-        Self::RaceEmptyPayload
     }
 }
 

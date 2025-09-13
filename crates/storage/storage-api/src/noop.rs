@@ -557,6 +557,10 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
     }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(Some(Box::new(self.clone())))
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C, N> {
