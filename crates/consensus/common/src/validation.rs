@@ -7,9 +7,16 @@ use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
-    SealedHeader,
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
+
+/// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
+///
+/// Calculated as `MAX_BLOCK_SIZE` - `SAFETY_MARGIN` where
+/// `MAX_BLOCK_SIZE` = `10_485_760`
+/// `SAFETY_MARGIN` = `2_097_152`
+pub const MAX_RLP_BLOCK_SIZE: usize = 8_388_608;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -56,6 +63,31 @@ pub fn validate_shanghai_withdrawals<B: Block>(
     if withdrawals_root != *header_withdrawals_root {
         return Err(ConsensusError::BodyWithdrawalsRootDiff(
             GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that block access lists are present in Amsterdam
+///
+/// [EIP-7928]: https://eips.ethereum.org/EIPS/eip-7928
+#[inline]
+pub fn validate_amsterdam_block_access_lists<B: Block>(
+    block: &SealedBlock<B>,
+) -> Result<(), ConsensusError> {
+    let bal = block.body().block_access_list().ok_or(ConsensusError::BlockAccessListMissing)?;
+    let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+    let header_bal_hash =
+        block.block_access_list_hash().ok_or(ConsensusError::BlockAccessListHashMissing)?;
+    if bal_hash != header_bal_hash {
+        tracing::error!(
+            target: "consensus",
+            ?header_bal_hash,
+            ?bal,
+            "Block access list hash mismatch in validation.rs in L81"
+        );
+        return Err(ConsensusError::BodyBlockAccessListHashDiff(
+            GotExpected { got: bal_hash, expected: header_bal_hash }.into(),
         ));
     }
     Ok(())
@@ -123,17 +155,22 @@ where
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
-    if header.block_access_list_hash().is_some() &&
-        alloy_primitives::keccak256(alloy_rlp::encode(&body.block_access_list())) !=
-            header.block_access_list_hash().unwrap()
+    if let (Some(expected_hash), Some(body_bal)) =
+        (header.block_access_list_hash(), body.block_access_list())
     {
-        return Err(ConsensusError::BodyBlockAccessListHashDiff(
-            GotExpected {
-                got: alloy_primitives::keccak256(alloy_rlp::encode(body.block_access_list())),
-                expected: header.block_access_list_hash().unwrap(),
-            }
-            .into(),
-        ))
+        let got_hash = alloy_primitives::keccak256(alloy_rlp::encode(body_bal));
+
+        if got_hash != expected_hash {
+            tracing::error!(
+                target: "consensus",
+                ?expected_hash,
+                ?body_bal,
+                "Block access list hash mismatch in validation.rs in L164"
+            );
+            return Err(ConsensusError::BodyBlockAccessListHashDiff(
+                GotExpected { got: got_hash, expected: expected_hash }.into(),
+            ));
+        }
     }
 
     Ok(())
@@ -169,6 +206,7 @@ where
 ///   information about the specific checks in [`validate_shanghai_withdrawals`].
 /// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
 ///   information about the specific checks in [`validate_cancun_gas`].
+/// * EIP-7934 block size limit validation, if osaka is active based on the given chainspec.
 pub fn post_merge_hardfork_fields<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
@@ -196,6 +234,19 @@ where
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
         validate_cancun_gas(block)?;
+    }
+
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+        block.rlp_length() > MAX_RLP_BLOCK_SIZE
+    {
+        return Err(ConsensusError::BlockTooLarge {
+            rlp_length: block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        })
+    }
+
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        validate_amsterdam_block_access_lists(block)?;
     }
 
     Ok(())
@@ -324,6 +375,54 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
     Ok(())
 }
 
+/// Validates gas limit against parent gas limit.
+///
+/// The maximum allowable difference between self and parent gas limits is determined by the
+/// parent's gas limit divided by the [`GAS_LIMIT_BOUND_DIVISOR`].
+#[inline]
+pub fn validate_against_parent_gas_limit<
+    H: BlockHeader,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+>(
+    header: &SealedHeader<H>,
+    parent: &SealedHeader<H>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+    let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number()) &&
+        chain_spec.is_london_active_at_block(header.number())
+    {
+        parent.gas_limit() *
+            chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
+                as u64
+    } else {
+        parent.gas_limit()
+    };
+
+    // Check for an increase in gas limit beyond the allowed threshold.
+    if header.gas_limit() > parent_gas_limit {
+        if header.gas_limit() - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+            return Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit,
+                child_gas_limit: header.gas_limit(),
+            })
+        }
+    }
+    // Check for a decrease in gas limit beyond the allowed threshold.
+    else if parent_gas_limit - header.gas_limit() >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+        return Err(ConsensusError::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: header.gas_limit(),
+        })
+    }
+    // Check if the self gas limit is below the minimum required limit.
+    else if header.gas_limit() < MINIMUM_GAS_LIMIT {
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
+    }
+
+    Ok(())
+}
+
 /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
 /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
 /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
@@ -347,8 +446,12 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     }
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
-    let expected_excess_blob_gas =
-        blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    let parent_base_fee_per_gas = parent.base_fee_per_gas().unwrap_or(0);
+    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas_osaka(
+        parent_excess_blob_gas,
+        parent_blob_gas_used,
+        parent_base_fee_per_gas,
+    );
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
