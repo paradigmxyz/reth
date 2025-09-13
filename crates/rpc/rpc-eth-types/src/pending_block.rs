@@ -13,7 +13,7 @@ use reth_chain_state::{
 };
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block, IndexedTx, NodePrimitives, RecoveredBlock, SealedHeader};
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -90,6 +90,20 @@ pub struct PendingBlockAndReceipts<N: NodePrimitives> {
     pub block: PendingRecoveredBlock<N>,
     /// The receipts for the pending block.
     pub receipts: PendingBlockReceipts<N>,
+}
+
+impl<N: NodePrimitives> PendingBlockAndReceipts<N> {
+    /// Finds a transaction by hash and returns it along with its corresponding receipt.
+    ///
+    /// Returns `None` if the transaction is not found in this pending block.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: alloy_primitives::TxHash,
+    ) -> Option<(IndexedTx<'_, N::Block>, &N::Receipt)> {
+        let indexed_tx = self.block.find_indexed(tx_hash)?;
+        let receipt = self.receipts.get(indexed_tx.index())?;
+        Some((indexed_tx, receipt))
+    }
 }
 
 /// Locally built pending block for `pending` tag.
