@@ -218,13 +218,14 @@ mod tests {
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
-        context::result::ExecutionResult,
+        context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
         state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot},
         Context, MainBuilder, MainContext,
     };
+    use revm_primitives::Bytes;
     use std::sync::mpsc;
 
     /// A simple mock executor for testing that doesn't require complex EVM setup
@@ -261,6 +262,35 @@ mod tests {
                 hook.on_state(StateChangeSource::Transaction(0), &self.state);
             }
             Ok(Some(1000)) // Mock gas used
+        }
+
+        fn execute_transaction_without_commit(
+            &mut self,
+            _tx: impl ExecutableTx<Self>,
+        ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+            // Call hook with our mock state for each transaction
+            if let Some(hook) = self.hook.as_mut() {
+                hook.on_state(StateChangeSource::Transaction(0), &self.state);
+            }
+
+            Ok(ResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas_used: 1000,
+                    gas_refunded: 0,
+                    logs: vec![],
+                    output: Output::Call(Bytes::from(vec![])),
+                },
+                Default::default(),
+            ))
+        }
+
+        fn commit_transaction(
+            &mut self,
+            _output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+            _tx: impl ExecutableTx<Self>,
+        ) -> Result<u64, BlockExecutionError> {
+            Ok(1000)
         }
 
         fn finish(
