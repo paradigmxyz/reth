@@ -118,7 +118,7 @@ impl reth_codecs::Compact for StaticFileBlockWithdrawals {
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoredBlockAccessList {
-    /// The block_access_list.
+    /// The `block_access_list` .
     pub block_access_list: BlockAccessList,
 }
 
