@@ -63,9 +63,7 @@ reth-codec = [
     "reth-primitives-traits/reth-codec",
     "reth-ethereum-primitives/reth-codec",
 ]
-asm-keccak = [
-    "alloy-primitives/asm-keccak",
-]
+asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "alloy-eips/arbitrary",
     "reth-codec",
@@ -77,14 +75,8 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "c-kzg?/arbitrary",
 ]
-secp256k1 = [
-    "reth-primitives-traits/secp256k1",
-]
-c-kzg = [
-    "dep:c-kzg",
-    "alloy-consensus/kzg",
-    "alloy-eips/kzg",
-]
+secp256k1 = ["reth-primitives-traits/secp256k1"]
+c-kzg = ["dep:c-kzg", "alloy-consensus/kzg", "alloy-eips/kzg"]
 alloy-compat = []
 test-utils = [
     "reth-primitives-traits/test-utils",
