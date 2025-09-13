@@ -1,5 +1,4 @@
-use alloy_eips::eip7928::BlockAccessList;
-use alloy_eips::eip4895::Withdrawals;
+use alloy_eips::{eip4895::Withdrawals, eip7928::BlockAccessList};
 use alloy_primitives::TxNumber;
 use core::ops::Range;
 

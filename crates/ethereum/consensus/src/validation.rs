@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
-use alloy_eips::eip7928::BlockAccessList;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
-use alloy_eips::{eip7685::Requests, Encodable2718};
+use alloy_eips::{eip7685::Requests, eip7928::BlockAccessList, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;

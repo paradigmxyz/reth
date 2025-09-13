@@ -22,8 +22,7 @@ where
 {
     if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
         SpecId::AMSTERDAM
-    }
-    else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
+    } else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
         SpecId::OSAKA
     } else if chain_spec.is_prague_active_at_timestamp(timestamp) {
         SpecId::PRAGUE
