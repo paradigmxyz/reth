@@ -17,10 +17,13 @@ engine-withdrawals:
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
 engine-cancun:
   - Transaction Re-Org, New Payload on Revert Back (Cancun) (reth)
+  - Transaction Re-Org, Re-Org to Different Block
+  - Transaction Re-Org, Re-Org Out
 engine-api:
   - Transaction Re-Org, Re-Org Out (Paris) (reth)
   - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
   - Transaction Re-Org, New Payload on Revert Back (Paris) (reth)
+  - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Paris) (reth)
 
