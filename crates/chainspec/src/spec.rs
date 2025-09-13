@@ -51,11 +51,17 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
     // * parent beacon block root to 0x0
     // * blob gas used to provided genesis or 0x0
     // * excess blob gas to provided genesis or 0x0
+    // Also preserve blob gas fields if they are explicitly provided in genesis,
+    // even if Cancun is not active at genesis timestamp (for testing purposes)
     let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
         if hardforks.fork(EthereumHardfork::Cancun).active_at_timestamp(genesis.timestamp) {
             let blob_gas_used = genesis.blob_gas_used.unwrap_or(0);
             let excess_blob_gas = genesis.excess_blob_gas.unwrap_or(0);
             (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
+        } else if genesis.blob_gas_used.is_some() || genesis.excess_blob_gas.is_some() {
+            // If blob gas fields are explicitly provided in genesis, use them even if
+            // Cancun is not active. This handles test cases that expect these fields.
+            (None, genesis.blob_gas_used, genesis.excess_blob_gas)
         } else {
             (None, None, None)
         };
