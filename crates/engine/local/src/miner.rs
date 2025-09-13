@@ -177,13 +177,14 @@ where
 
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
+        let state = self.forkchoice_state();
         let res = self
             .to_engine
-            .fork_choice_updated(self.forkchoice_state(), None, EngineApiMessageVersion::default())
+            .fork_choice_updated(state, None, EngineApiMessageVersion::default())
             .await?;
 
         if !res.is_valid() {
-            eyre::bail!("Invalid fork choice update")
+            eyre::bail!("Invalid fork choice update {state:?}: {res:?}")
         }
 
         Ok(())
