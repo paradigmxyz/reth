@@ -41,3 +41,7 @@ harness = false
 [[bench]]
 name = "transaction"
 harness = false
+
+[[bench]]
+name = "concurrent_bench"
+harness = false
