@@ -2,7 +2,7 @@
 
 use crate::Compact;
 use alloc::vec::Vec;
-use alloy_block_access_list::{
+use alloy_eips::eip7928::{
     balance_change::BalanceChange as AlloyBalanceChange,
     code_change::CodeChange as AlloyCodeChange, nonce_change::NonceChange as AlloyNonceChange,
     AccountChanges as AlloyAccountChanges, SlotChanges as AlloySlotChange,
@@ -179,7 +179,7 @@ impl Compact for AlloyAccountChanges {
                     changes: sc
                         .changes
                         .into_iter()
-                        .map(|c| alloy_block_access_list::storage_change::StorageChange {
+                        .map(|c| alloy_eips::eip7928::storage_change::StorageChange {
                             block_access_index: c.block_access_index,
                             new_value: c.new_value,
                         })

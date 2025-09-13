@@ -22,7 +22,6 @@ alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["k256"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
-alloy-block-access-list.workspace = true
 revm-primitives.workspace = true
 revm-bytecode.workspace = true
 revm-state.workspace = true
@@ -95,7 +94,6 @@ std = [
     "revm-bytecode/std",
     "revm-state/std",
     "alloy-rpc-types-eth?/std",
-    "alloy-block-access-list/std",
 ]
 secp256k1 = ["alloy-consensus/secp256k1"]
 test-utils = [
@@ -119,7 +117,6 @@ arbitrary = [
     "alloy-trie/arbitrary",
     "reth-chainspec/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
-    "alloy-block-access-list/arbitrary",
 ]
 serde-bincode-compat = [
     "serde",

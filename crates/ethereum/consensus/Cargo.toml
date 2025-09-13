@@ -20,7 +20,6 @@ reth-consensus.workspace = true
 
 # alloy
 alloy-eips.workspace = true
-alloy-block-access-list.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 # alloy-rlp.workspace = true
@@ -41,7 +40,6 @@ std = [
     "reth-primitives-traits/std",
     "tracing/std",
     # "alloy-rlp/std",
-    "alloy-block-access-list/std",
 ]
 
 [dev-dependencies]

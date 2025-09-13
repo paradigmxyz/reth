@@ -20,7 +20,10 @@ pub fn revm_spec_by_timestamp_and_block_number<C>(
 where
     C: EthereumHardforks,
 {
-    if chain_spec.is_osaka_active_at_timestamp(timestamp) {
+    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+        SpecId::AMSTERDAM
+    }
+    else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
         SpecId::OSAKA
     } else if chain_spec.is_prague_active_at_timestamp(timestamp) {
         SpecId::PRAGUE

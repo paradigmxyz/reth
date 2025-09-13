@@ -11,7 +11,6 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
-    "crates/block-access-list/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
@@ -329,7 +328,6 @@ codegen-units = 1
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
-reth-block-access-list = { path = "crates/block-access-list" }
 reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
@@ -489,7 +487,6 @@ alloy-trie = { version = "0.9.1", default-features = false }
 alloy-hardforks = "0.3.1"
 
 alloy-consensus = { version = "1.0.30", default-features = false }
-alloy-block-access-list = { version = "1.0.30", default-features = false }
 alloy-contract = { version = "1.0.30", default-features = false }
 alloy-eips = { version = "1.0.30", default-features = false }
 alloy-genesis = { version = "1.0.30", default-features = false }
@@ -736,7 +733,6 @@ alloy-rpc-types-engine = { git = "https://github.com/Soubhik-10/alloy", branch =
 alloy-rpc-types-eth = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
 alloy-rpc-types-mev = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
 alloy-rpc-types-trace = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
-alloy-block-access-list = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
 alloy-rpc-types-txpool = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
 alloy-serde = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }
 alloy-signer = { git = "https://github.com/Soubhik-10/alloy", branch = "bal" }

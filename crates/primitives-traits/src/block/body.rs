@@ -5,7 +5,7 @@ use crate::{
     MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_block_access_list::BlockAccessList;
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};

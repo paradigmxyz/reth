@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_block_access_list::BlockAccessList;
+use alloy_eips::eip7928::BlockAccessList;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
 use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
