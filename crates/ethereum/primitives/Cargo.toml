@@ -43,7 +43,7 @@ secp256k1 = { workspace = true, features = ["rand"] }
 alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 
 [features]
-default = ["std"]
+default = ["std", "serde", "serde-bincode-compat"]
 test-utils = [
     "reth-codecs?/test-utils",
     "reth-primitives-traits/test-utils",
