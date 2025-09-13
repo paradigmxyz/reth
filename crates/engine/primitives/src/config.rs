@@ -95,6 +95,8 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
+    /// Whether to unwind canonical header to ancestor during forkchoice updates.
+    unwind_canonical_header: bool,
 }
 
 impl Default for TreeConfig {
@@ -117,6 +119,7 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            unwind_canonical_header: false,
         }
     }
 }
@@ -142,6 +145,7 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
+        unwind_canonical_header: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -161,6 +165,7 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
+            unwind_canonical_header,
         }
     }
 
@@ -255,6 +260,11 @@ impl TreeConfig {
     /// canonical.
     pub const fn always_process_payload_attributes_on_canonical_head(&self) -> bool {
         self.always_process_payload_attributes_on_canonical_head
+    }
+
+    /// Returns true if canonical header should be unwound to ancestor during forkchoice updates.
+    pub const fn unwind_canonical_header(&self) -> bool {
+        self.unwind_canonical_header
     }
 
     /// Setter for persistence threshold.
