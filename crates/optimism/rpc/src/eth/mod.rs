@@ -78,7 +78,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         sequencer_client: Option<SequencerClient>,
         min_suggested_priority_fee: U256,
         pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
-        flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
+        flashblock_rx: Option<FlashBlockCompleteSequenceRx<<N::Primitives as reth_primitives_traits::NodePrimitives>::SignedTx>>,
     ) -> Self {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
@@ -105,7 +105,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     }
 
     /// Returns a flashblock receiver, if any, by resubscribing to it.
-    pub fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx> {
+    pub fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx<<N::Primitives as reth_primitives_traits::NodePrimitives>::SignedTx>> {
         self.inner.flashblock_rx.as_ref().map(|rx| rx.resubscribe())
     }
 
@@ -319,7 +319,10 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApi<N, Rpc> {
 }
 
 /// Container type `OpEthApi`
-pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
+pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert>
+where
+    N::Primitives: reth_primitives_traits::NodePrimitives,
+{
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N, Rpc>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -336,7 +339,7 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Flashblocks receiver.
     ///
     /// If set, then it provides sequences of flashblock built.
-    flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
+    flashblock_rx: Option<FlashBlockCompleteSequenceRx<<N::Primitives as reth_primitives_traits::NodePrimitives>::SignedTx>>,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApiInner<N, Rpc> {
