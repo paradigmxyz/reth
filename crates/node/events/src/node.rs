@@ -45,6 +45,8 @@ struct NodeState {
     safe_block_hash: Option<B256>,
     /// Hash of finalized block last set by fork choice update
     finalized_block_hash: Option<B256>,
+    /// The time when we last logged a status message
+    last_status_log_time: Option<u64>,
 }
 
 impl NodeState {
@@ -60,6 +62,7 @@ impl NodeState {
             head_block_hash: None,
             safe_block_hash: None,
             finalized_block_hash: None,
+            last_status_log_time: None,
         }
     }
 
@@ -479,25 +482,28 @@ where
                         )
                     }
                 }
-            } else if let Some(latest_block) = this.state.latest_block {
+            } else {
                 let now =
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-                if now.saturating_sub(this.state.latest_block_time.unwrap_or(0)) > 60 {
-                    // Once we start receiving consensus nodes, don't emit status unless stalled for
-                    // 1 minute
-                    info!(
-                        target: "reth::cli",
-                        connected_peers = this.state.num_connected_peers(),
-                        %latest_block,
-                        "Status"
-                    );
+
+                // Only log status if we haven't logged recently
+                if now.saturating_sub(this.state.last_status_log_time.unwrap_or(0)) > 60 {
+                    if let Some(latest_block) = this.state.latest_block {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            %latest_block,
+                            "Status"
+                        );
+                    } else {
+                        info!(
+                            target: "reth::cli",
+                            connected_peers = this.state.num_connected_peers(),
+                            "Status"
+                        );
+                    }
+                    this.state.last_status_log_time = Some(now);
                 }
-            } else {
-                info!(
-                    target: "reth::cli",
-                    connected_peers = this.state.num_connected_peers(),
-                    "Status"
-                );
             }
         }
 
