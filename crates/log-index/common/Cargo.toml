@@ -1,0 +1,54 @@
+[package]
+name = "reth-log-index-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Common types for Log index implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-primitives.workspace = true
+
+# reth
+reth-codecs = { workspace = true, optional = true }
+
+modular-bitfield = { workspace = true, optional = true }
+
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true, default-features = false }
+sha2 = { workspace = true, default-features = false }
+fnv = { workspace = true, default-features = false }
+
+[dev-dependencies]
+reth-codecs.workspace = true
+alloy-consensus.workspace = true
+rand.workspace = true
+test-fuzz.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "serde?/std",
+    "alloy-consensus/std",
+    "fnv/std",
+    "sha2/std",
+    "thiserror/std",
+]
+reth-codec = ["dep:reth-codecs", "dep:modular-bitfield"]
+test-utils = [
+    "reth-codecs/test-utils",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "reth-codecs?/serde",
+    "rand/serde",
+]

@@ -572,10 +572,10 @@ where
     ///     .extend_rpc_modules(|ctx| {
     ///         // Access node components, so they can used by the CustomApi
     ///         let pool = ctx.pool().clone();
-    ///         
+    ///
     ///         // Add custom RPC namespace
     ///         ctx.modules.merge_configured(CustomApi { pool }.into_rpc())?;
-    ///         
+    ///
     ///         Ok(())
     ///     })
     ///     .build()?;
