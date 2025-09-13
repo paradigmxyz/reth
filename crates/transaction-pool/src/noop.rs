@@ -18,6 +18,7 @@ use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
+    NumHash,
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
@@ -340,7 +341,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         if tx_hashes.is_empty() {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
@@ -386,6 +387,7 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
+        let block_info = NumHash::default();
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
@@ -397,6 +399,7 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
                 TransactionOrigin::Private => false,
             },
             authorities: None,
+            block_info,
         }
     }
 }
