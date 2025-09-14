@@ -10922,7 +10922,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Tracks the number of regular tasks currently ran by the executor.",
+      "description": "Tracks the number of regular blocking tasks currently ran by the executor. This does not account for OS threads spawned with rayon or std::thread.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -10996,9 +10996,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 354
+        "y": 362
       },
-      "id": 247,
+      "id": 248,
       "options": {
         "legend": {
           "calcs": [],
@@ -11022,12 +11022,12 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_executor_spawn_regular_tasks_total{$instance_label=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_executor_spawn_regular_tasks_blocking_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
           "instant": false,
-          "legendFormat": "Tasks started",
+          "legendFormat": "Blocking tasks started",
           "range": true,
           "refId": "A",
           "useBackend": false
@@ -11038,15 +11038,15 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_executor_spawn_regular_tasks_total{$instance_label=\"$instance\"} - reth_executor_spawn_finished_regular_tasks_total{$instance_label=\"$instance\"}",
+          "expr": "reth_executor_spawn_regular_tasks_blocking_total{$instance_label=\"$instance\"} - reth_executor_spawn_finished_regular_tasks_blocking_total{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
-          "legendFormat": "Tasks running",
+          "legendFormat": "Blocking tasks running",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Task Executor regular tasks",
+      "title": "Task Executor regular tasks blocking",
       "type": "timeseries"
     },
     {
