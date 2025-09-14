@@ -4,6 +4,7 @@
 
 use std::{sync::Arc, time::Instant};
 
+use crate::block::{BlockAndReceipts, BlockReceiptsArc, RecoveredBlockArc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockHash, B256};
@@ -76,21 +77,9 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     }
 }
 
-/// A type alias for an [`Arc`] wrapped [`RecoveredBlock`].
-pub type PendingRecoveredBlock<N> = Arc<RecoveredBlock<<N as NodePrimitives>::Block>>;
-
-/// A type alias for an [`Arc`] wrapped vector of [`NodePrimitives::Receipt`].
-pub type PendingBlockReceipts<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
-
 /// A type alias for a pair of an [`Arc`] wrapped [`RecoveredBlock`] and a vector of
 /// [`NodePrimitives::Receipt`].
-#[derive(Debug)]
-pub struct PendingBlockAndReceipts<N: NodePrimitives> {
-    /// The pending recovered block.
-    pub block: PendingRecoveredBlock<N>,
-    /// The receipts for the pending block.
-    pub receipts: PendingBlockReceipts<N>,
-}
+pub type PendingBlockAndReceipts<N> = BlockAndReceipts<N>;
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Clone, Constructor)]
@@ -98,7 +87,7 @@ pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The receipts for the pending block
-    pub receipts: PendingBlockReceipts<N>,
+    pub receipts: BlockReceiptsArc<N>,
     /// The locally built pending block with execution output.
     pub executed_block: ExecutedBlock<N>,
 }
@@ -117,23 +106,20 @@ impl<N: NodePrimitives> PendingBlock<N> {
     }
 
     /// Returns the locally built pending [`RecoveredBlock`].
-    pub const fn block(&self) -> &PendingRecoveredBlock<N> {
+    pub const fn block(&self) -> &RecoveredBlockArc<N> {
         &self.executed_block.recovered_block
     }
 
     /// Converts this [`PendingBlock`] into a pair of [`RecoveredBlock`] and a vector of
     /// [`NodePrimitives::Receipt`]s, taking self.
     pub fn into_block_and_receipts(self) -> PendingBlockAndReceipts<N> {
-        PendingBlockAndReceipts {
-            block: self.executed_block.recovered_block,
-            receipts: self.receipts,
-        }
+        BlockAndReceipts { block: self.executed_block.recovered_block, receipts: self.receipts }
     }
 
     /// Returns a pair of [`RecoveredBlock`] and a vector of  [`NodePrimitives::Receipt`]s by
     /// cloning from borrowed self.
     pub fn to_block_and_receipts(&self) -> PendingBlockAndReceipts<N> {
-        PendingBlockAndReceipts {
+        BlockAndReceipts {
             block: self.executed_block.recovered_block.clone(),
             receipts: self.receipts.clone(),
         }

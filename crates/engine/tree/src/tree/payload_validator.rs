@@ -335,7 +335,9 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = self.convert_to_block(input)?;
-                        return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+                        return Err(
+                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
+                        )
                     }
                 }
             };
@@ -437,7 +439,8 @@ where
             // Use state root task only if prefix sets are empty, otherwise proof generation is too
             // expensive because it requires walking over the paths in the prefix set in every
             // proof.
-            if trie_input.prefix_sets.is_empty() {
+            let spawn_payload_processor_start = Instant::now();
+            let handle = if trie_input.prefix_sets.is_empty() {
                 self.payload_processor.spawn(
                     env.clone(),
                     txs,
@@ -450,9 +453,25 @@ where
                 debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
                 self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
-            }
+            };
+
+            // record prewarming initialization duration
+            self.metrics
+                .block_validation
+                .spawn_payload_processor
+                .record(spawn_payload_processor_start.elapsed().as_secs_f64());
+            handle
         } else {
-            self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
+            let prewarming_start = Instant::now();
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder);
+
+            // Record prewarming initialization duration
+            self.metrics
+                .block_validation
+                .spawn_payload_processor
+                .record(prewarming_start.elapsed().as_secs_f64());
+            handle
         };
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -491,6 +510,7 @@ where
             };
         }
 
+        let post_execution_start = Instant::now();
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
         // validate block consensus rules
         ensure_ok!(self.validate_block_inner(&block));
@@ -518,6 +538,12 @@ where
             self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
             return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
         }
+
+        // record post-execution validation duration
+        self.metrics
+            .block_validation
+            .post_execution_validation_duration
+            .record(post_execution_start.elapsed().as_secs_f64());
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
@@ -892,7 +918,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return;
+            return
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
