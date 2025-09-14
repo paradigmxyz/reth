@@ -1,4 +1,4 @@
-//! This example shows how implement a custom node.
+//! This example shows how to implement a custom node.
 //!
 //! A node consists of:
 //! - primitives: block,header,transactions
