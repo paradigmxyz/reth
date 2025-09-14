@@ -3,7 +3,7 @@
 Thanks for your interest in improving Reth!
 
 There are multiple opportunities to contribute at any level. It doesn't matter if you are just getting started with Rust
-or are the most weathered expert, we can use your help.
+or if you are already the most weathered expert, we can use your help.
 
 **No contribution is too small and all contributions are valued.**
 
@@ -82,7 +82,7 @@ See [this guide][mcve] on how to create a minimal, complete, and verifiable exam
 
 When adding a feature request in the issue tracker, you will be presented with a basic form to fill out.
 
-Please include as detailed of an explanation as possible of the feature you would like, adding additional context if
+Please include as detailed an explanation as possible of the feature you would like, adding additional context if
 necessary.
 
 If you have examples of other tools that have the feature you are requesting, please include them as well.
