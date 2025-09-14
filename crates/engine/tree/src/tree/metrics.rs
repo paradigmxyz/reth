@@ -1,4 +1,5 @@
 use crate::tree::MeteredStateHook;
+use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,

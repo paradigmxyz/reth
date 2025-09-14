@@ -7,7 +7,7 @@ use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocki
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
@@ -24,7 +24,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{Recovered, SignedTransaction};
+use reth_primitives_traits::Recovered;
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -74,7 +74,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
             }
 
             let block = block.unwrap_or_default();
@@ -87,7 +87,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
             }
 
             let base_block =
@@ -127,7 +127,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                )
+                                );
                             }
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
@@ -150,7 +150,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into())
+                            .into());
                         }
 
                         if txs_without_gas_limit > 0 {
@@ -423,7 +423,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         access_list,
                         gas_used: U256::from(gas_used),
                         error,
-                    })
+                    });
                 }
                 ExecutionResult::Revert { output, gas_used } => {
                     let error = Some(RevertError::new(output).to_string());
@@ -431,7 +431,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         access_list,
                         gas_used: U256::from(gas_used),
                         error,
-                    })
+                    });
                 }
                 ExecutionResult::Success { .. } => {}
             };
@@ -700,7 +700,7 @@ pub trait Call:
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break
+                break;
             }
 
             let tx_env = self.evm_config().tx_env(tx);
