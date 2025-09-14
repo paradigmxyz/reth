@@ -4,7 +4,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use crate::block::{BlockAndReceipts, BlockReceiptsArc, RecoveredBlockArc};
+use crate::block::BlockAndReceipts;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockHash, B256};
@@ -14,7 +14,9 @@ use reth_chain_state::{
 };
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
+};
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -87,7 +89,7 @@ pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The receipts for the pending block
-    pub receipts: BlockReceiptsArc<N>,
+    pub receipts: Arc<Vec<ReceiptTy<N>>>,
     /// The locally built pending block with execution output.
     pub executed_block: ExecutedBlock<N>,
 }
@@ -106,7 +108,7 @@ impl<N: NodePrimitives> PendingBlock<N> {
     }
 
     /// Returns the locally built pending [`RecoveredBlock`].
-    pub const fn block(&self) -> &RecoveredBlockArc<N> {
+    pub const fn block(&self) -> &Arc<RecoveredBlock<BlockTy<N>>> {
         &self.executed_block.recovered_block
     }
 
