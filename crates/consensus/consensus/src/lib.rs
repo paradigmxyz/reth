@@ -403,6 +403,14 @@ pub enum ConsensusError {
         /// The maximum allowed RLP length.
         max_rlp_length: usize,
     },
+    /// EIP-7825: Transaction gas limit exceeds maximum allowed
+    #[error("transaction {tx_hash} gas limit {gas_limit} exceeds maximum {max_allowed}")]
+    TransactionGasLimitTooHigh {
+        tx_hash: TxHash,
+        gas_limit: u64,
+        max_allowed: u64,
+    },
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),

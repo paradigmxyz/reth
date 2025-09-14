@@ -153,6 +153,18 @@ where
     if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
+    // EIP-7825 validation
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
+        for tx in block.body().transactions() {
+            if tx.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA {
+                return Err(ConsensusError::TransactionGasLimitTooHigh {
+                    tx_hash: tx.hash(),
+                    gas_limit: tx.gas_limit(),
+                    max_allowed: MAX_TX_GAS_LIMIT_OSAKA,
+                });
+            }
+        }
+    }
 
     Ok(())
 }
