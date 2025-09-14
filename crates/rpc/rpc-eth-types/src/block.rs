@@ -3,13 +3,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::TxHash;
-use reth_primitives_traits::{IndexedTx, NodePrimitives, RecoveredBlock};
-
-/// A type alias for an [`Arc`] wrapped [`RecoveredBlock`].
-pub type RecoveredBlockArc<N> = Arc<RecoveredBlock<<N as NodePrimitives>::Block>>;
-
-/// A type alias for an [`Arc`] wrapped vector of [`NodePrimitives::Receipt`].
-pub type BlockReceiptsArc<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
+use reth_primitives_traits::{BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock};
 
 /// A pair of an [`Arc`] wrapped [`RecoveredBlock`] and its corresponding receipts.
 ///
@@ -18,14 +12,17 @@ pub type BlockReceiptsArc<N> = Arc<Vec<<N as NodePrimitives>::Receipt>>;
 #[derive(Debug, Clone)]
 pub struct BlockAndReceipts<N: NodePrimitives> {
     /// The recovered block.
-    pub block: RecoveredBlockArc<N>,
+    pub block: Arc<RecoveredBlock<BlockTy<N>>>,
     /// The receipts for the block.
-    pub receipts: BlockReceiptsArc<N>,
+    pub receipts: Arc<Vec<ReceiptTy<N>>>,
 }
 
 impl<N: NodePrimitives> BlockAndReceipts<N> {
     /// Creates a new [`BlockAndReceipts`] instance.
-    pub const fn new(block: RecoveredBlockArc<N>, receipts: BlockReceiptsArc<N>) -> Self {
+    pub const fn new(
+        block: Arc<RecoveredBlock<BlockTy<N>>>,
+        receipts: Arc<Vec<ReceiptTy<N>>>,
+    ) -> Self {
         Self { block, receipts }
     }
 
