@@ -82,7 +82,7 @@ See [this guide][mcve] on how to create a minimal, complete, and verifiable exam
 
 When adding a feature request in the issue tracker, you will be presented with a basic form to fill out.
 
-Please include as detailed an explanation as possible of the feature you would like, adding additional context if
+Please include as detailed of an explanation as possible of the feature you would like, adding additional context if
 necessary.
 
 If you have examples of other tools that have the feature you are requesting, please include them as well.
