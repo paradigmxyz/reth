@@ -107,6 +107,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            block_access_list_hash: None,
         };
 
         Ok(Block::new(
@@ -118,6 +119,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
                     .chain_spec
                     .is_canyon_active_at_timestamp(timestamp)
                     .then(Default::default),
+                block_access_list: None,
             },
         ))
     }

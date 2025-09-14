@@ -6,7 +6,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: ["**"]
   schedule:
     # Run once a day at 3:00 UTC
     - cron: "0 3 * * *"
@@ -23,8 +23,7 @@ jobs:
   test:
     name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     strategy:

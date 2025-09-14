@@ -223,7 +223,6 @@ where
         };
 
         let block = payload.block();
-
         let payload = T::block_to_payload(payload.block().clone());
         let res = self.to_engine.new_payload(payload).await?;
 

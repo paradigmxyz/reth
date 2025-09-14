@@ -105,6 +105,7 @@ where
                 withdrawals: chain_spec
                     .is_shanghai_active_at_timestamp(header.timestamp())
                     .then(Default::default),
+                block_access_list: None,
             })
             .collect())
     }
