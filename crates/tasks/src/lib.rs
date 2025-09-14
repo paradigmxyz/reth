@@ -644,7 +644,7 @@ impl TaskSpawner for TaskExecutor {
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        self.metrics.inc_regular_tasks_blocking(); 
+        self.metrics.inc_regular_tasks_blocking();
         self.spawn_blocking(fut)
     }
 
