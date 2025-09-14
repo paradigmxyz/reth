@@ -56,11 +56,7 @@ async function fixSearchIndex() {
 }
 
 async function findFiles(dir: string, extension: string, files: string[] = []): Promise<string[]> {
-<<<<<<< HEAD
-  const { readdir, stat } = await import('fs/promises');
-=======
   const { readdir } = await import('fs/promises');
->>>>>>> main
   const entries = await readdir(dir, { withFileTypes: true });
   
   for (const entry of entries) {
@@ -70,11 +66,7 @@ async function findFiles(dir: string, extension: string, files: string[] = []): 
     if (entry.name === '.vocs' || entry.name === 'docs' || entry.name === '_site') continue;
     
     if (entry.isDirectory()) {
-<<<<<<< HEAD
-      await findFiles(fullPath, extension, files);
-=======
       files = await findFiles(fullPath, extension, files);
->>>>>>> main
     } else if (entry.name.endsWith(extension)) {
       files.push(fullPath);
     }
@@ -84,8 +76,4 @@ async function findFiles(dir: string, extension: string, files: string[] = []): 
 }
 
 // Run the fix
-<<<<<<< HEAD
 fixSearchIndex().catch(console.error);
-=======
-fixSearchIndex().catch(console.error);
->>>>>>> main
