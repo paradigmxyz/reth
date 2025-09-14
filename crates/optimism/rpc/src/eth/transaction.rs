@@ -1,33 +1,34 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
-use alloy_consensus::transaction::TransactionMeta;
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::SignedTransaction;
-use reth_rpc_eth_api::FromEvmError;
-use reth_rpc_eth_api::RpcNodeCore;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
-    try_into_op_tx_info, FromEthApiError, RpcConvert, RpcReceipt, TxInfoMapper,
+    try_into_op_tx_info, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcReceipt,
+    TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::TransactionsProvider;
-use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use reth_storage_api::{errors::ProviderError, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::fmt::{Debug, Formatter};
-use std::future::Future;
+use std::{
+    fmt::{Debug, Formatter},
+    future::Future,
+};
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
-    N: RpcNodeCore,
+    N: RpcNodeCore<
+        Provider: TransactionsProvider<Transaction = <N::Primitives as NodePrimitives>::SignedTx>,
+    >,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    Self: RpcNodeCore<Primitives = N::Primitives, Pool = N::Pool>,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
@@ -57,7 +58,7 @@ where
                 tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
             });
 
-            return Ok(hash);
+            return Ok(hash)
         }
 
         // submit the transaction to the pool with a `Local` origin
@@ -83,72 +84,19 @@ where
     {
         let this = self.clone();
         async move {
-            // First try to load from historical data
-            match this.load_transaction_and_receipt(hash).await? {
-                Some((tx, meta, receipt)) => {
-                    return this.build_transaction_receipt(tx, meta, receipt).await.map(Some)
-                }
-                None => {
-                    // If not found historically, check the pending flashblock
-                    if let Ok(Some(pending_block)) = this.pending_flashblock() {
-                        let block = pending_block.block;
-                        let receipts = pending_block.receipts;
+            // first attempt to fetch the mined transaction receipt data
+            let mut tx_receipt = this.load_transaction_and_receipt(hash).await?;
 
-                        // Find the transaction in the pending block
-                        if let Some((index, tx_with_sender)) = block
-                            .transactions_with_sender()
-                            .enumerate()
-                            .find(|(_, (_, tx))| *tx.tx_hash() == hash)
-                        {
-                            let (signer, tx) = tx_with_sender;
-
-                            // Get the corresponding receipt
-                            if let Some(receipt) = receipts.get(index) {
-                                // Create TransactionMeta for the pending transaction
-                                let meta = TransactionMeta {
-                                    tx_hash: hash,
-                                    index: index as u64,
-                                    block_hash: block.hash(),
-                                    block_number: block.number(),
-                                    base_fee: block.base_fee_per_gas(),
-                                    excess_blob_gas: block.excess_blob_gas(),
-                                    timestamp: block.timestamp(),
-                                };
-
-                                // Convert the transaction to the expected provider type
-                                let provider_tx = this
-                                    .provider()
-                                    .transaction_by_hash(hash)
-                                    .map_err(Self::Error::from_eth_err)?
-                                    .ok_or_else(|| {
-                                        Self::Error::from_eth_err(
-                                            reth_rpc_eth_types::EthApiError::TransactionNotFound,
-                                        )
-                                    })?;
-
-                                // Convert the receipt to the expected provider receipt type
-                                let provider_receipt = this
-                                    .provider()
-                                    .receipt_by_hash(hash)
-                                    .map_err(Self::Error::from_eth_err)?
-                                    .ok_or_else(|| {
-                                        Self::Error::from_eth_err(
-                                            reth_rpc_eth_types::EthApiError::TransactionNotFound,
-                                        )
-                                    })?;
-
-                                // Build the receipt using the converted transaction and receipt
-                                let rpc_receipt = this
-                                    .build_transaction_receipt(provider_tx, meta, provider_receipt)
-                                    .await?;
-                                return Ok(Some(rpc_receipt));
-                            }
-                        };
-                    }
-
-                    Ok(None)
+            if tx_receipt.is_none() {
+                // if flashblocks are supported, attempt to find id from the pending block
+                if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                    tx_receipt = pending_block
+                        .find_transaction_and_receipt_by_hash(hash)
+                        .map(|(tx, receipt)| (tx.tx().clone(), tx.meta(), receipt.clone()));
                 }
             }
+            let Some((tx, meta, receipt)) = tx_receipt else { return Ok(None) };
+            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
         }
     }
 }
