@@ -23,7 +23,6 @@
 //! ```
 
 pub(crate) mod sealed;
-use alloy_consensus::transaction::Recovered;
 pub use sealed::SealedBlock;
 
 pub(crate) mod recovered;
@@ -191,10 +190,7 @@ pub trait Block:
     /// transactions.
     ///
     /// Returns the block as error if a signature is invalid.
-    fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>>
-    where
-        <Self::Body as BlockBody>::Transaction: SignedTransaction,
-    {
+    fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>> {
         let Ok(signers) = self.body().recover_signers() else {
             return Err(BlockRecoveryError::new(self))
         };
@@ -220,16 +216,6 @@ pub trait Block:
     ) -> alloy_consensus::Block<<Self::Body as BlockBody>::Transaction, Self::Header> {
         let (header, body) = self.split();
         alloy_consensus::Block::new(header, body.into_ethereum_body())
-    }
-
-    /// Returns an iterator over the recovered transactions in the block.
-    fn iter_recovered(
-        &self,
-    ) -> impl Iterator<Item = Result<Recovered<<Self::Body as BlockBody>::Transaction>, RecoveryError>>
-    {
-        self.body()
-            .transactions_iter()
-            .map(|tx| tx.try_recover().map(|signer| tx.clone().with_signer(signer)))
     }
 }
 
