@@ -262,8 +262,7 @@ where
     ///
     /// If `tx_index` is provided in opts, the call will be traced at the state after executing
     /// transactions up to the specified index within the block (0-indexed).
-    /// If not provided or equals the number of transactions, uses the post-state (default
-    /// behavior).
+    /// If not provided, then uses the post-state (default behavior).
     ///
     /// Differences compare to `eth_call`:
     ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>
