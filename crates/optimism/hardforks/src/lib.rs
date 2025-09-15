@@ -67,15 +67,15 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
 /// functions.
 pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
     let mut forks = Vec::new();
-    EthereumHardfork::VARIANTS.iter().for_each(|ethereum_hardfork| {
+    for ethereum_hardfork in EthereumHardfork::VARIANTS {
         forks.push((
             ethereum_hardfork.boxed(),
             op_hardforks.ethereum_fork_activation(*ethereum_hardfork),
         ));
-    });
-    OpHardfork::VARIANTS.iter().for_each(|op_hardfork| {
+    }
+    for op_hardfork in OpHardfork::VARIANTS {
         forks.push((op_hardfork.boxed(), op_hardforks.op_fork_activation(*op_hardfork)));
-    });
+    }
     ChainHardforks::new(forks)
 }
 
