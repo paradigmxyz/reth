@@ -4,8 +4,7 @@ use std::{
 };
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::non_blocking::NonBlockingBuilder;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 use crate::formatter::LogFormat;
@@ -165,20 +164,18 @@ impl FileInfo {
     /// # Returns
     /// A tuple containing the non-blocking writer and its associated worker guard.
     fn create_log_writer(&self) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
-    let log_dir = self.create_log_dir();
-    let appender = RollingFileAppender::new(
-        log_dir.join(&self.file_name),
-        RollingConditionBasic::new().max_size(self.max_size_bytes),
-        self.max_files,
-    )
-    .expect("Could not initialize file logging");
+        let log_dir = self.create_log_dir();
+        let appender = RollingFileAppender::new(
+            log_dir.join(&self.file_name),
+            RollingConditionBasic::new().max_size(self.max_size_bytes),
+            self.max_files,
+        )
+        .expect("Could not initialize file logging");
 
-    let (writer, guard) = NonBlockingBuilder::default()
-        .lossy(false)
-        .buffered_lines_limit(10000)
-        .finish(appender);
+        let (writer, guard) =
+            NonBlockingBuilder::default().lossy(false).buffered_lines_limit(10000).finish(appender);
 
-    (writer, guard)
+        (writer, guard)
     }
 }
 
