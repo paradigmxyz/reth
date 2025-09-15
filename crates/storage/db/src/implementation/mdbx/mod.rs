@@ -117,7 +117,7 @@ impl DatabaseArguments {
         Self {
             client_version,
             geometry: Geometry {
-                size: Some(0..(4 * TERABYTE)),
+                size: Some(0..(8 * TERABYTE)),
                 growth_step: Some(4 * GIGABYTE as isize),
                 shrink_threshold: Some(0),
                 page_size: Some(PageSize::Set(default_page_size())),
