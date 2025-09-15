@@ -138,7 +138,7 @@ where
         _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
-        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers>(block)?;
+        provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers<H>>(block)?;
 
         Ok(())
     }
