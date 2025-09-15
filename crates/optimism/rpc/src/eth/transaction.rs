@@ -5,14 +5,14 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
     try_into_op_tx_info, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcReceipt,
     TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{errors::ProviderError, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
@@ -23,12 +23,9 @@ use std::{
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
-    N: RpcNodeCore<
-        Provider: TransactionsProvider<Transaction = <N::Primitives as NodePrimitives>::SignedTx>,
-    >,
+    N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
-    Self: RpcNodeCore<Primitives = N::Primitives, Pool = N::Pool>,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
@@ -79,8 +76,6 @@ where
         &self,
         hash: B256,
     ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
-    where
-        Self: LoadReceipt + 'static,
     {
         let this = self.clone();
         async move {
