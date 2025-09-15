@@ -142,6 +142,7 @@ where
         self.execution_cache.update_with_guard(|cached| {
             let cache = SavedCache::new(hash, caches, metrics);
 
+            // Note: Write lock is held while insert which could block readers briefly
             if cache.cache().insert_state(&state).is_err() {
                 return;
             }
