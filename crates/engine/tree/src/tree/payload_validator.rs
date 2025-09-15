@@ -294,16 +294,20 @@ where
         // errors that take precedence over the execution error
         let block = self.convert_to_block(input)?;
 
-        // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block) {
+        // Validate block consensus rules and header against parent in parallel
+        let (block_validation_result, parent_validation_result) = rayon::join(
+            || self.validate_block_inner(&block),
+            || self.consensus.validate_header_against_parent(block.sealed_header(), parent_block),
+        );
+
+        // Check block validation first (header validation errors take precedence)
+        if let Err(consensus_err) = block_validation_result {
             // Header validation error takes precedence over execution error
             return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
         }
 
-        // Also validate against the parent
-        if let Err(consensus_err) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
-        {
+        // Check parent validation
+        if let Err(consensus_err) = parent_validation_result {
             // Parent validation error takes precedence over execution error
             return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
         }
@@ -512,13 +516,18 @@ where
 
         let post_execution_start = Instant::now();
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
-        // validate block consensus rules
-        ensure_ok!(self.validate_block_inner(&block));
 
-        // now validate against the parent
-        if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
-        {
+        // Validate block consensus rules and header against parent in parallel
+        let (block_validation_result, parent_validation_result) = rayon::join(
+            || self.validate_block_inner(&block),
+            || self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block),
+        );
+
+        // Check block validation first
+        ensure_ok!(block_validation_result);
+
+        // Check parent validation
+        if let Err(e) = parent_validation_result {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
         }
