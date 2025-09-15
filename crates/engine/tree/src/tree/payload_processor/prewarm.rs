@@ -132,21 +132,24 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-        let cache = SavedCache::new(
-            self.ctx.env.hash,
-            self.ctx.cache.clone(),
-            self.ctx.cache_metrics.clone(),
-        );
-        if cache.cache().insert_state(&state).is_err() {
-            return
-        }
+        // Create cache and insert state atomically under lock
+        self.execution_cache.update_with_guard(|guard| {
+            let cache = SavedCache::new(
+                self.ctx.env.hash,
+                self.ctx.cache.clone(),
+                self.ctx.cache_metrics.clone(),
+            );
 
-        cache.update_metrics();
+            // Insert state into cache
+            if cache.cache().insert_state(&state).is_ok() {
+                cache.update_metrics();
+                debug!(target: "engine::caching", "Updated state caches");
 
-        debug!(target: "engine::caching", "Updated state caches");
+                // Update the reference
+                guard.replace(cache);
+            }
+        });
 
-        // update the cache for the executed block
-        self.execution_cache.save_cache(cache);
         self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
