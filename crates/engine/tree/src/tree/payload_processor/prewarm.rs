@@ -6,15 +6,18 @@
 //!
 //! ## How Prewarming Works
 //!
-//! 1. Incoming transactions are split into two streams: one for prewarming
-//!    (executed in parallel) and one for actual execution (executed sequentially)
+//! 1. Incoming transactions are split into two streams: one for prewarming (executed in parallel)
+//!    and one for actual execution (executed sequentially)
 //! 2. Prewarming tasks execute transactions in parallel using shared caches
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache},
+    cached_state::{
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
+    },
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache as PayloadExecutionCache,
+        executor::WorkloadExecutor, multiproof::MultiProofMessage,
+        ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,

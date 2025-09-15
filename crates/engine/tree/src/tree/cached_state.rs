@@ -281,8 +281,8 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     /// ## How it works:
     /// 1. Takes an account address and a list of storage slot keys
     /// 2. Traverses the account's storage trie to collect proof nodes
-    /// 3. Returns a [`StorageMultiProof`] containing the minimal set of trie nodes
-    ///    needed to verify all the requested storage slots
+    /// 3. Returns a [`StorageMultiProof`] containing the minimal set of trie nodes needed to verify
+    ///    all the requested storage slots
     ///
     /// ## Relationship to Caching:
     /// Storage multiproofs are not directly cached, but they rely on the underlying
@@ -380,7 +380,7 @@ impl ExecutionCache {
     /// the touched and modified state. The insertion order is critical:
     ///
     /// 1. **Bytecodes**: Insert contract code first
-    /// 2. **Storage slots**: Update storage values for each account  
+    /// 2. **Storage slots**: Update storage values for each account
     /// 3. **Accounts**: Update account info (nonce, balance, code hash)
     ///
     /// ## Why This Order Matters
