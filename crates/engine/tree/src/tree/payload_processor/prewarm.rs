@@ -1,9 +1,20 @@
 //! Caching and prewarming related functionality.
+//!
+//! Prewarming executes transactions in parallel before the actual block execution
+//! to populate the execution cache with state that will likely be accessed during
+//! block processing.
+//!
+//! ## How Prewarming Works
+//!
+//! 1. Incoming transactions are split into two streams: one for prewarming
+//!    (executed in parallel) and one for actual execution (executed sequentially)
+//! 2. Prewarming tasks execute transactions in parallel using shared caches
+//! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
+    cached_state::{CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -39,7 +50,7 @@ where
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
-    execution_cache: ExecutionCache,
+    execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
@@ -59,7 +70,7 @@ where
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
-        execution_cache: ExecutionCache,
+        execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
@@ -216,7 +227,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: ProviderCaches,
+    pub(super) cache: StateExecutionCache,
     pub(super) cache_metrics: CachedStateMetrics,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
