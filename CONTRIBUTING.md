@@ -3,7 +3,7 @@
 Thanks for your interest in improving Reth!
 
 There are multiple opportunities to contribute at any level. It doesn't matter if you are just getting started with Rust
-or are the most weathered expert, we can use your help.
+or if you are already the most weathered expert, we can use your help.
 
 **No contribution is too small and all contributions are valued.**
 
