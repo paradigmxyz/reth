@@ -2656,6 +2656,113 @@ mod tests {
     }
 
     #[test]
+    fn test_canonical_state_change_with_basefee_update_regression() {
+        // Regression test: ensure we don't double-count promotions when base fee
+        // decreases and account is updated. This test would fail before the fix.
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Create transactions from different senders to test independently
+        let sender_balance = U256::from(100_000_000);
+
+        // Sender 1: tx will be promoted (gas price 60 > new base fee 50)
+        let tx1 = MockTransaction::eip1559()
+            .with_gas_price(60)
+            .with_gas_limit(21_000)
+            .with_nonce(0);
+        let sender1 = tx1.sender();
+
+        // Sender 2: tx will be promoted (gas price 55 > new base fee 50)
+        let tx2 = MockTransaction::eip1559()
+            .with_gas_price(55)
+            .with_gas_limit(21_000)
+            .with_nonce(0);
+        let sender2 = tx2.sender();
+
+        // Sender 3: tx will NOT be promoted (gas price 45 < new base fee 50)
+        let tx3 = MockTransaction::eip1559()
+            .with_gas_price(45)
+            .with_gas_limit(21_000)
+            .with_nonce(0);
+        let sender3 = tx3.sender();
+
+        // Set high initial base fee (all txs will go to basefee pool)
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 70;
+        pool.set_block_info(block_info);
+
+        // Add all transactions
+        let validated1 = f.validated(tx1);
+        let validated2 = f.validated(tx2);
+        let validated3 = f.validated(tx3);
+
+        pool.add_transaction(validated1, sender_balance, 0, None).unwrap();
+        pool.add_transaction(validated2, sender_balance, 0, None).unwrap();
+        pool.add_transaction(validated3, sender_balance, 0, None).unwrap();
+
+        let sender1_id = f.ids.sender_id(&sender1).unwrap();
+        let sender2_id = f.ids.sender_id(&sender2).unwrap();
+        let sender3_id = f.ids.sender_id(&sender3).unwrap();
+
+        // All should be in basefee pool initially
+        assert_eq!(pool.basefee_pool.len(), 3, "All txs should be in basefee pool");
+        assert_eq!(pool.pending_pool.len(), 0, "No txs should be in pending pool");
+
+        // Now decrease base fee to 50 - this should promote tx1 and tx2 (prices 60 and 55)
+        // but not tx3 (price 45)
+        block_info.pending_basefee = 50;
+
+        // Update all senders' balances (simulating account state changes)
+        let mut changed_senders = FxHashMap::default();
+        changed_senders.insert(
+            sender1_id,
+            SenderInfo {
+                state_nonce: 0,
+                balance: sender_balance + U256::from(1000),
+            },
+        );
+        changed_senders.insert(
+            sender2_id,
+            SenderInfo {
+                state_nonce: 0,
+                balance: sender_balance + U256::from(1000),
+            },
+        );
+        changed_senders.insert(
+            sender3_id,
+            SenderInfo {
+                state_nonce: 0,
+                balance: sender_balance + U256::from(1000),
+            },
+        );
+
+        let outcome = pool.on_canonical_state_change(
+            block_info,
+            vec![],
+            changed_senders,
+            PoolUpdateKind::Commit,
+        );
+
+        // Check final state
+        assert_eq!(pool.pending_pool.len(), 2, "tx1 and tx2 should be promoted");
+        assert_eq!(pool.basefee_pool.len(), 1, "tx3 should remain in basefee");
+
+        // CRITICAL: Should report exactly 2 promotions, not 4 (which would happen with double-processing)
+        assert_eq!(
+            outcome.promoted.len(),
+            2,
+            "Should report exactly 2 promotions, not double-counted"
+        );
+
+        // Verify the correct transactions were promoted
+        let promoted_prices: Vec<u128> = outcome.promoted.iter()
+            .map(|tx| tx.max_fee_per_gas())
+            .collect();
+        assert!(promoted_prices.contains(&60));
+        assert!(promoted_prices.contains(&55));
+    }
+
+    #[test]
     fn insert_already_imported() {
         let on_chain_balance = U256::ZERO;
         let on_chain_nonce = 0;
