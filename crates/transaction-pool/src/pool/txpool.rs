@@ -2617,9 +2617,9 @@ mod tests {
         // Set high base fee initially
         let mut block_info = pool.block_info();
         block_info.pending_basefee = 100;
-        pool.set_block_info(block_info.clone());
+        pool.set_block_info(block_info);
 
-        let validated = f.validated(tx.clone());
+        let validated = f.validated(tx);
         pool.add_transaction(validated, U256::from(10_000_000), 0, None).unwrap();
 
         // Get sender_id after the transaction has been added
