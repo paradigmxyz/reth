@@ -139,18 +139,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_primitives::{b256, B256};
     use reth_network_api::noop::NoopNetwork;
-    use std::str::FromStr;
 
     #[test]
     fn test_required_block_filter_creation() {
         let network = NoopNetwork::default();
         let block_hashes = vec![
-            B256::from_str("0x1111111111111111111111111111111111111111111111111111111111111111")
-                .unwrap(),
-            B256::from_str("0x2222222222222222222222222222222222222222222222222222222222222222")
-                .unwrap(),
+            b256!("0x1111111111111111111111111111111111111111111111111111111111111111"),
+            b256!("0x2222222222222222222222222222222222222222222222222222222222222222"),
         ];
 
         let filter = RequiredBlockFilter::new(network, block_hashes.clone());
@@ -175,7 +172,7 @@ mod tests {
         let network = NoopNetwork::default();
         let block_hashes = vec![B256::default()];
 
-        let filter = RequiredBlockFilter::new(network.clone(), block_hashes);
+        let filter = RequiredBlockFilter::new(network, block_hashes);
         // Verify the filter can be created and basic properties are set
         assert_eq!(filter.block_hashes.len(), 1);
     }
