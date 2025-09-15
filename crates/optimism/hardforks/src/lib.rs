@@ -19,8 +19,8 @@
 extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
+use alloy_op_hardforks::{EthereumHardforks, OpChainHardforks};
 pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
-use alloy_op_hardforks::{OpChainHardforks, EthereumHardforks};
 
 use alloc::vec;
 use alloy_primitives::U256;
@@ -63,11 +63,15 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ])
 });
 
-/// Helper function to initialize Reth's `ChainHardforks` from Alloy's `OpChainHardforks` init functions.
+/// Helper function to initialize Reth's `ChainHardforks` from Alloy's `OpChainHardforks` init
+/// functions.
 pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
     let mut forks = Vec::new();
     EthereumHardfork::VARIANTS.iter().for_each(|ethereum_hardfork| {
-        forks.push((ethereum_hardfork.boxed(), op_hardforks.ethereum_fork_activation(*ethereum_hardfork)));
+        forks.push((
+            ethereum_hardfork.boxed(),
+            op_hardforks.ethereum_fork_activation(*ethereum_hardfork),
+        ));
     });
     OpHardfork::VARIANTS.iter().for_each(|op_hardfork| {
         forks.push((op_hardfork.boxed(), op_hardforks.op_fork_activation(*op_hardfork)));
@@ -81,16 +85,13 @@ pub static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     chain_hardforks(OpChainHardforks::op_mainnet())
 });
 /// Optimism Sepolia list of hardforks.
-pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
-    chain_hardforks(OpChainHardforks::op_sepolia())
-});
+pub static OP_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> =
+    LazyLock::new(|| chain_hardforks(OpChainHardforks::op_sepolia()));
 
 /// Base Sepolia list of hardforks.
-pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
-    chain_hardforks(OpChainHardforks::base_sepolia())
-});
+pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> =
+    LazyLock::new(|| chain_hardforks(OpChainHardforks::base_sepolia()));
 
 /// Base mainnet list of hardforks.
-pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
-    chain_hardforks(OpChainHardforks::base_mainnet())
-});
+pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> =
+    LazyLock::new(|| chain_hardforks(OpChainHardforks::base_mainnet()));
