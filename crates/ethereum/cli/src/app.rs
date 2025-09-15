@@ -55,78 +55,17 @@ where
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()>
+    pub fn run(self, launcher: impl Launcher<C, Ext>) -> Result<()>
     where
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
-        let runner = match self.runner.take() {
-            Some(runner) => runner,
-            None => CliRunner::try_default_runtime()?,
-        };
-
-        // add network name to logs dir
-        // Add network name if available to the logs dir
-        if let Some(chain_spec) = self.cli.command.chain_spec() {
-            self.cli.logs.log_file_directory =
-                self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
-        }
-
-        self.init_tracing()?;
-        // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
-
         let components = |spec: Arc<ChainSpec>| {
             (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
         };
 
-        match self.cli.command {
-            Commands::Node(command) => {
-                // Validate RPC modules using the configured validator
-                if let Some(http_api) = &command.rpc.http_api {
-                    Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
-                }
-                if let Some(ws_api) = &command.rpc.ws_api {
-                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
-                }
-
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
-            }
-            Commands::Init(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _>(components))
-            }
-            Commands::ImportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::ExportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::Download(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::Stage(command) => runner
-                .run_command_until_exit(|ctx| command.execute::<EthereumNode, _>(ctx, components)),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
-            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
-            }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
-            #[cfg(feature = "dev")]
-            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::ReExecute(command) => {
-                runner.run_until_ctrl_c(command.execute::<EthereumNode>(components))
-            }
-        }
+        self.run_with_components::<EthereumNode>(components, |builder, ext| async move {
+            launcher.entrypoint(builder, ext).await
+        })
     }
 
     /// Execute the configured cli command with the provided [`CliComponentsBuilder`].
@@ -154,7 +93,6 @@ where
             None => CliRunner::try_default_runtime()?,
         };
 
-        // add network name to logs dir
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.cli.command.chain_spec() {
             self.cli.logs.log_file_directory =
