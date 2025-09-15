@@ -1,6 +1,9 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{app::CliApp, chainspec::EthereumChainSpecParser};
+use crate::{
+    app::{run_commands_with, CliApp},
+    chainspec::EthereumChainSpecParser,
+};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -201,52 +204,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        match self.command {
-            Commands::Node(command) => {
-                // Validate RPC modules using the configured validator
-                if let Some(http_api) = &command.rpc.http_api {
-                    Rpc::validate_selection(http_api, "http.api")
-                        .map_err(|e| eyre::eyre!("{e}"))?;
-                }
-                if let Some(ws_api) = &command.rpc.ws_api {
-                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre::eyre!("{e}"))?;
-                }
-
-                runner.run_command_until_exit(|ctx| {
-                    command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
-                })
-            }
-            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
-            }
-            Commands::ImportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::ExportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::Stage(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
-            }
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-            #[cfg(feature = "dev")]
-            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
-            }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-            Commands::ReExecute(command) => {
-                runner.run_until_ctrl_c(command.execute::<N>(components))
-            }
-        }
+        // Use the shared standalone function to avoid duplication
+        run_commands_with::<C, Ext, Rpc, N>(self, runner, components, launcher)
     }
 
     /// Initializes tracing with the configured options.
