@@ -160,7 +160,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     }
 }
 
-type PendingBlockAndReceipts<N> =
+type BlockAndReceipts<N> =
     (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
@@ -479,7 +479,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
     /// state and a vector of its `Receipt`s.
-    pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
+    pub fn pending_block_and_receipts(&self) -> Option<BlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (
                 block_state.block_ref().recovered_block().clone(),
