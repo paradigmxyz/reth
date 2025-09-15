@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
@@ -178,6 +179,11 @@ pub struct NetworkArgs {
         help = "Transaction propagation mode (sqrt, all, max:<number>)"
     )]
     pub propagation_mode: TransactionPropagationMode,
+
+    /// Comma separated list of required block hashes.
+    /// Peers that don't have these blocks will be filtered out.
+    #[arg(long = "required-block-hashes", value_delimiter = ',')]
+    pub required_block_hashes: Vec<B256>,
 }
 
 impl NetworkArgs {
@@ -290,6 +296,7 @@ impl NetworkArgs {
                 self.discovery.port,
             ))
             .disable_tx_gossip(self.disable_tx_gossip)
+            .required_block_hashes(self.required_block_hashes.clone())
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -363,6 +370,7 @@ impl Default for NetworkArgs {
             tx_propagation_policy: TransactionPropagationKind::default(),
             disable_tx_gossip: false,
             propagation_mode: TransactionPropagationMode::Sqrt,
+            required_block_hashes: vec![],
         }
     }
 }
@@ -649,5 +657,31 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn parse_required_block_hashes() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--required-block-hashes",
+            "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
+        ])
+        .args;
+
+        assert_eq!(args.required_block_hashes.len(), 2);
+        assert_eq!(
+            args.required_block_hashes[0].to_string(),
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert_eq!(
+            args.required_block_hashes[1].to_string(),
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+        );
+    }
+
+    #[test]
+    fn parse_empty_required_block_hashes() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert!(args.required_block_hashes.is_empty());
     }
 }
