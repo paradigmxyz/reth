@@ -145,7 +145,7 @@ where
             // Insert state into cache while holding the lock
             if cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
-                *cached = None;
+                cached.take();
                 return;
             }
 
