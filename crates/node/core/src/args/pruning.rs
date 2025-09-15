@@ -124,8 +124,11 @@ impl PruningArgs {
                     receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    // TODO: set default to pre-merge block if available
-                    bodies_history: None,
+                    // Set default to pre-merge block if available
+                    bodies_history: chain_spec
+                        .ethereum_fork_activation(EthereumHardfork::Paris)
+                        .block_number()
+                        .map(PruneMode::Before),
                     receipts_log_filter: Default::default(),
                 },
             }
@@ -296,6 +299,8 @@ mod tests {
     use super::*;
     use alloy_primitives::address;
     use clap::Parser;
+    use reth_chainspec::ChainSpec;
+    use reth_ethereum_forks::ForkCondition;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -383,5 +388,38 @@ mod tests {
             "0x0000000000000000000000000000000000000000:before:invalid_block",
         );
         assert!(matches!(result, Err(ReceiptsLogError::InvalidBlockNumber(_))));
+    }
+
+    #[test]
+    fn test_full_node_bodies_history_pre_merge() {
+        // Mainnet Paris block activated at block 15537394
+        let mut chain_spec = ChainSpec::default();
+        chain_spec.hardforks.insert(EthereumHardfork::Paris, ForkCondition::Block(15537394));
+
+        let args = CommandParser::<PruningArgs>::parse_from(["reth", "--full"]).args;
+        let config = args.prune_config(&chain_spec).expect("should create config");
+
+        assert!(config.segments.bodies_history.is_some());
+        if let Some(PruneMode::Before(block_number)) = config.segments.bodies_history {
+            assert_eq!(block_number, 15537394);
+        } else {
+            panic!("bodies_history should be PruneMode::Before with Paris block number");
+        }
+
+        // Without --full flag should not set bodies_history by default
+        let args = CommandParser::<PruningArgs>::parse_from(["reth"]).args;
+        let config = args.prune_config(&chain_spec).expect("should create config");
+        assert!(config.segments.bodies_history.is_none());
+    }
+
+    #[test]
+    fn test_full_node_bodies_history_no_pre_merge() {
+        // Default without Paris fork activated
+        let chain_spec = ChainSpec::default();
+
+        let args = CommandParser::<PruningArgs>::parse_from(["reth", "--full"]).args;
+        let config = args.prune_config(&chain_spec).expect("should create config");
+
+        assert!(config.segments.bodies_history.is_none());
     }
 }
