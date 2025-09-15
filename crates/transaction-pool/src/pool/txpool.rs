@@ -575,23 +575,33 @@ impl<T: TransactionOrdering> TxPool<T> {
         changed_senders: FxHashMap<SenderId, SenderInfo>,
         update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
-        // update block info
         let block_hash = block_info.last_seen_block_hash;
-        self.set_block_info(block_info);
 
-        // Remove all transaction that were included in the block
+        // Step 1: Remove mined transactions first (avoid processing them)
         let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 removed_txs_count += 1;
             }
         }
-
-        // Update removed transactions metric
         self.metrics.removed_transactions.increment(removed_txs_count);
 
+        // Step 2: Update the internal fees first, before updating accounts
+        // This ensures account updates see the new fees when evaluating transactions
+        self.all_transactions.set_block_info(block_info);
+
+        // Step 3: Update accounts with the new fee context already applied
+        // This will evaluate transactions with the correct fees
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
+        // Step 4: Now apply the actual fee-driven pool updates
+        // Update base fee pool - this handles transactions not affected by account updates
+        let basefee_ordering = self.update_basefee(block_info.pending_basefee);
+        if let Some(blob_fee) = block_info.pending_blob_fee {
+            self.update_blob_fee(blob_fee, basefee_ordering);
+        }
+
+        // Update metrics
         self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
 
@@ -2591,6 +2601,58 @@ mod tests {
         assert_eq!(pool.len(), 2);
         let inserted = pool.get(valid_tx.id()).unwrap();
         assert!(inserted.state.intersects(expected_state));
+    }
+
+    #[test]
+    fn test_on_canonical_state_change_no_double_processing() {
+        // Test that on_canonical_state_change doesn't double-process transactions
+        // when both fee and account updates would affect the same transaction
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        // Setup: Create a sender with a transaction in basefee pool
+        let tx = MockTransaction::eip1559().with_gas_price(50).with_gas_limit(30_000);
+        let sender = tx.sender();
+
+        // Set high base fee initially
+        let mut block_info = pool.block_info();
+        block_info.pending_basefee = 100;
+        pool.set_block_info(block_info.clone());
+
+        let validated = f.validated(tx.clone());
+        pool.add_transaction(validated, U256::from(10_000_000), 0, None).unwrap();
+
+        // Get sender_id after the transaction has been added
+        let sender_id = f.ids.sender_id(&sender).unwrap();
+
+        assert_eq!(pool.basefee_pool.len(), 1);
+        assert_eq!(pool.pending_pool.len(), 0);
+
+        // Now simulate a canonical state change with:
+        // 1. Lower base fee (would promote tx)
+        // 2. Account balance update (would also evaluate tx)
+        block_info.pending_basefee = 40;
+
+        let mut changed_senders = FxHashMap::default();
+        changed_senders.insert(
+            sender_id,
+            SenderInfo {
+                state_nonce: 0,
+                balance: U256::from(20_000_000), // Increased balance
+            },
+        );
+
+        let outcome = pool.on_canonical_state_change(
+            block_info,
+            vec![], // no mined transactions
+            changed_senders,
+            PoolUpdateKind::Commit,
+        );
+
+        // Transaction should be promoted exactly once
+        assert_eq!(pool.pending_pool.len(), 1, "Transaction should be in pending pool");
+        assert_eq!(pool.basefee_pool.len(), 0, "Transaction should not be in basefee pool");
+        assert_eq!(outcome.promoted.len(), 1, "Should report exactly one promotion");
     }
 
     #[test]
