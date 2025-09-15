@@ -2603,9 +2603,9 @@ mod tests {
     }
 
     #[test]
+    // Test that on_canonical_state_change doesn't double-process transactions
+    // when both fee and account updates would affect the same transaction
     fn test_on_canonical_state_change_no_double_processing() {
-        // Test that on_canonical_state_change doesn't double-process transactions
-        // when both fee and account updates would affect the same transaction
         let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
@@ -2655,9 +2655,9 @@ mod tests {
     }
 
     #[test]
+    // Regression test: ensure we don't double-count promotions when base fee
+    // decreases and account is updated. This test would fail before the fix.
     fn test_canonical_state_change_with_basefee_update_regression() {
-        // Regression test: ensure we don't double-count promotions when base fee
-        // decreases and account is updated. This test would fail before the fix.
         let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
