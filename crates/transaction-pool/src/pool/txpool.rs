@@ -2770,7 +2770,7 @@ mod tests {
 
         // Decrease base fee with NO changed senders
         block_info.pending_basefee = 50;
-        let outcome = pool.on_canonical_state_change(
+        let _outcome = pool.on_canonical_state_change(
             block_info,
             vec![],
             FxHashMap::default(), // Empty changed_senders!
