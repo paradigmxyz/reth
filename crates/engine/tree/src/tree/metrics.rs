@@ -163,16 +163,22 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
     pub(crate) state_root_parallel_fallback_total: Counter,
-    /// Histogram of state root duration, ie the time spent blocked waiting for the state root.
-    pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
+    /// Histogram for state root duration ie the time spent blocked waiting for the state root
+    pub(crate) state_root_histogram: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency
     pub(crate) payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
     pub(crate) payload_validation_histogram: Histogram,
+    /// Payload processor spawning duration
+    pub(crate) spawn_payload_processor: Histogram,
+    /// Post-execution validation duration
+    pub(crate) post_execution_validation_duration: Histogram,
+    /// Total duration of the new payload call
+    pub(crate) total_duration: Histogram,
 }
 
 impl BlockValidationMetrics {

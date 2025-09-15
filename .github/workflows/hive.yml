@@ -34,7 +34,7 @@ jobs:
           repository: ethereum/hive
           path: hivetests
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
       - run: go version
