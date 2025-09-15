@@ -17,62 +17,6 @@ use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
 use tracing::info;
 
-/// Run CLI commands with the provided runner, components and launcher.
-/// This is the shared implementation used by both `CliApp` and Cli methods.
-pub(crate) fn run_commands_with<C, Ext, Rpc, N>(
-    cli: Cli<C, Ext, Rpc>,
-    runner: CliRunner,
-    components: impl CliComponentsBuilder<N>,
-    launcher: impl AsyncFnOnce(
-        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
-        Ext,
-    ) -> Result<()>,
-) -> Result<()>
-where
-    C: ChainSpecParser<ChainSpec = N::ChainSpec>,
-    Ext: clap::Args + fmt::Debug,
-    Rpc: RpcModuleValidator,
-    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
-{
-    match cli.command {
-        Commands::Node(command) => {
-            // Validate RPC modules using the configured validator
-            if let Some(http_api) = &command.rpc.http_api {
-                Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
-            }
-            if let Some(ws_api) = &command.rpc.ws_api {
-                Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
-            }
-
-            runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
-            })
-        }
-        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::Import(command) => {
-            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
-        }
-        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-        Commands::Stage(command) => {
-            runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
-        }
-        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Recover(command) => {
-            runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
-        }
-        Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-        #[cfg(feature = "dev")]
-        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
-    }
-}
-
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
 pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> {
@@ -172,6 +116,62 @@ where
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
         }
         Ok(())
+    }
+}
+
+/// Run CLI commands with the provided runner, components and launcher.
+/// This is the shared implementation used by both `CliApp` and Cli methods.
+pub(crate) fn run_commands_with<C, Ext, Rpc, N>(
+    cli: Cli<C, Ext, Rpc>,
+    runner: CliRunner,
+    components: impl CliComponentsBuilder<N>,
+    launcher: impl AsyncFnOnce(
+        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        Ext,
+    ) -> Result<()>,
+) -> Result<()>
+where
+    C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
+    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+{
+    match cli.command {
+        Commands::Node(command) => {
+            // Validate RPC modules using the configured validator
+            if let Some(http_api) = &command.rpc.http_api {
+                Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
+            }
+            if let Some(ws_api) = &command.rpc.ws_api {
+                Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
+            }
+
+            runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            })
+        }
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Import(command) => {
+            runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
+        }
+        Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Stage(command) => {
+            runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
+        }
+        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Recover(command) => {
+            runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
+        }
+        Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+        #[cfg(feature = "dev")]
+        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
     }
 }
 
