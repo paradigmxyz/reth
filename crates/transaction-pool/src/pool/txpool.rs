@@ -575,46 +575,32 @@ impl<T: TransactionOrdering> TxPool<T> {
         changed_senders: FxHashMap<SenderId, SenderInfo>,
         update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
+        // update block info
         let block_hash = block_info.last_seen_block_hash;
 
-        // Step 1: Remove mined transactions first (avoid processing them)
+        // Remove all transaction that were included in the block
         let mut removed_txs_count = 0;
         for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 removed_txs_count += 1;
             }
         }
+
+        // Update removed transactions metric
         self.metrics.removed_transactions.increment(removed_txs_count);
 
-        // Step 2: Temporarily update fees for account evaluation
-        // Save the old fees so we can properly run fee-driven updates later
-        let old_base_fee = self.all_transactions.pending_fees.base_fee;
-        let old_blob_fee = self.all_transactions.pending_fees.blob_fee;
-
-        // Temporarily set new fees for account updates to use
+        // First update the fees internally so account updates use the new basefee
         self.all_transactions.pending_fees.base_fee = block_info.pending_basefee;
         if let Some(blob_fee) = block_info.pending_blob_fee {
             self.all_transactions.pending_fees.blob_fee = blob_fee;
         }
 
-        // Step 3: Update accounts with the new fee context
-        // This will evaluate transactions with the correct fees
+        // Now update accounts with the new fees already set
         let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
 
-        // Step 4: Restore old fees and run proper fee updates
-        // This allows update_basefee to see the actual fee change and move transactions
-        self.all_transactions.pending_fees.base_fee = old_base_fee;
-        self.all_transactions.pending_fees.blob_fee = old_blob_fee;
+        // Update the rest of block info
+        self.all_transactions.set_block_info(block_info);
 
-        // Now apply the full block info update which includes fee-driven pool moves
-        self.set_block_info(block_info);
-
-        // NOTE: The outcome currently only reports changes from account updates.
-        // Fee-driven promotions/demotions are still applied to the pool but not included
-        // in the returned outcome. This is a limitation that should be addressed by
-        // making update_basefee/update_blob_fee return UpdateOutcome in the future.
-
-        // Update metrics
         self.update_transaction_type_metrics();
         self.metrics.performed_state_updates.increment(1);
 
@@ -2679,24 +2665,18 @@ mod tests {
         let sender_balance = U256::from(100_000_000);
 
         // Sender 1: tx will be promoted (gas price 60 > new base fee 50)
-        let tx1 = MockTransaction::eip1559()
-            .with_gas_price(60)
-            .with_gas_limit(21_000)
-            .with_nonce(0);
+        let tx1 =
+            MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000).with_nonce(0);
         let sender1 = tx1.sender();
 
         // Sender 2: tx will be promoted (gas price 55 > new base fee 50)
-        let tx2 = MockTransaction::eip1559()
-            .with_gas_price(55)
-            .with_gas_limit(21_000)
-            .with_nonce(0);
+        let tx2 =
+            MockTransaction::eip1559().with_gas_price(55).with_gas_limit(21_000).with_nonce(0);
         let sender2 = tx2.sender();
 
         // Sender 3: tx will NOT be promoted (gas price 45 < new base fee 50)
-        let tx3 = MockTransaction::eip1559()
-            .with_gas_price(45)
-            .with_gas_limit(21_000)
-            .with_nonce(0);
+        let tx3 =
+            MockTransaction::eip1559().with_gas_price(45).with_gas_limit(21_000).with_nonce(0);
         let sender3 = tx3.sender();
 
         // Set high initial base fee (all txs will go to basefee pool)
@@ -2729,24 +2709,15 @@ mod tests {
         let mut changed_senders = FxHashMap::default();
         changed_senders.insert(
             sender1_id,
-            SenderInfo {
-                state_nonce: 0,
-                balance: sender_balance + U256::from(1000),
-            },
+            SenderInfo { state_nonce: 0, balance: sender_balance + U256::from(1000) },
         );
         changed_senders.insert(
             sender2_id,
-            SenderInfo {
-                state_nonce: 0,
-                balance: sender_balance + U256::from(1000),
-            },
+            SenderInfo { state_nonce: 0, balance: sender_balance + U256::from(1000) },
         );
         changed_senders.insert(
             sender3_id,
-            SenderInfo {
-                state_nonce: 0,
-                balance: sender_balance + U256::from(1000),
-            },
+            SenderInfo { state_nonce: 0, balance: sender_balance + U256::from(1000) },
         );
 
         let outcome = pool.on_canonical_state_change(
@@ -2760,7 +2731,8 @@ mod tests {
         assert_eq!(pool.pending_pool.len(), 2, "tx1 and tx2 should be promoted");
         assert_eq!(pool.basefee_pool.len(), 1, "tx3 should remain in basefee");
 
-        // CRITICAL: Should report exactly 2 promotions, not 4 (which would happen with double-processing)
+        // CRITICAL: Should report exactly 2 promotions, not 4 (which would happen with
+        // double-processing)
         assert_eq!(
             outcome.promoted.len(),
             2,
@@ -2768,9 +2740,8 @@ mod tests {
         );
 
         // Verify the correct transactions were promoted
-        let promoted_prices: Vec<u128> = outcome.promoted.iter()
-            .map(|tx| tx.max_fee_per_gas())
-            .collect();
+        let promoted_prices: Vec<u128> =
+            outcome.promoted.iter().map(|tx| tx.max_fee_per_gas()).collect();
         assert!(promoted_prices.contains(&60));
         assert!(promoted_prices.contains(&55));
     }
@@ -2783,9 +2754,7 @@ mod tests {
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         // Create transaction that will be promoted when fee drops
-        let tx = MockTransaction::eip1559()
-            .with_gas_price(60)
-            .with_gas_limit(21_000);
+        let tx = MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000);
 
         // Set high initial base fee
         let mut block_info = pool.block_info();
@@ -2823,9 +2792,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
-        let tx = MockTransaction::eip1559()
-            .with_gas_price(60)
-            .with_gas_limit(21_000);
+        let tx = MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000);
         let sender = tx.sender();
 
         // High initial base fee
@@ -2857,20 +2824,17 @@ mod tests {
             PoolUpdateKind::Commit,
         );
 
-        // Transaction should be discarded, not promoted
+        // With insufficient balance, transaction goes to queued pool
         assert_eq!(pool.pending_pool.len(), 0, "Unfunded tx should not be in pending");
-        // The transaction is removed from the pool due to insufficient balance
-        assert_eq!(pool.basefee_pool.len(), 0, "Unfunded tx removed from pool");
-        assert_eq!(pool.queued_pool.len(), 0, "Unfunded tx should not be in queued");
+        assert_eq!(pool.basefee_pool.len(), 0, "Tx no longer in basefee pool");
+        assert_eq!(pool.queued_pool.len(), 1, "Unfunded tx should be in queued pool");
 
-        // Check if transaction is still in all_transactions
+        // Transaction is not removed, just moved to queued
         let tx_count = pool.all_transactions.txs.len();
-        assert_eq!(tx_count, 0, "Transaction should be completely removed from pool");
+        assert_eq!(tx_count, 1, "Transaction should still be in pool (in queued)");
 
         assert_eq!(outcome.promoted.len(), 0, "Should not report promotion");
-        // NOTE: Current implementation may not report all discards in outcome
-        // The pool state is correct but outcome reporting has limitations
-        // assert_eq!(outcome.discarded.len(), 1, "Should report discard");
+        assert_eq!(outcome.discarded.len(), 0, "Queued tx is not reported as discarded");
     }
 
     #[test]
