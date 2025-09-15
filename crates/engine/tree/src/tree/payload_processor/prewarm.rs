@@ -150,7 +150,7 @@ where
             cache.update_metrics();
             debug!(target: "engine::caching", "Updated state caches");
 
-            // Updates the cache and drop the old cache
+            // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(cache);
         });
 
