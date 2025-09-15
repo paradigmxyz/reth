@@ -1,9 +1,15 @@
 use crate::{interface::Commands, Cli};
 use eyre::{eyre, Result};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::launcher::Launcher;
+use reth_cli_commands::{
+    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
+    launcher::{FnLauncher, Launcher},
+};
 use reth_cli_runner::CliRunner;
+use reth_db::DatabaseEnv;
+use reth_node_api::NodePrimitives;
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
@@ -22,7 +28,7 @@ pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcM
 
 impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
 where
-    C: ChainSpecParser<ChainSpec = ChainSpec>,
+    C: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
 {
@@ -49,7 +55,10 @@ where
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()> {
+    pub fn run(mut self, launcher: impl Launcher<C, Ext>) -> Result<()>
+    where
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
+    {
         let runner = match self.runner.take() {
             Some(runner) => runner,
             None => CliRunner::try_default_runtime()?,
@@ -116,6 +125,89 @@ where
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::ReExecute(command) => {
                 runner.run_until_ctrl_c(command.execute::<EthereumNode>(components))
+            }
+        }
+    }
+
+    /// Execute the configured cli command with the provided [`CliComponentsBuilder`].
+    ///
+    /// This accepts a closure that is used to launch the node via the
+    /// [`NodeCommand`](reth_cli_commands::node::NodeCommand) and allows providing custom
+    /// components.
+    pub fn run_with_components<N>(
+        mut self,
+        components: impl CliComponentsBuilder<N>,
+        launcher: impl AsyncFnOnce(
+            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            Ext,
+        ) -> Result<()>,
+    ) -> Result<()>
+    where
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: CliHeader>,
+            ChainSpec: Hardforks + EthChainSpec,
+        >,
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
+        let runner = match self.runner.take() {
+            Some(runner) => runner,
+            None => CliRunner::try_default_runtime()?,
+        };
+
+        // add network name to logs dir
+        // Add network name if available to the logs dir
+        if let Some(chain_spec) = self.cli.command.chain_spec() {
+            self.cli.logs.log_file_directory =
+                self.cli.logs.log_file_directory.join(chain_spec.chain().to_string());
+        }
+
+        self.init_tracing()?;
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
+
+        match self.cli.command {
+            Commands::Node(command) => {
+                // Validate RPC modules using the configured validator
+                if let Some(http_api) = &command.rpc.http_api {
+                    Rpc::validate_selection(http_api, "http.api").map_err(|e| eyre!("{e}"))?;
+                }
+                if let Some(ws_api) = &command.rpc.ws_api {
+                    Rpc::validate_selection(ws_api, "ws.api").map_err(|e| eyre!("{e}"))?;
+                }
+
+                runner.run_command_until_exit(|ctx| {
+                    command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+                })
+            }
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+            Commands::InitState(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
+            }
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
+            }
+            Commands::ImportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
+            }
+            Commands::ExportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
+            }
+            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+            Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+            Commands::Stage(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
+            }
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Recover(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
+            }
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+            #[cfg(feature = "dev")]
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::ReExecute(command) => {
+                runner.run_until_ctrl_c(command.execute::<N>(components))
             }
         }
     }
