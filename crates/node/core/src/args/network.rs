@@ -526,8 +526,8 @@ impl DiscoveryArgs {
         }
 
         self.enable_discv5_discovery ||
-        self.discv5_addr.is_some() ||
-        self.discv5_addr_ipv6.is_some()
+            self.discv5_addr.is_some() ||
+            self.discv5_addr_ipv6.is_some()
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
