@@ -1,6 +1,6 @@
 //! CLI definition and entrypoint to executable
 
-use crate::chainspec::EthereumChainSpecParser;
+use crate::{app::CliApp, chainspec::EthereumChainSpecParser};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -16,7 +16,6 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{args::LogArgs, version::version_metadata};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::FileWorkerGuard;
@@ -63,6 +62,17 @@ impl Cli {
 }
 
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> Cli<C, Ext, Rpc> {
+    /// Configures the CLI and returns a [`CliApp`] instance.
+    ///
+    /// This method is used to prepare the CLI for execution by wrapping it in a
+    /// [`CliApp`] that can be further configured before running.
+    pub fn configure(self) -> CliApp<C, Ext, Rpc>
+    where
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
+    {
+        CliApp::new(self)
+    }
+
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -160,15 +170,9 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
-        let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), Arc::new(EthBeaconConsensus::new(spec)))
-        };
-
-        self.with_runner_and_components::<EthereumNode>(
-            runner,
-            components,
-            async move |builder, ext| launcher(builder, ext).await,
-        )
+        let mut app = self.configure();
+        app.set_runner(runner);
+        app.run(FnLauncher::new::<C, Ext>(async move |builder, ext| launcher(builder, ext).await))
     }
 
     /// Execute the configured cli command with the provided [`CliRunner`] and
