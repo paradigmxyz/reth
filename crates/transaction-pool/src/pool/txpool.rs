@@ -2606,7 +2606,7 @@ mod tests {
     fn test_on_canonical_state_change_no_double_processing() {
         // Test that on_canonical_state_change doesn't double-process transactions
         // when both fee and account updates would affect the same transaction
-        let mut f = MockTransactionFactory::default();
+        let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         // Setup: Create a sender with a transaction in basefee pool
@@ -2618,11 +2618,11 @@ mod tests {
         block_info.pending_basefee = 100;
         pool.set_block_info(block_info);
 
-        let validated = f.validated(tx);
+        let validated = tx_factory.validated(tx);
         pool.add_transaction(validated, U256::from(10_000_000), 0, None).unwrap();
 
         // Get sender_id after the transaction has been added
-        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let sender_id = tx_factory.ids.sender_id(&sender).unwrap();
 
         assert_eq!(pool.basefee_pool.len(), 1);
         assert_eq!(pool.pending_pool.len(), 0);
@@ -2658,7 +2658,7 @@ mod tests {
     fn test_canonical_state_change_with_basefee_update_regression() {
         // Regression test: ensure we don't double-count promotions when base fee
         // decreases and account is updated. This test would fail before the fix.
-        let mut f = MockTransactionFactory::default();
+        let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         // Create transactions from different senders to test independently
@@ -2685,17 +2685,17 @@ mod tests {
         pool.set_block_info(block_info);
 
         // Add all transactions
-        let validated1 = f.validated(tx1);
-        let validated2 = f.validated(tx2);
-        let validated3 = f.validated(tx3);
+        let validated1 = tx_factory.validated(tx1);
+        let validated2 = tx_factory.validated(tx2);
+        let validated3 = tx_factory.validated(tx3);
 
         pool.add_transaction(validated1, sender_balance, 0, None).unwrap();
         pool.add_transaction(validated2, sender_balance, 0, None).unwrap();
         pool.add_transaction(validated3, sender_balance, 0, None).unwrap();
 
-        let sender1_id = f.ids.sender_id(&sender1).unwrap();
-        let sender2_id = f.ids.sender_id(&sender2).unwrap();
-        let sender3_id = f.ids.sender_id(&sender3).unwrap();
+        let sender1_id = tx_factory.ids.sender_id(&sender1).unwrap();
+        let sender2_id = tx_factory.ids.sender_id(&sender2).unwrap();
+        let sender3_id = tx_factory.ids.sender_id(&sender3).unwrap();
 
         // All should be in basefee pool initially
         assert_eq!(pool.basefee_pool.len(), 3, "All txs should be in basefee pool");
@@ -2750,7 +2750,7 @@ mod tests {
     fn test_basefee_decrease_with_empty_senders() {
         // Test that fee promotions still occur when basefee decreases
         // even with no changed_senders
-        let mut f = MockTransactionFactory::default();
+        let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         // Create transaction that will be promoted when fee drops
@@ -2762,7 +2762,7 @@ mod tests {
         pool.set_block_info(block_info);
 
         // Add transaction - should go to basefee pool
-        let validated = f.validated(tx);
+        let validated = tx_factory.validated(tx);
         pool.add_transaction(validated, U256::from(10_000_000), 0, None).unwrap();
 
         assert_eq!(pool.basefee_pool.len(), 1);
@@ -2789,7 +2789,7 @@ mod tests {
     fn test_basefee_decrease_account_makes_unfundable() {
         // Test that when basefee decreases but account update makes tx unfundable,
         // we don't get transient promote-then-discard double counting
-        let mut f = MockTransactionFactory::default();
+        let mut tx_factory = MockTransactionFactory::default();
         let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
         let tx = MockTransaction::eip1559().with_gas_price(60).with_gas_limit(21_000);
@@ -2800,9 +2800,9 @@ mod tests {
         block_info.pending_basefee = 100;
         pool.set_block_info(block_info);
 
-        let validated = f.validated(tx);
+        let validated = tx_factory.validated(tx);
         pool.add_transaction(validated, U256::from(10_000_000), 0, None).unwrap();
-        let sender_id = f.ids.sender_id(&sender).unwrap();
+        let sender_id = tx_factory.ids.sender_id(&sender).unwrap();
 
         assert_eq!(pool.basefee_pool.len(), 1);
 
