@@ -5,7 +5,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
-    str::FromStr,
 };
 
 use crate::version::version_metadata;
@@ -183,7 +182,7 @@ pub struct NetworkArgs {
 
     /// Comma separated list of required block hashes.
     /// Peers that don't have these blocks will be filtered out.
-    #[arg(long = "required-block-hashes", value_delimiter = ',', value_parser = parse_block_hash)]
+    #[arg(long = "required-block-hashes", value_delimiter = ',')]
     pub required_block_hashes: Vec<B256>,
 }
 
@@ -685,9 +684,4 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert!(args.required_block_hashes.is_empty());
     }
-}
-
-/// Parse a block hash from a string.
-fn parse_block_hash(s: &str) -> Result<B256, String> {
-    B256::from_str(s).map_err(|e| format!("Invalid block hash: {}", e))
 }
