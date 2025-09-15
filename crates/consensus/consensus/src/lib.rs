@@ -406,8 +406,11 @@ pub enum ConsensusError {
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error("transaction {tx_hash} gas limit {gas_limit} exceeds maximum {max_allowed}")]
     TransactionGasLimitTooHigh {
-        tx_hash: TxHash,
+        /// Hash of the transaction that violates the rule
+        tx_hash: B256,
+        /// The gas limit of the transaction
         gas_limit: u64,
+        /// The maximum allowed gas limit
         max_allowed: u64,
     },
 

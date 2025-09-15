@@ -7,8 +7,10 @@ use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    constants::{GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
-    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
+    constants::{
+        GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MAX_TX_GAS_LIMIT_OSAKA, MINIMUM_GAS_LIMIT,
+    },
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader, SignedTransaction,
 };
 
 /// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
@@ -158,7 +160,7 @@ where
         for tx in block.body().transactions() {
             if tx.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA {
                 return Err(ConsensusError::TransactionGasLimitTooHigh {
-                    tx_hash: tx.hash(),
+                    tx_hash: *tx.tx_hash(),
                     gas_limit: tx.gas_limit(),
                     max_allowed: MAX_TX_GAS_LIMIT_OSAKA,
                 });
