@@ -546,6 +546,87 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
     }
 
+    /// Updates only the pending fees without triggering subpool updates.
+    /// Returns the previous base fee and blob fee values.
+    fn update_pending_fees_only(
+        &mut self,
+        new_base_fee: u64,
+        new_blob_fee: Option<u128>,
+    ) -> (u64, u128) {
+        let prev_base_fee = self.all_transactions.pending_fees.base_fee;
+        let prev_blob_fee = self.all_transactions.pending_fees.blob_fee;
+
+        self.all_transactions.pending_fees.base_fee = new_base_fee;
+        if let Some(blob_fee) = new_blob_fee {
+            self.all_transactions.pending_fees.blob_fee = blob_fee;
+        }
+
+        (prev_base_fee, prev_blob_fee)
+    }
+
+    /// Applies fee-based promotion updates.
+    /// Directly modifies the provided outcome by pushing promoted transactions.
+    fn apply_fee_updates(
+        &mut self,
+        prev_base_fee: u64,
+        prev_blob_fee: u128,
+        outcome: &mut UpdateOutcome<T::Transaction>,
+    ) {
+        let current_base_fee = self.all_transactions.pending_fees.base_fee;
+        let current_blob_fee = self.all_transactions.pending_fees.blob_fee;
+
+        // Only handle promotions when base fee decreases
+        if current_base_fee < prev_base_fee {
+            // Promote transactions from basefee pool
+            self.basefee_pool.enforce_basefee_with(current_base_fee, |tx| {
+                let meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                meta.subpool = meta.state.into();
+
+                trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
+
+                // Direct push to outcome for promoted transactions
+                if meta.subpool == SubPool::Pending {
+                    outcome.promoted.push(tx.clone());
+                }
+
+                match meta.subpool {
+                    SubPool::Queued => self.queued_pool.add_transaction(tx),
+                    SubPool::Pending => {
+                        self.pending_pool.add_transaction(tx, current_base_fee);
+                    }
+                    SubPool::Blob => self.blob_pool.add_transaction(tx),
+                    SubPool::BaseFee => {
+                        warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
+                    }
+                }
+            });
+        }
+
+        // Only handle blob fee promotions when blob fee decreases
+        // Skip if base fee also decreased (already handled above)
+        if current_blob_fee < prev_blob_fee && current_base_fee >= prev_base_fee {
+            // Promote blob transactions
+            let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
+            for tx in removed {
+                let to = {
+                    let tx_meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                    tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                    tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                    tx_meta.subpool = tx_meta.state.into();
+                    tx_meta.subpool
+                };
+
+                // Direct push to outcome for promoted transactions
+                if to == SubPool::Pending {
+                    outcome.promoted.push(tx.clone());
+                }
+
+                self.add_transaction_to_subpool(to, tx);
+            }
+        }
+    }
+
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
@@ -589,16 +670,20 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Update removed transactions metric
         self.metrics.removed_transactions.increment(removed_txs_count);
 
-        // First update the fees internally so account updates use the new basefee
-        self.all_transactions.pending_fees.base_fee = block_info.pending_basefee;
-        if let Some(blob_fee) = block_info.pending_blob_fee {
-            self.all_transactions.pending_fees.blob_fee = blob_fee;
-        }
+        // Update fees internally first without triggering subpool updates
+        let (prev_base_fee, prev_blob_fee) = self.update_pending_fees_only(
+            block_info.pending_basefee,
+            block_info.pending_blob_fee,
+        );
 
         // Now update accounts with the new fees already set
-        let UpdateOutcome { promoted, discarded } = self.update_accounts(changed_senders);
+        let mut outcome = self.update_accounts(changed_senders);
 
-        // Update the rest of block info
+        // Apply subpool updates based on fee changes
+        // This directly pushes to outcome.promoted and outcome.discarded
+        self.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
+
+        // Update the rest of block info (without triggering fee updates again)
         self.all_transactions.set_block_info(block_info);
 
         self.update_transaction_type_metrics();
@@ -607,7 +692,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Update the latest update kind
         self.latest_update_kind = Some(update_kind);
 
-        OnNewCanonicalStateOutcome { block_hash, mined: mined_transactions, promoted, discarded }
+        OnNewCanonicalStateOutcome {
+            block_hash,
+            mined: mined_transactions,
+            promoted: outcome.promoted,
+            discarded: outcome.discarded
+        }
     }
 
     /// Update sub-pools size metrics.
@@ -2770,7 +2860,7 @@ mod tests {
 
         // Decrease base fee with NO changed senders
         block_info.pending_basefee = 50;
-        let _outcome = pool.on_canonical_state_change(
+        let outcome = pool.on_canonical_state_change(
             block_info,
             vec![],
             FxHashMap::default(), // Empty changed_senders!
@@ -2780,9 +2870,7 @@ mod tests {
         // Transaction should still be promoted by fee-driven logic
         assert_eq!(pool.pending_pool.len(), 1, "Fee decrease should promote tx");
         assert_eq!(pool.basefee_pool.len(), 0);
-        // NOTE: Due to current implementation, fee-only promotions aren't reported in outcome
-        // This is a known limitation - the pool state is correct but outcome is incomplete
-        // assert_eq!(outcome.promoted.len(), 1, "Should report promotion from fee update");
+        assert_eq!(outcome.promoted.len(), 1, "Should report promotion from fee update");
     }
 
     #[test]
