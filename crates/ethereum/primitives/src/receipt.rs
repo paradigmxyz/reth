@@ -41,6 +41,13 @@ impl<T> TxTy for T where
 {
 }
 
+/// Raw ethereum receipt.
+pub type Receipt<T = TxType> = EthereumReceipt<T>;
+
+#[cfg(feature = "rpc")]
+/// Receipt representation for RPC.
+pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
+
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -63,13 +70,6 @@ pub struct EthereumReceipt<T = TxType, L = Log> {
     /// Log send from contracts.
     pub logs: Vec<L>,
 }
-
-/// Raw ethereum receipt.
-pub type Receipt<T = TxType> = EthereumReceipt<T>;
-
-#[cfg(feature = "rpc")]
-/// Receipt representation for RPC.
-pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 
 #[cfg(feature = "rpc")]
 impl<T> Receipt<T> {
