@@ -5,8 +5,8 @@ use crate::{
     MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::{Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7928::BlockAccessList};
+use alloy_consensus::{transaction::Recovered, Transaction, Typed2718};
 use alloy_primitives::{Address, Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
@@ -157,20 +157,14 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
-    where
-        Self::Transaction: SignedTransaction,
-    {
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError> {
         crate::transaction::recover::recover_signers(self.transactions())
     }
 
     /// Recover signer addresses for all transactions in the block body.
     ///
     /// Returns an error if some transaction's signature is invalid.
-    fn try_recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
-    where
-        Self::Transaction: SignedTransaction,
-    {
+    fn try_recover_signers(&self) -> Result<Vec<Address>, RecoveryError> {
         self.recover_signers()
     }
 
@@ -178,10 +172,7 @@ pub trait BlockBody:
     /// signature has a low `s` value_.
     ///
     /// Returns `RecoveryError`, if some transaction's signature is invalid.
-    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
-    where
-        Self::Transaction: SignedTransaction,
-    {
+    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError> {
         crate::transaction::recover::recover_signers_unchecked(self.transactions())
     }
 
@@ -189,15 +180,25 @@ pub trait BlockBody:
     /// signature has a low `s` value_.
     ///
     /// Returns an error if some transaction's signature is invalid.
-    fn try_recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
-    where
-        Self::Transaction: SignedTransaction,
-    {
+    fn try_recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError> {
         self.recover_signers_unchecked()
     }
 
+
     /// Returns the block access list for the block body.
     fn block_access_list(&self) -> Option<&BlockAccessList>;
+
+    /// Recovers signers for all transactions in the block body and returns a vector of
+    /// [`Recovered`].
+    fn recover_transactions(&self) -> Result<Vec<Recovered<Self::Transaction>>, RecoveryError> {
+        self.recover_signers().map(|signers| {
+            self.transactions()
+                .iter()
+                .zip(signers)
+                .map(|(tx, signer)| tx.clone().with_signer(signer))
+                .collect()
+        })
+    }
 }
 
 impl<T, H> BlockBody for alloy_consensus::BlockBody<T, H>

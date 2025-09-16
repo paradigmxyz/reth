@@ -136,7 +136,7 @@ impl BlockchainTestCase {
             // Since it is unexpected, we treat it as a test failure.
             //
             // One reason for this happening is when one forgets to wrap the error from `run_case`
-            // so that it produces a `Error::BlockProcessingFailed`
+            // so that it produces an `Error::BlockProcessingFailed`
             Err(other) => Err(other),
         }
     }
@@ -333,7 +333,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             }
         }
         None => {
-            // Some test may not have post-state (e.g., state-heavy benchmark tests).
+            // Some tests may not have post-state (e.g., state-heavy benchmark tests).
             // In this case, we can skip the post-state validation.
         }
     }
@@ -414,7 +414,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing
-        // exception in testsuite There are more nonce overflow tests that are internal
+        // exception in testsuite. There are more nonce overflow tests that are internal
         // call/create, and those tests are passing and are enabled.
         | "CreateTransactionHighNonce.json"
 
