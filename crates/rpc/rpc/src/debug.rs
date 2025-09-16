@@ -511,13 +511,12 @@ where
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let txs = block.body().transactions();
-        if tx_index >= txs.len() {
+        if tx_index >= block.transaction_count() {
             // tx_index out of bounds
             return Err(EthApiError::InvalidParams(format!(
                 "tx_index {} out of bounds for block with {} transactions",
                 tx_index,
-                txs.len()
+                block.transaction_count()
             ))
             .into())
         }
