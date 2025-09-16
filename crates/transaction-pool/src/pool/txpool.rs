@@ -548,7 +548,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
-    fn update_pending_fees_only(
+        fn update_pending_fees_only(
         &mut self,
         new_base_fee: u64,
         new_blob_fee: Option<u128>,
@@ -608,7 +608,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             // Promote blob transactions
             let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
             for tx in removed {
-                let to = {
+                let subpool = {
                     let tx_meta =
                         self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                     tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
@@ -618,11 +618,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                 };
 
                 // Direct push to outcome for promoted transactions
-                if to == SubPool::Pending {
+                if subpool == SubPool::Pending {
                     outcome.promoted.push(tx.clone());
                 }
 
-                self.add_transaction_to_subpool(to, tx);
+                self.add_transaction_to_subpool(subpool, tx);
             }
         }
     }
