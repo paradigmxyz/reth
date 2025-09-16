@@ -462,6 +462,7 @@ mod tests {
             no_tx_pool: None,
             gas_limit: Some(30000000),
             eip_1559_params: None,
+            min_base_fee: None,
         };
 
         // Reth's `PayloadId` should match op-geth's `PayloadId`. This fails
