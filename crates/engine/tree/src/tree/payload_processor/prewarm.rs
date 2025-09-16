@@ -336,7 +336,8 @@ where
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
-                    return
+                    // skip error because we can ignore these errors and continue with the next tx
+                    continue
                 }
             };
             metrics.execution_duration.record(start.elapsed());
