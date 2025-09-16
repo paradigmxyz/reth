@@ -28,6 +28,12 @@ const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
     "jsonrpsee-server=off",
 ];
 
+/// Buffer size for non-blocking file logging writer.
+/// This value (10,000 lines) handles typical Reth logging bursts (10-100 seconds buffer)
+/// with reasonable memory usage (~1.5MB), keeping the blocking from lossy(false) as a rare
+/// fallback for extreme cases only.
+const FILE_LOGGING_BUFFER_SIZE: usize = 10000;
+
 /// Manages the collection of layers for a tracing subscriber.
 ///
 /// `Layers` acts as a container for different logging layers such as stdout, file, or journald.
@@ -172,8 +178,10 @@ impl FileInfo {
         )
         .expect("Could not initialize file logging");
 
-        let (writer, guard) =
-            NonBlockingBuilder::default().lossy(false).buffered_lines_limit(10000).finish(appender);
+        let (writer, guard) = NonBlockingBuilder::default()
+            .lossy(false)
+            .buffered_lines_limit(FILE_LOGGING_BUFFER_SIZE)
+            .finish(appender);
 
         (writer, guard)
     }
