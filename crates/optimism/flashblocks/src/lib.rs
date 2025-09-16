@@ -22,5 +22,5 @@ pub type PendingBlockRx<N> = tokio::sync::watch::Receiver<Option<PendingBlock<N>
 /// Receiver of the sequences of [`FlashBlock`]s built.
 ///
 /// [`FlashBlock`]: crate::FlashBlock
-pub type FlashBlockCompleteSequenceRx =
-    tokio::sync::broadcast::Receiver<FlashBlockCompleteSequence>;
+pub type FlashBlockCompleteSequenceRx<T = ()> =
+    tokio::sync::broadcast::Receiver<FlashBlockCompleteSequence<T>>;

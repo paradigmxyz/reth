@@ -1,14 +1,18 @@
 use crate::{ExecutionPayloadBaseV1, FlashBlock};
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::B256;
 use core::mem;
 use eyre::{bail, OptionExt};
 use reth_primitives_traits::{Recovered, SignedTransaction};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use tokio::sync::broadcast;
 use tracing::{debug, trace, warn};
 
 /// The size of the broadcast channel for completed flashblock sequences.
 const FLASHBLOCK_SEQUENCE_CHANNEL_SIZE: usize = 128;
+
+/// Maximum number of block sequences to cache
+const FLASHBLOCK_CACHE_SIZE: usize = 3;
 
 /// An ordered B-tree keeping the track of a sequence of [`FlashBlock`]s by their indices.
 #[derive(Debug)]
@@ -19,7 +23,9 @@ pub(crate) struct FlashBlockPendingSequence<T> {
     /// pending block, we expect 11 flashblocks per slot.
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
-    block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
+    block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence<T>>,
+    /// Cache of completed sequences by parent hash (last 3 blocks)
+    cache: VecDeque<FlashBlockCompleteSequence<T>>,
 }
 
 impl<T> FlashBlockPendingSequence<T>
@@ -30,38 +36,46 @@ where
         // Note: if the channel is full, send will not block but rather overwrite the oldest
         // messages. Order is preserved.
         let (tx, _) = broadcast::channel(FLASHBLOCK_SEQUENCE_CHANNEL_SIZE);
-        Self { inner: BTreeMap::new(), block_broadcaster: tx }
+        Self { inner: BTreeMap::new(), block_broadcaster: tx, cache: VecDeque::with_capacity(FLASHBLOCK_CACHE_SIZE) }
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
     pub(crate) fn subscribe_block_sequence(
         &self,
-    ) -> broadcast::Receiver<FlashBlockCompleteSequence> {
+    ) -> broadcast::Receiver<FlashBlockCompleteSequence<T>> {
         self.block_broadcaster.subscribe()
     }
 
     // Clears the state and broadcasts the blocks produced to subscribers.
     fn clear_and_broadcast_blocks(&mut self) {
         let flashblocks = mem::take(&mut self.inner);
+    
+        if !flashblocks.is_empty() {
+            match FlashBlockCompleteSequence::new_from_prepared(flashblocks.into_values().collect()) {
+                Ok(complete_sequence) => {
+                    // Add to cache before broadcasting
+                    self.cache.push_back(complete_sequence.clone());
 
-        // If there are any subscribers, send the flashblocks to them.
-        if self.block_broadcaster.receiver_count() > 0 {
-            let flashblocks = match FlashBlockCompleteSequence::new(
-                flashblocks.into_iter().map(|block| block.1.into()).collect(),
-            ) {
-                Ok(flashblocks) => flashblocks,
+                    // Keep only the last FLASHBLOCK_CACHE_SIZE entries
+                    while self.cache.len() > FLASHBLOCK_CACHE_SIZE {
+                        self.cache.pop_front();
+                    }
+                    
+                    // If there are any subscribers, send the flashblocks to them.
+                    if self.block_broadcaster.receiver_count() > 0 {
+                        // Note: this should only ever fail if there are no receivers. This can happen if
+                        // there is a race condition between the clause right above and this
+                        // one. We can simply warn the user and continue.
+                        if let Err(err) = self.block_broadcaster.send(complete_sequence) {
+                            warn!(target: "flashblocks", error = ?err, "Failed to send flashblocks to subscribers");
+                        }
+                    }
+                }
                 Err(err) => {
                     debug!(target: "flashblocks", error = ?err, "Failed to create full flashblock complete sequence");
                     return;
                 }
             };
-
-            // Note: this should only ever fail if there are no receivers. This can happen if
-            // there is a race condition between the clause right above and this
-            // one. We can simply warn the user and continue.
-            if let Err(err) = self.block_broadcaster.send(flashblocks) {
-                warn!(target: "flashblocks", error = ?err, "Failed to send flashblocks to subscribers");
-            }
         }
     }
 
@@ -109,6 +123,28 @@ where
             .flat_map(|(_, block)| block.txs.clone())
     }
 
+    /// Get ready transactions for a specific parent hash
+    pub(crate) fn ready_transactions_for_parent_hash(
+        &self,
+        parent_hash: B256,
+    ) -> Option<impl Iterator<Item = WithEncoded<Recovered<T>>> + '_> {
+        // First check current sequence
+        if let Some(base) = self.payload_base() {
+            if base.parent_hash == parent_hash {
+                return Some(Box::new(self.ready_transactions()) as Box<dyn Iterator<Item = _>>);
+            }
+        }
+        
+        // Then check cache
+        for cached_sequence in self.cache.iter().rev() {
+            if cached_sequence.payload_base().parent_hash == parent_hash {
+                return Some(Box::new(cached_sequence.ready_transactions().cloned()) as Box<dyn Iterator<Item = _>>);
+            }
+        }
+        
+        None
+    }
+
     /// Returns the first block number
     pub(crate) fn block_number(&self) -> Option<u64> {
         Some(self.inner.values().next()?.block().metadata.block_number)
@@ -117,6 +153,26 @@ where
     /// Returns the payload base of the first tracked flashblock.
     pub(crate) fn payload_base(&self) -> Option<ExecutionPayloadBaseV1> {
         self.inner.values().next()?.block().base.clone()
+    }
+
+    /// Get payload base for a specific parent hash
+    pub(crate) fn payload_base_for_parent_hash(&self, parent_hash: B256) -> Option<ExecutionPayloadBaseV1> {
+        // Check current sequence first
+        if let Some(base) = self.payload_base() {
+            if base.parent_hash == parent_hash {
+                return Some(base);
+            }
+        }
+        
+        // Check cache
+        for cached_sequence in self.cache.iter().rev() {
+            let base = cached_sequence.payload_base();
+            if base.parent_hash == parent_hash {
+                return Some(base.clone());
+            }
+        }
+        
+        None
     }
 
     /// Returns the number of tracked flashblocks.
@@ -128,14 +184,68 @@ where
 /// A complete sequence of flashblocks, often corresponding to a full block.
 /// Ensure invariants of a complete flashblocks sequence.
 #[derive(Debug, Clone)]
-pub struct FlashBlockCompleteSequence(Vec<FlashBlock>);
+pub struct FlashBlockCompleteSequence<T = ()> {
+    blocks: Vec<FlashBlock>,
+    prepared_transactions: Vec<WithEncoded<Recovered<T>>>,
+}
 
-impl FlashBlockCompleteSequence {
+impl<T> FlashBlockCompleteSequence<T>
+where
+    T: SignedTransaction,
+{
     /// Create a complete sequence from a vector of flashblocks.
     /// Ensure that:
     /// * vector is not empty
     /// * first flashblock have the base payload
     /// * sequence of flashblocks is sound (successive index from 0, same payload id, ...)
+    pub fn new_from_prepared(prepared_blocks: Vec<PreparedFlashBlock<T>>) -> eyre::Result<Self> {
+        let blocks: Vec<FlashBlock> = prepared_blocks.iter().map(|pb| pb.block().clone()).collect();
+        let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
+
+        // Ensure that first flashblock have base
+        first_block.base.as_ref().ok_or_eyre("Flashblock at index 0 has no base")?;
+
+        // Ensure that index are successive from 0, have same block number and payload id
+        if !blocks.iter().enumerate().all(|(idx, block)| {
+            idx == block.index as usize &&
+                block.payload_id == first_block.payload_id &&
+                block.metadata.block_number == first_block.metadata.block_number
+        }) {
+            bail!("Flashblock inconsistencies detected in sequence");
+        }
+
+        let prepared_transactions = prepared_blocks
+            .into_iter()
+            .flat_map(|pb| pb.txs)
+            .collect();
+
+        Ok(Self { blocks, prepared_transactions })
+    }
+
+    /// Get ready transactions iterator
+    pub fn ready_transactions(&self) -> impl Iterator<Item = &WithEncoded<Recovered<T>>> {
+        self.prepared_transactions.iter()
+    }
+
+    /// Returns the block number
+    pub fn block_number(&self) -> u64 {
+        self.blocks.first().unwrap().metadata.block_number
+    }
+
+    /// Returns the payload base of the first flashblock.
+    pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
+        self.blocks.first().unwrap().base.as_ref().unwrap()
+    }
+
+    /// Returns the number of flashblocks in the sequence.
+    pub const fn count(&self) -> usize {
+        self.blocks.len()
+    }
+}
+
+impl FlashBlockCompleteSequence<()> {
+    /// Create a complete sequence from a vector of flashblocks (without prepared transactions).
+    /// kept for backward compatibility.
     pub fn new(blocks: Vec<FlashBlock>) -> eyre::Result<Self> {
         let first_block = blocks.first().ok_or_eyre("No flashblocks in sequence")?;
 
@@ -151,35 +261,23 @@ impl FlashBlockCompleteSequence {
             bail!("Flashblock inconsistencies detected in sequence");
         }
 
-        Ok(Self(blocks))
-    }
-
-    /// Returns the block number
-    pub fn block_number(&self) -> u64 {
-        self.0.first().unwrap().metadata.block_number
-    }
-
-    /// Returns the payload base of the first flashblock.
-    pub fn payload_base(&self) -> &ExecutionPayloadBaseV1 {
-        self.0.first().unwrap().base.as_ref().unwrap()
-    }
-
-    /// Returns the number of flashblocks in the sequence.
-    pub const fn count(&self) -> usize {
-        self.0.len()
+        Ok(Self { blocks, prepared_transactions: Vec::new() })
     }
 }
 
-impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence {
+impl<T> TryFrom<FlashBlockPendingSequence<T>> for FlashBlockCompleteSequence<T>
+where
+    T: SignedTransaction,
+{
     type Error = eyre::Error;
     fn try_from(sequence: FlashBlockPendingSequence<T>) -> Result<Self, Self::Error> {
-        Self::new(
-            sequence.inner.into_values().map(|block| block.block().clone()).collect::<Vec<_>>(),
+        Self::new_from_prepared(
+            sequence.inner.into_values().collect()
         )
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PreparedFlashBlock<T> {
     /// The prepared transactions, ready for execution
     txs: Vec<WithEncoded<Recovered<T>>>,
@@ -322,7 +420,7 @@ mod tests {
         let flashblocks = subscriber.try_recv().unwrap();
         assert_eq!(flashblocks.count(), 10);
 
-        for (idx, block) in flashblocks.0.iter().enumerate() {
+        for (idx, block) in flashblocks.blocks.iter().enumerate() {
             assert_eq!(block.index, idx as u64);
         }
     }
