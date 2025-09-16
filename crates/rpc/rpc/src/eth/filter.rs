@@ -348,7 +348,7 @@ where
                 let stream = self.pool().new_pending_pool_transactions_listener();
                 let full_txs_receiver = FullTransactionsReceiver::new(
                     stream,
-                    self.inner.eth_api.tx_resp_builder().clone(),
+                    dyn_clone::clone(self.inner.eth_api.tx_resp_builder()),
                 );
                 FilterKind::PendingTransaction(PendingTransactionKind::FullTransaction(Arc::new(
                     full_txs_receiver,
@@ -1240,7 +1240,7 @@ mod tests {
         provider: MockEthProvider,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
-        RpcConverter<EthereumRpcTypes, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
     > {
         EthApiBuilder::new(
             provider.clone(),

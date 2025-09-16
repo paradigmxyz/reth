@@ -3,6 +3,7 @@
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
+use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -37,10 +38,7 @@ use reth_node_builder::{
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
-    eth::{
-        core::{EthApiFor, EthRpcConverterFor},
-        helpers::types::EthereumRpcTypes,
-    },
+    eth::core::{EthApiFor, EthRpcConverterFor},
     ValidationApi,
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
@@ -144,7 +142,7 @@ impl NodeTypes for EthereumNode {
 
 /// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
 #[derive(Debug)]
-pub struct EthereumEthApiBuilder<NetworkT = EthereumRpcTypes>(PhantomData<NetworkT>);
+pub struct EthereumEthApiBuilder<NetworkT = Ethereum>(PhantomData<NetworkT>);
 
 impl<NetworkT> Default for EthereumEthApiBuilder<NetworkT> {
     fn default() -> Self {

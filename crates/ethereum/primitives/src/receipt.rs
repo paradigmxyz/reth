@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
+    Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
@@ -48,7 +48,7 @@ impl<T> TxTy for T where
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-pub struct Receipt<T = TxType, L = Log> {
+pub struct EthereumReceipt<T = TxType, L = Log> {
     /// Receipt type.
     #[cfg_attr(feature = "serde", serde(rename = "type"))]
     pub tx_type: T,
@@ -64,17 +64,24 @@ pub struct Receipt<T = TxType, L = Log> {
     pub logs: Vec<L>,
 }
 
+/// Raw ethereum receipt.
+pub type Receipt<T = TxType> = EthereumReceipt<T>;
+
+#[cfg(feature = "rpc")]
+/// Receipt representation for RPC.
+pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
+
 #[cfg(feature = "rpc")]
 impl<T> Receipt<T> {
     /// Converts the logs of the receipt to RPC logs.
-    pub fn into_rpc_logs(
+    pub fn into_rpc(
         self,
         next_log_index: usize,
         meta: alloy_consensus::transaction::TransactionMeta,
-    ) -> Receipt<T, alloy_rpc_types_eth::Log> {
+    ) -> RpcReceipt<T> {
         let Self { tx_type, success, cumulative_gas_used, logs } = self;
         let logs = alloy_rpc_types_eth::Log::collect_for_receipt(next_log_index, meta, logs);
-        Receipt { tx_type, success, cumulative_gas_used, logs }
+        RpcReceipt { tx_type, success, cumulative_gas_used, logs }
     }
 }
 
@@ -278,7 +285,11 @@ impl<T: TxTy> Decodable for Receipt<T> {
     }
 }
 
-impl<T: TxTy, L: Send + Sync + Clone + Debug + Eq + AsRef<Log>> TxReceipt for Receipt<T, L> {
+impl<T, L> TxReceipt for EthereumReceipt<T, L>
+where
+    T: TxTy,
+    L: Send + Sync + Clone + Debug + Eq + AsRef<Log>,
+{
     type Log = L;
 
     fn status_or_post_state(&self) -> Eip658Value {
@@ -327,11 +338,11 @@ impl<T: TxTy> InMemorySize for Receipt<T> {
     }
 }
 
-impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType>
+impl<T> From<ReceiptEnvelope<T>> for Receipt<TxType>
 where
     T: Into<Log>,
 {
-    fn from(value: alloy_consensus::ReceiptEnvelope<T>) -> Self {
+    fn from(value: ReceiptEnvelope<T>) -> Self {
         let value = value.into_primitives_receipt();
         Self {
             tx_type: value.tx_type(),
@@ -342,8 +353,8 @@ where
     }
 }
 
-impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
-    fn from(value: Receipt<T>) -> Self {
+impl<T, L> From<EthereumReceipt<T, L>> for alloy_consensus::Receipt<L> {
+    fn from(value: EthereumReceipt<T, L>) -> Self {
         Self {
             status: value.success.into(),
             cumulative_gas_used: value.cumulative_gas_used,
@@ -352,8 +363,11 @@ impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
     }
 }
 
-impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
-    fn from(value: Receipt<TxType>) -> Self {
+impl<L> From<EthereumReceipt<TxType, L>> for ReceiptEnvelope<L>
+where
+    L: Send + Sync + Clone + Debug + Eq + AsRef<Log>,
+{
+    fn from(value: EthereumReceipt<TxType, L>) -> Self {
         let tx_type = value.tx_type;
         let receipt = value.into_with_bloom().map_receipt(Into::into);
         match tx_type {

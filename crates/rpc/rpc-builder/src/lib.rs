@@ -20,7 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_network::IntoWallet;
+use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -36,9 +36,8 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
-    eth::helpers::types::EthereumRpcTypes, AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder,
-    EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
-    ValidationApiConfig, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -259,7 +258,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<EthereumRpcTypes, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
     where
         Provider: Clone,
@@ -287,7 +286,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApi<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<EthereumRpcTypes, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
     where
         Provider: Clone,
@@ -296,7 +295,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         EvmConfig: ConfigureEvm + Clone,
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
             RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
-        RpcConverter<EthereumRpcTypes, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
         (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
@@ -964,7 +963,7 @@ where
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            self.eth.api.tx_resp_builder().clone(),
+                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
                         )
                         .into_rpc()
                         .into(),

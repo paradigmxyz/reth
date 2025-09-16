@@ -18,7 +18,6 @@ reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
-reth-ethereum-primitives = { workspace = true, features = ["rpc"] }
 reth-errors.workspace = true
 reth-metrics.workspace = true
 reth-storage-api.workspace = true
@@ -85,6 +84,7 @@ pin-project.workspace = true
 parking_lot.workspace = true
 
 # misc
+dyn-clone.workspace = true
 tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true
