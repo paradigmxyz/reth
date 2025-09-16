@@ -269,8 +269,9 @@ where
         opts: GethDebugTracingCallOptions,
     ) -> Result<GethTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
-        let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
-            opts;
+        let GethDebugTracingCallOptions {
+            tracing_options, state_overrides, block_overrides, ..
+        } = opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
