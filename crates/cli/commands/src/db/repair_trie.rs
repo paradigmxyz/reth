@@ -1,3 +1,4 @@
+use alloy_primitives::BlockNumber;
 use clap::Parser;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -6,7 +7,13 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::ProviderFactory;
+use reth_provider::{
+    providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+};
+use reth_stages::{
+    AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint,
+    StorageHashingCheckpoint,
+};
 use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
@@ -28,7 +35,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: NodeTypesWithDB>(
+    pub fn execute<N: ProviderNodeTypes>(
         self,
         provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {
@@ -77,17 +84,65 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     Ok(())
 }
 
-fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
-    // Get a database transaction directly from the database
-    let db = provider_factory.db_ref();
-    let mut tx = db.tx_mut()?;
+/// Returns the BlockNumber that both the `AccountHashing` and `StorageHashing` sync stages have
+/// been synced to. This will error if the checkpoint data in the DB indicates either stage has not
+/// finished running, or if they are not synced to the same block.
+fn get_hashing_checkpoint(provider: impl StageCheckpointReader) -> eyre::Result<BlockNumber> {
+    let account_hashing_checkpoint =
+        provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
+    let storage_hashing_checkpoint =
+        provider.get_stage_checkpoint(StageId::StorageHashing)?.unwrap_or_default();
+
+    match (account_hashing_checkpoint, storage_hashing_checkpoint) {
+    (StageCheckpoint{block_number: account_block, ..}, StageCheckpoint{block_number: storage_block, ..}) if
+        account_block != storage_block => {
+        Err(eyre::eyre!("AccountHashing stage checkpoint (block number {account_block}) does not match StorageHashing stage checkpoint (block number {storage_block})"))
+        }
+
+    (StageCheckpoint{stage_checkpoint: Some(StageUnitCheckpoint::Account(AccountHashingCheckpoint{
+        progress: EntitiesCheckpoint{processed, total},
+        ..
+    })), ..}, _) if processed != total => {
+        Err(eyre::eyre!("AccountHashing stage is still in-progress"))
+    }
+
+    (StageCheckpoint{stage_checkpoint: None, ..}, _) => {
+        Err(eyre::eyre!("AccountHashing stage must have been run"))
+    }
+
+    (_, StageCheckpoint{stage_checkpoint: Some(StageUnitCheckpoint::Storage(StorageHashingCheckpoint{
+        progress: EntitiesCheckpoint{processed, total},
+        ..
+    })), ..}) if processed != total => {
+        Err(eyre::eyre!("StorageHashing stage is still in-progress"))
+    }
+
+    (_, StageCheckpoint{stage_checkpoint: None, ..}) => {
+        Err(eyre::eyre!("StorageHashing stage must have been run"))
+    }
+
+    (StageCheckpoint{block_number, ..}, _)  => Ok(block_number),
+    }
+}
+
+fn verify_and_repair<N: ProviderNodeTypes>(
+    provider_factory: ProviderFactory<N>,
+) -> eyre::Result<()> {
+    // Get a read-write database provider
+    let mut provider_rw = provider_factory.provider_rw()?;
+
+    // Get the current block number that account and storage hashing have synced to. This errors if
+    // either account/storage stage sync have not completed or don't match each other.
+    let block_number = get_hashing_checkpoint(provider_rw.as_ref())?;
+
+    let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
 
     // Create the hashed cursor factory
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
 
     // Create the trie cursor factory
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
     let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
@@ -149,12 +204,23 @@ fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -
         }
     }
 
+    // Regardless of if any inconsistencies were fixed, at this point we know the trie tables are in
+    // correct state relative to the hashed account/storage tables, so we can update the sync
+    // checkpoint accordingly.
+    info!(?block_number, "Overwriting MerkleExecute sync checkpoint");
+    provider_rw.save_stage_checkpoint(
+        StageId::MerkleExecute,
+        StageCheckpoint { block_number, stage_checkpoint: None },
+    )?;
+    provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
+
+    info!("Committing any changes");
+    provider_rw.commit()?;
+
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
         info!("Repaired {} inconsistencies", inconsistent_nodes);
-        tx.commit()?;
-        info!("Changes committed to database");
     }
 
     Ok(())
