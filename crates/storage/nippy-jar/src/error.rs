@@ -25,8 +25,8 @@ pub enum NippyJarError {
     Bincode(#[from] Box<bincode::ErrorKind>),
 
     /// An error occurred with the Elias-Fano encoding/decoding process.
-    #[error(transparent)]
-    EliasFano(#[from] anyhow::Error),
+    #[error("Elias-Fano encoding/decoding error: {0}")]
+    EliasFano(String),
 
     /// Compression was enabled, but the compressor is not ready yet.
     #[error("compression was enabled, but it's not ready yet")]
