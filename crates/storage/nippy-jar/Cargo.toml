@@ -26,7 +26,6 @@ memmap2.workspace = true
 bincode.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tracing.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 
