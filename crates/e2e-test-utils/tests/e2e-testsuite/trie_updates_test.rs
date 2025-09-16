@@ -230,9 +230,7 @@ fn create_test_setup() -> Setup<EthEngineTypes> {
         .with_tree_config(
             TreeConfig::default()
                 .with_persistence_threshold(0) // Persist blocks immediately so trie updates are kept
-                .with_legacy_state_root(true) // Use legacy state root to bypass trie update optimizations
-                .with_state_root_fallback(false)
-                .with_always_compare_trie_updates(true),
+                .with_legacy_state_root(true), // Use legacy state root to bypass trie update optimizations
         )
 }
 
