@@ -38,5 +38,5 @@ dyn_clone::clone_trait_object!(<T> EthSigner<T>);
 pub trait AddDevSigners {
     /// Generates 20 random developer accounts.
     /// Used in DEV mode.
-    fn with_dev_accounts(&self, dev_mnemonic: Option<String>);
+    fn with_dev_accounts(&self, ddev_mnemonic: Option<Option<String>>);
 }

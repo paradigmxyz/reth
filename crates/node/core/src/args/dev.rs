@@ -49,7 +49,7 @@ pub struct DevArgs {
         requires = "dev",
         verbatim_doc_comment
     )]
-    pub dev_mnemonic: Option<String>,
+    pub dev_mnemonic: Option<Option<String>>,
 }
 
 #[cfg(test)]
