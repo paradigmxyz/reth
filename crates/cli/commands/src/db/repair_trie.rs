@@ -1,4 +1,3 @@
-use alloy_primitives::BlockNumber;
 use clap::Parser;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -7,13 +6,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{
-    providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-};
-use reth_stages::{
-    AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId, StageUnitCheckpoint,
-    StorageHashingCheckpoint,
-};
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_stages::StageId;
 use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
@@ -84,45 +78,40 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     Ok(())
 }
 
-/// Returns the BlockNumber that both the `AccountHashing` and `StorageHashing` sync stages have
-/// been synced to. This will error if the checkpoint data in the DB indicates either stage has not
-/// finished running, or if they are not synced to the same block.
-fn get_hashing_checkpoint(provider: impl StageCheckpointReader) -> eyre::Result<BlockNumber> {
+/// Checks that the merkle stage has completed running up to the account and storage hashing stages.
+fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> {
     let account_hashing_checkpoint =
         provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
     let storage_hashing_checkpoint =
         provider.get_stage_checkpoint(StageId::StorageHashing)?.unwrap_or_default();
+    let merkle_checkpoint =
+        provider.get_stage_checkpoint(StageId::MerkleExecute)?.unwrap_or_default();
 
-    match (account_hashing_checkpoint, storage_hashing_checkpoint) {
-    (StageCheckpoint{block_number: account_block, ..}, StageCheckpoint{block_number: storage_block, ..}) if
-        account_block != storage_block => {
-        Err(eyre::eyre!("AccountHashing stage checkpoint (block number {account_block}) does not match StorageHashing stage checkpoint (block number {storage_block})"))
-        }
-
-    (StageCheckpoint{stage_checkpoint: Some(StageUnitCheckpoint::Account(AccountHashingCheckpoint{
-        progress: EntitiesCheckpoint{processed, total},
-        ..
-    })), ..}, _) if processed != total => {
-        Err(eyre::eyre!("AccountHashing stage is still in-progress"))
+    if account_hashing_checkpoint.block_number != merkle_checkpoint.block_number {
+        return Err(eyre::eyre!(
+            "MerkleExecute stage checkpoint ({}) != AccountHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
+            merkle_checkpoint.block_number,
+            account_hashing_checkpoint.block_number,
+        ))
     }
 
-    (StageCheckpoint{stage_checkpoint: None, ..}, _) => {
-        Err(eyre::eyre!("AccountHashing stage must have been run"))
+    if storage_hashing_checkpoint.block_number != merkle_checkpoint.block_number {
+        return Err(eyre::eyre!(
+            "MerkleExecute stage checkpoint ({}) != StorageHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
+            merkle_checkpoint.block_number,
+            storage_hashing_checkpoint.block_number,
+        ))
     }
 
-    (_, StageCheckpoint{stage_checkpoint: Some(StageUnitCheckpoint::Storage(StorageHashingCheckpoint{
-        progress: EntitiesCheckpoint{processed, total},
-        ..
-    })), ..}) if processed != total => {
-        Err(eyre::eyre!("StorageHashing stage is still in-progress"))
+    let merkle_checkpoint_progress =
+        provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?;
+    if merkle_checkpoint_progress.is_some_and(|progress| !progress.is_empty()) {
+        return Err(eyre::eyre!(
+            "MerkleExecute sync stage in-progress, you must first complete the pipeline sync by running `reth node`",
+        ))
     }
 
-    (_, StageCheckpoint{stage_checkpoint: None, ..}) => {
-        Err(eyre::eyre!("StorageHashing stage must have been run"))
-    }
-
-    (StageCheckpoint{block_number, ..}, _)  => Ok(block_number),
-    }
+    Ok(())
 }
 
 fn verify_and_repair<N: ProviderNodeTypes>(
@@ -131,9 +120,8 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     // Get a read-write database provider
     let mut provider_rw = provider_factory.provider_rw()?;
 
-    // Get the current block number that account and storage hashing have synced to. This errors if
-    // either account/storage stage sync have not completed or don't match each other.
-    let block_number = get_hashing_checkpoint(provider_rw.as_ref())?;
+    // Check that a pipeline sync isn't in progress.
+    verify_checkpoints(provider_rw.as_ref())?;
 
     let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
@@ -204,23 +192,11 @@ fn verify_and_repair<N: ProviderNodeTypes>(
         }
     }
 
-    // Regardless of if any inconsistencies were fixed, at this point we know the trie tables are in
-    // correct state relative to the hashed account/storage tables, so we can update the sync
-    // checkpoint accordingly.
-    info!(?block_number, "Overwriting MerkleExecute sync checkpoint");
-    provider_rw.save_stage_checkpoint(
-        StageId::MerkleExecute,
-        StageCheckpoint { block_number, stage_checkpoint: None },
-    )?;
-    provider_rw.save_stage_checkpoint_progress(StageId::MerkleExecute, vec![])?;
-
-    info!("Committing any changes");
-    provider_rw.commit()?;
-
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        info!("Repaired {} inconsistencies", inconsistent_nodes);
+        info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
+        provider_rw.commit()?;
     }
 
     Ok(())
