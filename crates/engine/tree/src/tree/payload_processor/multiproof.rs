@@ -1129,8 +1129,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot))
-                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot)) ||
+                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
