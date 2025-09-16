@@ -204,7 +204,12 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(|| tx.clone(), |tx, result| { let _ = tx.send(result); });
+        .for_each_init(
+            || tx.clone(),
+            |tx, result| {
+                let _ = tx.send(result);
+            },
+        );
     drop(tx);
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate
