@@ -714,8 +714,6 @@ where
         V: Send + Sync,
     {
         // Perform validation checks in parallel
-        // a: Validate block consensus rules which includes header validation
-        // b: Validate against the parent
         let (header_validation, pre_execution_validation) = rayon::join(
             || self.consensus.validate_header(block.sealed_header()),
             || self.consensus.validate_block_pre_execution(block.sealed_block()),
