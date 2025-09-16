@@ -19,7 +19,7 @@ use alloy_primitives::B256;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::{ConsensusError, FullConsensus, HeaderValidator};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
@@ -294,16 +294,20 @@ where
         // errors that take precedence over the execution error
         let block = self.convert_to_block(input)?;
 
-        // Validate block consensus rules which includes header validation
-        if let Err(consensus_err) = self.validate_block_inner(&block) {
+        // Perform validation checks in parallel
+        // a: Validate block consensus rules which includes header validation
+        // b: Validate against the parent
+        let (block_validation, parent_validation) = rayon::join(
+            || self.validate_block_inner(&block),
+            || self.consensus.validate_header_against_parent(block.sealed_header(), parent_block),
+        );
+
+        if let Err(consensus_err) = block_validation {
             // Header validation error takes precedence over execution error
             return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
         }
 
-        // Also validate against the parent
-        if let Err(consensus_err) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
-        {
+        if let Err(consensus_err) = parent_validation {
             // Parent validation error takes precedence over execution error
             return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
         }
@@ -705,13 +709,24 @@ where
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
-    fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
-        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
+    fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError>
+    where
+        V: Send + Sync,
+    {
+        // Perform validation checks in parallel
+        // a: Validate block consensus rules which includes header validation
+        // b: Validate against the parent
+        let (header_validation, pre_execution_validation) = rayon::join(
+            || self.consensus.validate_header(block.sealed_header()),
+            || self.consensus.validate_block_pre_execution(block.sealed_block()),
+        );
+
+        if let Err(e) = header_validation {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
+        if let Err(e) = pre_execution_validation {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
