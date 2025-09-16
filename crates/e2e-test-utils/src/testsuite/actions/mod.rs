@@ -36,10 +36,7 @@ pub use produce_blocks::{
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
 pub use transactions::{ProduceBlockWithTransactions, ProduceBlockWithTransactionsViaEngineAPI};
-pub use trie::{
-    AssertBranchNodeAtPrefix, AssertMissingTrieUpdates, SendValidForkBlock,
-    VerifyAnyTrieUpdatesEmitted,
-};
+pub use trie::AssertMissingTrieUpdates;
 
 /// An action that can be performed on an instance.
 ///
