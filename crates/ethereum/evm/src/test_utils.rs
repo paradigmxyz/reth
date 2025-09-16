@@ -9,8 +9,7 @@ use parking_lot::Mutex;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     block::{
-        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
-        ExecutableTx,
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
     ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
@@ -19,7 +18,7 @@ use reth_evm::{
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
-    context::result::{ExecutionResult, HaltReason, Output, ResultAndState, SuccessReason},
+    context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
     database::State,
     Inspector,
 };
@@ -88,14 +87,6 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         Ok(())
-    }
-
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        _tx: impl alloy_evm::block::ExecutableTx<Self>,
-        _f: impl FnOnce(&ExecutionResult<HaltReason>) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
-        Ok(Some(0))
     }
 
     fn execute_transaction_without_commit(

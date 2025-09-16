@@ -210,7 +210,7 @@ pub(crate) struct BlockBufferMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_evm::block::{CommitChanges, StateChangeSource};
+    use alloy_evm::block::StateChangeSource;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -250,18 +250,6 @@ mod tests {
 
         fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
             Ok(())
-        }
-
-        fn execute_transaction_with_commit_condition(
-            &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-        ) -> Result<Option<u64>, BlockExecutionError> {
-            // Call hook with our mock state for each transaction
-            if let Some(hook) = self.hook.as_mut() {
-                hook.on_state(StateChangeSource::Transaction(0), &self.state);
-            }
-            Ok(Some(1000)) // Mock gas used
         }
 
         fn execute_transaction_without_commit(

@@ -9,7 +9,7 @@ use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, CommitChanges, ExecutableTx, OnStateHook,
+        BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
     Database, Evm,
@@ -17,10 +17,7 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{
-    context::result::{ExecutionResult, ResultAndState},
-    database::State,
-};
+use revm::{context::result::ResultAndState, database::State};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -38,20 +35,6 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
-    }
-
-    fn execute_transaction_with_commit_condition(
-        &mut self,
-        tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
-        match tx.tx() {
-            CustomTransaction::Op(op_tx) => self.inner.execute_transaction_with_commit_condition(
-                Recovered::new_unchecked(op_tx, *tx.signer()),
-                f,
-            ),
-            CustomTransaction::Payment(..) => todo!(),
-        }
     }
 
     fn execute_transaction_without_commit(
