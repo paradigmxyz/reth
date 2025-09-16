@@ -1,45 +1,35 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use rayon::ThreadPool as RayonPool;
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{sync::OnceLock, time::Duration};
 use tokio::{
     runtime::{Builder, Handle, Runtime},
     task::JoinHandle,
 };
 
-/// An executor for mixed I/O and CPU workloads.
+/// A simplified executor for I/O workloads.
 ///
-/// This type has access to its own rayon pool and uses tokio to spawn blocking tasks.
-///
-/// It will reuse an existing tokio runtime if available or create its own.
+/// This type provides a convenient interface for spawning blocking tasks
+/// while managing runtime lifecycle efficiently.
 #[derive(Debug, Clone)]
 pub struct WorkloadExecutor {
-    inner: WorkloadExecutorInner,
+    handle: Handle,
 }
 
 impl Default for WorkloadExecutor {
     fn default() -> Self {
-        Self { inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()) }
+        Self::new()
     }
 }
 
 impl WorkloadExecutor {
-    /// Creates a new executor with the given number of threads for cpu bound work (rayon).
-    #[expect(unused)]
-    pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
-        Self {
-            inner: WorkloadExecutorInner::new(
-                rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap(),
-            ),
-        }
+    /// Creates a new executor that reuses existing runtime or creates its own.
+    pub fn new() -> Self {
+        Self { handle: get_or_create_runtime_handle() }
     }
 
     /// Returns the handle to the tokio runtime
     pub(super) const fn handle(&self) -> &Handle {
-        &self.inner.handle
+        &self.handle
     }
 
     /// Shorthand for [`Runtime::spawn_blocking`]
@@ -49,47 +39,29 @@ impl WorkloadExecutor {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.inner.handle.spawn_blocking(func)
-    }
-
-    /// Returns access to the rayon pool
-    #[expect(unused)]
-    pub(super) const fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
-        &self.inner.rayon_pool
+        self.handle.spawn_blocking(func)
     }
 }
 
-#[derive(Debug, Clone)]
-struct WorkloadExecutorInner {
-    handle: Handle,
-    rayon_pool: Arc<RayonPool>,
-}
+/// Gets the current runtime handle or creates a new optimized runtime.
+fn get_or_create_runtime_handle() -> Handle {
+    Handle::try_current().unwrap_or_else(|_| {
+        // Create a new runtime if no runtime is available
+        static RT: OnceLock<Runtime> = OnceLock::new();
 
-impl WorkloadExecutorInner {
-    fn new(rayon_pool: rayon::ThreadPool) -> Self {
-        fn get_runtime_handle() -> Handle {
-            Handle::try_current().unwrap_or_else(|_| {
-                // Create a new runtime if no runtime is available
-                static RT: OnceLock<Runtime> = OnceLock::new();
+        let rt = RT.get_or_init(|| {
+            Builder::new_multi_thread()
+                .enable_all()
+                // Keep the threads alive for at least the block time, which is 12 seconds
+                // at the time of writing, plus a little extra.
+                //
+                // This is to prevent the costly process of spawning new threads on every
+                // new block, and instead reuse the existing threads.
+                .thread_keep_alive(Duration::from_secs(15))
+                .build()
+                .expect("Failed to create tokio runtime")
+        });
 
-                let rt = RT.get_or_init(|| {
-                    Builder::new_multi_thread()
-                        .enable_all()
-                        // Keep the threads alive for at least the block time, which is 12 seconds
-                        // at the time of writing, plus a little extra.
-                        //
-                        // This is to prevent the costly process of spawning new threads on every
-                        // new block, and instead reuse the existing
-                        // threads.
-                        .thread_keep_alive(Duration::from_secs(15))
-                        .build()
-                        .unwrap()
-                });
-
-                rt.handle().clone()
-            })
-        }
-
-        Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
-    }
+        rt.handle().clone()
+    })
 }
