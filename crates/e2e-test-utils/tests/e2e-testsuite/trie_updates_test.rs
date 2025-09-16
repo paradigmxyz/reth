@@ -15,10 +15,7 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
-    actions::{
-        AssertMissingTrieUpdates, CaptureBlock,
-        ProduceBlockWithTransactionsViaEngineAPI,
-    },
+    actions::{AssertMissingTrieUpdates, CaptureBlock, ProduceBlockWithTransactionsViaEngineAPI},
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -82,29 +79,18 @@ async fn test_trie_updates_preserved_in_canonical_blocks() -> Result<()> {
     let test = TestBuilder::new()
         .with_setup(setup)
         // Create block 1: Set initial storage values
-        .with_action(
-            ProduceBlockWithTransactionsViaEngineAPI::new(
-                txs.set_initial_values,
-                "block_1",
-            )
-        )
+        .with_action(ProduceBlockWithTransactionsViaEngineAPI::new(
+            txs.set_initial_values,
+            "block_1",
+        ))
         .with_action(CaptureBlock::new("block_1"))
         // Verify block 1 has trie updates
-        .with_action(
-            AssertMissingTrieUpdates::new("block_1").expect_missing(false)
-        )
+        .with_action(AssertMissingTrieUpdates::new("block_1").expect_missing(false))
         // Create block 2: Modify storage values
-        .with_action(
-            ProduceBlockWithTransactionsViaEngineAPI::new(
-                txs.modify_values,
-                "block_2",
-            )
-        )
+        .with_action(ProduceBlockWithTransactionsViaEngineAPI::new(txs.modify_values, "block_2"))
         .with_action(CaptureBlock::new("block_2"))
         // Verify block 2 also has trie updates (this was failing before the fix)
-        .with_action(
-            AssertMissingTrieUpdates::new("block_2").expect_missing(false)
-        );
+        .with_action(AssertMissingTrieUpdates::new("block_2").expect_missing(false));
 
     test.run::<EthereumNode>().await?;
 
@@ -230,7 +216,8 @@ fn create_test_setup() -> Setup<EthEngineTypes> {
         .with_tree_config(
             TreeConfig::default()
                 .with_persistence_threshold(0) // Persist blocks immediately so trie updates are kept
-                .with_legacy_state_root(true), // Use legacy state root to bypass trie update optimizations
+                .with_legacy_state_root(true), /* Use legacy state root to bypass trie update
+                                                * optimizations */
         )
 }
 
@@ -290,18 +277,26 @@ async fn create_test_transactions(
 ) -> Result<TestTransactions> {
     // Block 1 transactions: Set initial values
     let set_initial_values = vec![
-        create_storage_tx_with_signer(slots.slot_a, values.block_1.slot_a, 0, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_b, values.block_1.slot_b, 1, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_c, values.block_1.slot_c, 2, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_d, values.block_1.slot_d, 3, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_a, values.block_1.slot_a, 0, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_b, values.block_1.slot_b, 1, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_c, values.block_1.slot_c, 2, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_d, values.block_1.slot_d, 3, TEST_PRIVATE_KEY_1)
+            .await?,
     ];
 
     // Block 2 transactions: Modify values
     let modify_values = vec![
-        create_storage_tx_with_signer(slots.slot_a, values.block_2.slot_a, 4, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_b, values.block_2.slot_b, 5, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_c, values.block_2.slot_c, 6, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_d, values.block_2.slot_d, 7, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_a, values.block_2.slot_a, 4, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_b, values.block_2.slot_b, 5, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_c, values.block_2.slot_c, 6, TEST_PRIVATE_KEY_1)
+            .await?,
+        create_storage_tx_with_signer(slots.slot_d, values.block_2.slot_d, 7, TEST_PRIVATE_KEY_1)
+            .await?,
     ];
 
     Ok(TestTransactions { set_initial_values, modify_values })
