@@ -548,6 +548,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
+    #[allow(clippy::missing_const_for_fn)]
     fn update_pending_fees_only(
         &mut self,
         new_base_fee: u64,
@@ -578,6 +579,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Only handle promotions when base fee decreases
         if current_base_fee < prev_base_fee {
             // Promote transactions from basefee pool
+            let mut to_add = Vec::new();
             self.basefee_pool.enforce_basefee_with(current_base_fee, |tx| {
                 let meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                 meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -588,18 +590,18 @@ impl<T: TransactionOrdering> TxPool<T> {
                     outcome.promoted.push(tx.clone());
                 }
 
-                trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
-                match meta.subpool {
-                    SubPool::Queued => self.queued_pool.add_transaction(tx),
-                    SubPool::Pending => {
-                        self.pending_pool.add_transaction(tx, current_base_fee);
-                    }
-                    SubPool::Blob => self.blob_pool.add_transaction(tx),
-                    SubPool::BaseFee => {
-                        warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
-                    }
+                // Special warning for unexpected BaseFee subpool
+                if meta.subpool == SubPool::BaseFee {
+                    warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
                 }
+
+                to_add.push((meta.subpool, tx));
             });
+
+            // Add transactions to their respective subpools
+            for (subpool, tx) in to_add {
+                self.add_transaction_to_subpool(subpool, tx);
+            }
         }
 
         // Only handle blob fee promotions when blob fee decreases
