@@ -145,8 +145,8 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
-    if version.is_v5() && !is_osaka {
+    let is_eip7805 = chain_spec.is_eip7805_active_at_timestamp(timestamp);
+    if version.is_v5() && !is_eip7805 {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
         //
@@ -182,7 +182,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -283,7 +284,10 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -306,6 +310,41 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Validates the presence of the `il` field according to the payload timestamp.
+/// Before Amsterdam, il field must be [None];
+pub const fn validate_il_presence<T: EthereumHardforks>(
+    _chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    has_il: bool,
+) -> Result<(), EngineObjectValidationError> {
+    match version {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 => {
+            if has_il {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))
+            }
+        }
+        EngineApiMessageVersion::V5 | EngineApiMessageVersion::V6 => {
+            // NOTE
+            //
+            // the IL is not part of the execution payload, so we only check for the payload
+            // attributes
+            if core::matches!(message_validation_kind, MessageValidationKind::PayloadAttributes) &&
+                !has_il
+            {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoIlPostAmsterdam))
+            }
+        }
+    };
+
+    Ok(())
+}
+
 /// A type that represents whether or not we are validating a payload or payload attributes.
 ///
 /// This is used to ensure that the correct error code is returned when validating the payload or
@@ -317,7 +356,6 @@ pub enum MessageValidationKind {
     /// We are validating fields of a payload.
     Payload,
 }
-
 impl MessageValidationKind {
     /// Returns an `EngineObjectValidationError` based on the given
     /// `VersionSpecificValidationError` and the current validation kind.
@@ -362,6 +400,12 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.parent_beacon_block_root().is_some(),
+    )?;
+    validate_il_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.il().is_some(),
     )
 }
 
@@ -387,6 +431,10 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Osaka hardfork.
     V5 = 5,
+    /// Version 6
+    ///
+    /// Added in the Amsterdam hardfork.
+    V6 = 6,
 }
 
 impl EngineApiMessageVersion {
@@ -415,6 +463,11 @@ impl EngineApiMessageVersion {
         matches!(self, Self::V5)
     }
 
+    /// Returns true if the version is V6.
+    pub const fn is_v6(&self) -> bool {
+        matches!(self, Self::V6)
+    }
+
     /// Returns the method name for the given version.
     pub const fn method_name(&self) -> &'static str {
         match self {
@@ -423,6 +476,7 @@ impl EngineApiMessageVersion {
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
             Self::V5 => "engine_newPayloadV5",
+            Self::V6 => "engine_newPayloadV6",
         }
     }
 }

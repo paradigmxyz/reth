@@ -12,7 +12,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use error::{InsertBlockError, InsertBlockFatalError};
+use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
@@ -39,6 +39,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{HashedPostState, TrieInput};
 use reth_trie_db::DatabaseHashedPostState;
+
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -613,6 +614,10 @@ where
             }
         };
 
+        // TODO Pelle
+        //
+        // pass in the IL along with the block to buffer, so that, when we catch up via sync, then
+        // we can check the IL that we got for the block.
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
@@ -1900,6 +1905,10 @@ where
         let block_count = blocks.len();
         for child in blocks {
             let child_num_hash = child.num_hash();
+            // NOTE
+            //
+            // we insert without an inclusion list, because we only enforce the IL for
+            // `on_new_payload`.
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
@@ -2227,6 +2236,10 @@ where
         }
 
         // try to append the block
+        //
+        // NOTE
+        //
+        // we insert without an inclusion list, because we only enforce the IL for `on_new_payload`.
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
@@ -2363,7 +2376,6 @@ where
             TreeCtx::new(&mut self.state, &self.persistence_state, &self.canonical_in_memory_state);
 
         let start = Instant::now();
-
         let executed = execute(&mut self.payload_validator, input, ctx)?;
 
         // if the parent is the canonical head, we can insert the block as the pending block
@@ -2528,6 +2540,7 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
+
         // Temporary fix for EIP-7623 test compatibility:
         // Map gas floor errors to the expected format for test compatibility
         // TODO: Remove this workaround once https://github.com/paradigmxyz/reth/issues/18369 is resolved
@@ -2538,13 +2551,23 @@ where
             // The test also expects the error to contain
             // "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"
             error_str =
-                format!("TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST: {}", error_str);
+                format!("TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST: {error_str}");
         }
 
-        Ok(PayloadStatus::new(
-            PayloadStatusEnum::Invalid { validation_error: error_str },
-            latest_valid_hash,
-        ))
+        // If the validation error is specifically an inclusion-list failure,
+        // return the dedicated `InclusionListUnsatisfied` payload status.
+        match validation_err {
+            InsertBlockValidationError::Validation(
+                reth_errors::BlockValidationError::InvalidInclusionList,
+            ) => Ok(PayloadStatus::new(
+                PayloadStatusEnum::InclusionListUnsatisfied,
+                latest_valid_hash,
+            )),
+            _ => Ok(PayloadStatus::new(
+                PayloadStatusEnum::Invalid { validation_error: error_str },
+                latest_valid_hash,
+            )),
+        }
     }
 
     /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
