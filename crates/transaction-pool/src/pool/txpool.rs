@@ -583,13 +583,12 @@ impl<T: TransactionOrdering> TxPool<T> {
                 meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                 meta.subpool = meta.state.into();
 
-                trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
-
                 // Direct push to outcome for promoted transactions
                 if meta.subpool == SubPool::Pending {
                     outcome.promoted.push(tx.clone());
                 }
 
+                trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?meta.subpool, "Adding transaction to a subpool");
                 match meta.subpool {
                     SubPool::Queued => self.queued_pool.add_transaction(tx),
                     SubPool::Pending => {
@@ -610,7 +609,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
             for tx in removed {
                 let to = {
-                    let tx_meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                    let tx_meta =
+                        self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                     tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                     tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                     tx_meta.subpool = tx_meta.state.into();
@@ -671,10 +671,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.removed_transactions.increment(removed_txs_count);
 
         // Update fees internally first without triggering subpool updates
-        let (prev_base_fee, prev_blob_fee) = self.update_pending_fees_only(
-            block_info.pending_basefee,
-            block_info.pending_blob_fee,
-        );
+        let (prev_base_fee, prev_blob_fee) =
+            self.update_pending_fees_only(block_info.pending_basefee, block_info.pending_blob_fee);
 
         // Now update accounts with the new fees already set
         let mut outcome = self.update_accounts(changed_senders);
@@ -696,7 +694,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             block_hash,
             mined: mined_transactions,
             promoted: outcome.promoted,
-            discarded: outcome.discarded
+            discarded: outcome.discarded,
         }
     }
 
