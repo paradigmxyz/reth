@@ -33,16 +33,15 @@ const STORAGE_CONTRACT: Address = address!("123456789012345678901234567890123456
 const TEST_PRIVATE_KEY_1: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-/// Storage slot configuration for trie fork tests.
+/// Storage slot configuration for trie update tests.
 ///
 /// These slots are specifically chosen to create branch nodes in the Merkle Patricia Trie
-/// by having common hash prefixes. This allows us to test trie update behavior during
-/// fork and reorg scenarios.
+/// by having common hash prefixes when hashed with keccak256.
 struct StorageSlots {
-    slot_a: U256, // Group 1: 0x70e0 prefix - Same value in both chains
-    slot_b: U256, // Group 1: 0x70e0 prefix - Different values
-    slot_c: U256, // Group 1: 0x70e0 prefix - Canonical only
-    slot_d: U256, // Group 2: 0x05f3 prefix - Different values
+    slot_a: U256, // Group 1: hashes to 0x70e0 prefix
+    slot_b: U256, // Group 1: hashes to 0x70e0 prefix
+    slot_c: U256, // Group 1: hashes to 0x70e0 prefix
+    slot_d: U256, // Group 2: hashes to 0x05f3 prefix
 }
 
 /// Storage values for a single block
@@ -119,7 +118,7 @@ fn create_test_genesis() -> serde_json::Value {
     let alloc = serde_json::json!({
         format!("{:?}", STORAGE_CONTRACT): {
             "balance": "0x0",
-            "code": "0x6000356020359055",
+            "code": "0x6000356020359055", // Simple storage contract: stores value at slot
             // Storage slots that create branch nodes by having common hash prefixes
             "storage": {
                 // Group 1: slots that hash to prefix 0x70e0 (creates branch at depth 2)
