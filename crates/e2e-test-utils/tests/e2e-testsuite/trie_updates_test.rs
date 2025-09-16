@@ -45,18 +45,20 @@ struct StorageSlots {
     slot_d: U256, // Group 2: 0x05f3 prefix - Different values
 }
 
-/// Storage values used for testing trie updates
+/// Storage values for a single block
+struct BlockStorageValues {
+    slot_a: U256,
+    slot_b: U256,
+    slot_c: U256,
+    slot_d: U256,
+}
+
+/// Storage values used for testing trie updates across blocks
 struct StorageValues {
-    /// Initial values for block 1
-    initial_a: U256,
-    initial_b: U256,
-    initial_c: U256,
-    initial_d: U256,
-    /// Modified values for block 2
-    modified_a: U256,
-    modified_b: U256,
-    modified_c: U256,
-    modified_d: U256,
+    /// Values to set in block 1
+    block_1: BlockStorageValues,
+    /// Values to set in block 2
+    block_2: BlockStorageValues,
 }
 
 /// Test transactions for different blocks
@@ -260,16 +262,20 @@ fn init_storage_slots() -> StorageSlots {
 /// - Modify that state in block 2 to verify trie updates are preserved
 fn init_storage_values() -> StorageValues {
     StorageValues {
-        // Initial values for block 1
-        initial_a: U256::from(0x1111),
-        initial_b: U256::from(0x2222),
-        initial_c: U256::from(0x3333),
-        initial_d: U256::from(0x4444),
-        // Modified values for block 2
-        modified_a: U256::from(0x5555),
-        modified_b: U256::from(0x6666),
-        modified_c: U256::from(0x7777),
-        modified_d: U256::from(0x8888),
+        // Block 1: Set initial values
+        block_1: BlockStorageValues {
+            slot_a: U256::from(0x1111),
+            slot_b: U256::from(0x2222),
+            slot_c: U256::from(0x3333),
+            slot_d: U256::from(0x4444),
+        },
+        // Block 2: Modify all values to ensure trie updates
+        block_2: BlockStorageValues {
+            slot_a: U256::from(0x5555),
+            slot_b: U256::from(0x6666),
+            slot_c: U256::from(0x7777),
+            slot_d: U256::from(0x8888),
+        },
     }
 }
 
@@ -287,18 +293,18 @@ async fn create_test_transactions(
 ) -> Result<TestTransactions> {
     // Block 1 transactions: Set initial values
     let set_initial_values = vec![
-        create_storage_tx_with_signer(slots.slot_a, values.initial_a, 0, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_b, values.initial_b, 1, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_c, values.initial_c, 2, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_d, values.initial_d, 3, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_a, values.block_1.slot_a, 0, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_b, values.block_1.slot_b, 1, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_c, values.block_1.slot_c, 2, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_d, values.block_1.slot_d, 3, TEST_PRIVATE_KEY_1).await?,
     ];
 
     // Block 2 transactions: Modify values
     let modify_values = vec![
-        create_storage_tx_with_signer(slots.slot_a, values.modified_a, 4, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_b, values.modified_b, 5, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_c, values.modified_c, 6, TEST_PRIVATE_KEY_1).await?,
-        create_storage_tx_with_signer(slots.slot_d, values.modified_d, 7, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_a, values.block_2.slot_a, 4, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_b, values.block_2.slot_b, 5, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_c, values.block_2.slot_c, 6, TEST_PRIVATE_KEY_1).await?,
+        create_storage_tx_with_signer(slots.slot_d, values.block_2.slot_d, 7, TEST_PRIVATE_KEY_1).await?,
     ];
 
     Ok(TestTransactions { set_initial_values, modify_values })
