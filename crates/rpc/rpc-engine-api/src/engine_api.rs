@@ -296,7 +296,7 @@ where
         >::from_execution_payload(&payload);
         self.inner
             .validator
-            .validate_version_specific_fields(EngineApiMessageVersion::V5, payload_or_attrs)?;
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
 
         Ok(self
             .inner
@@ -417,10 +417,8 @@ where
         res
     }
 
-    /// Sends a message to the beacon consensus engine to update the fork choice for Prague (V4).
-    ///
     /// This behaves like previous fork choice handlers but validates attributes according to the
-    /// Amsterdam rules and forwards the update to the beacon consensus engine.
+    /// Amsterdam rules and updates blocks based on inclusion list.
     ///
     /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/.md#engine_forkchoiceupdatedv4>
     pub async fn fork_choice_updated_v4(
@@ -428,7 +426,7 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V5, state, payload_attrs)
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
             .await
     }
 

@@ -145,8 +145,8 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    let is_eip7805 = chain_spec.is_eip7805_active_at_timestamp(timestamp);
-    if version.is_v5() && !is_eip7805 {
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    if version.is_v5() && !is_osaka {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
         //
@@ -154,6 +154,24 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
         //    built payload does not fall within the time frame of the Osaka fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
+    // let is_amsterdam = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+    let is_eip7805 = chain_spec.is_eip7805_active_at_timestamp(timestamp);
+    if version.is_v6() && !is_eip7805 {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/pull/609>
+        //
+        // For `engine_newPayloadV5`
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    built payload does not fall within the time frame of the Amsterdam/EIP7805 fork.
+        //
+        // For `engine_forkchoiceUpdatedV4`
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    built payload does not fall within the time frame of the Amsterdam/EIP7805 fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
@@ -322,24 +340,14 @@ pub const fn validate_il_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V1 |
         EngineApiMessageVersion::V2 |
         EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
             if has_il {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))
             }
         }
-        EngineApiMessageVersion::V5 | EngineApiMessageVersion::V6 => {
-            // NOTE
-            //
-            // the IL is not part of the execution payload, so we only check for the payload
-            // attributes
-            if core::matches!(message_validation_kind, MessageValidationKind::PayloadAttributes) &&
-                !has_il
-            {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoIlPostAmsterdam))
-            }
-        }
+        EngineApiMessageVersion::V6 => {}
     };
 
     Ok(())
