@@ -86,6 +86,19 @@ pub enum StatelessValidationError {
         expected: B256,
     },
 
+    /// Error when the computed pre-storage root does not match the expected one.
+    #[error(
+        "mismatched pre-storage root of account with hash {address_hash}: {got} \n {expected}"
+    )]
+    PreStorageRootMismatch {
+        /// The account address hash
+        address_hash: B256,
+        /// The computed pre-state root
+        got: B256,
+        /// The expected pre-state root from the previous block
+        expected: B256,
+    },
+
     /// Custom error.
     #[error("{0}")]
     Custom(&'static str),

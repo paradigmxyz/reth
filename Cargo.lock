@@ -10679,6 +10679,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-trie-linked"
+version = "1.7.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "itertools 0.14.0",
+ "reth-stateless",
+ "reth-storage-errors",
+ "reth-trie-common",
+ "revm-bytecode",
+ "serde",
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "reth-trie-parallel"
 version = "1.7.0"
 dependencies = [
