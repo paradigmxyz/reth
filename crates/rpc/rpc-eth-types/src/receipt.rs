@@ -9,7 +9,7 @@ use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::{NodePrimitives, TransactionMeta};
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<N, E>(
@@ -51,12 +51,13 @@ where
 }
 
 /// Converter for Ethereum receipts.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct EthReceiptConverter<
     ChainSpec,
     Builder = fn(Receipt, usize, TransactionMeta) -> ReceiptEnvelope<Log>,
 > {
     chain_spec: Arc<ChainSpec>,
+    #[debug(skip)]
     build_rpc_receipt: Builder,
 }
 
@@ -96,7 +97,7 @@ impl<N, ChainSpec, Builder, Rpc> ReceiptConverter<N> for EthReceiptConverter<Cha
 where
     N: NodePrimitives,
     ChainSpec: EthChainSpec + 'static,
-    Builder: Debug + Fn(N::Receipt, usize, TransactionMeta) -> Rpc + 'static,
+    Builder: Fn(N::Receipt, usize, TransactionMeta) -> Rpc + 'static,
 {
     type RpcReceipt = TransactionReceipt<Rpc>;
     type Error = EthApiError;
