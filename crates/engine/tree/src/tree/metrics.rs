@@ -264,7 +264,7 @@ mod tests {
             Ok(ResultAndState::new(
                 ExecutionResult::Success {
                     reason: SuccessReason::Return,
-                    gas_used: 1000,
+                    gas_used: 1000, // Mock gas used
                     gas_refunded: 0,
                     logs: vec![],
                     output: Output::Call(Bytes::from(vec![])),
