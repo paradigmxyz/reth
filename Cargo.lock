@@ -112,8 +112,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -137,8 +137,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-consensus-any"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -151,8 +151,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-contract"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -244,8 +244,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -270,7 +270,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.20.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#13973585d6da5dfea1bd5cbb590294e8ec1db335"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#1fcabc1e65e23b4623c87c644c4b63b1056fdf67"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -290,8 +290,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -303,9 +303,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c8616642b176f21e98e2740e27d28917b5d30d8612450cafff21772d4926bc"
+checksum = "48cf0e627944d913ad4347915afe1c1fb275d4d71e269a77ef31f4ce2016a695"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -329,8 +329,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-rpc"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -343,8 +343,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-network"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -368,8 +368,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-network-primitives"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -381,7 +381,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.20.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#13973585d6da5dfea1bd5cbb590294e8ec1db335"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#1fcabc1e65e23b4623c87c644c4b63b1056fdf67"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -396,9 +396,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-hardforks"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07953246c78130f119855393ba0235d22539c60b6a627f737cdf0ae692f042f6"
+checksum = "0113a49d2cb6549aa491884f61a31555b73ba6045a06c8a08b0049b33c6e765f"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
@@ -421,7 +421,7 @@ dependencies = [
  "foldhash",
  "getrandom 0.3.3",
  "hashbrown 0.15.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "itoa",
  "k256",
  "keccak-asm",
@@ -438,8 +438,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-provider"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -482,8 +482,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-pubsub"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -525,8 +525,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-client"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -550,8 +550,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -562,8 +562,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-admin"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -573,8 +573,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-anvil"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -584,8 +584,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-any"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -594,8 +594,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-beacon"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -612,8 +612,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-debug"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -623,8 +623,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-engine"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -643,8 +643,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-eth"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -664,8 +664,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-mev"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -678,8 +678,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-trace"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -691,8 +691,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-rpc-types-txpool"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -702,8 +702,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-serde"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -713,8 +713,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -727,8 +727,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-signer-local"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -766,7 +766,7 @@ dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
  "heck",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "proc-macro-error2",
  "proc-macro2",
  "quote",
@@ -815,8 +815,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -838,8 +838,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-http"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -852,8 +852,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ipc"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -871,8 +871,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-transport-ws"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -908,8 +908,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-tx-macros"
-version = "1.0.30"
-source = "git+https://github.com/Soubhik-10/alloy?branch=bal#6d870d6fcf0212351b6bb525c85b55007ad2c6df"
+version = "1.0.32"
+source = "git+https://github.com/Soubhik-10/alloy?branch=bal#c89b89a89300fc927cf143edfaf0a0ad787a572d"
 dependencies = [
  "alloy-primitives",
  "darling 0.20.11",
@@ -1670,7 +1670,7 @@ dependencies = [
  "boa_interner",
  "boa_macros",
  "boa_string",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "num-bigint",
  "rustc-hash 2.1.1",
 ]
@@ -1696,7 +1696,7 @@ dependencies = [
  "fast-float2",
  "hashbrown 0.15.5",
  "icu_normalizer 1.5.0",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "intrusive-collections",
  "itertools 0.13.0",
  "num-bigint",
@@ -1742,7 +1742,7 @@ dependencies = [
  "boa_gc",
  "boa_macros",
  "hashbrown 0.15.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "once_cell",
  "phf 0.11.3",
  "rustc-hash 2.1.1",
@@ -1921,11 +1921,11 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.12"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd0b03af37dad7a14518b7691d81acb0f8222604ad3d1b02f6b4bed5188c0cd5"
+checksum = "e1de8bc0aa9e9385ceb3bf0c152e3a9b9544f6c4a912c8ae504e80c1f0368603"
 dependencies = [
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1945,7 +1945,7 @@ checksum = "4acbb09d9ee8e23699b9634375c72795d095bf268439da88562cf9b501f181fa"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.26",
+ "semver 1.0.27",
  "serde",
  "serde_json",
 ]
@@ -1958,7 +1958,7 @@ checksum = "dd5eb614ed4c27c5d706420e4320fbe3216ab31fa1c33cd8246ac36dae4479ba"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.26",
+ "semver 1.0.27",
  "serde",
  "serde_json",
  "thiserror 2.0.16",
@@ -2343,15 +2343,14 @@ dependencies = [
 
 [[package]]
 name = "const-hex"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dccd746bf9b1038c0507b7cec21eb2b11222db96a2902c96e8c185d6d20fb9c4"
+checksum = "b6407bff74dea37e0fa3dc1c1c974e5d46405f0c987bf9997a0762adce71eda6"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "hex",
  "proptest",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -4013,7 +4012,7 @@ dependencies = [
  "js-sys",
  "libc",
  "r-efi",
- "wasi 0.14.5+wasi-0.2.4",
+ "wasi 0.14.7+wasi-0.2.4",
  "wasm-bindgen",
 ]
 
@@ -4131,7 +4130,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "slab",
  "tokio",
  "tokio-util",
@@ -4223,9 +4222,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "hex-conservative"
@@ -4440,9 +4436,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d9b05277c7e8da2c93a568989bb6207bef0112e8d17df7a6eda4a3cf143bc5e"
+checksum = "3c6995591a8f1380fcb4ba966a252a4b29188d51d2b89e3a252f5305be65aea8"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4785,14 +4781,15 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.11.1"
+version = "2.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "206a8042aec68fa4a62e8d3f7aa4ceb508177d9324faf261e1959e495b7a1921"
+checksum = "92119844f513ffa41556430369ab02c295a3578af21cf945caa3e9e0c2481ac3"
 dependencies = [
  "arbitrary",
  "equivalent",
  "hashbrown 0.15.5",
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -5327,9 +5324,9 @@ dependencies = [
 
 [[package]]
 name = "libredox"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "391290121bad3d37fbddad76d8f5d1c1c314cfc646d143d7e07a3086ddff0ce3"
+checksum = "416f7e718bdb06000964960ffa43b4335ad4012ae8b99060261aa4a8088d5ccb"
 dependencies = [
  "bitflags 2.9.4",
  "libc",
@@ -5555,7 +5552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd7399781913e5393588a8d8c6a2867bf85fb38eaf2502fdce465aad2dc6f034"
 dependencies = [
  "base64 0.22.1",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "metrics",
  "metrics-util",
  "quanta",
@@ -5587,7 +5584,7 @@ dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.15.5",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "metrics",
  "ordered-float",
  "quanta",
@@ -6096,7 +6093,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "auto_impl",
  "revm",
@@ -6606,11 +6603,11 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "3.3.0"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edce586971a4dfaa28950c6f18ed55e0406c1ab88bbce2c6f6293a7aaba73d35"
+checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
 dependencies = [
- "toml_edit",
+ "toml_edit 0.23.5",
 ]
 
 [[package]]
@@ -7168,9 +7165,9 @@ dependencies = [
 
 [[package]]
 name = "resolv-conf"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95325155c684b1c89f7765e30bc1c42e4a6da51ca513615660cb8a62ef9a88e3"
+checksum = "6b3789b30bd25ba102de4beabd95d21ac45b69b1be7d14522bab988c526d6799"
 
 [[package]]
 name = "reth"
@@ -10749,7 +10746,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "29.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10767,7 +10764,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.2.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "bitvec",
  "phf 0.13.1",
@@ -10778,7 +10775,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "9.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10795,7 +10792,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "10.1.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10810,7 +10807,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10823,7 +10820,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "auto_impl",
  "either",
@@ -10835,7 +10832,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10853,7 +10850,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "auto_impl",
  "either",
@@ -10890,7 +10887,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "25.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10902,7 +10899,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "27.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10926,7 +10923,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10937,7 +10934,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#177456a4d987ae53672088423f658f1882cced26"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#b16252313fb32125a112d6eec316275e7e061005"
 dependencies = [
  "bitflags 2.9.4",
  "revm-bytecode",
@@ -11168,7 +11165,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver 1.0.26",
+ "semver 1.0.27",
 ]
 
 [[package]]
@@ -11263,9 +11260,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.5"
+version = "0.103.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5a37813727b78798e53c2bec3f5e8fe12a6d6f8389bf9ca7802add4c9905ad8"
+checksum = "8572f3c2cb9934231157b45499fc41e1f58c589fdfb81a844ba873265e80f8eb"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -11457,11 +11454,12 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
+checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 dependencies = [
  "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -11487,9 +11485,9 @@ checksum = "cd0b0ec5f1c1ca621c432a25813d8d60c88abe6d3e08a3eb9cf37d97a0fe3d73"
 
 [[package]]
 name = "serde"
-version = "1.0.221"
+version = "1.0.225"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "341877e04a22458705eb4e131a1508483c877dca2792b3781d4e5d8a6019ec43"
+checksum = "fd6c24dee235d0da097043389623fb913daddf92c76e9f5a1db88607a0bcbd1d"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -11506,18 +11504,18 @@ dependencies = [
 
 [[package]]
 name = "serde_core"
-version = "1.0.221"
+version = "1.0.225"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c459bc0a14c840cb403fc14b148620de1e0778c96ecd6e0c8c3cacb6d8d00fe"
+checksum = "659356f9a0cb1e529b24c01e43ad2bdf520ec4ceaf83047b83ddcc2251f96383"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.221"
+version = "1.0.225"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6185cf75117e20e62b1ff867b9518577271e58abe0037c40bb4794969355ab0"
+checksum = "0ea936adf78b1f766949a4977b91d2f5595825bd6ec079aa9543ad2685fc4516"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11526,14 +11524,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.144"
+version = "1.0.145"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56177480b00303e689183f110b4e727bb4211d692c62d4fcd16d02be93077d40"
+checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "itoa",
  "memchr",
  "ryu",
+ "serde",
  "serde_core",
 ]
 
@@ -11579,7 +11578,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "schemars 0.9.0",
  "schemars 1.0.4",
  "serde",
@@ -12411,8 +12410,8 @@ checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
  "serde",
  "serde_spanned",
- "toml_datetime",
- "toml_edit",
+ "toml_datetime 0.6.11",
+ "toml_edit 0.22.27",
 ]
 
 [[package]]
@@ -12425,16 +12424,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a197c0ec7d131bfc6f7e82c8442ba1595aeab35da7adbf05b6b73cd06a16b6be"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "serde",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.6.11",
  "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.23.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2ad0b7ae9cfeef5605163839cb9221f453399f15cfb5c10be9885fcf56611f9"
+dependencies = [
+ "indexmap 2.11.3",
+ "toml_datetime 0.7.1",
+ "toml_parser",
+ "winnow",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b551886f449aa90d4fe2bdaa9f4a2577ad2dde302c61ecf262d80b116db95c10"
+dependencies = [
  "winnow",
 ]
 
@@ -12474,7 +12503,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hdrhistogram",
- "indexmap 2.11.1",
+ "indexmap 2.11.3",
  "pin-project-lite",
  "slab",
  "sync_wrapper",
@@ -13051,18 +13080,18 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi"
-version = "0.14.5+wasi-0.2.4"
+version = "0.14.7+wasi-0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4494f6290a82f5fe584817a676a34b9d6763e8d9d18204009fb31dceca98fd4"
+checksum = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c"
 dependencies = [
  "wasip2",
 ]
 
 [[package]]
 name = "wasip2"
-version = "1.0.0+wasi-0.2.4"
+version = "1.0.1+wasi-0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03fa2761397e5bd52002cd7e73110c71af2109aca4e521a9f40473fe685b0a24"
+checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
 dependencies = [
  "wit-bindgen",
 ]
@@ -13842,9 +13871,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.45.1"
+version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c573471f125075647d03df72e026074b7203790d41351cd6edc96f46bcccd36"
+checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "write16"

@@ -427,7 +427,7 @@ pub enum ConsensusError {
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
-  
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),
