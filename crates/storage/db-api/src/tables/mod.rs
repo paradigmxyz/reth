@@ -21,8 +21,8 @@ use crate::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
-        StoredBlockBodyIndices, StoredBlockWithdrawals,
+        AccountBeforeTx, BlockNumberHashedAddress, BranchNodeBeforeBlock, ClientVersion,
+        CompactU256, IntegerList, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
 };
@@ -483,6 +483,20 @@ tables! {
     table StoragesTrie {
         type Key = B256;
         type Value = StorageTrieEntry;
+        type SubKey = StoredNibblesSubKey;
+    }
+
+    /// Stores the state of a node in the accounts trie prior to a particular block being executed.
+    table AccountsTrieChangeSets {
+        type Key = BlockNumber;
+        type Value = BranchNodeBeforeBlock;
+        type SubKey = StoredNibbles;
+    }
+
+    /// Stores the state of a node in a storage trie prior to a particular block being executed.
+    table StoragesTrieChangeSets {
+        type Key = BlockNumberHashedAddress;
+        type Value = BranchNodeBeforeBlock;
         type SubKey = StoredNibblesSubKey;
     }
 

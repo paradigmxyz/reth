@@ -20,6 +20,7 @@ pub mod blocks;
 pub mod integer_list;
 pub mod sharded_key;
 pub mod storage_sharded_key;
+pub mod trie;
 
 pub use accounts::*;
 pub use blocks::*;
@@ -29,6 +30,7 @@ pub use reth_db_models::{
     StoredBlockWithdrawals,
 };
 pub use sharded_key::ShardedKey;
+pub use trie::*;
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
@@ -219,6 +221,7 @@ impl_compression_for_compact!(
     TxType,
     StorageEntry,
     BranchNodeCompact,
+    BranchNodeBeforeBlock,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
