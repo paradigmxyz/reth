@@ -548,6 +548,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
+    #[allow(clippy::missing_const_for_fn)]
     fn update_pending_fees_only(
         &mut self,
         new_base_fee: u64,
