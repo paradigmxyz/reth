@@ -89,7 +89,7 @@ where
             Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ConfiguredSparseTrie>>,
         >,
     >,
-    /// Whether to use the parallel sparse trie.
+    /// Whether to disable the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
