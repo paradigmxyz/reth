@@ -48,6 +48,8 @@ tracing.workspace = true
 # errors
 eyre.workspace = true
 
+ringbuffer.workspace = true
+
 [dev-dependencies]
 test-case.workspace = true
 alloy-consensus.workspace = true

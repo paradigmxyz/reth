@@ -9313,6 +9313,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
+ "ringbuffer",
  "serde",
  "serde_json",
  "test-case",

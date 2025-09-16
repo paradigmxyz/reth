@@ -1,8 +1,8 @@
-use crate::{sequence::FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx};
-use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion, PayloadTypes};
+use crate::FlashBlockCompleteSequenceRx;
+use alloy_primitives::B256;
+use reth_node_api::{ConsensusEngineHandle, EngineApiMessageVersion};
 use reth_optimism_payload_builder::OpPayloadTypes;
-use reth_optimism_primitives::{OpBlock, OpPrimitives};
-use reth_primitives_traits::SealedBlock;
+use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tracing::warn;
 
 /// Consensus client that sends FCUs and new payloads using blocks from a [`FlashBlockService`]
@@ -24,27 +24,44 @@ impl FlashBlockConsensusClient {
         Ok(Self { engine_handle, sequence_receiver })
     }
 
+    /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
+    /// started more recently than `offset`), return default zero hash
+    fn get_previous_block_hash(
+        &self,
+        previous_block_hashes: &AllocRingBuffer<B256>,
+        offset: usize,
+    ) -> B256 {
+        *previous_block_hashes
+            .len()
+            .checked_sub(offset)
+            .and_then(|index| previous_block_hashes.get(index))
+            .unwrap_or_default()
+    }
+
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
     pub async fn run(mut self) {
+        let mut previous_block_hashes = AllocRingBuffer::new(64);
+
         loop {
             match self.sequence_receiver.recv().await {
                 Ok(sequence) => {
                     let block_hash = sequence.last().diff.block_hash;
-                    let block = self.sequence_to_block(sequence);
+                    previous_block_hashes.push(block_hash);
 
-                    let payload = OpPayloadTypes::<OpPrimitives>::block_to_payload(
-                        SealedBlock::new_unhashed(block),
-                    );
-
-                    // Send new events to execution client
-                    let _ = self.engine_handle.new_payload(payload).await;
+                    // Load previous block hashes. We're using (head - 32) and (head - 64) as the
+                    // safe and finalized block hashes.
+                    let safe_block_hash = self.get_previous_block_hash(&previous_block_hashes, 32);
+                    let finalized_block_hash =
+                        self.get_previous_block_hash(&previous_block_hashes, 64);
 
                     let state = alloy_rpc_types_engine::ForkchoiceState {
                         head_block_hash: block_hash,
-                        safe_block_hash: block_hash,      // TODO
-                        finalized_block_hash: block_hash, // TODO
+                        safe_block_hash,
+                        finalized_block_hash,
                     };
+
+                    // Send FCU
                     let _ = self
                         .engine_handle
                         .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
@@ -60,9 +77,5 @@ impl FlashBlockConsensusClient {
                 }
             }
         }
-    }
-
-    fn sequence_to_block(&self, _block: FlashBlockCompleteSequence) -> OpBlock {
-        unimplemented!()
     }
 }
