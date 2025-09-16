@@ -12,10 +12,7 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
     ExecutionPayloadV3, PayloadId,
 };
-use op_alloy_consensus::{
-    encode_holocene_extra_data, encode_jovian_extra_data,
-    EIP1559ParamError,
-};
+use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data, EIP1559ParamError};
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
@@ -504,23 +501,41 @@ mod tests {
     #[test]
     fn test_get_extra_data_post_jovian() {
         let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
-            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()), min_base_fee: Some(257), ..Default::default() };
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::from_str("0x0000000800000008").unwrap()),
+                min_base_fee: Some(257),
+                ..Default::default()
+            };
         let extra_data = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[1, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 1, 1]));
+        assert_eq!(
+            extra_data.unwrap(),
+            Bytes::copy_from_slice(&[1, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 1, 1])
+        );
     }
 
     #[test]
     fn test_get_extra_data_post_jovian_default() {
         let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
-            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), min_base_fee: Some(0), ..Default::default() };
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                min_base_fee: Some(0),
+                ..Default::default()
+            };
         let extra_data = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
-        assert_eq!(extra_data.unwrap(), Bytes::copy_from_slice(&[1, 0, 0, 0, 80, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert_eq!(
+            extra_data.unwrap(),
+            Bytes::copy_from_slice(&[1, 0, 0, 0, 80, 0, 0, 0, 60, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
     }
 
     #[test]
     fn test_get_jovian_extra_data_fails_without_min_base_fee() {
         let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
-            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), min_base_fee: None, ..Default::default() };
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                min_base_fee: None,
+                ..Default::default()
+            };
 
         let result = attributes.get_jovian_extra_data(BaseFeeParams::new(80, 60));
         assert_eq!(result.unwrap_err(), EIP1559ParamError::MinBaseFeeNotSet);
@@ -529,10 +544,14 @@ mod tests {
     #[test]
     fn test_min_base_fee_must_be_none_before_jovian() {
         let attributes: OpPayloadBuilderAttributes<OpTransactionSigned> =
-            OpPayloadBuilderAttributes { eip_1559_params: Some(B64::ZERO), min_base_fee: Some(100), ..Default::default() };
+            OpPayloadBuilderAttributes {
+                eip_1559_params: Some(B64::ZERO),
+                min_base_fee: Some(100),
+                ..Default::default()
+            };
 
         // Use Holocene function for pre-Jovian decoding of extra data
         let result = attributes.get_holocene_extra_data(BaseFeeParams::new(80, 60));
         assert_eq!(result.unwrap_err(), EIP1559ParamError::MinBaseFeeMustBeNone);
-    }    
+    }
 }
