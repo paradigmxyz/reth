@@ -882,6 +882,7 @@ mod tests {
         "graniteTime": 51,
         "holoceneTime": 52,
         "isthmusTime": 53,
+        "jovianTime": 54,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -907,6 +908,8 @@ mod tests {
         assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
         let actual_isthmus_timestamp = genesis.config.extra_fields.get("isthmusTime");
         assert_eq!(actual_isthmus_timestamp, Some(serde_json::Value::from(53)).as_ref());
+        let actual_jovian_timestamp = genesis.config.extra_fields.get("jovianTime");
+        assert_eq!(actual_jovian_timestamp, Some(serde_json::Value::from(54)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -931,6 +934,7 @@ mod tests {
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Jovian, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
@@ -939,6 +943,7 @@ mod tests {
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Jovian, 54));
     }
 
     #[test]
@@ -954,6 +959,7 @@ mod tests {
         "graniteTime": 51,
         "holoceneTime": 52,
         "isthmusTime": 53,
+        "jovianTime": 54,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -980,6 +986,8 @@ mod tests {
         assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
         let actual_isthmus_timestamp = genesis.config.extra_fields.get("isthmusTime");
         assert_eq!(actual_isthmus_timestamp, Some(serde_json::Value::from(53)).as_ref());
+        let actual_jovian_timestamp = genesis.config.extra_fields.get("jovianTime");
+        assert_eq!(actual_jovian_timestamp, Some(serde_json::Value::from(54)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -1011,6 +1019,7 @@ mod tests {
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OpHardfork::Jovian, 0));
 
         assert!(chain_spec.is_fork_active_at_block(OpHardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, 20));
@@ -1019,6 +1028,7 @@ mod tests {
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, 50));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Granite, 51));
         assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Holocene, 52));
+        assert!(chain_spec.is_fork_active_at_timestamp(OpHardfork::Jovian, 54));
     }
 
     #[test]

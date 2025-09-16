@@ -4,7 +4,7 @@ pub mod canyon;
 pub mod isthmus;
 
 // Re-export the decode_holocene_base_fee function for compatibility
-pub use reth_optimism_chainspec::decode_holocene_base_fee;
+pub use reth_optimism_chainspec::{decode_holocene_base_fee, decode_jovian_base_fee};
 
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
@@ -209,6 +209,23 @@ mod tests {
         chainspec
     }
 
+    fn jovian_chainspec() -> Arc<OpChainSpec> {
+        let mut hardforks = BASE_SEPOLIA_HARDFORKS.clone();
+        hardforks.insert(OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1800000000));
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
+                paris_block_and_final_difficulty: Some((0, U256::from(0))),
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
+    }
+
     #[test]
     fn test_get_base_fee_pre_holocene() {
         let op_chain_spec = BASE_SEPOLIA.clone();
@@ -316,5 +333,24 @@ mod tests {
 
         body.withdrawals.take();
         validate_body_against_header_op(&chainspec, &body, &header).unwrap_err();
+    }
+
+    #[test]
+    fn test_get_base_fee_jovian_extra_data_set() {
+        let parent = Header {
+            base_fee_per_gas: Some(1),
+            gas_used: 15763614,
+            gas_limit: 144000000,
+            extra_data: Bytes::from_static(&[1, 0, 0, 0, 8, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 1, 1]),
+            timestamp: 1800000000,
+            ..Default::default()
+        };
+
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &jovian_chainspec(),
+            &parent,
+            1800000007,
+        );
+        assert_eq!(base_fee.unwrap(), 257);
     }
 }
