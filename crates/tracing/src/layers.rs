@@ -145,7 +145,12 @@ pub struct FileInfo {
 
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
-    pub fn new(dir: PathBuf, file_name: String, max_size_bytes: u64, max_files: usize) -> Self {
+    pub const fn new(
+        dir: PathBuf,
+        file_name: String,
+        max_size_bytes: u64,
+        max_files: usize,
+    ) -> Self {
         Self {
             dir,
             file_name,
@@ -157,13 +162,13 @@ impl FileInfo {
     }
 
     /// Sets the buffer size for the non-blocking writer.
-    pub fn with_buffer_size(mut self, buffer_size: usize) -> Self {
+    pub const fn with_buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
         self
     }
 
     /// Sets the behavior for when the buffer is full.
-    pub fn with_behavior(mut self, behavior: NonBlockingBehavior) -> Self {
+    pub const fn with_behavior(mut self, behavior: NonBlockingBehavior) -> Self {
         self.behavior = behavior;
         self
     }

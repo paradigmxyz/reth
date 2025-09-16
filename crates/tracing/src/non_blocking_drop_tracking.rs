@@ -10,18 +10,13 @@ use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuar
 use tracing_subscriber::fmt::MakeWriter;
 
 /// Configuration for non-blocking writer behavior.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NonBlockingBehavior {
     /// Drop messages when the buffer is full (default)
+    #[default]
     Drop,
     /// Block the current thread when the buffer is full
     Block,
-}
-
-impl Default for NonBlockingBehavior {
-    fn default() -> Self {
-        Self::Drop
-    }
 }
 
 /// A custom non-blocking writer that tracks dropped messages and allows configurable behavior.
@@ -34,7 +29,7 @@ pub struct NonBlockingDropTracking {
 
 impl NonBlockingDropTracking {
     /// Creates a new instance with the given inner writer and drop counter.
-    pub fn new(
+    pub const fn new(
         inner: NonBlocking,
         drop_count: Arc<AtomicUsize>,
         behavior: NonBlockingBehavior,
@@ -53,7 +48,7 @@ impl NonBlockingDropTracking {
     }
 
     /// Returns the current behavior configuration.
-    pub fn behavior(&self) -> NonBlockingBehavior {
+    pub const fn behavior(&self) -> NonBlockingBehavior {
         self.behavior
     }
 }
@@ -62,7 +57,7 @@ impl io::Write for NonBlockingDropTracking {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.behavior {
             NonBlockingBehavior::Drop => {
-                self.inner.lock().unwrap().write(buf).map_err(|e| {
+                self.inner.lock().unwrap().write(buf).inspect_err(|e| {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         self.drop_count.fetch_add(1, Ordering::Relaxed);
                         // Log the first drop to warn users immediately
@@ -70,7 +65,6 @@ impl io::Write for NonBlockingDropTracking {
                             eprintln!("WARNING: Log messages are being dropped due to full buffer. Consider increasing buffer size or using blocking behavior.");
                         }
                     }
-                    e
                 })
             }
             NonBlockingBehavior::Block => {
@@ -81,7 +75,6 @@ impl io::Write for NonBlockingDropTracking {
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                             // Yield to allow other threads to run
                             std::thread::yield_now();
-                            continue;
                         }
                         Err(e) => return Err(e),
                     }
@@ -154,7 +147,7 @@ impl NonBlockingDropTrackingBuilder {
     }
 
     /// Sets the behavior for when the buffer is full.
-    pub(crate) fn behavior(mut self, behavior: NonBlockingBehavior) -> Self {
+    pub(crate) const fn behavior(mut self, behavior: NonBlockingBehavior) -> Self {
         self.behavior = behavior;
         self
     }
