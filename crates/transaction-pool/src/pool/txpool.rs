@@ -548,7 +548,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
-        fn update_pending_fees_only(
+    fn update_pending_fees_only(
         &mut self,
         new_base_fee: u64,
         new_blob_fee: Option<u128>,
