@@ -526,7 +526,6 @@ fn account_and_storage_trie() {
 
         let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
         assert_eq!(entry.0.to_vec(), vec![0xB]);
-        // Compiler says entry.1 is &BranchNodeCompact, not &Option<BranchNodeCompact>
         let node1c = entry.1;
 
         assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
@@ -586,7 +585,6 @@ fn account_and_storage_trie() {
 
         let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
         assert_eq!(entry.0.to_vec(), vec![0xB]);
-        // Compiler says entry.1 is &BranchNodeCompact, not &Option<BranchNodeCompact>
         let node1d = entry.1;
 
         assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
