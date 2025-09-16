@@ -8,7 +8,6 @@ use reth_primitives_traits::SignerRecoverable;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
 use reth_storage_api::{ProviderReceipt, ProviderTx};
-use std::borrow::Cow;
 
 /// Assembles transaction receipt data w.r.t to network.
 ///
@@ -60,7 +59,7 @@ pub trait LoadReceipt:
                         .map_err(Self::Error::from_eth_err)?
                         .as_recovered_ref(),
                     gas_used: receipt.cumulative_gas_used() - gas_used,
-                    receipt: Cow::Owned(receipt),
+                    receipt,
                     next_log_index,
                     meta,
                 }])?
