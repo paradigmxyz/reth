@@ -21,6 +21,8 @@ reth-zstd-compressors = { workspace = true, optional = true }
 alloy-eips = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-serde = { workspace = true, optional = true }
+alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-rlp.workspace = true
 
 # misc
@@ -83,6 +85,7 @@ serde-bincode-compat = [
 ]
 serde = [
     "dep:serde",
+    "dep:alloy-serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
@@ -92,3 +95,4 @@ serde = [
     "rand_08/serde",
     "secp256k1/serde",
 ]
+rpc = ["dep:alloy-rpc-types-eth"]

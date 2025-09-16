@@ -1,7 +1,9 @@
 //! `EthApiBuilder` implementation
 
-use crate::{eth::core::EthApiInner, EthApi};
-use alloy_network::Ethereum;
+use crate::{
+    eth::{core::EthApiInner, helpers::types::EthereumRpcTypes},
+    EthApi,
+};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
@@ -48,7 +50,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
     EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<EthereumRpcTypes, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
 where
     RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
@@ -115,7 +117,8 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
     }
 }
 
-impl<N, ChainSpec> EthApiBuilder<N, RpcConverter<Ethereum, N::Evm, EthReceiptConverter<ChainSpec>>>
+impl<N, ChainSpec>
+    EthApiBuilder<N, RpcConverter<EthereumRpcTypes, N::Evm, EthReceiptConverter<ChainSpec>>>
 where
     N: RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
 {

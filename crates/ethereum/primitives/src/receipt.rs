@@ -47,17 +47,35 @@ impl<T> TxTy for T where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
-pub struct Receipt<T = TxType> {
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct Receipt<T = TxType, L = Log> {
     /// Receipt type.
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
     pub tx_type: T,
     /// If transaction is executed successfully.
     ///
     /// This is the `statusCode`
+    #[cfg_attr(feature = "serde", serde(with = "alloy_serde::quantity"))]
     pub success: bool,
     /// Gas used
+    #[cfg_attr(feature = "serde", serde(with = "alloy_serde::quantity"))]
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
-    pub logs: Vec<Log>,
+    pub logs: Vec<L>,
+}
+
+#[cfg(feature = "rpc")]
+impl<T> Receipt<T> {
+    /// Converts the logs of the receipt to RPC logs.
+    pub fn into_rpc_logs(
+        self,
+        next_log_index: usize,
+        meta: alloy_consensus::transaction::TransactionMeta,
+    ) -> Receipt<T, alloy_rpc_types_eth::Log> {
+        let Self { tx_type, success, cumulative_gas_used, logs } = self;
+        let logs = alloy_rpc_types_eth::Log::collect_for_receipt(next_log_index, meta, logs);
+        Receipt { tx_type, success, cumulative_gas_used, logs }
+    }
 }
 
 impl<T: TxTy> Receipt<T> {
@@ -260,8 +278,8 @@ impl<T: TxTy> Decodable for Receipt<T> {
     }
 }
 
-impl<T: TxTy> TxReceipt for Receipt<T> {
-    type Log = Log;
+impl<T: TxTy, L: Send + Sync + Clone + Debug + Eq + AsRef<Log>> TxReceipt for Receipt<T, L> {
+    type Log = L;
 
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -272,18 +290,18 @@ impl<T: TxTy> TxReceipt for Receipt<T> {
     }
 
     fn bloom(&self) -> Bloom {
-        alloy_primitives::logs_bloom(self.logs())
+        alloy_primitives::logs_bloom(self.logs.iter().map(|l| l.as_ref()))
     }
 
     fn cumulative_gas_used(&self) -> u64 {
         self.cumulative_gas_used
     }
 
-    fn logs(&self) -> &[Log] {
+    fn logs(&self) -> &[L] {
         &self.logs
     }
 
-    fn into_logs(self) -> Vec<Log> {
+    fn into_logs(self) -> Vec<L> {
         self.logs
     }
 }

@@ -1,13 +1,28 @@
 //! L1 `eth` API types.
 
-use alloy_network::Ethereum;
+use alloy_consensus::{ReceiptWithBloom, TxType};
+use reth_ethereum_primitives::Receipt;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_rpc_convert::RpcConverter;
+use reth_rpc_convert::{RpcConverter, RpcTypes};
 use reth_rpc_eth_types::receipt::EthReceiptConverter;
+
+/// Ethereum specific RPC types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct EthereumRpcTypes;
+
+impl RpcTypes for EthereumRpcTypes {
+    type Header = alloy_rpc_types_eth::Header;
+    type Receipt = alloy_rpc_types_eth::TransactionReceipt<
+        ReceiptWithBloom<Receipt<TxType, alloy_rpc_types_eth::Log>>,
+    >;
+    type TransactionRequest = alloy_rpc_types_eth::TransactionRequest;
+    type TransactionResponse = alloy_rpc_types_eth::Transaction;
+}
 
 /// An [`RpcConverter`] with its generics set to Ethereum specific.
 pub type EthRpcConverter<ChainSpec> =
-    RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
+    RpcConverter<EthereumRpcTypes, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
 
 //tests for simulate
 #[cfg(test)]

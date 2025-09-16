@@ -1240,7 +1240,7 @@ mod tests {
         provider: MockEthProvider,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
-        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<EthereumRpcTypes, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
     > {
         EthApiBuilder::new(
             provider.clone(),

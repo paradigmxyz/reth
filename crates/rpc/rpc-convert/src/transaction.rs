@@ -22,14 +22,14 @@ use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
 };
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
 pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
     /// Primitive receipt.
-    pub receipt: Cow<'a, N::Receipt>,
+    pub receipt: N::Receipt,
     /// Transaction the receipt corresponds to.
     pub tx: Recovered<&'a N::SignedTx>,
     /// Gas used by the transaction.
