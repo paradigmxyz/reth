@@ -660,7 +660,7 @@ where
         //
         // Instead, they will be recomputed on persistence.
         let connects_to_last_persisted =
-            ensure_ok!(self.block_connects_to_last_persisted(ctx, &block));
+            ensure_ok!(self.block_connects_to_last_persisted(&ctx, &block));
         let should_discard_trie_updates =
             !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
         debug!(
@@ -816,7 +816,7 @@ where
     /// This checks the database for the actual last persisted block, not [`PersistenceState`].
     fn block_connects_to_last_persisted(
         &self,
-        ctx: TreeCtx<'_, N>,
+        ctx: &TreeCtx<'_, N>,
         block: &RecoveredBlock<N::Block>,
     ) -> ProviderResult<bool> {
         let provider = self.provider.database_provider_ro()?;

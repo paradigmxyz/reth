@@ -1,6 +1,6 @@
 //! Example tests using the test suite framework.
 
-mod trie_fork_test;
+mod trie_updates_test;
 
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
