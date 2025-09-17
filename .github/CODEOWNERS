@@ -6,7 +6,7 @@ crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @mattsse
 crates/consensus/           @rkrasiuk @mattsse @Rjected
 crates/e2e-test-utils/      @mattsse @Rjected @klkvr @fgimenez
-crates/engine/              @rkrasiuk @mattsse @Rjected @fgimenez @mediocregopher
+crates/engine/              @rkrasiuk @mattsse @Rjected @fgimenez @mediocregopher @yongkangc
 crates/era/                 @mattsse @RomanHodulak
 crates/errors/              @mattsse
 crates/ethereum-forks/      @mattsse @Rjected
