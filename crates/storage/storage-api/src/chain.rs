@@ -204,7 +204,6 @@ where
 #[derive(Debug, Clone, Copy)]
 pub struct EmptyBodyStorage<T, H>(PhantomData<(T, H)>);
 
-/// Implement `Default` so `EmptyBodyStorage` (and aliases like `OpStorage`) can be created easily.
 impl<T, H> Default for EmptyBodyStorage<T, H> {
     fn default() -> Self {
         Self(PhantomData)
