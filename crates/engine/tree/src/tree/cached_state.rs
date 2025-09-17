@@ -129,10 +129,6 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
 }
 
 /// Represents the status of a storage slot in the cache.
-///
-/// The distinction between `NotCached` and `Empty` is crucial for performance:
-/// - `NotCached` means we need to query the database
-/// - `Empty` means we already know the slot is zero (no database query needed)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlotStatus {
     /// The account's storage cache doesn't exist.
