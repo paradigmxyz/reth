@@ -7574,6 +7574,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-engine",
+ "alloy-transport",
  "auto_impl",
  "derive_more",
  "eyre",

@@ -79,8 +79,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
 /// ## RPC Consensus Client
 ///
 /// When `--debug.rpc-consensus-ws <URL>` is provided, the launcher will:
-/// - Connect to an external RPC `WebSocket` endpoint
-/// - Fetch blocks from that endpoint
+/// - Connect to an external RPC endpoint (`WebSocket` or HTTP)
+/// - Fetch blocks from that endpoint (using subscriptions for `WebSocket`, polling for HTTP)
 /// - Submit them to the local engine for execution
 /// - Useful for testing engine behavior with real network data
 ///
@@ -116,11 +116,11 @@ where
         let handle = self.inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(ws_url) = config.debug.rpc_consensus_ws.clone() {
-            info!(target: "reth::cli", "Using RPC WebSocket consensus client: {}", ws_url);
+        if let Some(url) = config.debug.rpc_consensus_url.clone() {
+            info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
             let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(ws_url.as_str(), |block_response| {
+                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
                     let json = serde_json::to_value(block_response)
                         .expect("Block serialization cannot fail");
                     let rpc_block =
