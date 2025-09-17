@@ -551,18 +551,19 @@ impl<T: TransactionOrdering> TxPool<T> {
     #[allow(clippy::missing_const_for_fn)]
     fn update_pending_fees_only(
         &mut self,
-        new_base_fee: u64,
+        mut new_base_fee: u64,
         new_blob_fee: Option<u128>,
     ) -> (u64, u128) {
-        let prev_base_fee = self.all_transactions.pending_fees.base_fee;
-        let prev_blob_fee = self.all_transactions.pending_fees.blob_fee;
+        std::mem::swap(&mut self.all_transactions.pending_fees.base_fee, &mut new_base_fee);
 
-        self.all_transactions.pending_fees.base_fee = new_base_fee;
-        if let Some(blob_fee) = new_blob_fee {
-            self.all_transactions.pending_fees.blob_fee = blob_fee;
-        }
+        let prev_blob_fee = if let Some(mut blob_fee) = new_blob_fee {
+            std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut blob_fee);
+            blob_fee
+        } else {
+            self.all_transactions.pending_fees.blob_fee
+        };
 
-        (prev_base_fee, prev_blob_fee)
+        (new_base_fee, prev_blob_fee)
     }
 
     /// Applies fee-based promotion updates.
