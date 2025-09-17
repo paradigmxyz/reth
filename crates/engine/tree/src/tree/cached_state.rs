@@ -368,9 +368,7 @@ impl ExecutionCache {
     ///
     /// ## Error Handling
     ///
-    /// Returns `Err(())` if the state updates are inconsistent (e.g., modified account
-    /// with `None` info that should have been destroyed). In this case, the entire
-    /// cache update should be discarded to maintain consistency.
+    /// Returns an error if the state updates are inconsistent and should be discarded. 
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
