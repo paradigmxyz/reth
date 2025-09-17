@@ -308,7 +308,10 @@ impl<B: Block> Deref for SealedBlock<B> {
 
 impl<B: Block> Encodable for SealedBlock<B> {
     fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.rlp_length();
+        // Compute payload length as the sum of the header and body payload lengths.
+        // This must exclude the outer list header bytes to be symmetrical with plain Block RLP.
+        let payload_length =
+            alloy_rlp::Encodable::length(self.header()) + alloy_rlp::Encodable::length(self.body());
         alloy_rlp::Header { list: true, payload_length }.encode(out);
         self.header().encode(out);
         self.body().encode(out);
