@@ -180,7 +180,7 @@ mod tests {
     use op_alloy_consensus::OpTxEnvelope;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
-    use reth_optimism_forks::{OpHardfork, OpChainHardforks, chain_hardforks};
+    use reth_optimism_forks::{chain_hardforks, OpChainHardforks, OpHardfork};
     use std::sync::Arc;
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {

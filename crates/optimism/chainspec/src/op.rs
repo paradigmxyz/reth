@@ -6,7 +6,7 @@ use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::{OpHardfork, OpChainHardforks, chain_hardforks};
+use reth_optimism_forks::{chain_hardforks, OpChainHardforks, OpHardfork};
 use reth_primitives_traits::SealedHeader;
 
 /// The Optimism Mainnet spec

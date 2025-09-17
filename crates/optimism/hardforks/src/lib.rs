@@ -20,7 +20,7 @@ extern crate alloc;
 
 // Re-export alloy-op-hardforks types.
 use alloy_op_hardforks::EthereumHardforks;
-pub use alloy_op_hardforks::{OpHardfork, OpHardforks, OpChainHardforks};
+pub use alloy_op_hardforks::{OpChainHardforks, OpHardfork, OpHardforks};
 
 use alloc::vec;
 use alloy_primitives::U256;
@@ -71,7 +71,7 @@ pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
         let fork_condition = op_hardforks.ethereum_fork_activation(*ethereum_hardfork);
         // Add Ethereum hardforks that are activated on the chain.
         if fork_condition != ForkCondition::Never {
-            forks.push((ethereum_hardfork.boxed(), fork_condition));                
+            forks.push((ethereum_hardfork.boxed(), fork_condition));
         }
     }
     for op_hardfork in OpHardfork::VARIANTS {
@@ -87,7 +87,7 @@ pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
 #[cfg(test)]
 mod tests {
     use super::*;
-        /// Optimism mainnet list of hardforks.
+    /// Optimism mainnet list of hardforks.
     static OP_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ChainHardforks::new(vec![
             (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
@@ -259,11 +259,17 @@ mod tests {
 
     #[test]
     fn test_base_mainnet_hardforks() {
-        assert_eq!(chain_hardforks(OpChainHardforks::base_mainnet()), BASE_MAINNET_HARDFORKS.clone());
+        assert_eq!(
+            chain_hardforks(OpChainHardforks::base_mainnet()),
+            BASE_MAINNET_HARDFORKS.clone()
+        );
     }
 
     #[test]
     fn test_base_sepolia_hardforks() {
-        assert_eq!(chain_hardforks(OpChainHardforks::base_sepolia()), BASE_SEPOLIA_HARDFORKS.clone());
+        assert_eq!(
+            chain_hardforks(OpChainHardforks::base_sepolia()),
+            BASE_SEPOLIA_HARDFORKS.clone()
+        );
     }
 }
