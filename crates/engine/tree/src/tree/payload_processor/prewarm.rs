@@ -10,7 +10,7 @@ use crate::tree::{
 };
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
@@ -336,6 +336,8 @@ where
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
+                    // Track transaction execution errors
+                    metrics.transaction_errors.increment(1);
                     // skip error because we can ignore these errors and continue with the next tx
                     continue
                 }
@@ -427,4 +429,6 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+    /// Counter for transaction execution errors during prewarming
+    pub(crate) transaction_errors: Counter,
 }
