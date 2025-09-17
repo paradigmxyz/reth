@@ -356,9 +356,9 @@ impl ExecutionCache {
     /// This method is called after transaction execution to update the cache with
     /// the touched and modified state. The insertion order is critical:
     ///
-    /// 1. **Bytecodes**: Insert contract code first
-    /// 2. **Storage slots**: Update storage values for each account
-    /// 3. **Accounts**: Update account info (nonce, balance, code hash)
+    /// 1. Bytecodes: Insert contract code first
+    /// 2. Storage slots: Update storage values for each account
+    /// 3. Accounts: Update account info (nonce, balance, code hash)
     ///
     /// ## Why This Order Matters
     ///
