@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
@@ -16,6 +16,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
 };
+
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -191,5 +192,76 @@ where
         }
 
         Ok(bodies)
+    }
+}
+
+/// A noop storage for chains that don’t have custom body storage.
+#[derive(Debug, Clone, Copy)]
+pub struct EmptyBodyStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
+
+/// Implement `Default` so `EmptyBodyStorage` (and aliases like `OpStorage`) can be created easily.
+impl<T, H> Default for EmptyBodyStorage<T, H> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
+    for EmptyBodyStorage<T, H>
+where
+    Provider: DBProvider<Tx: DbTxMut>,
+    T: SignedTransaction,
+    H: FullBlockHeader,
+{
+    fn write_block_bodies(
+        &self,
+        _provider: &Provider,
+        _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        _write_to: StorageLocation,
+    ) -> ProviderResult<()> {
+        // noop
+        Ok(())
+    }
+
+    fn remove_block_bodies_above(
+        &self,
+        _provider: &Provider,
+        _block: BlockNumber,
+        _remove_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        // noop
+        Ok(())
+    }
+}
+
+impl<Provider, T, H> BlockBodyReader<Provider> for EmptyBodyStorage<T, H>
+where
+    Provider: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + DBProvider,
+    T: SignedTransaction,
+    H: FullBlockHeader,
+{
+    type Block = alloy_consensus::Block<T, H>;
+
+    fn read_block_bodies(
+        &self,
+        provider: &Provider,
+        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
+    ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
+        let chain_spec = provider.chain_spec();
+
+        Ok(inputs
+            .into_iter()
+            .map(|(header, transactions)| {
+                let withdrawals = chain_spec
+                    .is_shanghai_active_at_timestamp(header.timestamp())
+                    .then(|| Default::default());
+
+                alloy_consensus::BlockBody {
+                    transactions,
+                    ommers: vec![], // Empty storage never has ommers
+                    withdrawals,
+                }
+            })
+            .collect())
     }
 }

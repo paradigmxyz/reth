@@ -9,8 +9,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-extern crate alloc;
-
 mod chain;
 pub use chain::OpStorage;
 
