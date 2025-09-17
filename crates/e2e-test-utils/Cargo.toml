@@ -22,7 +22,7 @@ reth-rpc-eth-api.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-payload-builder-primitives.workspace = true
-reth-payload-primitives.workspace = true
+reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-provider.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true

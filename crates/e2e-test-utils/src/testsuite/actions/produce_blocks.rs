@@ -13,6 +13,7 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionReques
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
+use reth_payload_primitives::PayloadAttributes as PayloadAttributesExt;
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
@@ -60,9 +61,12 @@ fn convert_v2_to_v3(v2_envelope: ExecutionPayloadEnvelopeV2) -> Result<Execution
 /// - If `parent_beacon_block_root` is Some -> use v2 (Cancun)
 /// - If withdrawals is Some -> use v2 (Shanghai)
 /// - Otherwise -> use v1 (Paris)
-const fn determine_fcu_version(payload_attributes: &PayloadAttributes) -> u8 {
+fn determine_fcu_version<A>(payload_attributes: &A) -> u8
+where
+    A: PayloadAttributesExt,
+{
     // Note: v3 is not supported in our test environment, so we use v2 for Cancun
-    if payload_attributes.withdrawals.is_some() {
+    if payload_attributes.withdrawals().is_some() {
         2 // Shanghai/Cancun - use v2
     } else {
         1 // Paris
@@ -113,7 +117,7 @@ where
 impl<Engine> Action<Engine> for AssertMineBlock<Engine>
 where
     Engine: EngineTypes,
-    Engine::PayloadAttributes: Into<PayloadAttributes> + Clone,
+    Engine::PayloadAttributes: PayloadAttributesExt + Clone,
     Engine::ExecutionPayloadEnvelopeV2: Into<ExecutionPayloadEnvelopeV2>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
@@ -150,12 +154,10 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            // Convert to PayloadAttributes for version detection
-            let concrete_attrs: PayloadAttributes = self.payload_attributes.clone().into();
-            let version = determine_fcu_version(&concrete_attrs);
+            let version = determine_fcu_version(&self.payload_attributes);
             debug!("Payload attributes: withdrawals={:?}, parent_beacon_block_root={:?}, FCU version={}",
-                   concrete_attrs.withdrawals.is_some(),
-                   concrete_attrs.parent_beacon_block_root.is_some(),
+                   self.payload_attributes.withdrawals().is_some(),
+                   self.payload_attributes.parent_beacon_block_root().is_some(),
                    version);
 
             let fcu_result = match version {

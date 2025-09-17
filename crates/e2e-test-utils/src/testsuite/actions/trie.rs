@@ -6,6 +6,7 @@ use eyre::Result;
 use reth_node_api::EngineTypes;
 use std::{future::Future, pin::Pin, time::Duration};
 use tokio::time::sleep;
+use tracing::error;
 
 /// Action that asserts whether a block has missing trie updates
 #[derive(Debug)]
