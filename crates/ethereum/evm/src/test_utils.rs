@@ -1,5 +1,5 @@
 use crate::EthEvmConfig;
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_evm::precompiles::PrecompilesMap;
