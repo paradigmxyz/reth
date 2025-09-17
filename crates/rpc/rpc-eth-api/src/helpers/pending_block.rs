@@ -23,8 +23,8 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderBox, StateProviderFactory, noop::NoopProvider,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader,
+    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
