@@ -6,9 +6,9 @@ use crate::{
     Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Sealable};
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
+use alloy_primitives::{Address, BlockHash, Sealed, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
@@ -308,8 +308,10 @@ impl<B: Block> Deref for SealedBlock<B> {
 
 impl<B: Block> Encodable for SealedBlock<B> {
     fn encode(&self, out: &mut dyn BufMut) {
-        // TODO: https://github.com/paradigmxyz/reth/issues/18002
-        self.clone().into_block().encode(out);
+        let payload_length = self.rlp_length();
+        alloy_rlp::Header { list: true, payload_length }.encode(out);
+        self.header().encode(out);
+        self.body().encode(out);
     }
 }
 
@@ -548,6 +550,82 @@ mod tests {
         assert_eq!(sealed_block.hash(), decoded.hash());
         assert_eq!(sealed_block.header().number, decoded.header().number);
         assert_eq!(sealed_block.header().state_root, decoded.header().state_root);
+        assert_eq!(sealed_block.body().transactions.len(), decoded.body().transactions.len());
+    }
+
+    #[test]
+    fn test_sealed_block_encode_equivalence_with_plain_block() {
+        // Construct a sample block (same structure as in roundtrip test)
+        let header = alloy_consensus::Header {
+            parent_hash: B256::ZERO,
+            ommers_hash: B256::ZERO,
+            beneficiary: Address::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            difficulty: Default::default(),
+            number: 7,
+            gas_limit: 30_000_000,
+            gas_used: 21_000,
+            timestamp: 1_234_567,
+            extra_data: Default::default(),
+            mix_hash: B256::ZERO,
+            nonce: Default::default(),
+            base_fee_per_gas: Some(1_000_000_000),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        let tx = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000_000_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: alloy_primitives::U256::from(123),
+            input: alloy_primitives::Bytes::default(),
+        };
+
+        let tx_signed =
+            alloy_consensus::TxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
+                tx,
+                alloy_primitives::Signature::test_signature(),
+                B256::ZERO,
+            ));
+
+        let body = alloy_consensus::BlockBody {
+            transactions: vec![tx_signed],
+            ommers: vec![],
+            withdrawals: Some(Default::default()),
+        };
+
+        let block = alloy_consensus::Block::new(header, body);
+        let sealed_block = SealedBlock::seal_slow(block);
+
+        // Encode sealed block using zero-copy encode implementation
+        let mut encoded_sealed = Vec::new();
+        sealed_block.encode(&mut encoded_sealed);
+
+        // Encode the equivalent plain block
+        let plain_block = sealed_block.clone().into_block();
+        let mut encoded_plain = Vec::new();
+        plain_block.encode(&mut encoded_plain);
+
+        // The encodings must be byte-for-byte identical
+        assert_eq!(encoded_sealed, encoded_plain);
+
+        // Also ensure decoding from sealed encoding roundtrips to an equivalent sealed block
+        let decoded = SealedBlock::<
+            alloy_consensus::Block<alloy_consensus::TxEnvelope, alloy_consensus::Header>,
+        >::decode(&mut encoded_sealed.as_slice())
+        .expect("Failed to decode sealed bytes");
+
+        assert_eq!(sealed_block.hash(), decoded.hash());
+        assert_eq!(sealed_block.header().number, decoded.header().number);
         assert_eq!(sealed_block.body().transactions.len(), decoded.body().transactions.len());
     }
 }
