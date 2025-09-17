@@ -28,8 +28,18 @@ use std::{
 };
 use tracing::{debug, trace, warn};
 
-/// Optimism deposit transaction type (0x7E/126).
-const OPTIMISM_DEPOSIT_TX_TYPE: u8 = 126;
+/// Maximum standard Ethereum transaction type value.
+///
+/// Standard transaction types are:
+/// - Type 0: Legacy transactions (original Ethereum)
+/// - Type 1: EIP-2930 (access list transactions)
+/// - Type 2: EIP-1559 (dynamic fee transactions)
+/// - Type 3: EIP-4844 (blob transactions)
+/// - Type 4: EIP-7702 (set code authorization transactions)
+///
+/// Any transaction with a type > 4 is considered a non-standard/system transaction,
+/// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type 126).
+const MAX_STANDARD_TX_TYPE: u8 = 4;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -113,13 +123,15 @@ where
                 handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
             }
 
-            // Handle first transaction - special case for Optimism deposit / systems txs
+            // Handle first transaction - special case for system transactions
             if let Ok(first_tx) = pending.recv() {
-                if first_tx.tx().is_type(OPTIMISM_DEPOSIT_TX_TYPE) {
-                    // For Optimism chains: The first transaction is always a deposit transaction
-                    // that sets critical metadata (L1 block info, fees) affecting all subsequent
-                    // transactions. We broadcast the first transaction to all workers to ensure
-                    // they have this critical state.
+                // Check if this is a system transaction (type > 4)
+                // System transactions in the first position typically set critical metadata
+                // that affects all subsequent transactions (e.g., L1 block info, fees on L2s).
+                if first_tx.tx().ty() > MAX_STANDARD_TX_TYPE {
+                    // Broadcast system transaction to all workers to ensure they have the
+                    // critical state. This is particularly important for L2s like Optimism
+                    // where the first deposit transaction contains essential block metadata.
                     for handle in &handles {
                         if handle.send(first_tx.clone()).is_err() {
                             warn!(
