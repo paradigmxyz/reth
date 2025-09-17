@@ -103,7 +103,7 @@ impl<B: Block> RecoveredBlock<B> {
         Self { block, senders }
     }
 
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
@@ -216,7 +216,7 @@ impl<B: Block> RecoveredBlock<B> {
         Ok(Self::new(block, senders, hash))
     }
 
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new_sealed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
@@ -230,7 +230,7 @@ impl<B: Block> RecoveredBlock<B> {
         Self::try_new(block, senders, hash)
     }
 
-    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new_sealed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
