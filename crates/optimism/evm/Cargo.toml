@@ -32,6 +32,9 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 
+# Mantle
+reth-mantle-forks.workspace = true
+
 # revm
 revm.workspace = true
 op-revm.workspace = true

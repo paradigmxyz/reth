@@ -25,6 +25,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
+use reth_mantle_forks::MantleHardforks;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader, SignedTransaction};
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
@@ -101,7 +102,7 @@ impl<ChainSpec, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> {
 
 impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
 where
-    ChainSpec: EthChainSpec + OpHardforks,
+    ChainSpec: EthChainSpec + OpHardforks + MantleHardforks,
     N: NodePrimitives<
         Receipt = R::Receipt,
         SignedTx = R::Transaction,

@@ -1,7 +1,7 @@
 use alloy_consensus::BlockHeader;
 use op_revm::OpSpecId;
-use reth_optimism_forks::OpHardforks;
 use revm::primitives::{Address, Bytes, B256};
+use reth_mantle_forks::MantleHardforks;
 
 /// Context relevant for execution of a next block w.r.t OP.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub struct OpNextBlockEnvAttributes {
 }
 
 /// Map the latest active hardfork at the given header to a revm [`OpSpecId`].
-pub fn revm_spec(chain_spec: impl OpHardforks, header: impl BlockHeader) -> OpSpecId {
+pub fn revm_spec(chain_spec: impl MantleHardforks, header: impl BlockHeader) -> OpSpecId {
     revm_spec_by_timestamp_after_bedrock(chain_spec, header.timestamp())
 }
 
@@ -32,10 +32,12 @@ pub fn revm_spec(chain_spec: impl OpHardforks, header: impl BlockHeader) -> OpSp
 /// This is only intended to be used after the Bedrock, when hardforks are activated by
 /// timestamp.
 pub fn revm_spec_by_timestamp_after_bedrock(
-    chain_spec: impl OpHardforks,
+    chain_spec: impl MantleHardforks,
     timestamp: u64,
 ) -> OpSpecId {
-    if chain_spec.is_interop_active_at_timestamp(timestamp) {
+    if chain_spec.is_skadi_active_at_timestamp(timestamp) {
+        OpSpecId::OSAKA
+    } else if chain_spec.is_interop_active_at_timestamp(timestamp) {
         OpSpecId::INTEROP
     } else if chain_spec.is_isthmus_active_at_timestamp(timestamp) {
         OpSpecId::ISTHMUS

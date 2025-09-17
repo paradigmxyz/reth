@@ -6,6 +6,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
+use reth_mantle_forks::MantleHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
@@ -91,7 +92,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks> + StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
@@ -311,7 +312,7 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks> + StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     type Transaction = Tx;

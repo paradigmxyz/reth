@@ -306,8 +306,8 @@ mod test {
                 l1_blob_base_fee_scalar: Some(1014213),
                 operator_fee_scalar: None,
                 operator_fee_constant: None,
+                token_ratio: None,
             },
-            token_ratio: None,
             deposit_nonce: None,
             deposit_receipt_version: None,
         };
@@ -350,6 +350,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
+            token_ratio,
         } = receipt_meta.l1_block_info;
 
         assert_eq!(
@@ -393,6 +394,11 @@ mod test {
             TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.operator_fee_constant,
             "incorrect operator fee constant"
         );
+        assert_eq!(
+            token_ratio,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.token_ratio,
+            "incorrect token ratio"
+        );
     }
 
     // <https://github.com/paradigmxyz/reth/issues/12177>
@@ -432,6 +438,7 @@ mod test {
             l1_blob_base_fee_scalar,
             operator_fee_scalar,
             operator_fee_constant,
+            token_ratio,
         } = receipt_meta.l1_block_info;
 
         assert_eq!(l1_gas_price, Some(14121491676), "incorrect l1 base fee (former gas price)");
@@ -443,5 +450,6 @@ mod test {
         assert_eq!(l1_blob_base_fee_scalar, Some(1055762), "incorrect l1 blob base fee scalar");
         assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
         assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
+        assert_eq!(token_ratio, None, "incorrect token ratio");
     }
 }

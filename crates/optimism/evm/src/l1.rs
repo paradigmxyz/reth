@@ -5,7 +5,7 @@ use alloy_consensus::Transaction;
 use alloy_primitives::{hex, U256};
 use op_revm::L1BlockInfo;
 use reth_execution_errors::BlockExecutionError;
-use reth_optimism_forks::OpHardforks;
+use reth_mantle_forks::MantleHardforks;
 use reth_primitives_traits::BlockBody;
 
 /// The function selector of the "setL1BlockValuesEcotone" function in the `L1Block` contract.
@@ -224,7 +224,7 @@ pub trait RethL1BlockInfo {
     /// - `is_deposit`: Whether or not the transaction is a deposit.
     fn l1_tx_data_fee(
         &mut self,
-        chain_spec: impl OpHardforks,
+        chain_spec: impl MantleHardforks,
         timestamp: u64,
         input: &[u8],
         is_deposit: bool,
@@ -238,7 +238,7 @@ pub trait RethL1BlockInfo {
     /// - `input`: The calldata of the transaction.
     fn l1_data_gas(
         &self,
-        chain_spec: impl OpHardforks,
+        chain_spec: impl MantleHardforks,
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError>;
@@ -247,7 +247,7 @@ pub trait RethL1BlockInfo {
 impl RethL1BlockInfo for L1BlockInfo {
     fn l1_tx_data_fee(
         &mut self,
-        chain_spec: impl OpHardforks,
+        chain_spec: impl MantleHardforks,
         timestamp: u64,
         input: &[u8],
         is_deposit: bool,
@@ -262,7 +262,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 
     fn l1_data_gas(
         &self,
-        chain_spec: impl OpHardforks,
+        chain_spec: impl MantleHardforks,
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {

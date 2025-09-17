@@ -22,6 +22,10 @@ reth-network-peers.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 
+# mantle
+reth-mantle-forks.workspace = true
+alloy-serde.workspace = true
+
 # ethereum
 alloy-chains.workspace = true
 alloy-genesis.workspace = true

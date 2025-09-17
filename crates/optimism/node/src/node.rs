@@ -29,6 +29,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_forks::OpHardforks;
+use reth_mantle_forks::MantleHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -537,7 +538,7 @@ impl<T> OpPoolBuilder<T> {
 
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks + MantleHardforks>>,
     T: EthPoolTransaction<Consensus = TxTy<Node::Types>>
         + MaybeConditionalTransaction
         + MaybeInteropTransaction,

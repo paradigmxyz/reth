@@ -1,0 +1,35 @@
+[package]
+name = "reth-mantle-forks"
+description = "Mantle network hardfork definitions and utilities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository = "https://github.com/paradigmxyz/reth"
+homepage = "https://reth.rs"
+keywords = ["mantle", "hardfork", "blockchain", "ethereum"]
+categories = ["cryptography::cryptocurrencies"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Core dependencies
+alloy-chains = { workspace = true }
+alloy-hardforks = { workspace = true }
+# alloy-primitives = { workspace = true }
+
+# Reth dependencies
+# reth-chainspec = { workspace = true }
+# reth-ethereum-forks = { workspace = true }
+reth-optimism-forks = { workspace = true }
+
+auto_impl.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+serde = [
+	"dep:serde",
+	"alloy-hardforks/serde"
+]

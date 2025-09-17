@@ -14,6 +14,7 @@ use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{Receipt, SignedTransaction};
+use reth_mantle_forks::MantleHardforks;
 
 /// Block builder for Optimism.
 #[derive(Debug)]
@@ -36,7 +37,7 @@ impl<ChainSpec> Clone for OpBlockAssembler<ChainSpec> {
 
 impl<F, ChainSpec> BlockAssembler<F> for OpBlockAssembler<ChainSpec>
 where
-    ChainSpec: OpHardforks,
+    ChainSpec: OpHardforks + MantleHardforks,
     F: for<'a> BlockExecutorFactory<
         ExecutionCtx<'a> = OpBlockExecutionCtx,
         Transaction: SignedTransaction,
@@ -69,7 +70,7 @@ where
 
         let mut requests_hash = None;
 
-        let withdrawals_root = if self.chain_spec.is_isthmus_active_at_timestamp(timestamp) {
+        let withdrawals_root = if self.chain_spec.is_skadi_active_at_timestamp(timestamp) {
             // always empty requests hash post isthmus
             requests_hash = Some(EMPTY_REQUESTS_HASH);
 
@@ -86,7 +87,7 @@ where
         };
 
         let (excess_blob_gas, blob_gas_used) =
-            if self.chain_spec.is_ecotone_active_at_timestamp(timestamp) {
+            if self.chain_spec.is_skadi_active_at_timestamp(timestamp) {
                 (Some(0), Some(0))
             } else {
                 (None, None)

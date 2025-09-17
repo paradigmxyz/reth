@@ -55,6 +55,9 @@ alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
+# Mantle
+reth-mantle-forks.workspace = true
+
 # misc
 clap.workspace = true
 serde.workspace = true

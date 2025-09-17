@@ -39,6 +39,7 @@ pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+mod mantle;
 
 #[cfg(feature = "superchain-configs")]
 mod superchain;
@@ -51,7 +52,7 @@ pub use op_sepolia::OP_SEPOLIA;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{proofs::storage_root_unhashed, Header};
+use alloy_consensus::{proofs::{storage_root_unhashed}, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
@@ -67,7 +68,9 @@ use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
+use reth_mantle_forks::{MantleHardfork, MantleHardforks};
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+use crate::mantle::MantleChainInfo;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -320,12 +323,19 @@ impl OpHardforks for OpChainSpec {
     }
 }
 
+impl MantleHardforks for OpChainSpec {
+    fn mantle_fork_activation(&self, fork: MantleHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+}
+
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
         use reth_optimism_forks::OpHardfork;
         let optimism_genesis_info = OpGenesisInfo::extract_from(&genesis);
         let genesis_info =
             optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
+        let mantle_genesis_info = optimism_genesis_info.mantle_chain_info.unwrap_or_default().genesis_info.unwrap_or_default();
 
         // Block-based hardforks
         let hardfork_opts = [
@@ -362,11 +372,12 @@ impl From<Genesis> for OpChainSpec {
         // Time-based hardforks
         let time_hardfork_opts = [
             // L1
-            // we need to map the L1 hardforks to the activation timestamps of the correspondong op
+            // we need to map the L1 hardforks to the activation timestamps of the corresponding mantle
             // hardforks
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (EthereumHardfork::Cancun.boxed(), genesis_info.ecotone_time),
-            (EthereumHardfork::Prague.boxed(), genesis_info.isthmus_time),
+            (EthereumHardfork::Shanghai.boxed(), mantle_genesis_info.mantle_skadi_time),
+            (EthereumHardfork::Cancun.boxed(), mantle_genesis_info.mantle_skadi_time),
+            (EthereumHardfork::Prague.boxed(), mantle_genesis_info.mantle_skadi_time),
+            
             // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
             (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
@@ -376,6 +387,9 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
+            
+            // Mantle
+            (MantleHardfork::Skadi.boxed(), mantle_genesis_info.mantle_skadi_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -428,6 +442,7 @@ impl From<ChainSpec> for OpChainSpec {
 
 #[derive(Default, Debug)]
 struct OpGenesisInfo {
+    mantle_chain_info: Option<MantleChainInfo>,
     optimism_chain_info: op_alloy_rpc_types::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
 }
@@ -435,6 +450,7 @@ struct OpGenesisInfo {
 impl OpGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut info = Self {
+            mantle_chain_info: MantleChainInfo::extract_from(&genesis.config.extra_fields),
             optimism_chain_info: op_alloy_rpc_types::OpChainInfo::extract_from(
                 &genesis.config.extra_fields,
             )
@@ -480,11 +496,17 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
     // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
+    if hardforks.fork(MantleHardfork::Skadi).active_at_timestamp(header.timestamp) {
         if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
             if let Some(storage) = &predeploy.storage {
                 header.withdrawals_root =
-                    Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
+                    Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
+                        if v.is_zero() {
+                            None
+                        } else {
+                            Some((*k, (*v).into()))
+                        }
+                    })));
             }
         }
     }
@@ -502,6 +524,45 @@ mod tests {
     use reth_optimism_forks::{OpHardfork, OpHardforks};
 
     use crate::*;
+
+    #[test]
+    fn test_storage_root_consistency() {
+        use alloy_primitives::{B256, U256};
+        use std::str::FromStr;
+
+        let k1 =
+            B256::from_str("0x0000000000000000000000000000000000000000000000000000000000000001")
+                .unwrap();
+        let v1 =
+            U256::from_str("0x0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let k2 =
+            B256::from_str("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
+                .unwrap();
+        let v2 =
+            U256::from_str("0x000000000000000000000000c0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d3c0d30016")
+                .unwrap();
+        let k3 =
+            B256::from_str("0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103")
+                .unwrap();
+        let v3 =
+            U256::from_str("0x0000000000000000000000004200000000000000000000000000000000000018")
+                .unwrap();
+        let origin_root =
+            B256::from_str("0x5d5ba3a8093ede3901ad7a569edfb7b9aecafa54730ba0bf069147cbcc00e345")
+                .unwrap();
+        let expected_root =
+            B256::from_str("0x8ed4baae3a927be3dea54996b4d5899f8c01e7594bf50b17dc1e741388ce3d12")
+                .unwrap();
+
+        let storage_origin = vec![(k1, v1), (k2, v2), (k3, v3)];
+        let storage_fix = vec![(k2, v2), (k3, v3)];
+        let root_origin = storage_root_unhashed(storage_origin);
+        let root_fix = storage_root_unhashed(storage_fix);
+        assert_ne!(root_origin, root_fix);
+        assert_eq!(root_origin, origin_root);
+        assert_eq!(root_fix, expected_root);
+    }
 
     #[test]
     fn base_mainnet_forkids() {
