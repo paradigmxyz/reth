@@ -116,7 +116,12 @@ impl BlockCache {
                 self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
 
-            self.highest_committed_block_height = Some(committed_chain.tip().number());
+            let tip = committed_chain.tip().number();
+            let first = committed_chain.first().number();
+            self.highest_committed_block_height =
+                Some(self.highest_committed_block_height.map_or(tip, |h| h.max(tip)));
+            self.lowest_committed_block_height =
+                Some(self.lowest_committed_block_height.map_or(first, |l| l.min(first)));
         }
     }
 
