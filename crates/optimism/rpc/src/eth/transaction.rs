@@ -9,7 +9,10 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
 use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction},
+    helpers::{
+        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
+        LoadReceipt, LoadTransaction,
+    },
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
 };
@@ -97,15 +100,9 @@ where
                         // issue. See: https://github.com/paradigmxyz/reth/issues/18529
                         let meta = tx.meta();
                         let all_receipts = &block_and_receipts.receipts;
-                        let mut gas_used = 0;
-                        let mut next_log_index = 0;
 
-                        if meta.index > 0 {
-                            for r in all_receipts.iter().take(meta.index as usize) {
-                                gas_used = r.cumulative_gas_used();
-                                next_log_index += r.logs().len();
-                            }
-                        }
+                        let (gas_used, next_log_index) =
+                            calculate_gas_used_and_next_log_index(meta.index, all_receipts);
 
                         return Ok(Some(
                             this.tx_resp_builder()
