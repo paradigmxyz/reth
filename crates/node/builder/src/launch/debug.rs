@@ -116,16 +116,16 @@ where
         let handle = self.inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(ws_url) = config.debug.rpc_consensus_ws.clone() {
-            let con_type = if ws_url.starts_with("ws://") || ws_url.starts_with("wss://") {
+        if let Some(url) = config.debug.rpc_consensus_url.clone() {
+            let con_type = if url.starts_with("ws://") || url.starts_with("wss://") {
                 "WebSocket"
             } else {
                 "HTTP"
             };
-            info!(target: "reth::cli", "Using RPC {} consensus client: {}", con_type, ws_url);
+            info!(target: "reth::cli", "Using RPC {} consensus client: {}", con_type, url);
 
             let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(ws_url.as_str(), |block_response| {
+                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
                     let json = serde_json::to_value(block_response)
                         .expect("Block serialization cannot fail");
                     let rpc_block =
