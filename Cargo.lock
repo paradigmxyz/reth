@@ -9518,14 +9518,8 @@ name = "reth-optimism-storage"
 version = "1.7.0"
 dependencies = [
  "alloy-consensus",
- "alloy-primitives",
- "reth-chainspec",
  "reth-codecs",
- "reth-db-api",
- "reth-node-api",
  "reth-optimism-primitives",
- "reth-primitives-traits",
- "reth-provider",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
