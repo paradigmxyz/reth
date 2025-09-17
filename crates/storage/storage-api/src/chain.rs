@@ -1,7 +1,6 @@
 use crate::{DBProvider, StorageLocation};
 use alloc::vec::Vec;
 use alloy_consensus::Header;
-use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -17,7 +16,6 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
 };
-
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -256,14 +254,12 @@ where
         Ok(inputs
             .into_iter()
             .map(|(header, transactions)| {
-                let withdrawals: Option<Withdrawals> = chain_spec
-                    .is_shanghai_active_at_timestamp(header.timestamp())
-                    .then(Default::default);
-
                 alloy_consensus::BlockBody {
                     transactions,
                     ommers: vec![], // Empty storage never has ommers
-                    withdrawals,
+                    withdrawals: chain_spec
+                        .is_shanghai_active_at_timestamp(header.timestamp())
+                        .then(Default::default),
                 }
             })
             .collect())
