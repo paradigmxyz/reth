@@ -496,7 +496,7 @@ impl DatabaseEnv {
     /// after the default [`Self::create_tables`] are created.
     pub fn create_tables_for<TS: TableSet>(mut self: &mut Arc<Self>) -> Result<(), DatabaseError> {
         let handles = self._create_tables::<TS>()?;
-        if let Some(db) = Arc::get_mut(&mut self) {
+        if let Some(db) = Arc::get_mut(self) {
             // Note: The db is unique and the dbis as well, and they can also be cloned.
             let dbis = Arc::make_mut(&mut db.dbis);
             dbis.extend(handles);
