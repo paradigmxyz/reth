@@ -1,23 +1,4 @@
 //! Execution cache implementation for block processing.
-//!
-//! This module provides a caching layer on top of state providers to optimize
-//! state access during block execution. The cache system works in conjunction
-//! with prewarming to improve performance.
-//!
-//! ## Architecture
-//!
-//! The caching system consists of:
-//! - [`ExecutionCache`]: Main cache structure holding account, storage, and bytecode caches
-//! - [`CachedStateProvider`]: Wrapper that adds caching to any [`StateProvider`]
-//! - [`AccountStorageCache`]: Hierarchical storage cache organized by account
-//! - [`SlotStatus`]: Enum representing cache hit/miss status for storage slots
-//!
-//! ## Cache Behavior
-//!
-//! On read: checks cache first, returns cached value on hit, fetches from
-//! underlying provider on miss and caches the result.
-//!
-//! On write: after execution, touched state is inserted via [`ExecutionCache::insert_state`].
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
