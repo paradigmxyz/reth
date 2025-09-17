@@ -300,7 +300,7 @@ pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Cache<B256, Option<Bytecode>>,
 
-    /// Hierarchical storage cache organized by account address.
+    /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s storage slots.
     storage_cache: Cache<Address, AccountStorageCache>,
 
     /// Cache for basic account information (nonce, balance, code hash).
