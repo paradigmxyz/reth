@@ -23,6 +23,7 @@ use reth_provider::{
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
     trie::StatelessSparseTrie, validation::stateless_validation_with_trie, ExecutionWitness,
+    UncompressedPublicKey,
 };
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -387,7 +388,7 @@ fn pre_execution_checks(
 }
 
 /// Recover public keys from transaction signatures.
-fn recover_signers<'a, I>(txs: I) -> Result<Vec<VerifyingKey>, Box<dyn std::error::Error>>
+fn recover_signers<'a, I>(txs: I) -> Result<Vec<UncompressedPublicKey>, Box<dyn std::error::Error>>
 where
     I: IntoIterator<Item = &'a TransactionSigned>,
 {
@@ -396,9 +397,10 @@ where
         .map(|(i, tx)| {
             tx.signature()
                 .recover_from_prehash(&tx.signature_hash())
+                .map(|keys| keys.to_encoded_point(false).as_bytes().try_into().unwrap())
                 .map_err(|e| format!("failed to recover signature for tx #{i}: {e}").into())
         })
-        .collect::<Result<Vec<_>, _>>()
+        .collect::<Result<Vec<UncompressedPublicKey>, _>>()
 }
 
 /// Returns whether the test at the given path should be skipped.
