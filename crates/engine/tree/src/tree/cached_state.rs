@@ -300,7 +300,8 @@ pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Cache<B256, Option<Bytecode>>,
 
-    /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s storage slots.
+    /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s
+    /// storage slots.
     storage_cache: Cache<Address, AccountStorageCache>,
 
     /// Cache for basic account information (nonce, balance, code hash).
@@ -363,7 +364,7 @@ impl ExecutionCache {
     ///
     /// ## Error Handling
     ///
-    /// Returns an error if the state updates are inconsistent and should be discarded. 
+    /// Returns an error if the state updates are inconsistent and should be discarded.
     pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
         // Insert bytecodes
         for (code_hash, bytecode) in &state_updates.contracts {
