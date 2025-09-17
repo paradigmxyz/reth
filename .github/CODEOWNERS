@@ -38,7 +38,7 @@ crates/storage/provider/    @rakita @joshieDo @shekhirin
 crates/storage/storage-api/ @joshieDo @rkrasiuk
 crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez
-crates/transaction-pool/    @mattsse
+crates/transaction-pool/    @mattsse @yongkangc
 crates/trie/                @rkrasiuk @Rjected @shekhirin @mediocregopher
 etc/                        @Rjected @shekhirin
 .github/                    @gakonst @DaniPopes
