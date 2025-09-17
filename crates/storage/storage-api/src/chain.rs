@@ -1,6 +1,7 @@
 use crate::{DBProvider, StorageLocation};
 use alloc::vec::Vec;
 use alloy_consensus::Header;
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -197,12 +198,12 @@ where
 
 /// A noop storage for chains that don’t have custom body storage.
 #[derive(Debug, Clone, Copy)]
-pub struct EmptyBodyStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
+pub struct EmptyBodyStorage<T, H>(PhantomData<(T, H)>);
 
 /// Implement `Default` so `EmptyBodyStorage` (and aliases like `OpStorage`) can be created easily.
 impl<T, H> Default for EmptyBodyStorage<T, H> {
     fn default() -> Self {
-        Self(Default::default())
+        Self(PhantomData)
     }
 }
 
@@ -252,9 +253,9 @@ where
         Ok(inputs
             .into_iter()
             .map(|(header, transactions)| {
-                let withdrawals = chain_spec
+                let withdrawals: Option<Withdrawals> = chain_spec
                     .is_shanghai_active_at_timestamp(header.timestamp())
-                    .then(|| Default::default());
+                    .then(Default::default);
 
                 alloy_consensus::BlockBody {
                     transactions,
