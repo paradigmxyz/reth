@@ -1,10 +1,10 @@
 use crate::BlockProvider;
 use alloy_consensus::BlockHeader;
 use alloy_provider::{Network, Provider, ProviderBuilder};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reth_node_api::Block;
 use reth_tracing::tracing::warn;
-use std::{sync::Arc, time::Duration};
+use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::Sender, time::interval};
 
 /// Block provider that fetches new blocks from an RPC endpoint.
@@ -40,58 +40,45 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         self.interval = interval;
         self
     }
-}
 
-impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
-where
-    PrimitiveBlock: Block + 'static,
-{
-    type Block = PrimitiveBlock;
-
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        if self.is_websocket {
-            let mut stream = match self.provider.subscribe_blocks().await {
-                Ok(sub) => sub.into_stream(),
-                Err(err) => {
-                    warn!(
-                        target: "consensus::debug-client",
-                        %err,
-                        url=%self.url,
-                        "Failed to subscribe to blocks",
-                    );
-                    return;
-                }
-            };
-            while let Some(header) = stream.next().await {
-                match self.get_block(header.number()).await {
-                    Ok(block) => {
-                        if tx.send(block).await.is_err() {
-                            // Channel closed.
-                            break;
-                        }
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: "consensus::debug-client",
-                            %err,
-                            url=%self.url,
-                            "Failed to fetch a block",
-                        );
-                    }
-                }
+    /// Creates a stream of block numbers for `WebSocket` connections.
+    async fn websocket_block_stream(&self) -> Pin<Box<dyn Stream<Item = u64> + Send + '_>> {
+        let stream = match self.provider.subscribe_blocks().await {
+            Ok(sub) => sub.into_stream(),
+            Err(err) => {
+                warn!(
+                    target: "consensus::debug-client",
+                    %err,
+                    url=%self.url,
+                    "Failed to subscribe to blocks",
+                );
+                return Box::pin(futures::stream::empty());
             }
-        } else {
+        };
+
+        Box::pin(stream.map(|header| header.number()))
+    }
+
+    /// Creates a stream of block numbers for HTTP connections using polling.
+    fn http_block_stream(&self) -> Pin<Box<dyn Stream<Item = u64> + Send + '_>> {
+        let provider = self.provider.clone();
+        let url = self.url.clone();
+        let interval_duration = self.interval;
+
+        Box::pin(async_stream::stream! {
             let mut last_block_number: Option<u64> = None;
-            let mut interval = interval(self.interval);
+            let mut interval = interval(interval_duration);
+
             loop {
                 interval.tick().await;
-                let block_number = match self.provider.get_block_number().await {
+
+                let block_number = match provider.get_block_number().await {
                     Ok(number) => number,
                     Err(err) => {
                         warn!(
                             target: "consensus::debug-client",
                             %err,
-                            url=%self.url,
+                            url=%url,
                             "Failed to get latest block number",
                         );
                         continue;
@@ -102,25 +89,43 @@ where
                     continue;
                 }
 
-                let block = match self.get_block(block_number).await {
-                    Ok(block) => block,
-                    Err(err) => {
-                        warn!(
-                            target: "consensus::debug-client",
-                            %err,
-                            url=%self.url,
-                            "Failed to fetch a block",
-                        );
-                        continue;
-                    }
-                };
-
-                if tx.send(block).await.is_err() {
-                    // Channel closed.
-                    break;
-                }
-
+                yield block_number;
                 last_block_number = Some(block_number);
+            }
+        })
+    }
+}
+
+impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
+where
+    PrimitiveBlock: Block + 'static,
+{
+    type Block = PrimitiveBlock;
+
+    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
+        let mut block_stream = if self.is_websocket {
+            self.websocket_block_stream().await
+        } else {
+            self.http_block_stream()
+        };
+
+        while let Some(block_number) = block_stream.next().await {
+            match self.get_block(block_number).await {
+                Ok(block) => {
+                    if tx.send(block).await.is_err() {
+                        // Channel closed.
+                        break;
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        target: "consensus::debug-client",
+                        %err,
+                        url=%self.url,
+                        block_number=%block_number,
+                        "Failed to fetch block",
+                    );
+                }
             }
         }
     }
