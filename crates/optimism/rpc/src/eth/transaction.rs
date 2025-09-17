@@ -93,8 +93,8 @@ where
                     {
                         // Build tx receipt from pending block and receipts directly inline.
                         // This avoids canonical cache lookup that would be done by the
-                        // `build_transaction_receipt` which would result in a block not found issue.
-                        // See: https://github.com/paradigmxyz/reth/issues/18529 
+                        // `build_transaction_receipt` which would result in a block not found
+                        // issue. See: https://github.com/paradigmxyz/reth/issues/18529
                         let meta = tx.meta();
                         let all_receipts = &block_and_receipts.receipts;
                         let mut gas_used = 0;
