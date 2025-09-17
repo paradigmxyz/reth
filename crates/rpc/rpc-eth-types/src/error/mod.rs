@@ -7,6 +7,7 @@ use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
+use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
@@ -24,6 +25,7 @@ use revm::context_interface::result::{
 };
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
+use tokio::sync::oneshot::error::RecvError;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -35,6 +37,19 @@ pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
 impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
     fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
         self.clone()
+    }
+}
+
+impl ToRpcError for RpcError<TransportErrorKind> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+        match self {
+            Self::ErrorResp(payload) => jsonrpsee_types::error::ErrorObject::owned(
+                payload.code as i32,
+                payload.message.clone(),
+                payload.data.clone(),
+            ),
+            err => internal_rpc_err(err.to_string()),
+        }
     }
 }
 
@@ -166,6 +181,12 @@ pub enum EthApiError {
         /// Duration that was waited before timing out
         duration: Duration,
     },
+    /// Error thrown when batch tx response channel fails
+    #[error(transparent)]
+    BatchTxRecvError(#[from] RecvError),
+    /// Error thrown when batch tx send channel fails
+    #[error("Batch transaction sender channel closed")]
+    BatchTxSendError,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -179,7 +200,13 @@ impl EthApiError {
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
     pub const fn is_gas_too_high(&self) -> bool {
-        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+        matches!(
+            self,
+            Self::InvalidTransaction(
+                RpcInvalidTransactionError::GasTooHigh |
+                    RpcInvalidTransactionError::GasLimitTooHigh
+            )
+        )
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooLow`]
@@ -262,9 +289,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     block_id_to_str(end_id),
                 ),
             ),
-            err @ EthApiError::TransactionConfirmationTimeout { .. } => {
-                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), err.to_string())
-            }
+            err @ EthApiError::TransactionConfirmationTimeout { .. } => rpc_error_with_code(
+                EthRpcErrorCode::TransactionConfirmationTimeout.code(),
+                err.to_string(),
+            ),
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
@@ -279,6 +307,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+            EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxSendError => {
+                internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
         }
     }
 }

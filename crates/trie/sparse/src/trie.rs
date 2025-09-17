@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -42,7 +42,7 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum SparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
@@ -130,6 +130,13 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// ```
     pub const fn blind() -> Self {
         Self::Blind(None)
+    }
+
+    /// Creates a new blind sparse trie, clearing and later reusing the given
+    /// [`SparseTrieInterface`].
+    pub fn blind_from(mut trie: T) -> Self {
+        trie.clear();
+        Self::Blind(Some(Box::new(trie)))
     }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
@@ -419,6 +426,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?path, ?node, ?masks, "reveal_node called");
+
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
@@ -570,6 +579,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, ?value, "update_leaf called");
+
         self.prefix_set.insert(full_path);
         let existing = self.values.insert(full_path, value);
         if existing.is_some() {
@@ -636,6 +647,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
+                                debug!(
+                                    target: "trie::sparse",
+                                    leaf_full_path = ?full_path,
+                                    child_path = ?current,
+                                    "Extension node child not revealed in update_leaf, falling back to db",
+                                );
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                     provider.trie_node(&current)?
                                 {
@@ -700,6 +717,8 @@ impl SparseTrieInterface for SerialSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        trace!(target: "trie::sparse", ?full_path, "remove_leaf called");
+
         if self.values.remove(full_path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {
                 // Leaf is present in the trie, but it's blinded.
@@ -803,7 +822,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
+                            debug!(
+                                target: "trie::sparse",
+                                ?child_path,
+                                leaf_full_path = ?full_path,
+                                "Branch node child not revealed in remove_leaf, falling back to db",
+                            );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&child_path)?
                             {
@@ -1921,8 +1945,6 @@ impl SparseTrieUpdates {
 mod find_leaf_tests {
     use super::*;
     use crate::provider::DefaultTrieNodeProvider;
-    use alloy_primitives::map::foldhash::fast::RandomState;
-    // Assuming this exists
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
@@ -2085,7 +2107,7 @@ mod find_leaf_tests {
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = alloy_primitives::map::HashMap::with_hasher(RandomState::default());
+        let mut nodes = alloy_primitives::map::HashMap::default();
         // Create path to the blinded node
         nodes.insert(
             Nibbles::default(),
@@ -2126,7 +2148,7 @@ mod find_leaf_tests {
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
-        let mut nodes = HashMap::with_hasher(RandomState::default());
+        let mut nodes = HashMap::default();
 
         // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
         // So we set Bit 1 and Bit 5 in the state_mask
@@ -2141,7 +2163,7 @@ mod find_leaf_tests {
             SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
         );
 
-        let mut values = HashMap::with_hasher(RandomState::default());
+        let mut values = HashMap::default();
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = SerialSparseTrie {
@@ -2286,8 +2308,8 @@ mod tests {
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
         prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
-        let walker =
-            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let walker = TrieWalker::<_>::state_trie(trie_cursor, prefix_set.freeze())
+            .with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))

@@ -96,15 +96,6 @@ pub trait StateProvider:
 pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
-/// Trait implemented for database providers that can provide the [`reth_trie_db::StateCommitment`]
-/// type.
-#[cfg(feature = "db-api")]
-pub trait StateCommitmentProvider: Send + Sync {
-    /// The [`reth_trie_db::StateCommitment`] type that can be used to perform state commitment
-    /// operations.
-    type StateCommitment: reth_trie_db::StateCommitment;
-}
-
 /// Trait that provides the hashed state from various sources.
 #[auto_impl(&, Arc, Box)]
 pub trait HashedPostStateProvider: Send + Sync {
@@ -203,4 +194,9 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     /// If the block couldn't be found, returns `None`.
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
+
+    /// Returns a pending [`StateProvider`] if it exists.
+    ///
+    /// This will return `None` if there's no pending state.
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>>;
 }

@@ -145,10 +145,7 @@ where
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()>
-    where
-        N: NodePrimitives,
-    {
+    ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
@@ -159,7 +156,7 @@ where
 
         // Take the bundle state
         let mut db = executor.into_state();
-        let mut bundle_state = db.take_bundle();
+        let bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = Vec::default();
@@ -251,20 +248,10 @@ where
 
         // The bundle state after re-execution should match the original one.
         //
-        // NOTE: This should not be needed if `Reverts` had a comparison method that sorted first,
-        // or otherwise did not care about order.
+        // Reverts now supports order-independent equality, so we can compare directly without
+        // sorting the reverts vectors.
         //
-        // See: https://github.com/bluealloy/revm/issues/1813
-        let mut output = output.clone();
-        for reverts in output.state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
-        // We also have to sort the `bundle_state` reverts
-        for reverts in bundle_state.reverts.iter_mut() {
-            reverts.sort_by(|left, right| left.0.cmp(&right.0));
-        }
-
+        // See: https://github.com/bluealloy/revm/pull/1827
         if bundle_state != output.state {
             let original_path = self.save_file(
                 format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),

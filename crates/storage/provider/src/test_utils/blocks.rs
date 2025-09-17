@@ -366,7 +366,7 @@ fn block4(
     for idx in address_range {
         let address = Address::with_last_byte(idx);
         // increase balance for every even account and destroy every odd
-        bundle_state_builder = if idx % 2 == 0 {
+        bundle_state_builder = if idx.is_multiple_of(2) {
             bundle_state_builder
                 .state_present_account_info(
                     address,
@@ -462,7 +462,7 @@ fn block5(
                     .map(|slot| (U256::from(slot), (U256::from(slot), U256::from(slot * 4))))
                     .collect(),
             );
-        bundle_state_builder = if idx % 2 == 0 {
+        bundle_state_builder = if idx.is_multiple_of(2) {
             bundle_state_builder
                 .revert_account_info(
                     number,

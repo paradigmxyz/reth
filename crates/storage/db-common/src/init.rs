@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{map::HashMap, Address, B256, U256};
+use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -19,7 +19,10 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie::{
+    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
+    IntermediateStateRootState, Nibbles, StateRoot as StateRootComputer, StateRootProgress,
+};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
@@ -144,7 +147,7 @@ where
     insert_genesis_state(&provider_rw, alloc.iter())?;
 
     // compute state root to populate trie tables
-    compute_state_root(&provider_rw)?;
+    compute_state_root(&provider_rw, None)?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -393,7 +396,9 @@ where
     }
 
     let block = provider_rw.last_block_number()?;
-    let hash = provider_rw.block_hash(block)?.unwrap();
+    let hash = provider_rw
+        .block_hash(block)?
+        .ok_or_else(|| eyre::eyre!("Block hash not found for block {}", block))?;
     let expected_state_root = provider_rw
         .header_by_number(block)?
         .ok_or_else(|| ProviderError::HeaderNotFound(block.into()))?
@@ -423,11 +428,14 @@ where
     // remaining lines are accounts
     let collector = parse_accounts(&mut reader, etl_config)?;
 
-    // write state to db
-    dump_state(collector, provider_rw, block)?;
+    // write state to db and collect prefix sets
+    let mut prefix_sets = TriePrefixSetsMut::default();
+    dump_state(collector, provider_rw, block, &mut prefix_sets)?;
+
+    info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
     // compute and compare state root. this advances the stage checkpoints.
-    let computed_state_root = compute_state_root(provider_rw)?;
+    let computed_state_root = compute_state_root(provider_rw, Some(prefix_sets.freeze()))?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
             ?computed_state_root,
@@ -484,7 +492,8 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if !collector.is_empty() && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0
+        if !collector.is_empty() &&
+            collector.len().is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)
         {
             info!(target: "reth::cli",
                 parsed_new_accounts=collector.len(),
@@ -502,6 +511,7 @@ fn dump_state<Provider>(
     mut collector: Collector<Address, GenesisAccount>,
     provider_rw: &Provider,
     block: u64,
+    prefix_sets: &mut TriePrefixSetsMut,
 ) -> Result<(), eyre::Error>
 where
     Provider: StaticFileProviderFactory
@@ -521,9 +531,25 @@ where
         let (address, _) = Address::from_compact(address.as_slice(), address.len());
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
 
+        // Add to prefix sets
+        let hashed_address = keccak256(address);
+        prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+        // Add storage keys to prefix sets if storage exists
+        if let Some(ref storage) = account.storage {
+            for key in storage.keys() {
+                let hashed_key = keccak256(key);
+                prefix_sets
+                    .storage_prefix_sets
+                    .entry(hashed_address)
+                    .or_default()
+                    .insert(Nibbles::unpack(hashed_key));
+            }
+        }
+
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
+        if (index > 0 && index.is_multiple_of(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP)) ||
             index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
@@ -560,7 +586,10 @@ where
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
-fn compute_state_root<Provider>(provider: &Provider) -> Result<B256, InitStorageError>
+fn compute_state_root<Provider>(
+    provider: &Provider,
+    prefix_sets: Option<TriePrefixSets>,
+) -> Result<B256, InitStorageError>
 where
     Provider: DBProvider<Tx: DbTxMut> + TrieWriter,
 {
@@ -571,10 +600,14 @@ where
     let mut total_flushed_updates = 0;
 
     loop {
-        match StateRootComputer::from_tx(tx)
-            .with_intermediate_state(intermediate_state)
-            .root_with_progress()?
-        {
+        let mut state_root =
+            StateRootComputer::from_tx(tx).with_intermediate_state(intermediate_state);
+
+        if let Some(sets) = prefix_sets.clone() {
+            state_root = state_root.with_prefix_sets(sets);
+        }
+
+        match state_root.root_with_progress()? {
             StateRootProgress::Progress(state, _, updates) => {
                 let updated_len = provider.write_trie_updates(&updates)?;
                 total_flushed_updates += updated_len;
@@ -588,7 +621,7 @@ where
 
                 intermediate_state = Some(*state);
 
-                if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                if total_flushed_updates.is_multiple_of(SOFT_LIMIT_COUNT_FLUSHED_UPDATES) {
                     info!(target: "reth::cli",
                         total_flushed_updates,
                         "Flushing trie updates"

@@ -22,7 +22,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
+    BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -178,7 +178,7 @@ where
 
         let event_sender = EventSender::default();
 
-        let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
+        let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
         let jwt_secret = ctx.auth_jwt_secret()?;

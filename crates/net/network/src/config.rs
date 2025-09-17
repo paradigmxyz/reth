@@ -6,6 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
+use alloy_primitives::B256;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
@@ -24,7 +25,10 @@ use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
-use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
+use crate::{
+    protocol::{IntoRlpxSubProtocol, RlpxSubProtocols},
+    transactions::TransactionPropagationMode,
+};
 pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
@@ -90,6 +94,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// This can be overridden to support custom handshake logic via the
     /// [`NetworkConfigBuilder`].
     pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block hashes to check for required blocks.
+    /// If non-empty, peers that don't have these blocks will be filtered out.
+    pub required_block_hashes: Vec<B256>,
 }
 
 // === impl NetworkConfig ===
@@ -217,6 +224,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block hashes to check for required blocks.
+    required_block_hashes: Vec<B256>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -257,6 +266,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config: Default::default(),
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
+            required_block_hashes: Vec::new(),
         }
     }
 
@@ -343,6 +353,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Configures the transactions manager with the given config.
     pub const fn transactions_manager_config(mut self, config: TransactionsManagerConfig) -> Self {
         self.transactions_manager_config = config;
+        self
+    }
+
+    /// Configures the propagation mode for the transaction manager.
+    pub const fn transaction_propagation_mode(mut self, mode: TransactionPropagationMode) -> Self {
+        self.transactions_manager_config.propagation_mode = mode;
         self
     }
 
@@ -535,6 +551,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Sets the required block hashes for peer filtering.
+    pub fn required_block_hashes(mut self, hashes: Vec<B256>) -> Self {
+        self.required_block_hashes = hashes;
+        self
+    }
+
     /// Sets the block import type.
     pub fn block_import(mut self, block_import: Box<dyn BlockImport<N::NewBlockPayload>>) -> Self {
         self.block_import = Some(block_import);
@@ -597,6 +619,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            required_block_hashes,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -665,6 +688,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             transactions_manager_config,
             nat,
             handshake,
+            required_block_hashes,
         }
     }
 }

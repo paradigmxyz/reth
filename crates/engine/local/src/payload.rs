@@ -61,6 +61,7 @@ where
             no_tx_pool: None,
             gas_limit: None,
             eip_1559_params: None,
+            min_base_fee: None,
         }
     }
 }

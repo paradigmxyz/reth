@@ -74,7 +74,7 @@ Database:
           Specify a snapshot URL or let the command propose a default one.
 
           Available snapshot sources:
-          - https://snapshots.merkle.io (default, mainnet archive)
+          - https://www.merkle.io/snapshots (default, mainnet archive)
           - https://publicnode.com/snapshots (full nodes & testnets)
 
           If no URL is provided, the latest mainnet archive snapshot
@@ -115,6 +115,11 @@ Logging:
           The path to put log files in
 
           [default: <CACHE_DIR>/logs]
+
+      --log.file.name <NAME>
+          The prefix name of the log files
+
+          [default: reth.log]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

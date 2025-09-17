@@ -5,21 +5,22 @@ pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
-    invalid_block_hook::InvalidBlockHookExt, BeaconConsensusEngineEvent,
-    BeaconConsensusEngineHandle, ConfigureEngineEvm,
+    invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
+    ConsensusEngineHandle,
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
     NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
+    cli::config::RethTransactionPoolConfig,
     node_config::NodeConfig,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
+    version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
@@ -325,10 +326,9 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     ///
     /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
     /// dispatch events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub beacon_engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -362,6 +362,29 @@ where
     }
 }
 
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
+    /// Returns the RPC server handles.
+    pub const fn rpc_server_handles(&self) -> &RethRpcServerHandles {
+        &self.rpc_server_handles
+    }
+
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.beacon_engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
+}
+
 /// Handle returned when only the regular RPC server (HTTP/WS/IPC) is launched.
 ///
 /// This handle provides access to the RPC server endpoints and registry, but does not
@@ -374,10 +397,32 @@ pub struct RpcServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
     /// Notification channel for engine API events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the consensus engine.
-    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcServerOnlyHandle<Node, EthApi> {
+    /// Returns the RPC server handle.
+    pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handle
+    }
+
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
 }
 
 /// Handle returned when only the authenticated Engine API server is launched.
@@ -392,10 +437,27 @@ pub struct AuthServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
     /// Notification channel for engine API events
-    pub engine_events:
-        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the consensus engine.
-    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    pub engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> AuthServerOnlyHandle<Node, EthApi> {
+    /// Returns the consensus engine handle.
+    ///
+    /// This handle can be used to interact with the engine service directly.
+    pub const fn consensus_engine_handle(
+        &self,
+    ) -> &ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload> {
+        &self.engine_handle
+    }
+
+    /// Returns the consensus engine events sender.
+    pub const fn consensus_engine_events(
+        &self,
+    ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
+        &self.engine_events
+    }
 }
 
 /// Internal context struct for RPC setup shared between different launch methods
@@ -407,8 +469,8 @@ struct RpcSetupContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     auth_config: reth_rpc_builder::auth::AuthServerConfig,
     registry: RpcRegistry<Node, EthApi>,
     on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
-    engine_events: EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
@@ -444,6 +506,8 @@ pub struct RpcAddOns<
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
     /// See [`RpcAddOns::with_rpc_middleware`] for more details.
     rpc_middleware: RpcMiddleware,
+    /// Optional custom tokio runtime for the RPC server.
+    tokio_runtime: Option<tokio::runtime::Handle>,
 }
 
 impl<Node, EthB, PVB, EB, EVB, RpcMiddleware> Debug
@@ -487,6 +551,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime: None,
         }
     }
 
@@ -501,6 +566,7 @@ where
             payload_validator_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
             ..
         } = self;
         RpcAddOns {
@@ -510,6 +576,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -524,6 +591,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
             ..
         } = self;
         RpcAddOns {
@@ -533,6 +601,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -547,6 +616,7 @@ where
             payload_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
             ..
         } = self;
         RpcAddOns {
@@ -556,6 +626,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -607,6 +678,7 @@ where
             payload_validator_builder,
             engine_api_builder,
             engine_validator_builder,
+            tokio_runtime,
             ..
         } = self;
         RpcAddOns {
@@ -616,6 +688,31 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Sets the tokio runtime for the RPC servers.
+    ///
+    /// Caution: This runtime must not be created from within asynchronous context.
+    pub fn with_tokio_runtime(self, tokio_runtime: Option<tokio::runtime::Handle>) -> Self {
+        let Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+            ..
+        } = self;
+        Self {
+            hooks,
+            eth_api_builder,
+            payload_validator_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -631,6 +728,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
         } = self;
         let rpc_middleware = Stack::new(rpc_middleware, layer);
         RpcAddOns {
@@ -640,6 +738,7 @@ where
             engine_api_builder,
             engine_validator_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -716,6 +815,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
+        let tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -729,7 +829,11 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
+        let server_config = config
+            .rpc
+            .rpc_server_config()
+            .set_rpc_middleware(rpc_middleware)
+            .with_tokio_runtime(tokio_runtime);
         let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
 
         let handles =
@@ -782,6 +886,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
+        let tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -795,7 +900,11 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
+        let server_config = config
+            .rpc
+            .rpc_server_config()
+            .set_rpc_middleware(rpc_middleware)
+            .with_tokio_runtime(tokio_runtime);
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
@@ -863,7 +972,8 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
+        let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
+        let ctx = EthApiCtx { components: &node, config: eth_config, cache };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -1028,7 +1138,9 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
 }
 
-impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> EthApiCtx<'a, N> {
+impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
+    EthApiCtx<'a, N>
+{
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
@@ -1040,6 +1152,9 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
+            .max_batch_size(self.config.max_batch_size)
+            .pending_block_kind(self.config.pending_block_kind)
+            .raw_tx_forwarder(self.config.raw_tx_forwarder)
     }
 }
 
@@ -1068,13 +1183,15 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder;
 }
 
-impl<N, EthB, PVB, EB, EVB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, PVB, EB, EVB>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
+    for RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
+    RpcMiddleware: Send,
 {
     type ValidatorBuilder = EVB;
 
@@ -1236,9 +1353,9 @@ where
         let engine_validator = payload_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
+            name: version_metadata().name_client.to_string(),
+            version: version_metadata().cargo_pkg_version.to_string(),
+            commit: version_metadata().vergen_git_sha.to_string(),
         };
         Ok(EngineApi::new(
             ctx.node.provider().clone(),

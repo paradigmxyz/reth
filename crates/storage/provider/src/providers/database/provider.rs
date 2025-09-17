@@ -14,9 +14,9 @@ use crate::{
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
     HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -408,10 +408,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
 
         Ok(Box::new(state_provider))
     }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvider<TX, N> {
-    type StateCommitment = N::StateCommitment;
 }
 
 impl<
@@ -1646,7 +1642,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
 
 impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
-        Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
+        Ok(if let Some(encoded) = id.get_pre_encoded() {
+            self.tx.get_by_encoded_key::<tables::StageCheckpoints>(encoded)?
+        } else {
+            self.tx.get::<tables::StageCheckpoints>(id.to_string())?
+        })
     }
 
     /// Get stage checkpoint progress.
@@ -3055,10 +3055,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             return Ok(())
         }
 
-        let first_number = blocks.first().unwrap().number();
+        // Blocks are not empty, so no need to handle the case of `blocks.first()` being
+        // `None`.
+        let first_number = blocks[0].number();
 
-        let last = blocks.last().unwrap();
-        let last_block_number = last.number();
+        // Blocks are not empty, so no need to handle the case of `blocks.last()` being
+        // `None`.
+        let last_block_number = blocks[blocks.len() - 1].number();
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 

@@ -132,6 +132,28 @@ pub struct TxPoolArgs {
         conflicts_with = "transactions_backup_path"
     )]
     pub disable_transactions_backup: bool,
+
+    /// Max batch size for transaction pool insertions
+    #[arg(long = "txpool.max-batch-size", default_value_t = 1)]
+    pub max_batch_size: usize,
+}
+
+impl TxPoolArgs {
+    /// Sets the minimal protocol base fee to 0, effectively disabling checks that enforce that a
+    /// transaction's fee must be higher than the [`MIN_PROTOCOL_BASE_FEE`] which is the lowest
+    /// value the ethereum EIP-1559 base fee can reach.
+    pub const fn with_disabled_protocol_base_fee(self) -> Self {
+        self.with_protocol_base_fee(0)
+    }
+
+    /// Configures the minimal protocol base fee that should be enforced.
+    ///
+    /// Ethereum's EIP-1559 base fee can't drop below [`MIN_PROTOCOL_BASE_FEE`] hence this is
+    /// enforced by default in the pool.
+    pub const fn with_protocol_base_fee(mut self, protocol_base_fee: u64) -> Self {
+        self.minimal_protocol_basefee = protocol_base_fee;
+        self
+    }
 }
 
 impl Default for TxPoolArgs {
@@ -165,6 +187,7 @@ impl Default for TxPoolArgs {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
+            max_batch_size: 1,
         }
     }
 }
@@ -207,7 +230,13 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
+            ..Default::default()
         }
+    }
+
+    /// Returns max batch size for transaction batch insertion.
+    fn max_batch_size(&self) -> usize {
+        self.max_batch_size
     }
 }
 

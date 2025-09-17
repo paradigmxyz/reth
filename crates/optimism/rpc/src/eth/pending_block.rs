@@ -1,18 +1,21 @@
 //! Loads OP pending block for a RPC response.
 
-use std::sync::Arc;
-
 use crate::{OpEthApi, OpEthApiError};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use reth_primitives_traits::RecoveredBlock;
+use reth_chain_state::BlockState;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
+    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
     FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ReceiptProvider,
+use reth_rpc_eth_types::{
+    block::BlockAndReceipts, builder::config::PendingBlockKind, error::FromEthApiError,
+    EthApiError, PendingBlock,
 };
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ReceiptProvider, StateProviderBox, StateProviderFactory,
+};
+use std::sync::Arc;
 
 impl<N, Rpc> LoadPendingBlock for OpEthApi<N, Rpc>
 where
@@ -30,16 +33,19 @@ where
         self.inner.eth_api.pending_env_builder()
     }
 
+    #[inline]
+    fn pending_block_kind(&self) -> PendingBlockKind {
+        self.inner.eth_api.pending_block_kind()
+    }
+
     /// Returns the locally built pending block
     async fn local_pending_block(
         &self,
-    ) -> Result<
-        Option<(
-            Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
-            Arc<Vec<ProviderReceipt<Self::Provider>>>,
-        )>,
-        Self::Error,
-    > {
+    ) -> Result<Option<BlockAndReceipts<Self::Primitives>>, Self::Error> {
+        if let Ok(Some(pending)) = self.pending_flashblock() {
+            return Ok(Some(pending.into_block_and_receipts()));
+        }
+
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
@@ -56,6 +62,25 @@ where
             .receipts_by_block(block_id)?
             .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
 
-        Ok(Some((Arc::new(block), Arc::new(receipts))))
+        Ok(Some(BlockAndReceipts { block: Arc::new(block), receipts: Arc::new(receipts) }))
+    }
+
+    /// Returns a [`StateProviderBox`] on a mem-pool built pending block overlaying latest.
+    async fn local_pending_state(&self) -> Result<Option<StateProviderBox>, Self::Error>
+    where
+        Self: SpawnBlocking,
+    {
+        let Ok(Some(pending_block)) = self.pending_flashblock() else {
+            return Ok(None);
+        };
+
+        let latest_historical = self
+            .provider()
+            .history_by_block_hash(pending_block.block().parent_hash())
+            .map_err(Self::Error::from_eth_err)?;
+
+        let state = BlockState::from(pending_block);
+
+        Ok(Some(Box::new(state.state_provider(latest_historical)) as StateProviderBox))
     }
 }

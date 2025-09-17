@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, TxHash, B256};
+use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
@@ -43,8 +43,9 @@ pub(crate) struct InMemoryStateMetrics {
 ///
 /// # Locking behavior on state updates
 ///
-/// All update calls must be atomic, meaning that they must acquire all locks at once, before
-/// modifying the state. This is to ensure that the internal state is always consistent.
+/// All update calls must acquire all locks at once before modifying state to ensure the internal
+/// state remains consistent. This prevents readers from observing partially updated state where
+/// the numbers and blocks maps are out of sync.
 /// Update functions ensure that the numbers write lock is always acquired first, because lookup by
 /// numbers first read the numbers map and then the blocks map.
 /// By acquiring the numbers lock first, we ensure that read-only lookups don't deadlock updates.
@@ -588,11 +589,11 @@ impl<N: NodePrimitives> BlockState<N> {
 
     /// Returns the hash and block of the on disk block this state can be traced back to.
     pub fn anchor(&self) -> BlockNumHash {
-        if let Some(parent) = &self.parent {
-            parent.anchor()
-        } else {
-            self.block.recovered_block().parent_num_hash()
+        let mut current = self;
+        while let Some(parent) = &current.parent {
+            current = parent;
         }
+        current.block.recovered_block().parent_num_hash()
     }
 
     /// Returns the executed block that determines the state.
@@ -764,6 +765,12 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     #[inline]
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
+    }
+
+    /// Returns a [`BlockNumber`] of the block.
+    #[inline]
+    pub fn block_number(&self) -> BlockNumber {
+        self.recovered_block.header().number()
     }
 }
 

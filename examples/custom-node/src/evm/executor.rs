@@ -9,7 +9,7 @@ use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, CommitChanges, ExecutableTx, OnStateHook,
+        BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
     Database, Evm,
@@ -17,7 +17,7 @@ use alloy_evm::{
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
 use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
-use revm::{context::result::ExecutionResult, database::State};
+use revm::{context::result::ResultAndState, database::State};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -37,16 +37,27 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_commit_condition(
+    fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
         match tx.tx() {
-            CustomTransaction::Op(op_tx) => self.inner.execute_transaction_with_commit_condition(
-                Recovered::new_unchecked(op_tx, *tx.signer()),
-                f,
-            ),
+            CustomTransaction::Op(op_tx) => self
+                .inner
+                .execute_transaction_without_commit(Recovered::new_unchecked(op_tx, *tx.signer())),
+            CustomTransaction::Payment(..) => todo!(),
+        }
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        match tx.tx() {
+            CustomTransaction::Op(op_tx) => {
+                self.inner.commit_transaction(output, Recovered::new_unchecked(op_tx, *tx.signer()))
+            }
             CustomTransaction::Payment(..) => todo!(),
         }
     }
@@ -70,7 +81,7 @@ where
 
 impl BlockExecutorFactory for CustomEvmConfig {
     type EvmFactory = CustomEvmFactory;
-    type ExecutionCtx<'a> = OpBlockExecutionCtx;
+    type ExecutionCtx<'a> = CustomBlockExecutionCtx;
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
 
@@ -81,7 +92,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
     fn create_executor<'a, DB, I>(
         &'a self,
         evm: CustomEvm<&'a mut State<DB>, I, PrecompilesMap>,
-        ctx: OpBlockExecutionCtx,
+        ctx: CustomBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
@@ -90,10 +101,23 @@ impl BlockExecutorFactory for CustomEvmConfig {
         CustomBlockExecutor {
             inner: OpBlockExecutor::new(
                 evm,
-                ctx,
+                ctx.inner,
                 self.inner.chain_spec().clone(),
                 *self.inner.executor_factory.receipt_builder(),
             ),
         }
+    }
+}
+
+/// Additional parameters for executing custom transactions.
+#[derive(Debug, Clone)]
+pub struct CustomBlockExecutionCtx {
+    pub inner: OpBlockExecutionCtx,
+    pub extension: u64,
+}
+
+impl From<CustomBlockExecutionCtx> for OpBlockExecutionCtx {
+    fn from(value: CustomBlockExecutionCtx) -> Self {
+        value.inner
     }
 }

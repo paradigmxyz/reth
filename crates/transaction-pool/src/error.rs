@@ -93,7 +93,7 @@ impl PoolError {
     ///
     /// Not all error variants are caused by the incorrect composition of the transaction (See also
     /// [`InvalidPoolTransactionError`]) and can be caused by the current state of the transaction
-    /// pool. For example the transaction pool is already full or the error was caused my an
+    /// pool. For example the transaction pool is already full or the error was caused by an
     /// internal error, such as database errors.
     ///
     /// This function returns true only if the transaction will never make it into the pool because

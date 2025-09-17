@@ -30,8 +30,8 @@ pub struct ClearedSparseStateTrie<
 
 impl<A, S> ClearedSparseStateTrie<A, S>
 where
-    A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default,
+    A: SparseTrieInterface,
+    S: SparseTrieInterface,
 {
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
@@ -108,12 +108,18 @@ impl<A, S> SparseStateTrie<A, S> {
         self.state = trie;
         self
     }
+
+    /// Set the default trie which will be cloned when creating new storage [`SparseTrie`]s.
+    pub fn with_default_storage_trie(mut self, trie: SparseTrie<S>) -> Self {
+        self.storage.default_trie = trie;
+        self
+    }
 }
 
 impl<A, S> SparseStateTrie<A, S>
 where
     A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default + Clone,
 {
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
@@ -671,15 +677,14 @@ where
     /// Update or remove trie account based on new account info. This method will either recompute
     /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
-    /// If the new account info and storage trie are empty, the account leaf will be removed.
+    /// Returns false if the new account info and storage trie are empty, indicating the account
+    /// leaf should be removed.
     pub fn update_account(
         &mut self,
         address: B256,
         account: Account,
         provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
-        let nibbles = Nibbles::unpack(address);
-
+    ) -> SparseStateTrieResult<bool> {
         let storage_root = if let Some(storage_trie) = self.storage.tries.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
@@ -698,27 +703,29 @@ where
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trace!(target: "trie::sparse", ?address, "Removing account");
-            self.remove_account_leaf(&nibbles, provider_factory)
-        } else {
-            trace!(target: "trie::sparse", ?address, "Updating account");
-            self.account_rlp_buf.clear();
-            account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)
+            return Ok(false);
         }
+
+        trace!(target: "trie::sparse", ?address, "Updating account");
+        let nibbles = Nibbles::unpack(address);
+        self.account_rlp_buf.clear();
+        account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+
+        Ok(true)
     }
 
     /// Update the storage root of a revealed account.
     ///
     /// If the account doesn't exist in the trie, the function is a no-op.
     ///
-    /// If the new storage root is empty, and the account info was already empty, the account leaf
-    /// will be removed.
+    /// Returns false if the new storage root is empty, and the account info was already empty,
+    /// indicating the account leaf should be removed.
     pub fn update_account_storage_root(
         &mut self,
         address: B256,
         provider_factory: impl TrieNodeProviderFactory,
-    ) -> SparseStateTrieResult<()> {
+    ) -> SparseStateTrieResult<bool> {
         if !self.is_account_revealed(address) {
             return Err(SparseTrieErrorKind::Blind.into())
         }
@@ -730,7 +737,7 @@ where
             .transpose()?
         else {
             trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
-            return Ok(())
+            return Ok(true)
         };
 
         // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
@@ -745,20 +752,19 @@ where
         // Update the account with the new storage root.
         trie_account.storage_root = storage_root;
 
-        let nibbles = Nibbles::unpack(address);
+        // If the account is empty, indicate that it should be removed.
         if trie_account == TrieAccount::default() {
-            // If the account is empty, remove it.
-            trace!(target: "trie::sparse", ?address, "Removing account because the storage root is empty");
-            self.remove_account_leaf(&nibbles, provider_factory)?;
-        } else {
-            // Otherwise, update the account leaf.
-            trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
-            self.account_rlp_buf.clear();
-            trie_account.encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+            return Ok(false)
         }
 
-        Ok(())
+        // Otherwise, update the account leaf.
+        trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
+        let nibbles = Nibbles::unpack(address);
+        self.account_rlp_buf.clear();
+        trie_account.encode(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+
+        Ok(true)
     }
 
     /// Remove the account leaf node.
@@ -801,9 +807,11 @@ struct StorageTries<S = SerialSparseTrie> {
     revealed_paths: B256Map<HashSet<Nibbles>>,
     /// Cleared revealed storage trie path collections, kept for re-use.
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
+    /// A default cleared trie instance, which will be cloned when creating new tries.
+    default_trie: SparseTrie<S>,
 }
 
-impl<S: SparseTrieInterface + Default> StorageTries<S> {
+impl<S: SparseTrieInterface> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
@@ -813,7 +821,9 @@ impl<S: SparseTrieInterface + Default> StorageTries<S> {
             set
         }));
     }
+}
 
+impl<S: SparseTrieInterface + Clone> StorageTries<S> {
     /// Returns the set of already revealed trie node paths for an account's storage, creating the
     /// set if it didn't previously exist.
     fn get_revealed_paths_mut(&mut self, account: B256) -> &mut HashSet<Nibbles> {
@@ -828,10 +838,9 @@ impl<S: SparseTrieInterface + Default> StorageTries<S> {
         &mut self,
         account: B256,
     ) -> (&mut SparseTrie<S>, &mut HashSet<Nibbles>) {
-        let trie = self
-            .tries
-            .entry(account)
-            .or_insert_with(|| self.cleared_tries.pop().unwrap_or_default());
+        let trie = self.tries.entry(account).or_insert_with(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        });
 
         let revealed_paths = self
             .revealed_paths
@@ -845,7 +854,9 @@ impl<S: SparseTrieInterface + Default> StorageTries<S> {
     /// doesn't already exist.
     #[cfg(feature = "std")]
     fn take_or_create_trie(&mut self, account: &B256) -> SparseTrie<S> {
-        self.tries.remove(account).unwrap_or_else(|| self.cleared_tries.pop().unwrap_or_default())
+        self.tries.remove(account).unwrap_or_else(|| {
+            self.cleared_tries.pop().unwrap_or_else(|| self.default_trie.clone())
+        })
     }
 
     /// Takes the revealed paths set from the account from the internal `HashMap`, creating one if

@@ -10,7 +10,7 @@ use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_node_core::version::SHORT_VERSION;
+use reth_node_core::version::version_metadata;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;
 use std::{path::PathBuf, sync::Arc};
@@ -68,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
     {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+        info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 

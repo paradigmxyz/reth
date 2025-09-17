@@ -1,7 +1,11 @@
+use reth_db::DatabaseEnv;
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
-use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
+use crate::{
+    components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns, NodeHandle,
+    RethFullAdapter,
+};
 use reth_node_api::{EngineTypes, FullNodeComponents, PayloadTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -72,8 +76,6 @@ where
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
     type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
-
-    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
 
     type Storage = <N::Types as NodeTypes>::Storage;
 
@@ -210,3 +212,11 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> DerefMut for FullNode<N
         &mut self.add_ons_handle
     }
 }
+
+/// Helper type alias to define [`FullNode`] for a given [`Node`].
+pub type FullNodeFor<N, DB = Arc<DatabaseEnv>> =
+    FullNode<NodeAdapter<RethFullAdapter<DB, N>>, <N as Node<RethFullAdapter<DB, N>>>::AddOns>;
+
+/// Helper type alias to define [`NodeHandle`] for a given [`Node`].
+pub type NodeHandleFor<N, DB = Arc<DatabaseEnv>> =
+    NodeHandle<NodeAdapter<RethFullAdapter<DB, N>>, <N as Node<RethFullAdapter<DB, N>>>::AddOns>;
