@@ -1,5 +1,7 @@
 use crate::{
-    bundle_state::StorageRevertsIter,
+    changesets_utils::{
+        storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
+    },
     providers::{
         database::{chain::ChainStorage, metrics},
         static_file::StaticFileWriter,
@@ -36,7 +38,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        ShardedKey, StoredBlockBodyIndices,
+        BlockNumberHashedAddress, ShardedKey, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -61,8 +63,9 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles, StoredNibblesSubKey,
+    TrieChangeSetsEntry,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm_database::states::{
@@ -1915,6 +1918,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 // If we are writing the primary storage wipe transition, the pre-existing plain
                 // storage state has to be taken from the database and written to storage history.
                 // See [StorageWipe::Primary] for more details.
+                //
+                // TODO(mediocregopher): This could be rewritten in a way which doesn't require
+                // collecting wiped entries into a Vec like this, see
+                // `write_storage_trie_changesets`.
                 let mut wiped_storage = Vec::new();
                 if wiped {
                     tracing::trace!(?address, "Wiping storage");
@@ -2340,11 +2347,50 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 
         Ok(num_entries)
     }
+
+    /// Records the current values of all trie nodes which will be updated using the [`TrieUpdates`]
+    /// into the trie changesets tables.
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling `write_trie_updates` with
+    /// the same [`TrieUpdates`].
+    ///
+    /// Returns the number of keys written.
+    fn write_trie_changesets(
+        &self,
+        block_number: BlockNumber,
+        trie_updates: &TrieUpdatesSorted,
+    ) -> ProviderResult<usize> {
+        let mut num_entries = 0;
+
+        let mut changeset_cursor =
+            self.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
+        let mut curr_values_cursor = self.tx_ref().cursor_read::<tables::AccountsTrie>()?;
+
+        for (path, _) in trie_updates.account_nodes_ref() {
+            num_entries += 1;
+            let node = curr_values_cursor.seek_exact(StoredNibbles(*path))?.map(|e| e.1);
+            changeset_cursor.append_dup(
+                block_number,
+                TrieChangeSetsEntry { nibbles: StoredNibblesSubKey(*path), node },
+            )?;
+        }
+
+        let mut storage_updates = trie_updates.storage_tries.iter().collect::<Vec<_>>();
+        storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+        num_entries +=
+            self.write_storage_trie_changesets(block_number, storage_updates.into_iter())?;
+
+        Ok(num_entries)
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
-    /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
-    /// updates by the hashed address, writing in sorted order.
+    /// Writes storage trie updates from the given storage trie map.
+    ///
+    /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
+    ///
+    /// Returns the number of entries modified.
     fn write_storage_trie_updates(
         &self,
         storage_tries: &B256Map<StorageTrieUpdates>,
@@ -2376,6 +2422,66 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         let mut trie_db_cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
         Ok(trie_db_cursor.write_storage_trie_updates(updates)?)
+    }
+
+    /// Records the current values of all trie nodes which will be updated using the
+    /// [`StorageTrieUpdates`] into the storage trie changesets table.
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling
+    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
+    ///
+    /// Returns the number of keys written.
+    fn write_storage_trie_changesets<'a>(
+        &self,
+        block_number: BlockNumber,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+    ) -> ProviderResult<usize> {
+        let mut num_written = 0;
+
+        let mut changeset_cursor =
+            self.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
+
+        // We hold two cursors to the same table because we use them simultaneously when an
+        // account's storage is wiped. We keep them outside the for-loop so they can be re-used
+        // between accounts.
+        let mut changed_curr_values_cursor =
+            self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+        let mut wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+
+        for (hashed_address, storage_trie_updates) in storage_tries {
+            let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
+
+            // Create an iterator which produces the current values of all updated paths, or None if
+            // they are currently unset.
+            let curr_values_of_changed = StorageTrieCurrentValuesIter::new(
+                *hashed_address,
+                storage_trie_updates.storage_nodes.iter().map(|e| e.0),
+                &mut changed_curr_values_cursor,
+            )?;
+
+            if storage_trie_updates.is_deleted() {
+                let all_nodes = wiped_nodes_cursor.walk_dup(Some(*hashed_address), None)?;
+                for wiped in storage_trie_wiped_changeset_iter(curr_values_of_changed, all_nodes)? {
+                    let (path, node) = wiped?;
+                    num_written += 1;
+                    changeset_cursor.append_dup(
+                        changeset_key,
+                        TrieChangeSetsEntry { nibbles: StoredNibblesSubKey(path), node },
+                    )?;
+                }
+            } else {
+                for curr_value in curr_values_of_changed {
+                    let (path, node) = curr_value?;
+                    num_written += 1;
+                    changeset_cursor.append_dup(
+                        changeset_key,
+                        TrieChangeSetsEntry { nibbles: StoredNibblesSubKey(path), node },
+                    )?;
+                }
+            }
+        }
+
+        Ok(num_written)
     }
 }
 
@@ -3443,5 +3549,239 @@ mod tests {
         }
 
         assert_eq!(range_result, individual_results);
+    }
+
+    #[test]
+    fn test_write_trie_changesets() {
+        use reth_db_api::models::BlockNumberHashedAddress;
+        use reth_trie::{BranchNodeCompact, StorageTrieEntry};
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let block_number = 1u64;
+
+        // Create some test nibbles and nodes
+        let account_nibbles1 = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+        let account_nibbles2 = Nibbles::from_nibbles([0x5, 0x6, 0x7, 0x8]);
+
+        let node1 = BranchNodeCompact::new(
+            0b1111_1111_1111_1111, // state_mask
+            0b0000_0000_0000_0000, // tree_mask
+            0b0000_0000_0000_0000, // hash_mask
+            vec![],                // hashes
+            None,                  // root hash
+        );
+
+        // Pre-populate AccountsTrie with a node that will be updated (for account_nibbles1)
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+            cursor.insert(StoredNibbles(account_nibbles1), &node1).unwrap();
+        }
+
+        // Create account trie updates: one Some (update) and one None (removal)
+        let account_nodes = vec![
+            (account_nibbles1, Some(node1.clone())), // This will update existing node
+            (account_nibbles2, None),                // This will be a removal (no existing node)
+        ];
+
+        // Create storage trie updates
+        let storage_address1 = B256::from([1u8; 32]); // Normal storage trie
+        let storage_address2 = B256::from([2u8; 32]); // Wiped storage trie
+
+        let storage_nibbles1 = Nibbles::from_nibbles([0xa, 0xb]);
+        let storage_nibbles2 = Nibbles::from_nibbles([0xc, 0xd]);
+        let storage_nibbles3 = Nibbles::from_nibbles([0xe, 0xf]);
+
+        let storage_node1 = BranchNodeCompact::new(
+            0b1111_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let storage_node2 = BranchNodeCompact::new(
+            0b0000_1111_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Create an old version of storage_node1 to prepopulate
+        let storage_node1_old = BranchNodeCompact::new(
+            0b1010_0000_0000_0000, // Different mask to show it's an old value
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Pre-populate StoragesTrie for normal storage (storage_address1)
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            // Add node that will be updated (storage_nibbles1) with old value
+            let entry = StorageTrieEntry {
+                nibbles: StoredNibblesSubKey(storage_nibbles1),
+                node: storage_node1_old.clone(),
+            };
+            cursor.upsert(storage_address1, &entry).unwrap();
+        }
+
+        // Pre-populate StoragesTrie for wiped storage (storage_address2)
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            // Add node that will be updated (storage_nibbles1)
+            let entry1 = StorageTrieEntry {
+                nibbles: StoredNibblesSubKey(storage_nibbles1),
+                node: storage_node1.clone(),
+            };
+            cursor.upsert(storage_address2, &entry1).unwrap();
+            // Add node that won't be updated but exists (storage_nibbles3)
+            let entry3 = StorageTrieEntry {
+                nibbles: StoredNibblesSubKey(storage_nibbles3),
+                node: storage_node2.clone(),
+            };
+            cursor.upsert(storage_address2, &entry3).unwrap();
+        }
+
+        // Normal storage trie: one Some (update) and one None (new)
+        let storage_trie1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1.clone())), // This will update existing node
+                (storage_nibbles2, None),                        // This is a new node
+            ],
+        };
+
+        // Wiped storage trie
+        let storage_trie2 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1.clone())), // Updated node already in db
+                (storage_nibbles2, Some(storage_node2.clone())), /* Updated node not in db
+                                                                  * storage_nibbles3 is in db
+                                                                  * but not updated */
+            ],
+        };
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(storage_address1, storage_trie1);
+        storage_tries.insert(storage_address2, storage_trie2);
+
+        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+
+        // Write the changesets
+        let num_written = provider_rw.write_trie_changesets(block_number, &trie_updates).unwrap();
+
+        // Verify number of entries written
+        // Account changesets: 2 (one update, one removal)
+        // Storage changesets:
+        //   - Normal storage: 2 (one update, one removal)
+        //   - Wiped storage: 3 (two updated, one existing not updated)
+        // Total: 2 + 2 + 3 = 7
+        assert_eq!(num_written, 7);
+
+        // Verify account changesets were written correctly
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+
+            // Get all entries for this block to see what was written
+            let all_entries = cursor
+                .walk_dup(Some(block_number), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            // Assert the full value of all_entries in a single assert_eq
+            assert_eq!(
+                all_entries,
+                vec![
+                    (
+                        block_number,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(account_nibbles1),
+                            node: Some(node1),
+                        }
+                    ),
+                    (
+                        block_number,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(account_nibbles2),
+                            node: None,
+                        }
+                    ),
+                ]
+            );
+        }
+
+        // Verify storage changesets were written correctly
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
+
+            // Check normal storage trie changesets
+            let key1 = BlockNumberHashedAddress((block_number, storage_address1));
+            let entries1 =
+                cursor.walk_dup(Some(key1), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+            assert_eq!(
+                entries1,
+                vec![
+                    (
+                        key1,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles1),
+                            node: Some(storage_node1_old), // Old value that was prepopulated
+                        }
+                    ),
+                    (
+                        key1,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles2),
+                            node: None, // New node, no previous value
+                        }
+                    ),
+                ]
+            );
+
+            // Check wiped storage trie changesets
+            let key2 = BlockNumberHashedAddress((block_number, storage_address2));
+            let entries2 =
+                cursor.walk_dup(Some(key2), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+            assert_eq!(
+                entries2,
+                vec![
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles1),
+                            node: Some(storage_node1), // Was in db, so has old value
+                        }
+                    ),
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles2),
+                            node: None, // Was not in db
+                        }
+                    ),
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles3),
+                            node: Some(storage_node2), // Existing node in wiped storage
+                        }
+                    ),
+                ]
+            );
+        }
+
+        provider_rw.commit().unwrap();
     }
 }
