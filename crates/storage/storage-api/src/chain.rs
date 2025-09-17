@@ -197,6 +197,10 @@ where
 }
 
 /// A noop storage for chains that don’t have custom body storage.
+///
+/// This will never read nor write additional body content such as withdrawals or ommers.
+/// But will respect the optionality of withdrawals if activated and fill them if the corresponding
+/// hardfork is activated.
 #[derive(Debug, Clone, Copy)]
 pub struct EmptyBodyStorage<T, H>(PhantomData<(T, H)>);
 
