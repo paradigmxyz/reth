@@ -1,6 +1,5 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
-use futures::{Stream, StreamExt};
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, EngineApiMessageVersion, ExecutionPayload, NodePrimitives,
     PayloadTypes,
@@ -8,7 +7,7 @@ use reth_node_api::{
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::future::Future;
 use tokio::sync::mpsc;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
@@ -65,29 +64,36 @@ pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
     /// Handle to execution client.
     engine_handle: ConsensusEngineHandle<T>,
     /// Provider to get consensus blocks from.
-    block_provider: Arc<P>,
+    block_provider: P,
 }
 
 impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
-    pub const fn new(engine_handle: ConsensusEngineHandle<T>, block_provider: Arc<P>) -> Self {
+    pub const fn new(engine_handle: ConsensusEngineHandle<T>, block_provider: P) -> Self {
         Self { engine_handle, block_provider }
     }
 }
 
 impl<P, T> DebugConsensusClient<P, T>
 where
-    P: BlockProvider,
+    P: BlockProvider + Clone,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = P::Block>>>,
 {
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
     pub async fn run(self) {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
-        let mut block_stream = block_stream(self.block_provider.clone());
+        let mut block_stream = {
+            let (tx, rx) = mpsc::channel::<P::Block>(64);
+            let block_provider = self.block_provider.clone();
+            tokio::spawn(async move {
+                block_provider.subscribe_blocks(tx).await;
+            });
+            rx
+        };
 
-        while let Some(block) = block_stream.next().await {
+        while let Some(block) = block_stream.recv().await {
             let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
 
             let block_hash = payload.block_hash();
@@ -135,21 +141,4 @@ where
                 .await;
         }
     }
-}
-
-/// Creates a stream of blocks from a `BlockProvider`.
-///
-/// This is a utility function that provides a cleaner way to work with block providers
-/// using streams instead of manual channel handling.
-pub fn block_stream<P>(provider: Arc<P>) -> Pin<Box<dyn Stream<Item = P::Block> + Send + 'static>>
-where
-    P: BlockProvider,
-{
-    let (tx, rx) = mpsc::channel(64);
-
-    tokio::spawn(async move {
-        provider.subscribe_blocks(tx).await;
-    });
-
-    Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx))
 }

@@ -117,12 +117,7 @@ where
 
         let config = &handle.node.config;
         if let Some(url) = config.debug.rpc_consensus_url.clone() {
-            let con_type = if url.starts_with("ws://") || url.starts_with("wss://") {
-                "WebSocket"
-            } else {
-                "HTTP"
-            };
-            info!(target: "reth::cli", "Using RPC {} consensus client: {}", con_type, url);
+            info!(target: "reth::cli", "Using RPC consensus client: {}", url);
 
             let block_provider =
                 RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {

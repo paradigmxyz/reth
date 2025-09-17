@@ -1,21 +1,19 @@
 use crate::BlockProvider;
-use alloy_consensus::BlockHeader;
 use alloy_provider::{Network, Provider, ProviderBuilder};
+use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
-use reth_tracing::tracing::warn;
-use std::{pin::Pin, sync::Arc, time::Duration};
-use tokio::{sync::mpsc::Sender, time::interval};
+use reth_tracing::tracing::{debug, warn};
+use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 
-/// Block provider that fetches new blocks from an RPC endpoint.
-/// Supports both `WebSocket` (with subscriptions) and HTTP (with polling) connections.
+/// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
+/// RPC subscriptions.
 #[derive(derive_more::Debug, Clone)]
 pub struct RpcBlockProvider<N: Network, PrimitiveBlock> {
     #[debug(skip)]
     provider: Arc<dyn Provider<N>>,
     url: String,
-    is_websocket: bool,
-    interval: Duration,
     #[debug(skip)]
     convert: Arc<dyn Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync>,
 }
@@ -29,70 +27,30 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         Ok(Self {
             provider: Arc::new(ProviderBuilder::default().connect(rpc_url).await?),
             url: rpc_url.to_string(),
-            is_websocket: rpc_url.starts_with("ws://") || rpc_url.starts_with("wss://"),
-            interval: Duration::from_secs(3),
             convert: Arc::new(convert),
         })
     }
 
-    /// Sets the polling interval for HTTP connections (ignored for `WebSocket` connections).
-    pub const fn with_interval(mut self, interval: Duration) -> Self {
-        self.interval = interval;
-        self
-    }
-
-    /// Creates a stream of block numbers for `WebSocket` connections.
-    async fn websocket_block_stream(&self) -> Pin<Box<dyn Stream<Item = u64> + Send + '_>> {
-        let stream = match self.provider.subscribe_blocks().await {
-            Ok(sub) => sub.into_stream(),
+    /// Obtains a full block stream.
+    ///
+    /// This first attempts to obtain an `eth_subscribe` subscription, if that fails because the
+    /// connection is not a websocket, this falls back to poll based subscription.
+    async fn full_block_stream(
+        &self,
+    ) -> TransportResult<impl Stream<Item = TransportResult<N::BlockResponse>>> {
+        // first try to obtain a regular subscription
+        match self.provider.subscribe_full_blocks().full().into_stream().await {
+            Ok(sub) => Ok(sub.left_stream()),
             Err(err) => {
-                warn!(
+                debug!(
                     target: "consensus::debug-client",
                     %err,
                     url=%self.url,
-                    "Failed to subscribe to blocks",
+                    "Failed to establish block subscription",
                 );
-                return Box::pin(futures::stream::empty());
+                Ok(self.provider.watch_full_blocks().await?.full().into_stream().right_stream())
             }
-        };
-
-        Box::pin(stream.map(|header| header.number()))
-    }
-
-    /// Creates a stream of block numbers for HTTP connections using polling.
-    fn http_block_stream(&self) -> Pin<Box<dyn Stream<Item = u64> + Send + '_>> {
-        let provider = self.provider.clone();
-        let url = self.url.clone();
-        let interval_duration = self.interval;
-
-        Box::pin(async_stream::stream! {
-            let mut last_block_number: Option<u64> = None;
-            let mut interval = interval(interval_duration);
-
-            loop {
-                interval.tick().await;
-
-                let block_number = match provider.get_block_number().await {
-                    Ok(number) => number,
-                    Err(err) => {
-                        warn!(
-                            target: "consensus::debug-client",
-                            %err,
-                            url=%url,
-                            "Failed to get latest block number",
-                        );
-                        continue;
-                    }
-                };
-
-                if Some(block_number) == last_block_number {
-                    continue;
-                }
-
-                yield block_number;
-                last_block_number = Some(block_number);
-            }
-        })
+        }
     }
 }
 
@@ -103,16 +61,21 @@ where
     type Block = PrimitiveBlock;
 
     async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        let mut block_stream = if self.is_websocket {
-            self.websocket_block_stream().await
-        } else {
-            self.http_block_stream()
+        let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
+            warn!(
+                target: "consensus::debug-client",
+                %err,
+                url=%self.url,
+                "Failed to subscribe to blocks",
+            );
+        }) else {
+            return
         };
 
-        while let Some(block_number) = block_stream.next().await {
-            match self.get_block(block_number).await {
+        while let Some(res) = stream.next().await {
+            match res {
                 Ok(block) => {
-                    if tx.send(block).await.is_err() {
+                    if tx.send((self.convert)(block)).await.is_err() {
                         // Channel closed.
                         break;
                     }
@@ -122,8 +85,7 @@ where
                         target: "consensus::debug-client",
                         %err,
                         url=%self.url,
-                        block_number=%block_number,
-                        "Failed to fetch block",
+                        "Failed to fetch a block",
                     );
                 }
             }
