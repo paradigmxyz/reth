@@ -2343,8 +2343,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
-    /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
-    /// updates by the hashed address, writing in sorted order.
+    /// Writes storage trie updates from the given storage trie map.
+    ///
+    /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
+    ///
+    /// Returns the number of entries modified.
     fn write_storage_trie_updates<'a>(
         &self,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
@@ -2362,6 +2365,42 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         }
 
         Ok(num_entries)
+    }
+
+    /// Records the pre-image of all trie nodes which will be updated using the
+    /// [`StorageTrieUpdates`], indexed by the [`BlockNumber`].
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling
+    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
+    ///
+    /// Returns the number of keys written.
+    fn write_storage_trie_changesets(
+        &self,
+        block_number: BlockNumber,
+        storage_tries: impl Iterator<Item = (B256, StorageTrieUpdates)>,
+    ) -> ProviderResult<usize> {
+        let mut num_written = 0;
+
+        let mut storage_tries = storage_tries.collect::<Vec<_>>();
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+        let mut changeset_cursor =
+            self.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
+
+        for (hashed_address, storage_trie_updates) in storage_tries {
+            let storage_trie_updates = storage_trie_updates.into_sorted();
+
+            if storage_trie_updates.is_deleted() {
+                todo!()
+            }
+
+            for (path, node) in storage_trie_updates.storage_nodes {
+                cursor.seek_by_key_subkey(hashed_address, path)?;
+            }
+        }
+
+        Ok(num_written)
     }
 }
 

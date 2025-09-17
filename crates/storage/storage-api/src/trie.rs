@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{StorageTrieUpdates, TrieUpdates},
+    updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
@@ -96,6 +96,19 @@ pub trait TrieWriter: Send + Sync {
     ///
     /// Returns the number of entries modified.
     fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize>;
+
+    /*
+    /// Records the pre-image of all trie nodes which will be updated using the [`TrieUpdates`],
+    /// indexed by the [`BlockNumber`].
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling `write_trie_updates` with
+    /// the same [`TrieUpdates`].
+    fn write_trie_changesets(
+        &self,
+        block_number: BlockNumber,
+        trie_updates: &TrieUpdates,
+    ) -> ProviderResult<()>;
+    */
 }
 
 /// Storage Trie Writer
@@ -109,5 +122,18 @@ pub trait StorageTrieWriter: Send + Sync {
     fn write_storage_trie_updates<'a>(
         &self,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
+    ) -> ProviderResult<usize>;
+
+    /// Records the pre-image of all trie nodes which will be updated using the
+    /// [`StorageTrieUpdates`], indexed by the [`BlockNumber`].
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling
+    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
+    ///
+    /// Returns the number of keys written.
+    fn write_storage_trie_changesets(
+        &self,
+        block_number: BlockNumber,
+        storage_tries: impl Iterator<Item = (B256, StorageTrieUpdates)>,
     ) -> ProviderResult<usize>;
 }
