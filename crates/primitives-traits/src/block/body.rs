@@ -109,7 +109,7 @@ pub trait BlockBody:
 
     /// Calculate the withdrawals root for the block body.
     ///
-    /// Returns `RecoveryError` if there are no withdrawals in the block.
+    /// Returns `Some(root)` if withdrawals are present, otherwise `None`.
     fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.withdrawals().map(|withdrawals| {
             alloy_consensus::proofs::calculate_withdrawals_root(withdrawals.as_slice())
@@ -121,7 +121,7 @@ pub trait BlockBody:
 
     /// Calculate the ommers root for the block body.
     ///
-    /// Returns `RecoveryError` if there are no ommers in the block.
+    /// Returns `Some(root)` if ommers are present, otherwise `None`.
     fn calculate_ommers_root(&self) -> Option<B256> {
         self.ommers().map(alloy_consensus::proofs::calculate_ommers_root)
     }
