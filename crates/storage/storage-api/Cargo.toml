@@ -25,7 +25,6 @@ reth-trie-common.workspace = true
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
 
-
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
