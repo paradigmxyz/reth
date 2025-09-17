@@ -81,7 +81,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     let modified_root = loader.root().unwrap();
 
     // Update the intermediate roots table so that we can run the incremental verification
-    tx.write_individual_storage_trie_updates(hashed_address, &trie_updates).unwrap();
+    tx.write_storage_trie_updates(core::iter::once((&hashed_address, &trie_updates))).unwrap();
 
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
