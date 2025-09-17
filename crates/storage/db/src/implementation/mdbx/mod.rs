@@ -476,7 +476,7 @@ impl DatabaseEnv {
     /// Creates all the tables defined in the given [`TableSet`], if necessary.
     pub fn create_tables_for<TS: TableSet>(&mut self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
-        let mut dbis = HashMap::with_capacity(Tables::ALL.len());
+        let dbis = Arc::get_mut(&mut self.dbis).expect("no transactions should open");
 
         for table in TS::tables() {
             let flags =
@@ -489,7 +489,6 @@ impl DatabaseEnv {
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
-        self.dbis = Arc::new(dbis);
 
         Ok(())
     }
