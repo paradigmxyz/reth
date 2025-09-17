@@ -180,11 +180,11 @@ mod tests {
     use op_alloy_consensus::OpTxEnvelope;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
-    use reth_optimism_forks::{OpHardfork, BASE_SEPOLIA_HARDFORKS};
+    use reth_optimism_forks::{OpHardfork, OpChainHardforks, chain_hardforks};
     use std::sync::Arc;
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
-        let mut hardforks = BASE_SEPOLIA_HARDFORKS.clone();
+        let mut hardforks = chain_hardforks(OpChainHardforks::base_sepolia());
         hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
         Arc::new(OpChainSpec {
             inner: ChainSpec {

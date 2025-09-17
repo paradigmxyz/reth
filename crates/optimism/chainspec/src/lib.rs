@@ -404,7 +404,7 @@ impl From<Genesis> for OpChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = OP_MAINNET_HARDFORKS.clone();
+        let mainnet_hardforks = chain_hardforks(OpChainHardforks::op_mainnet());
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());

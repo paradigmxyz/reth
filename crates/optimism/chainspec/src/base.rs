@@ -6,7 +6,7 @@ use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::{EthereumHardfork, Hardfork};
-use reth_optimism_forks::{OpHardfork, BASE_MAINNET_HARDFORKS};
+use reth_optimism_forks::{OpHardfork, OpChainHardforks, chain_hardforks};
 use reth_primitives_traits::SealedHeader;
 
 use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
@@ -15,7 +15,7 @@ use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/genesis/base.json"))
         .expect("Can't deserialize Base genesis json");
-    let hardforks = BASE_MAINNET_HARDFORKS.clone();
+    let hardforks = chain_hardforks(OpChainHardforks::base_mainnet());
     OpChainSpec {
         inner: ChainSpec {
             chain: Chain::base_mainnet(),

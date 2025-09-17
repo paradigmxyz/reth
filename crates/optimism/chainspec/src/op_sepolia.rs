@@ -6,14 +6,14 @@ use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::{OpHardfork, OP_SEPOLIA_HARDFORKS};
+use reth_optimism_forks::{OpHardfork, OpChainHardforks, chain_hardforks};
 use reth_primitives_traits::SealedHeader;
 
 /// The OP Sepolia spec
 pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
     let genesis = serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
         .expect("Can't deserialize OP Sepolia genesis json");
-    let hardforks = OP_SEPOLIA_HARDFORKS.clone();
+    let hardforks = chain_hardforks(OpChainHardforks::op_sepolia());
     OpChainSpec {
         inner: ChainSpec {
             chain: Chain::from_named(NamedChain::OptimismSepolia),
