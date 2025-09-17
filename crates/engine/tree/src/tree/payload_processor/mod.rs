@@ -1,7 +1,10 @@
 //! Entrypoint for payload processing.
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
+    cached_state::{
+        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
+        SavedCache,
+    },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
@@ -354,7 +357,7 @@ where
     /// instance.
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
-            let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
     }
@@ -452,7 +455,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> ProviderCaches {
+    pub(super) fn caches(&self) -> StateExecutionCache {
         self.prewarm_handle.cache.clone()
     }
 
@@ -486,7 +489,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
-    cache: ProviderCaches,
+    cache: StateExecutionCache,
     /// Metrics for the caches
     cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
