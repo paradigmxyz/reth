@@ -41,6 +41,14 @@ use tracing::{debug, trace, warn};
 /// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type 126).
 const MAX_STANDARD_TX_TYPE: u8 = 4;
 
+/// Number of CPUs to reserve for other critical system tasks (e.g., block processing, networking).
+/// The prewarm task will use at most `min(available_cpus - RESERVED_CPUS, PREWARM_MAX_CONCURRENCY)` workers.
+const PREWARM_RESERVED_CPUS: usize = 2;
+
+/// Maximum concurrency for the prewarm task. Even if more CPUs are available we cap the workers to
+/// avoid over-saturating the system and to stay aligned with the historical limit.
+const PREWARM_MAX_CONCURRENCY: usize = 64;
+
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
 ///
@@ -81,12 +89,32 @@ where
         transaction_count_hint: usize,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
+
+        // Calculate max_concurrency based on available CPUs
+        // This ensures we scale with the hardware while leaving room for other critical tasks
+        let max_concurrency = std::thread::available_parallelism().map_or(PREWARM_MAX_CONCURRENCY, |cpus| {
+            // Use available CPUs minus the reserved set, always leaving at least one worker
+            // and never exceeding the configured maximum.
+            cpus
+                .get()
+                .saturating_sub(PREWARM_RESERVED_CPUS)
+                .max(1)
+                .min(PREWARM_MAX_CONCURRENCY)
+        });
+
+        trace!(
+            target: "engine::tree::prewarm",
+            max_concurrency,
+            transaction_count_hint,
+            "Initialized prewarm task"
+        );
+
         (
             Self {
                 executor,
                 execution_cache,
                 ctx,
-                max_concurrency: 64,
+                max_concurrency,
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
