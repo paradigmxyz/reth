@@ -306,8 +306,8 @@ where
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
     ///
-    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
-    /// executed sequentially.
+    /// Note: There are no ordering guarantees; this does not reflect the state produced by
+    /// sequential execution.
     fn transact_batch(
         self,
         txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
@@ -330,7 +330,7 @@ where
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
-                        target: "engine::tree",
+                        target: "engine::tree::prewarm",
                         %err,
                         tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
