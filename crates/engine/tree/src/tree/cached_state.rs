@@ -260,11 +260,6 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
     /// 2. Traverses the account's storage trie to collect proof nodes
     /// 3. Returns a [`StorageMultiProof`] containing the minimal set of trie nodes needed to verify
     ///    all the requested storage slots
-    ///
-    /// ## Relationship to Caching:
-    /// Storage multiproofs are not directly cached, but they rely on the underlying
-    /// storage data that IS cached. When generating proofs, cached storage values
-    /// can be used instead of fetching from disk, improving proof generation speed.
     fn storage_multiproof(
         &self,
         address: Address,
