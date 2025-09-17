@@ -1074,10 +1074,8 @@ where
                 Err(_) => {
                     // this means our internal message channel is closed, which shouldn't happen
                     // in normal operation since we hold both ends
-                    error!(
-                        target: "engine::root",
-                        "Internal message channel closed unexpectedly"
-                    );
+                    error!(target: "engine::root", "Internal message channel closed unexpectedly");
+                    return
                 }
             }
         }
@@ -1449,8 +1447,8 @@ mod tests {
         let addr2 = B256::random();
         let slot1 = B256::random();
         let slot2 = B256::random();
-        targets.insert(addr1, vec![slot1].into_iter().collect());
-        targets.insert(addr2, vec![slot2].into_iter().collect());
+        targets.insert(addr1, std::iter::once(slot1).collect());
+        targets.insert(addr2, std::iter::once(slot2).collect());
 
         let prefetch_proof_targets =
             test_state_root_task.get_prefetch_proof_targets(targets.clone());
@@ -1462,7 +1460,7 @@ mod tests {
         // add a different addr and slot to fetched proof targets
         let addr3 = B256::random();
         let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
+        test_state_root_task.fetched_proof_targets.insert(addr3, std::iter::once(slot3).collect());
 
         let prefetch_proof_targets =
             test_state_root_task.get_prefetch_proof_targets(targets.clone());
@@ -1483,11 +1481,11 @@ mod tests {
         let addr2 = B256::random();
         let slot1 = B256::random();
         let slot2 = B256::random();
-        targets.insert(addr1, vec![slot1].into_iter().collect());
-        targets.insert(addr2, vec![slot2].into_iter().collect());
+        targets.insert(addr1, std::iter::once(slot1).collect());
+        targets.insert(addr2, std::iter::once(slot2).collect());
 
         // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
+        test_state_root_task.fetched_proof_targets.insert(addr1, std::iter::once(slot1).collect());
 
         let prefetch_proof_targets =
             test_state_root_task.get_prefetch_proof_targets(targets.clone());
@@ -1510,12 +1508,12 @@ mod tests {
         assert!(prefetch_proof_targets.contains_key(&addr1));
         assert_eq!(
             *prefetch_proof_targets.get(&addr1).unwrap(),
-            vec![slot3].into_iter().collect::<B256Set>()
+            std::iter::once(slot3).collect::<B256Set>()
         );
         assert!(prefetch_proof_targets.contains_key(&addr2));
         assert_eq!(
             *prefetch_proof_targets.get(&addr2).unwrap(),
-            vec![slot2].into_iter().collect::<B256Set>()
+            std::iter::once(slot2).collect::<B256Set>()
         );
     }
 

@@ -245,6 +245,9 @@ Networking:
 
           [default: sqrt]
 
+      --required-block-hashes <REQUIRED_BLOCK_HASHES>
+          Comma separated list of required block hashes. Peers that don't have these blocks will be filtered out
+
 RPC:
       --http
           Enable the HTTP-RPC server
@@ -414,6 +417,9 @@ RPC:
 
           [default: full]
 
+      --rpc.forwarder <FORWARDER>
+          Endpoint to forward transactions to
+
       --builder.disallow <PATH>
           Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
 
@@ -458,6 +464,9 @@ Gas Price Oracle:
           The percentile of gas prices to use for the estimate
 
           [default: 60]
+
+      --gpo.default-suggested-fee <DEFAULT_SUGGESTED_FEE>
+          The default gas price to use if there are no blocks to use
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>

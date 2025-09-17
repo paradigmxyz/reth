@@ -1,16 +1,30 @@
 //! Caching and prewarming related functionality.
+//!
+//! Prewarming executes transactions in parallel before the actual block execution
+//! to populate the execution cache with state that will likely be accessed during
+//! block processing.
+//!
+//! ## How Prewarming Works
+//!
+//! 1. Incoming transactions are split into two streams: one for prewarming (executed in parallel)
+//!    and one for actual execution (executed sequentially)
+//! 2. Prewarming tasks execute transactions in parallel using shared caches
+//! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
+    cached_state::{
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
+    },
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+        executor::WorkloadExecutor, multiproof::MultiProofMessage,
+        ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
 };
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
-use metrics::{Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
@@ -39,7 +53,7 @@ where
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
-    execution_cache: ExecutionCache,
+    execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
@@ -59,7 +73,7 @@ where
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
-        execution_cache: ExecutionCache,
+        execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
@@ -88,7 +102,7 @@ where
         let max_concurrency = self.max_concurrency;
 
         self.executor.spawn_blocking(move || {
-            let mut handles = Vec::new();
+            let mut handles = Vec::with_capacity(max_concurrency);
             let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
@@ -132,21 +146,30 @@ where
     /// Save the state to the shared cache for the given block.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
-        let cache = SavedCache::new(
-            self.ctx.env.hash,
-            self.ctx.cache.clone(),
-            self.ctx.cache_metrics.clone(),
-        );
-        if cache.cache().insert_state(&state).is_err() {
-            return
-        }
 
-        cache.update_metrics();
+        // Precompute outside the lock
+        let hash = self.ctx.env.hash;
+        let caches = self.ctx.cache.clone();
+        let metrics = self.ctx.cache_metrics.clone();
 
-        debug!(target: "engine::caching", "Updated state caches");
+        // Perform all cache operations atomically under the lock
+        self.execution_cache.update_with_guard(|cached| {
+            let cache = SavedCache::new(hash, caches, metrics);
 
-        // update the cache for the executed block
-        self.execution_cache.save_cache(cache);
+            // Insert state into cache while holding the lock
+            if cache.cache().insert_state(&state).is_err() {
+                // Clear the cache on error to prevent having a polluted cache
+                *cached = None;
+                return;
+            }
+
+            cache.update_metrics();
+            debug!(target: "engine::caching", "Updated state caches");
+
+            // Replace the shared cache with the new one; the previous cache (if any) is dropped.
+            *cached = Some(cache);
+        });
+
         self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
@@ -175,6 +198,7 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
+                    trace!(target: "engine::tree::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
                     if finished_execution {
@@ -183,6 +207,7 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                    trace!(target: "engine::tree::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
 
@@ -195,6 +220,8 @@ where
                 }
             }
         }
+
+        trace!(target: "engine::tree::prewarm", "Completed prewarm execution");
 
         // save caches and finish
         if let Some(Some(state)) = final_block_output {
@@ -212,7 +239,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: ProviderCaches,
+    pub(super) cache: StateExecutionCache,
     pub(super) cache_metrics: CachedStateMetrics,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
@@ -293,8 +320,8 @@ where
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
     ///
-    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
-    /// executed sequentially.
+    /// Note: There are no ordering guarantees; this does not reflect the state produced by
+    /// sequential execution.
     fn transact_batch(
         self,
         txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
@@ -317,13 +344,16 @@ where
                 Ok(res) => res,
                 Err(err) => {
                     trace!(
-                        target: "engine::tree",
+                        target: "engine::tree::prewarm",
                         %err,
                         tx_hash=%tx.tx().tx_hash(),
                         sender=%tx.signer(),
                         "Error when executing prewarm transaction",
                     );
-                    return
+                    // Track transaction execution errors
+                    metrics.transaction_errors.increment(1);
+                    // skip error because we can ignore these errors and continue with the next tx
+                    continue
                 }
             };
             metrics.execution_duration.record(start.elapsed());
@@ -413,4 +443,6 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) prefetch_storage_targets: Histogram,
     /// A histogram of duration for cache saving
     pub(crate) cache_saving_duration: Gauge,
+    /// Counter for transaction execution errors during prewarming
+    pub(crate) transaction_errors: Counter,
 }

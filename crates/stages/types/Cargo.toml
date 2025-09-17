@@ -26,7 +26,6 @@ modular-bitfield = { workspace = true, optional = true }
 reth-codecs.workspace = true
 alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
 arbitrary = { workspace = true, features = ["derive"] }
-modular-bitfield.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 test-fuzz.workspace = true

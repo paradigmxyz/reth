@@ -14,22 +14,23 @@ use alloy_rpc_types_eth::{
     Transaction, TransactionInfo,
 };
 use core::error;
+use dyn_clone::DynClone;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
-    ConfigureEvm, TxEnvFor,
+    ConfigureEvm, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{
     HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
 };
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
 pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
     /// Primitive receipt.
-    pub receipt: Cow<'a, N::Receipt>,
+    pub receipt: N::Receipt,
     /// Transaction the receipt corresponds to.
     pub tx: Recovered<&'a N::SignedTx>,
     /// Gas used by the transaction.
@@ -93,7 +94,8 @@ impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -106,6 +108,9 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
 
     /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
+
+    /// The EVM specification identifier.
+    type Spec;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
@@ -137,10 +142,10 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
 
     /// Creates a transaction environment for execution based on `request` with corresponding
     /// `cfg_env` and `block_env`.
-    fn tx_env<Spec>(
+    fn tx_env(
         &self,
         request: RpcTxReq<Self::Network>,
-        cfg_env: &CfgEnv<Spec>,
+        cfg_env: &CfgEnv<Self::Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
 
@@ -158,6 +163,11 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
+
+dyn_clone::clone_trait_object!(
+    <Primitives, Network, Error, TxEnv, Spec>
+    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, TxEnv = TxEnv, Spec = Spec>
+);
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
 ///
@@ -369,6 +379,79 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
     }
 }
 
+/// Converts `TxReq` into `TxEnv`.
+///
+/// Where:
+/// * `TxReq` is a transaction request received from an RPC API
+/// * `TxEnv` is the corresponding transaction environment for execution
+///
+/// The `TxEnvConverter` has two blanket implementations:
+/// * `()` assuming `TxReq` implements [`TryIntoTxEnv`] and is used as default for [`RpcConverter`].
+/// * `Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>` and can be applied using
+///   [`RpcConverter::with_tx_env_converter`].
+///
+/// One should prefer to implement [`TryIntoTxEnv`] for `TxReq` to get the `TxEnvConverter`
+/// implementation for free, thanks to the blanket implementation, unless the conversion requires
+/// more context. For example, some configuration parameters or access handles to database, network,
+/// etc.
+pub trait TxEnvConverter<TxReq, TxEnv, Spec>:
+    Debug + Send + Sync + Unpin + Clone + 'static
+{
+    /// An associated error that can occur during conversion.
+    type Error;
+
+    /// Converts a rpc transaction request into a transaction environment.
+    ///
+    /// See [`TxEnvConverter`] for more information.
+    fn convert_tx_env(
+        &self,
+        tx_req: TxReq,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error>;
+}
+
+impl<TxReq, TxEnv, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for ()
+where
+    TxReq: TryIntoTxEnv<TxEnv>,
+{
+    type Error = TxReq::Err;
+
+    fn convert_tx_env(
+        &self,
+        tx_req: TxReq,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error> {
+        tx_req.try_into_tx_env(cfg_env, block_env)
+    }
+}
+
+/// Converts rpc transaction requests into transaction environment using a closure.
+impl<F, TxReq, TxEnv, E, Spec> TxEnvConverter<TxReq, TxEnv, Spec> for F
+where
+    F: Fn(TxReq, &CfgEnv<Spec>, &BlockEnv) -> Result<TxEnv, E>
+        + Debug
+        + Send
+        + Sync
+        + Unpin
+        + Clone
+        + 'static,
+    TxReq: Clone,
+    E: error::Error + Send + Sync + 'static,
+{
+    type Error = E;
+
+    fn convert_tx_env(
+        &self,
+        tx_req: TxReq,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error> {
+        self(tx_req, cfg_env, block_env)
+    }
+}
+
 /// Converts `self` into `T`.
 ///
 /// Should create an executable transaction environment using [`TransactionRequest`].
@@ -499,18 +582,29 @@ pub struct TransactionConversionError(String);
 /// network and EVM associated primitives:
 /// * [`FromConsensusTx`]: from signed transaction into RPC response object.
 /// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
-/// * [`TryIntoTxEnv`]: from RPC transaction request into an executable transaction.
+/// * [`TryIntoTxEnv`] or [`TxEnvConverter`]: from RPC transaction request into an executable
+///   transaction.
 /// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
 ///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
 ///   object.
 #[derive(Debug)]
-pub struct RpcConverter<Network, Evm, Receipt, Header = (), Map = (), SimTx = (), RpcTx = ()> {
+pub struct RpcConverter<
+    Network,
+    Evm,
+    Receipt,
+    Header = (),
+    Map = (),
+    SimTx = (),
+    RpcTx = (),
+    TxEnv = (),
+> {
     network: PhantomData<Network>,
     evm: PhantomData<Evm>,
     receipt_converter: Receipt,
     header_converter: Header,
     mapper: Map,
+    tx_env_converter: TxEnv,
     sim_tx_converter: SimTx,
     rpc_tx_converter: RpcTx,
 }
@@ -524,17 +618,20 @@ impl<Network, Evm, Receipt> RpcConverter<Network, Evm, Receipt> {
             receipt_converter,
             header_converter: (),
             mapper: (),
+            tx_env_converter: (),
             sim_tx_converter: (),
             rpc_tx_converter: (),
         }
     }
 }
 
-impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
-    RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
+impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
+    RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 {
     /// Converts the network type
-    pub fn with_network<N>(self) -> RpcConverter<N, Evm, Receipt, Header, Map, SimTx, RpcTx> {
+    pub fn with_network<N>(
+        self,
+    ) -> RpcConverter<N, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> {
         let Self {
             receipt_converter,
             header_converter,
@@ -542,6 +639,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
             ..
         } = self;
         RpcConverter {
@@ -552,6 +650,35 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
+        }
+    }
+
+    /// Converts the transaction environment type.
+    pub fn with_tx_env_converter<TxEnvNew>(
+        self,
+        tx_env_converter: TxEnvNew,
+    ) -> RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnvNew> {
+        let Self {
+            receipt_converter,
+            header_converter,
+            mapper,
+            network,
+            evm,
+            sim_tx_converter,
+            rpc_tx_converter,
+            tx_env_converter: _,
+            ..
+        } = self;
+        RpcConverter {
+            receipt_converter,
+            header_converter,
+            mapper,
+            network,
+            evm,
+            sim_tx_converter,
+            rpc_tx_converter,
+            tx_env_converter,
         }
     }
 
@@ -559,7 +686,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
     pub fn with_header_converter<HeaderNew>(
         self,
         header_converter: HeaderNew,
-    ) -> RpcConverter<Network, Evm, Receipt, HeaderNew, Map, SimTx, RpcTx> {
+    ) -> RpcConverter<Network, Evm, Receipt, HeaderNew, Map, SimTx, RpcTx, TxEnv> {
         let Self {
             receipt_converter,
             header_converter: _,
@@ -568,6 +695,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         } = self;
         RpcConverter {
             receipt_converter,
@@ -577,6 +705,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         }
     }
 
@@ -584,7 +713,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
     pub fn with_mapper<MapNew>(
         self,
         mapper: MapNew,
-    ) -> RpcConverter<Network, Evm, Receipt, Header, MapNew, SimTx, RpcTx> {
+    ) -> RpcConverter<Network, Evm, Receipt, Header, MapNew, SimTx, RpcTx, TxEnv> {
         let Self {
             receipt_converter,
             header_converter,
@@ -593,6 +722,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         } = self;
         RpcConverter {
             receipt_converter,
@@ -602,6 +732,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         }
     }
 
@@ -609,7 +740,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
     pub fn with_sim_tx_converter<SimTxNew>(
         self,
         sim_tx_converter: SimTxNew,
-    ) -> RpcConverter<Network, Evm, Receipt, Header, Map, SimTxNew, RpcTx> {
+    ) -> RpcConverter<Network, Evm, Receipt, Header, Map, SimTxNew, RpcTx, TxEnv> {
         let Self {
             receipt_converter,
             header_converter,
@@ -617,6 +748,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             network,
             evm,
             rpc_tx_converter,
+            tx_env_converter,
             ..
         } = self;
         RpcConverter {
@@ -627,6 +759,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         }
     }
 
@@ -634,7 +767,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
     pub fn with_rpc_tx_converter<RpcTxNew>(
         self,
         rpc_tx_converter: RpcTxNew,
-    ) -> RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTxNew> {
+    ) -> RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTxNew, TxEnv> {
         let Self {
             receipt_converter,
             header_converter,
@@ -642,6 +775,7 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             network,
             evm,
             sim_tx_converter,
+            tx_env_converter,
             ..
         } = self;
         RpcConverter {
@@ -652,18 +786,39 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
             evm,
             sim_tx_converter,
             rpc_tx_converter,
+            tx_env_converter,
         }
+    }
+
+    /// Converts `self` into a boxed converter.
+    #[expect(clippy::type_complexity)]
+    pub fn erased(
+        self,
+    ) -> Box<
+        dyn RpcConvert<
+            Primitives = <Self as RpcConvert>::Primitives,
+            Network = <Self as RpcConvert>::Network,
+            Error = <Self as RpcConvert>::Error,
+            TxEnv = <Self as RpcConvert>::TxEnv,
+            Spec = <Self as RpcConvert>::Spec,
+        >,
+    >
+    where
+        Self: RpcConvert,
+    {
+        Box::new(self)
     }
 }
 
-impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx> Default
-    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
+impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> Default
+    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 where
     Receipt: Default,
     Header: Default,
     Map: Default,
     SimTx: Default,
     RpcTx: Default,
+    TxEnv: Default,
 {
     fn default() -> Self {
         Self {
@@ -674,12 +829,21 @@ where
             mapper: Default::default(),
             sim_tx_converter: Default::default(),
             rpc_tx_converter: Default::default(),
+            tx_env_converter: Default::default(),
         }
     }
 }
 
-impl<Network, Evm, Receipt: Clone, Header: Clone, Map: Clone, SimTx: Clone, RpcTx: Clone> Clone
-    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
+impl<
+        Network,
+        Evm,
+        Receipt: Clone,
+        Header: Clone,
+        Map: Clone,
+        SimTx: Clone,
+        RpcTx: Clone,
+        TxEnv: Clone,
+    > Clone for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 {
     fn clone(&self) -> Self {
         Self {
@@ -690,23 +854,22 @@ impl<Network, Evm, Receipt: Clone, Header: Clone, Map: Clone, SimTx: Clone, RpcT
             mapper: self.mapper.clone(),
             sim_tx_converter: self.sim_tx_converter.clone(),
             rpc_tx_converter: self.rpc_tx_converter.clone(),
+            tx_env_converter: self.tx_env_converter.clone(),
         }
     }
 }
 
-impl<N, Network, Evm, Receipt, Header, Map, SimTx, RpcTx> RpcConvert
-    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx>
+impl<N, Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> RpcConvert
+    for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 where
     N: NodePrimitives,
     Network: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    TxTy<N>: Clone + Debug,
-    RpcTxReq<Network>: TryIntoTxEnv<TxEnvFor<Evm>>,
     Receipt: ReceiptConverter<
             N,
             RpcReceipt = RpcReceipt<Network>,
             Error: From<TransactionConversionError>
-                       + From<<RpcTxReq<Network> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
+                       + From<TxEnv::Error>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
                        + From<RpcTx::Err>
                        + Error
@@ -724,11 +887,13 @@ where
     SimTx: SimTxConverter<RpcTxReq<Network>, TxTy<N>>,
     RpcTx:
         RpcTxConverter<TxTy<N>, Network::TransactionResponse, <Map as TxInfoMapper<TxTy<N>>>::Out>,
+    TxEnv: TxEnvConverter<RpcTxReq<Network>, TxEnvFor<Evm>, SpecFor<Evm>>,
 {
     type Primitives = N;
     type Network = Network;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Receipt::Error;
+    type Spec = SpecFor<Evm>;
 
     fn fill(
         &self,
@@ -751,13 +916,13 @@ where
             .map_err(|e| TransactionConversionError(e.to_string()))?)
     }
 
-    fn tx_env<Spec>(
+    fn tx_env(
         &self,
         request: RpcTxReq<Network>,
-        cfg_env: &CfgEnv<Spec>,
+        cfg_env: &CfgEnv<SpecFor<Evm>>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
-        Ok(request.try_into_tx_env(cfg_env, block_env)?)
+        self.tx_env_converter.convert_tx_env(request, cfg_env, block_env).map_err(Into::into)
     }
 
     fn convert_receipts(

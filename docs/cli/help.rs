@@ -120,7 +120,7 @@ fn main() -> io::Result<()> {
         output.iter().map(|(cmd, _)| cmd_summary(cmd, 0)).chain(once("\n".to_string())).collect();
 
     println!("Writing SUMMARY.mdx to \"{}\"", out_dir.to_string_lossy());
-    write_file(&out_dir.clone().join("SUMMARY.mdx"), &summary)?;
+    write_file(&out_dir.join("SUMMARY.mdx"), &summary)?;
 
     // Generate README.md.
     if args.readme {

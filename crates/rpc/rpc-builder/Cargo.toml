@@ -43,6 +43,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 metrics.workspace = true
 
 # misc
+dyn-clone.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
@@ -62,9 +63,7 @@ reth-rpc-api = { workspace = true, features = ["client"] }
 reth-rpc-engine-api.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
-reth-rpc-convert.workspace = true
 reth-engine-primitives.workspace = true
-reth-engine-tree.workspace = true
 reth-node-ethereum.workspace = true
 
 alloy-primitives.workspace = true

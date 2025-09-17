@@ -274,7 +274,8 @@ pub use crate::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     blobstore::{BlobStore, BlobStoreError},
     config::{
-        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+        DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS, DEFAULT_PRICE_BUMP,
         DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
@@ -368,12 +369,8 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
-        let hash = *transaction.hash();
-
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-
-        (hash, outcome)
+    ) -> TransactionValidationOutcome<V::Transaction> {
+        self.pool.validator().validate_transaction(origin, transaction).await
     }
 
     /// Returns future that validates all transactions in the given iterator.
@@ -383,14 +380,8 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
-    ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        self.pool
-            .validator()
-            .validate_transactions_with_origin(origin, transactions)
-            .await
-            .into_iter()
-            .map(|tx| (tx.tx_hash(), tx))
-            .collect()
+    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
+        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
     }
 
     /// Validates all transactions with their individual origins.
@@ -400,6 +391,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, V::Transaction)>,
     ) -> Vec<(TransactionOrigin, TransactionValidationOutcome<V::Transaction>)> {
+        if transactions.len() == 1 {
+            let (origin, tx) = transactions.into_iter().next().unwrap();
+            let res = self.pool.validator().validate_transaction(origin, tx).await;
+            return vec![(origin, res)]
+        }
         let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
         let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
         origins.into_iter().zip(tx_outcomes).collect()
@@ -493,7 +489,7 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<TransactionEvents> {
-        let (_, tx) = self.validate(origin, transaction).await;
+        let tx = self.validate(origin, transaction).await;
         self.pool.add_transaction_and_subscribe(origin, tx)
     }
 
@@ -502,7 +498,7 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> PoolResult<AddedTransactionOutcome> {
-        let (_, tx) = self.validate(origin, transaction).await;
+        let tx = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
         results.pop().expect("result length is the same as the input")
     }
@@ -517,7 +513,7 @@ where
         }
         let validated = self.validate_all(origin, transactions).await;
 
-        self.pool.add_transactions(origin, validated.into_iter().map(|(_, tx)| tx))
+        self.pool.add_transactions(origin, validated.into_iter())
     }
 
     async fn add_transactions_with_origins(

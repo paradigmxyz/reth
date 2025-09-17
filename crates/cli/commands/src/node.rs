@@ -59,7 +59,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     /// - `IPC_PATH`: default + `-instance`
-    #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(..=200))]
+    #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(1..=200))]
     pub instance: Option<u16>,
 
     /// Sets all ports to unused, allowing the OS to choose random unused ports when sockets are
