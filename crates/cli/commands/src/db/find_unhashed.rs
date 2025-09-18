@@ -6,6 +6,7 @@ use reth_db_api::{
 };
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::ProviderFactory;
+use reth_trie_common::Nibbles;
 use tracing::info;
 
 /// The arguments for the `reth db find-unhashed` command
@@ -15,9 +16,9 @@ pub struct Command {
     #[arg(long, value_name = "HASH")]
     pub account: Option<B256>,
 
-    /// The hashed storage slot key to search for
-    #[arg(long, value_name = "HASH")]
-    pub slot: Option<B256>,
+    /// The hashed storage slot key to search for (as hex string, will match as prefix)
+    #[arg(long, value_name = "HEX")]
+    pub slot: Option<Nibbles>,
 
     /// Minimum block number to search (stop searching below this block)
     #[arg(long, value_name = "BLOCK_NUMBER")]
@@ -49,6 +50,8 @@ impl Command {
             info!("Starting search from block: {}", start_block);
         }
 
+        let mut matches_found = 0;
+
         // Iterate through entries backwards
         while let Some((block_number, account_before_tx)) = current {
             // Check if we've gone below the minimum block
@@ -64,29 +67,27 @@ impl Command {
 
             // Check if this is the account we're looking for
             if hashed_address == account_hash {
-                info!("Found matching account!");
-                info!("  Account address: {}", address);
-                info!("  Block number: {}", block_number);
-
-                // Output the account's state prior to the block
-                info!("  Account state before block: {:?}", account_before_tx.info);
-
-                return Ok(());
+                matches_found += 1;
+                info!(?address, ?block_number, pre_block_state=?account_before_tx.info, "Found matching account!");
             }
 
             // Move to the previous entry
             current = cursor.prev()?;
         }
 
-        info!("No account found with the given hash");
+        if matches_found == 0 {
+            info!("No account found with the given hash");
+        } else {
+            info!("Total matches found: {}", matches_found);
+        }
         Ok(())
     }
 
-    /// Search for a storage slot by slot hash and optionally account hash and output results
-    fn search_storage_by_hash<TX: DbTx>(
+    /// Search for a storage slot by slot nibbles (prefix match) and optionally account hash
+    fn search_storage_by_nibbles<TX: DbTx>(
         tx: &TX,
         account_hash: Option<B256>,
-        slot_hash: B256,
+        slot_prefix: Nibbles,
         min_block: Option<BlockNumber>,
         max_block: Option<BlockNumber>,
     ) -> eyre::Result<()> {
@@ -103,16 +104,17 @@ impl Command {
 
         if let Some(account_hash) = account_hash {
             info!(
-                "Searching for storage slot with account hash: {} and slot hash: {}",
-                account_hash, slot_hash
+                "Searching for storage slot with account hash: {account_hash} and hashed slot nibbles prefix: {slot_prefix:?}",
             );
         } else {
-            info!("Searching for storage slot with slot hash: {}", slot_hash);
+            info!("Searching for storage slot with nibbles prefix: {slot_prefix:?}");
         }
 
         if let Some((BlockNumberAddress((start_block, _)), _)) = &current {
             info!("Starting search from block: {}", start_block);
         }
+
+        let mut matches_found = 0;
 
         // Iterate through entries backwards
         while let Some((BlockNumberAddress((block_number, address)), storage_entry)) = current {
@@ -125,34 +127,27 @@ impl Command {
             }
 
             let hashed_slot = keccak256(storage_entry.key);
+            let hashed_slot = Nibbles::unpack(hashed_slot);
 
-            // Check if the slot matches
-            if hashed_slot == slot_hash {
-                // If account_hash is provided, also check that it matches
-                if let Some(account_hash) = account_hash {
-                    let hashed_address = keccak256(address);
-                    if hashed_address != account_hash {
-                        // Account doesn't match, continue searching
-                        current = cursor.prev()?;
-                        continue;
-                    }
-                }
+            // Check if the slot nibbles match as a prefix
+            let slot_matches = hashed_slot.starts_with(&slot_prefix);
+            let addr_matches =
+                account_hash.is_none_or(|account_hash| keccak256(address) == account_hash);
 
-                // Found a match!
-                info!("Found matching storage slot!");
-                info!("  Account address: {}", address);
-                info!("  Storage slot key: {}", storage_entry.key);
-                info!("  Block number: {}", block_number);
-                info!("  Storage value before block: {}", storage_entry.value);
-
-                return Ok(());
+            if slot_matches && addr_matches {
+                matches_found += 1;
+                info!(?address, slot=?storage_entry.key, ?hashed_slot, ?block_number, pre_block_value=?storage_entry.value, "Found matching slot");
             }
 
             // Move to the previous entry
             current = cursor.prev()?;
         }
 
-        info!("No storage slot found with the given hashes");
+        if matches_found == 0 {
+            info!("No storage slot found with the given criteria");
+        } else {
+            info!("Total matches found: {}", matches_found);
+        }
         Ok(())
     }
 
@@ -198,12 +193,12 @@ impl Command {
 
         // Call the appropriate search function based on which arguments are provided
         match (self.account, self.slot) {
-            (_, Some(slot)) => {
+            (_, Some(slot_prefix)) => {
                 // If slot is given, always search storage (with optional account filter)
-                Self::search_storage_by_hash(
+                Self::search_storage_by_nibbles(
                     &tx,
                     self.account,
-                    slot,
+                    slot_prefix,
                     self.min_block,
                     self.max_block,
                 )
