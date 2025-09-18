@@ -221,7 +221,14 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Updates the tracked blob fee
-    fn update_blob_fee(&mut self, mut pending_blob_fee: u128, base_fee_update: Ordering) {
+    fn update_blob_fee<F>(
+        &mut self,
+        mut pending_blob_fee: u128,
+        base_fee_update: Ordering,
+        mut on_promoted: F,
+    ) where
+        F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
+    {
         std::mem::swap(&mut self.all_transactions.pending_fees.blob_fee, &mut pending_blob_fee);
         match (self.all_transactions.pending_fees.blob_fee.cmp(&pending_blob_fee), base_fee_update)
         {
@@ -247,7 +254,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             (Ordering::Less, _) | (_, Ordering::Less) => {
                 // decreased blob/base fee: recheck blob pool and promote all that are now valid
-                self.handle_blob_fee_decrease(|_| {});
+                self.handle_blob_fee_decrease(|tx| on_promoted(tx));
             }
         }
     }
@@ -256,7 +263,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// Depending on the change in direction of the basefee, this will promote or demote
     /// transactions from the basefee pool.
-    fn update_basefee(&mut self, mut pending_basefee: u64) -> Ordering {
+    fn update_basefee<F>(&mut self, mut pending_basefee: u64, mut on_promoted: F) -> Ordering
+    where
+        F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
+    {
         std::mem::swap(&mut self.all_transactions.pending_fees.base_fee, &mut pending_basefee);
         match self.all_transactions.pending_fees.base_fee.cmp(&pending_basefee) {
             Ordering::Equal => {
@@ -289,50 +299,41 @@ impl<T: TransactionOrdering> TxPool<T> {
                 //   ENOUGH_BLOB_FEE_CAP_BLOCK.
                 // With the lower base fee they gain ENOUGH_FEE_CAP_BLOCK, so we can set the bit and
                 // insert directly into Pending (skip generic routing).
-                self.handle_basefee_decrease(self.all_transactions.pending_fees.base_fee, |_| {});
+                let current_base_fee = self.all_transactions.pending_fees.base_fee;
+                self.basefee_pool.enforce_basefee_with(current_base_fee, |tx| {
+                    // Update transaction state — guaranteed Pending by the invariants above
+                    let subpool = {
+                        let meta =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        meta.subpool = meta.state.into();
+                        meta.subpool
+                    };
+
+                    if subpool == SubPool::Pending {
+                        on_promoted(&tx);
+                    }
+
+                    trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?subpool, "Adding transaction to a subpool");
+                    match subpool {
+                        SubPool::Queued => self.queued_pool.add_transaction(tx),
+                        SubPool::Pending => {
+                            self.pending_pool.add_transaction(tx, current_base_fee);
+                        }
+                        SubPool::Blob => {
+                            self.blob_pool.add_transaction(tx);
+                        }
+                        SubPool::BaseFee => {
+                            // This should be unreachable as transactions from BaseFee pool with decreased
+                            // basefee are guaranteed to become Pending
+                            warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
+                        }
+                    }
+                });
 
                 Ordering::Less
             }
         }
-    }
-
-    /// Handles promotions that become possible after a base-fee decrease.
-    ///
-    /// The provided callback is invoked for each transaction that becomes pending.
-    fn handle_basefee_decrease<F>(&mut self, current_base_fee: u64, mut on_promoted: F)
-    where
-        F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
-    {
-        self.basefee_pool.enforce_basefee_with(current_base_fee, |tx| {
-            // Update transaction state — guaranteed Pending by the invariants above
-            let subpool = {
-                let meta =
-                    self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                meta.subpool = meta.state.into();
-                meta.subpool
-            };
-
-            if subpool == SubPool::Pending {
-                on_promoted(&tx);
-            }
-
-            trace!(target: "txpool", hash=%tx.transaction.hash(), pool=?subpool, "Adding transaction to a subpool");
-            match subpool {
-                SubPool::Queued => self.queued_pool.add_transaction(tx),
-                SubPool::Pending => {
-                    self.pending_pool.add_transaction(tx, current_base_fee);
-                }
-                SubPool::Blob => {
-                    self.blob_pool.add_transaction(tx);
-                }
-                SubPool::BaseFee => {
-                    // This should be unreachable as transactions from BaseFee pool with decreased
-                    // basefee are guaranteed to become Pending
-                    warn!(target: "txpool", "BaseFee transactions should become Pending after basefee decrease");
-                }
-            }
-        });
     }
 
     /// Handles promotions that become possible after a blob-fee decrease.
@@ -365,9 +366,9 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will also apply updates to the pool based on the new base fee and blob fee
     pub fn set_block_info(&mut self, info: BlockInfo) {
         // first update the subpools based on the new values
-        let basefee_ordering = self.update_basefee(info.pending_basefee);
+        let basefee_ordering = self.update_basefee(info.pending_basefee, |_| {});
         if let Some(blob_fee) = info.pending_blob_fee {
-            self.update_blob_fee(blob_fee, basefee_ordering)
+            self.update_blob_fee(blob_fee, basefee_ordering, |_| {})
         }
         // then update tracked values
         self.all_transactions.set_block_info(info);
@@ -601,19 +602,24 @@ impl<T: TransactionOrdering> TxPool<T> {
         prev_blob_fee: u128,
         outcome: &mut UpdateOutcome<T::Transaction>,
     ) {
-        let current_base_fee = self.all_transactions.pending_fees.base_fee;
-        let current_blob_fee = self.all_transactions.pending_fees.blob_fee;
+        let new_base_fee = self.all_transactions.pending_fees.base_fee;
+        let new_blob_fee = self.all_transactions.pending_fees.blob_fee;
 
-        let base_fee_decreased = current_base_fee < prev_base_fee;
-        let blob_fee_decreased = current_blob_fee < prev_blob_fee;
-
-        if base_fee_decreased {
-            self.handle_basefee_decrease(current_base_fee, |tx| outcome.promoted.push(tx.clone()));
-            // blob transactions can be promoted when either the blob fee OR the base fee decreases.
-            self.handle_blob_fee_decrease(|tx| outcome.promoted.push(tx.clone()));
-        } else if blob_fee_decreased {
-            self.handle_blob_fee_decrease(|tx| outcome.promoted.push(tx.clone()));
+        if new_base_fee == prev_base_fee && new_blob_fee == prev_blob_fee {
+            return;
         }
+
+        // Restore previous fees so that the update helpers detect the delta.
+        self.all_transactions.pending_fees.base_fee = prev_base_fee;
+        self.all_transactions.pending_fees.blob_fee = prev_blob_fee;
+
+        let base_fee_ordering = self.update_basefee(new_base_fee, |tx| {
+            outcome.promoted.push(tx.clone());
+        });
+
+        self.update_blob_fee(new_blob_fee, base_fee_ordering, |tx| {
+            outcome.promoted.push(tx.clone());
+        });
     }
 
     /// Updates the transactions for the changed senders.
@@ -3259,7 +3265,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 1);
 
-        pool.update_basefee((tx.max_fee_per_gas() + 1) as u64);
+        pool.update_basefee((tx.max_fee_per_gas() + 1) as u64, |_| {});
 
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.basefee_pool.len(), 1);
@@ -3397,7 +3403,7 @@ mod tests {
         assert_eq!(pool.pending_pool.len(), 1);
 
         // Raise base fee beyond the transaction's cap so it gets parked in BaseFee pool.
-        pool.update_basefee(600);
+        pool.update_basefee(600, |_| {});
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.basefee_pool.len(), 1);
 
@@ -3414,6 +3420,8 @@ mod tests {
         assert!(pool.basefee_pool.is_empty());
         assert_eq!(outcome.promoted.len(), 1);
         assert_eq!(outcome.promoted[0].id(), &id);
+        assert_eq!(pool.all_transactions.pending_fees.base_fee, 400);
+        assert_eq!(pool.all_transactions.pending_fees.blob_fee, prev_blob_fee);
 
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
@@ -3436,7 +3444,7 @@ mod tests {
 
         // Raise blob fee beyond the transaction's cap so it gets parked in Blob pool.
         let increased_blob_fee = tx.max_fee_per_blob_gas().unwrap() + 200;
-        pool.update_blob_fee(increased_blob_fee, Ordering::Equal);
+        pool.update_blob_fee(increased_blob_fee, Ordering::Equal, |_| {});
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.blob_pool.len(), 1);
 
@@ -3453,6 +3461,11 @@ mod tests {
         assert!(pool.blob_pool.is_empty());
         assert_eq!(outcome.promoted.len(), 1);
         assert_eq!(outcome.promoted[0].id(), &id);
+        assert_eq!(pool.all_transactions.pending_fees.base_fee, prev_base_fee);
+        assert_eq!(
+            pool.all_transactions.pending_fees.blob_fee,
+            tx.max_fee_per_blob_gas().unwrap()
+        );
 
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
@@ -3479,7 +3492,7 @@ mod tests {
 
         // Raise base fee beyond the transaction's cap so it gets parked in Blob pool.
         let high_base_fee = 600;
-        pool.update_basefee(high_base_fee);
+        pool.update_basefee(high_base_fee, |_| {});
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.blob_pool.len(), 1);
 
@@ -3496,11 +3509,49 @@ mod tests {
         assert!(pool.blob_pool.is_empty());
         assert_eq!(outcome.promoted.len(), 1);
         assert_eq!(outcome.promoted[0].id(), &id);
+        assert_eq!(pool.all_transactions.pending_fees.base_fee, 400);
+        assert_eq!(pool.all_transactions.pending_fees.blob_fee, prev_blob_fee);
 
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
         assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn apply_fee_updates_demotes_after_basefee_rise() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let tx = MockTransaction::eip1559()
+            .with_gas_limit(21_000)
+            .with_max_fee(400)
+            .with_priority_fee(1);
+        let validated = f.validated(tx);
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        let prev_base_fee = pool.all_transactions.pending_fees.base_fee;
+        let prev_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+
+        // Simulate canonical path raising the base fee beyond the transaction's cap.
+        let new_base_fee = prev_base_fee + 1_000;
+        pool.all_transactions.pending_fees.base_fee = new_base_fee;
+
+        let mut outcome = UpdateOutcome::default();
+        pool.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
+
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.basefee_pool.len(), 1);
+        assert!(outcome.promoted.is_empty());
+        assert_eq!(pool.all_transactions.pending_fees.base_fee, new_base_fee);
+        assert_eq!(pool.all_transactions.pending_fees.blob_fee, prev_blob_fee);
+
+        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
+        assert_eq!(tx_meta.subpool, SubPool::BaseFee);
+        assert!(!tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
     }
 
     #[test]
@@ -3660,7 +3711,7 @@ mod tests {
 
         // set the base fee of the pool
         let pool_base_fee = 100;
-        pool.update_basefee(pool_base_fee);
+        pool.update_basefee(pool_base_fee, |_| {});
 
         // 2 txs, that should put the pool over the size limit but not max txs
         let a_txs = MockTransactionSet::dependent(a_sender, 0, 3, TxType::Eip1559)
@@ -4447,7 +4498,7 @@ mod tests {
             .inc_limit();
 
         // Set high basefee so transaction goes to BaseFee pool initially
-        pool.update_basefee(600);
+        pool.update_basefee(600, |_| {});
 
         let validated = f.validated(non_4844_tx);
         let tx_id = *validated.id();
@@ -4463,7 +4514,7 @@ mod tests {
 
         // Decrease basefee - transaction should be promoted to Pending
         // This is where PR #18215 bug would manifest: blob fee bit incorrectly removed
-        pool.update_basefee(400);
+        pool.update_basefee(400, |_| {});
 
         // After basefee decrease: should be promoted to Pending with blob fee bit preserved
         let tx_meta = pool.all_transactions.txs.get(&tx_id).unwrap();
