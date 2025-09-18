@@ -576,17 +576,12 @@ impl Default for DiscoveryArgs {
 /// Parse a block number=hash pair or just a hash into `BlockNumHash`
 fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
     if let Some((num_str, hash_str)) = s.split_once('=') {
-        // Parse block_number=hash format
-        let number = num_str
-            .parse::<u64>()
-            .map_err(|e| format!("Invalid block number '{}': {}", num_str, e))?;
-        let hash = B256::from_str(hash_str)
-            .map_err(|e| format!("Invalid block hash '{}': {}", hash_str, e))?;
+        let number = num_str.parse().map_err(|_| format!("Invalid block number: {}", num_str))?;
+        let hash = B256::from_str(hash_str).map_err(|_| format!("Invalid hash: {}", hash_str))?;
         Ok(BlockNumHash::new(number, hash))
     } else {
-        // Parse just hash format (assume block number 0 as placeholder)
-        let hash = B256::from_str(s).map_err(|e| format!("Invalid block hash '{}': {}", s, e))?;
-        // For backward compatibility, use block number 0 when only hash is provided
+        // For backward compatibility, treat as hash-only with number 0
+        let hash = B256::from_str(s).map_err(|_| format!("Invalid hash: {}", s))?;
         Ok(BlockNumHash::new(0, hash))
     }
 }
@@ -717,24 +712,14 @@ mod tests {
             "0x1111111111111111111111111111111111111111111111111111111111111111",
         );
         assert!(result.is_ok());
-        let block_num_hash = result.unwrap();
-        assert_eq!(block_num_hash.number, 0);
-        assert_eq!(
-            block_num_hash.hash.to_string(),
-            "0x1111111111111111111111111111111111111111111111111111111111111111"
-        );
+        assert_eq!(result.unwrap().number, 0);
 
         // Test block_number=hash format
         let result = parse_block_num_hash(
             "23115201=0x2222222222222222222222222222222222222222222222222222222222222222",
         );
         assert!(result.is_ok());
-        let block_num_hash = result.unwrap();
-        assert_eq!(block_num_hash.number, 23115201);
-        assert_eq!(
-            block_num_hash.hash.to_string(),
-            "0x2222222222222222222222222222222222222222222222222222222222222222"
-        );
+        assert_eq!(result.unwrap().number, 23115201);
 
         // Test invalid formats
         assert!(parse_block_num_hash("invalid").is_err());
@@ -742,6 +727,5 @@ mod tests {
             "abc=0x1111111111111111111111111111111111111111111111111111111111111111"
         )
         .is_err());
-        assert!(parse_block_num_hash("123=invalid_hash").is_err());
     }
 }

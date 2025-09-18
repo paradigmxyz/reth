@@ -58,37 +58,21 @@ where
                 let peer_id = info.peer_id;
                 debug!(target: "net::filter", "New peer session established: {}", peer_id);
 
-                // Get the peer's latest block number from status
+                // Spawn a task to check this peer's blocks
+                let network = self.network.clone();
+                let block_num_hashes = self.block_num_hashes.clone();
                 let peer_block_number = info.status.latest_block.unwrap_or(0);
-                debug!(target: "net::filter", "Peer {} latest block number: {}", peer_id, peer_block_number);
 
-                // Find the lowest required block number
-                let min_required_block_number = self
-                    .block_num_hashes
-                    .iter()
-                    .filter(|block_num_hash| block_num_hash.number > 0) // Skip backward-compatibility entries with number 0
-                    .map(|block_num_hash| block_num_hash.number)
-                    .min();
-
-                // Only check blocks if peer's block number is higher than the lowest required
-                let should_check = if let Some(min_required) = min_required_block_number {
-                    peer_block_number >= min_required
-                } else {
-                    // If all entries have number 0 (backward compatibility), always check
-                    true
-                };
-
-                if should_check {
-                    // Spawn a task to check this peer's blocks
-                    let network = self.network.clone();
-                    let block_num_hashes = self.block_num_hashes.clone();
-
-                    tokio::spawn(async move {
-                        Self::check_peer_blocks(network, peer_id, messages, block_num_hashes).await;
-                    });
-                } else {
-                    debug!(target: "net::filter", "Peer {} block number {} is below minimum required, skipping check", peer_id, peer_block_number);
-                }
+                tokio::spawn(async move {
+                    Self::check_peer_blocks(
+                        network,
+                        peer_id,
+                        messages,
+                        block_num_hashes,
+                        peer_block_number,
+                    )
+                    .await;
+                });
             }
         }
     }
@@ -99,10 +83,18 @@ where
         peer_id: reth_network_api::PeerId,
         messages: reth_network_api::PeerRequestSender<PeerRequest<N::Primitives>>,
         block_num_hashes: Vec<BlockNumHash>,
+        peer_block_number: u64,
     ) {
         for block_num_hash in block_num_hashes {
+            // Skip if peer's block number is lower than required (optimization)
+            if block_num_hash.number > 0 && peer_block_number < block_num_hash.number {
+                debug!(target: "net::filter", "Skipping check for block {} - peer {} only at block {}", 
+                       block_num_hash.number, peer_id, peer_block_number);
+                continue;
+            }
+
             let block_hash = block_num_hash.hash;
-            trace!(target: "net::filter", "Checking if peer {} has block {} at number {}", peer_id, block_hash, block_num_hash.number);
+            trace!(target: "net::filter", "Checking if peer {} has block {}", peer_id, block_hash);
 
             // Create a request for block headers
             let request = GetBlockHeaders {
