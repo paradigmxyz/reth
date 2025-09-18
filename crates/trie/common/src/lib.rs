@@ -36,7 +36,7 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
