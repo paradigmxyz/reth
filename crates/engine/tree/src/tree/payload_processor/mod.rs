@@ -357,22 +357,15 @@ where
     /// instance.
     #[instrument(target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-<<<<<<< Updated upstream
-        self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
-            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
-        })
-=======
         self.execution_cache
             .get_cache_for(parent_hash)
             .inspect(|_| debug!("reusing execution cache"))
             .unwrap_or_else(|| {
                 debug!("creating new execution cache on cache miss");
                 let cache =
-                    ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
                 SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
             })
->>>>>>> Stashed changes
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
