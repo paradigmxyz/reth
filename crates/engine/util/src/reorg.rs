@@ -19,7 +19,7 @@ use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory, noop::NoopProvider};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -316,7 +316,7 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
+    let BlockBuilderOutcome { block, .. } = builder.finish(NoopProvider::default())?;
 
     Ok(block.into_sealed_block())
 }
