@@ -203,12 +203,12 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx, transaction_count_hint) = self.spawn_tx_iterator(transactions);
 
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
-            size_hint,
+            transaction_count_hint,
             provider_builder,
             to_multi_proof.clone(),
         );
@@ -280,7 +280,7 @@ where
         // Get the transaction count for prewarming task
         // Use upper bound if available (more accurate), otherwise use lower bound
         let (lower, upper) = transactions.size_hint();
-        let size_hint = upper.unwrap_or(lower);
+        let transaction_count_hint = upper.unwrap_or(lower);
 
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
@@ -295,7 +295,7 @@ where
             }
         });
 
-        (prewarm_rx, execute_rx, size_hint)
+        (prewarm_rx, execute_rx, transaction_count_hint)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
