@@ -63,13 +63,13 @@ where
             .block_by_number(block_number)?
             .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
 
-        self.convert_receipts_with_block(inputs, block)
+        self.convert_receipts_with_block(inputs, &block)
     }
 
     fn convert_receipts_with_block(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
-        block: N::Block,
+        block: &N::Block,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
             Ok(l1_block_info) => l1_block_info,

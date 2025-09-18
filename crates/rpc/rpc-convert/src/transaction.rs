@@ -61,7 +61,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
-        _block: N::Block,
+        _block: &N::Block,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
     }
