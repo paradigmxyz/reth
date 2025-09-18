@@ -125,7 +125,8 @@ where
 
             // Initially cap workers based on transaction count hint
             let mut handles = Vec::with_capacity(max_concurrency);
-            let workers_needed = transaction_count_hint.min(max_concurrency);
+
+            let initial_workers = transaction_count_hint.max(1).min(max_concurrency);
 
             // Spawn the required number of workers
             for _ in 0..workers_needed {
