@@ -170,7 +170,7 @@ where
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
-        let mut total_size = bodies_capacity * mem::size_of::<C::Body>();
+        let mut total_size = 0;
         while bodies.peek().is_some() {
             let next_header = match self.pending_headers.pop_front() {
                 Some(header) => header,
@@ -178,8 +178,6 @@ where
             };
 
             if next_header.is_empty() {
-                // increment empty block body metric
-                total_size += mem::size_of::<C::Body>();
                 self.buffer.push(BlockResponse::Empty(next_header));
             } else {
                 let next_body = bodies.next().unwrap();
