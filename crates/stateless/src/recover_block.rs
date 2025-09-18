@@ -16,7 +16,7 @@ compile_error!("Either 'k256' or 'secp256k1' feature must be enabled");
 pub type UncompressedPublicKey = [u8; 65];
 
 /// Verifies a transaction using its signature and the given public key.
-///
+/// 
 /// Note: If the signature or the public key is incorrect, then this method
 /// will return an error.
 ///
@@ -48,7 +48,7 @@ fn recover_sender_unchecked(
         VerifyingKey::from_sec1_bytes(vk).map_err(|_| StatelessValidationError::SignerRecovery)?;
 
     sig.to_k256()
-        .and_then(|sig| vk.verify_prehash(tx.signature_hash().as_slice(), &sig))
+        .and_then(|sig| vk.verify_prehash(sig_hash.as_slice(), &sig))
         .map_err(|_| StatelessValidationError::SignerRecovery)?;
 
     Ok(Address::from_public_key(&vk))
