@@ -160,11 +160,12 @@ where
             if cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
                 *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
             }
 
             cache.update_metrics();
-            debug!(target: "engine::caching", "Updated state caches");
+            debug!(target: "engine::caching", parent_hash=?cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(cache);

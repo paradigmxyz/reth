@@ -1,5 +1,6 @@
 //! Entrypoint for payload processing.
 
+use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
         CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
@@ -44,8 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-
-use super::precompile_cache::PrecompileCacheMap;
+use tracing::{debug, instrument};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -355,11 +355,24 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
+    #[instrument(target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
+<<<<<<< Updated upstream
         self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
+=======
+        self.execution_cache
+            .get_cache_for(parent_hash)
+            .inspect(|_| debug!("reusing execution cache"))
+            .unwrap_or_else(|| {
+                debug!("creating new execution cache on cache miss");
+                let cache =
+                    ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+                SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            })
+>>>>>>> Stashed changes
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
