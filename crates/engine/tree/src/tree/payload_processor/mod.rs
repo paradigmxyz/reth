@@ -582,9 +582,6 @@ impl ExecutionCache {
     ///
     /// Violating this requirement can result in cache corruption, incorrect state data,
     /// and potential consensus failures.
-    ///
-    /// This method is typically called from [`PrewarmCacheTask::save_cache`] after
-    /// ensuring all concurrent operations have finished.
     pub(crate) fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),
