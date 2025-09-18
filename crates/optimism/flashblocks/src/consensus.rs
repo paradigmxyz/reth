@@ -46,7 +46,7 @@ impl FlashBlockConsensusClient {
         loop {
             match self.sequence_receiver.recv().await {
                 Ok(sequence) => {
-                    let block_hash = sequence.last().diff.block_hash;
+                    let block_hash = sequence.payload_base().parent_hash;
                     previous_block_hashes.push(block_hash);
 
                     // Load previous block hashes. We're using (head - 32) and (head - 64) as the
