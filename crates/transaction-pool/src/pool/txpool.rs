@@ -3462,10 +3462,7 @@ mod tests {
         assert_eq!(outcome.promoted.len(), 1);
         assert_eq!(outcome.promoted[0].id(), &id);
         assert_eq!(pool.all_transactions.pending_fees.base_fee, prev_base_fee);
-        assert_eq!(
-            pool.all_transactions.pending_fees.blob_fee,
-            tx.max_fee_per_blob_gas().unwrap()
-        );
+        assert_eq!(pool.all_transactions.pending_fees.blob_fee, tx.max_fee_per_blob_gas().unwrap());
 
         let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
         assert_eq!(tx_meta.subpool, SubPool::Pending);
