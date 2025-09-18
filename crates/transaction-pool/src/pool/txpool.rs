@@ -345,8 +345,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
         for tx in removed {
             let subpool = {
-                let tx_meta =
-                    self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                let tx_meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
                 tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                 tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                 tx_meta.subpool = tx_meta.state.into();
