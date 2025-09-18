@@ -82,6 +82,8 @@ where
     disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
+    /// Maximum concurrency for prewarm task.
+    prewarm_max_concurrency: usize,
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -108,6 +110,7 @@ where
             sparse_state_trie: Arc::default(),
             trie_input: None,
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
+            prewarm_max_concurrency: config.prewarm_max_concurrency(),
         }
     }
 }
@@ -333,6 +336,7 @@ where
             prewarm_ctx,
             to_multi_proof,
             transaction_count_hint,
+            self.prewarm_max_concurrency,
         );
 
         // spawn pre-warm task
