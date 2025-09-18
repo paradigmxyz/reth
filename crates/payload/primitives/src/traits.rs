@@ -147,6 +147,38 @@ pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     fn build(&self, timestamp: u64) -> Attributes;
 }
 
+impl<Attributes, F> PayloadAttributesBuilder<Attributes> for F
+where
+    F: Fn(u64) -> Attributes + Send + Sync + 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self(timestamp)
+    }
+}
+
+impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for either::Either<L, R>
+where
+    L: PayloadAttributesBuilder<Attributes>,
+    R: PayloadAttributesBuilder<Attributes>,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        match self {
+            Self::Left(l) => l.build(timestamp),
+            Self::Right(r) => r.build(timestamp),
+        }
+    }
+}
+
+impl<Attributes> PayloadAttributesBuilder<Attributes>
+    for Box<dyn PayloadAttributesBuilder<Attributes>>
+where
+    Attributes: 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self.as_ref().build(timestamp)
+    }
+}
+
 /// Trait to build the EVM environment for the next block from the given payload attributes.
 ///
 /// Accepts payload attributes from CL, parent header and additional payload builder context.

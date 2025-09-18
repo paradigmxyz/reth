@@ -9605,6 +9605,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
+ "either",
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
