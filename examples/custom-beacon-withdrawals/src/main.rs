@@ -238,20 +238,22 @@ sol!(
 
 /// Applies the post-block call to the withdrawal / deposit contract, using the given block,
 /// [`ChainSpec`], EVM.
-pub fn apply_withdrawals_contract_call(
+pub fn apply_withdrawals_contract_call<DB, E>(
     withdrawals: &[Withdrawal],
-    evm: &mut impl Evm<Error: Display, DB: DatabaseCommit>,
-) -> Result<(), BlockExecutionError> {
-    let mut state = match evm.transact_system_call(
-        SYSTEM_ADDRESS,
-        WITHDRAWALS_ADDRESS,
-        withdrawalsCall {
-            amounts: withdrawals.iter().map(|w| w.amount).collect::<Vec<_>>(),
-            addresses: withdrawals.iter().map(|w| w.address).collect::<Vec<_>>(),
-        }
-        .abi_encode()
-        .into(),
-    ) {
+    evm: &mut E,
+) -> Result<(), BlockExecutionError>
+where
+    DB: DatabaseCommit,
+    E: Evm<DB = DB, Error: Display>,
+{
+    let call_data = withdrawals(
+        withdrawals.iter().map(|w| w.amount).collect::<Vec<_>>(),
+        withdrawals.iter().map(|w| w.address).collect::<Vec<_>>()
+    )
+    .abi_encode()
+    .into();
+
+    let mut state = match evm.transact_system_call(SYSTEM_ADDRESS, WITHDRAWALS_ADDRESS, call_data) {
         Ok(res) => res.state,
         Err(e) => {
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
@@ -260,7 +262,6 @@ pub fn apply_withdrawals_contract_call(
         }
     };
 
-    // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
     state.remove(&evm.block().beneficiary);
 
