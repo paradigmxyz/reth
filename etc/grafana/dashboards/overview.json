@@ -691,7 +691,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_sync_checkpoint{$instance_label=\"$instance\"}",
+          "expr": "max by (stage) (reth_sync_checkpoint{$instance_label=\"$instance\"})",
           "instant": true,
           "legendFormat": "{{stage}}",
           "range": false,
@@ -928,7 +928,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_entities_processed{$instance_label=\"$instance\"} / reth_sync_entities_total{$instance_label=\"$instance\"}",
+          "expr": "avg by (stage) (reth_sync_entities_processed{$instance_label=\"$instance\"} / reth_sync_entities_total{$instance_label=\"$instance\"})",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
@@ -1025,7 +1025,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_checkpoint{$instance_label=\"$instance\"}",
+          "expr": "max by (stage) (reth_sync_checkpoint{$instance_label=\"$instance\"})",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
