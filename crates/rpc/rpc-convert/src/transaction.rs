@@ -55,6 +55,16 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from `block`.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+        _block: N::Block,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self.convert_receipts(receipts)
+    }
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
