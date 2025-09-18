@@ -1,12 +1,16 @@
+use crate::validation::StatelessValidationError;
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::Address;
-use k256::ecdsa::{signature::hazmat::PrehashVerifier, VerifyingKey};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 
-use crate::validation::StatelessValidationError;
+#[cfg(all(feature = "k256", feature = "secp256k1"))]
+compile_error!("Features 'k256' and 'secp256k1' are mutually exclusive");
+
+#[cfg(not(any(feature = "k256", feature = "secp256k1")))]
+compile_error!("Either 'k256' or 'secp256k1' feature must be enabled");
 
 /// Serialized uncompressed public key
 pub type UncompressedPublicKey = [u8; 65];
@@ -17,13 +21,17 @@ pub type UncompressedPublicKey = [u8; 65];
 /// will return an error.
 ///
 /// Returns the address derived from the public key.
+#[cfg(feature = "k256")]
 fn recover_sender(
     vk: &UncompressedPublicKey,
     tx: &TransactionSigned,
     is_homestead: bool,
 ) -> Result<Address, StatelessValidationError> {
+    use k256::ecdsa::{signature::hazmat::PrehashVerifier, VerifyingKey};
+
     let sig = tx.signature();
-    let vk = VerifyingKey::from_sec1_bytes(vk).unwrap();
+    let vk =
+        VerifyingKey::from_sec1_bytes(vk).map_err(|_| StatelessValidationError::SignerRecovery)?;
 
     // non-normalized signatures are only valid pre-homestead
     let sig_is_normalized = sig.normalize_s().is_none();
@@ -36,6 +44,45 @@ fn recover_sender(
         .map_err(|_| StatelessValidationError::SignerRecovery)?;
 
     Ok(Address::from_public_key(&vk))
+}
+
+/// Verifies a transaction using its signature and the given public key.
+///
+/// Note: If the signature or the public key is incorrect, then this method
+/// will return an error.
+///
+/// Returns the address derived from the public key.
+#[cfg(feature = "secp256k1")]
+fn recover_sender(
+    vk: &UncompressedPublicKey,
+    tx: &TransactionSigned,
+    is_homestead: bool,
+) -> Result<Address, StatelessValidationError> {
+    use secp256k1::{ecdsa::Signature, Message, PublicKey, SECP256K1};
+
+    let sig = tx.signature();
+
+    let public_key =
+        PublicKey::from_slice(vk).map_err(|_| StatelessValidationError::SignerRecovery)?;
+
+    let sig_is_normalized = sig.normalize_s().is_none();
+    if is_homestead && !sig_is_normalized {
+        return Err(StatelessValidationError::HomesteadSignatureNotNormalized);
+    }
+
+    let mut sig_bytes = [0u8; 64];
+    sig_bytes[0..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
+    sig_bytes[32..64].copy_from_slice(&sig.s().to_be_bytes::<32>());
+
+    let signature = Signature::from_compact(&sig_bytes)
+        .map_err(|_| StatelessValidationError::SignerRecovery)?;
+
+    let message = Message::from_digest(tx.signature_hash().0);
+    SECP256K1
+        .verify_ecdsa(&message, &signature, &public_key)
+        .map_err(|_| StatelessValidationError::SignerRecovery)?;
+
+    Ok(Address::from_raw_public_key(&vk[1..]))
 }
 
 /// Verifies all transactions in a block against a list of public keys and signatures.
