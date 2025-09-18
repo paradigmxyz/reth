@@ -28,6 +28,15 @@ use std::{
 };
 use tracing::{debug, trace, warn};
 
+/// A wrapper for transactions that includes their index in the block.
+#[derive(Clone)]
+struct IndexedTransaction<Tx> {
+    /// The transaction index in the block.
+    index: usize,
+    /// The wrapped transaction.
+    tx: Tx,
+}
+
 /// Maximum standard Ethereum transaction type value.
 ///
 /// Standard transaction types are:
@@ -109,11 +118,10 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all(
-        &self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
-        actions_tx: Sender<PrewarmTaskEvent>,
-    ) {
+    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
+    where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
         let executor = self.executor.clone();
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
@@ -121,60 +129,75 @@ where
 
         self.executor.spawn_blocking(move || {
             let (done_tx, done_rx) = mpsc::channel();
-            let mut executing = 0;
+            let mut executing = 0usize;
 
-            // Initially cap workers based on transaction count hint
+            // Initialize worker handles container
             let mut handles = Vec::with_capacity(max_concurrency);
 
-            let initial_workers = transaction_count_hint.max(1).min(max_concurrency);
+            let workers_needed = transaction_count_hint.max(1).min(max_concurrency);
 
-            // Spawn the required number of workers
+            // Only spawn initial workers as needed
             for _ in 0..workers_needed {
                 handles.push(ctx.spawn_worker(&executor, actions_tx.clone(), done_tx.clone()));
             }
 
+            let mut tx_index = 0usize;
+
             // Handle first transaction - special case for system transactions
             if let Ok(first_tx) = pending.recv() {
+                // Move the transaction into the indexed wrapper to avoid an extra clone
+                let indexed_tx = IndexedTransaction { index: tx_index, tx: first_tx };
+                // Compute metadata from the moved value
+                let tx_ref = indexed_tx.tx.tx();
+                let is_system_tx = tx_ref.ty() > MAX_STANDARD_TX_TYPE;
+                let first_tx_hash = tx_ref.tx_hash();
+
                 // Check if this is a system transaction (type > 4)
                 // System transactions in the first position typically set critical metadata
                 // that affects all subsequent transactions (e.g., L1 block info, fees on L2s).
-                if first_tx.tx().ty() > MAX_STANDARD_TX_TYPE {
+                if is_system_tx {
                     // Broadcast system transaction to all workers to ensure they have the
                     // critical state. This is particularly important for L2s like Optimism
                     // where the first deposit transaction contains essential block metadata.
                     for handle in &handles {
-                        if handle.send(first_tx.clone()).is_err() {
+                        if let Err(err) = handle.send(indexed_tx.clone()) {
                             warn!(
                                 target: "engine::tree::prewarm",
-                                tx_hash = %first_tx.tx().tx_hash(),
+                                tx_hash = %first_tx_hash,
+                                error = %err,
                                 "Failed to send deposit transaction to worker"
                             );
                         }
                     }
                 } else {
                     // Not a deposit, send to first worker via round-robin
-                    if handles[0].send(first_tx).is_err() {
+                    if let Err(err) = handles[0].send(indexed_tx) {
                         warn!(
                             target: "engine::tree::prewarm",
                             task_idx = 0,
+                            error = %err,
                             "Failed to send transaction to worker"
                         );
                     }
                 }
                 executing += 1;
+                tx_index += 1;
             }
 
             // Process remaining transactions with round-robin distribution
             while let Ok(executable) = pending.recv() {
+                let indexed_tx = IndexedTransaction { index: tx_index, tx: executable };
                 let task_idx = executing % workers_needed;
-                if handles[task_idx].send(executable).is_err() {
+                if let Err(err) = handles[task_idx].send(indexed_tx) {
                     warn!(
                         target: "engine::tree::prewarm",
                         task_idx,
+                        error = %err,
                         "Failed to send transaction to worker"
                     );
                 }
                 executing += 1;
+                tx_index += 1;
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
@@ -364,21 +387,27 @@ where
     ///
     /// Note: Since here are no ordering guarantees this won't be the state the txs produce when
     /// executed sequentially.
-    fn transact_batch(
+    fn transact_batch<Tx>(
         self,
-        txs: mpsc::Receiver<impl ExecutableTxFor<Evm>>,
+        txs: mpsc::Receiver<IndexedTransaction<Tx>>,
         sender: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
-    ) {
+    ) where
+        Tx: ExecutableTxFor<Evm>,
+    {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
-        while let Ok(tx) = txs.recv() {
+        while let Ok(IndexedTransaction { index, tx }) = txs.recv() {
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
                 break
             }
+
+            // Skip sending outputs for the first transaction (index 0)
+            // as the main execution will be just as fast
+            let should_send_output = index > 0;
 
             // create the tx env
             let start = Instant::now();
@@ -397,11 +426,14 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
-            metrics.prefetch_storage_targets.record(storage_targets as f64);
-            metrics.total_runtime.record(start.elapsed());
+            // Only send outcome for transactions after the first one
+            if should_send_output {
+                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                metrics.prefetch_storage_targets.record(storage_targets as f64);
+                let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+            }
 
-            let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+            metrics.total_runtime.record(start.elapsed());
         }
 
         // send a message to the main task to flag that we're done
@@ -414,7 +446,7 @@ where
         executor: &WorkloadExecutor,
         actions_tx: Sender<PrewarmTaskEvent>,
         done_tx: Sender<()>,
-    ) -> mpsc::Sender<Tx>
+    ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
