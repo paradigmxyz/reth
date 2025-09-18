@@ -28,7 +28,7 @@ enum BranchNode {
 /// of the trie tables.
 ///
 /// [`BranchNode`]s are iterated over such that:
-/// * Account nodes and storage nodes may be interspersed.
+/// * Account nodes and storage nodes may be interleaved.
 /// * Storage nodes for the same account will be ordered by ascending path relative to each other.
 /// * Account nodes will be ordered by ascending path relative to each other.
 /// * All storage nodes for one account will finish before storage nodes for another account are

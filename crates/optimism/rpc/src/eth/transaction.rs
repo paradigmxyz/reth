@@ -1,25 +1,35 @@
 //! Loads and formats OP transaction RPC response.
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
+use alloy_consensus::TxReceipt as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
+use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    try_into_op_tx_info, FromEthApiError, RpcConvert, RpcNodeCore, TxInfoMapper,
+    helpers::{
+        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
+        LoadReceipt, LoadTransaction,
+    },
+    try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    RpcReceipt, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    future::Future,
+};
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
@@ -62,11 +72,68 @@ where
 
         Ok(hash)
     }
+
+    /// Returns the transaction receipt for the given hash.
+    ///
+    /// With flashblocks, we should also lookup the pending block for the transaction
+    /// because this is considered confirmed/mined.
+    fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
+    {
+        let this = self.clone();
+        async move {
+            // first attempt to fetch the mined transaction receipt data
+            let tx_receipt = this.load_transaction_and_receipt(hash).await?;
+
+            if tx_receipt.is_none() {
+                // if flashblocks are supported, attempt to find id from the pending block
+                if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                    let block_and_receipts = pending_block.into_block_and_receipts();
+                    if let Some((tx, receipt)) =
+                        block_and_receipts.find_transaction_and_receipt_by_hash(hash)
+                    {
+                        // Build tx receipt from pending block and receipts directly inline.
+                        // This avoids canonical cache lookup that would be done by the
+                        // `build_transaction_receipt` which would result in a block not found
+                        // issue. See: https://github.com/paradigmxyz/reth/issues/18529
+                        let meta = tx.meta();
+                        let all_receipts = &block_and_receipts.receipts;
+
+                        let (gas_used, next_log_index) =
+                            calculate_gas_used_and_next_log_index(meta.index, all_receipts);
+
+                        return Ok(Some(
+                            this.tx_resp_builder()
+                                .convert_receipts(vec![ConvertReceiptInput {
+                                    tx: tx
+                                        .tx()
+                                        .clone()
+                                        .try_into_recovered_unchecked()
+                                        .map_err(Self::Error::from_eth_err)?
+                                        .as_recovered_ref(),
+                                    gas_used: receipt.cumulative_gas_used() - gas_used,
+                                    receipt: receipt.clone(),
+                                    next_log_index,
+                                    meta,
+                                }])?
+                                .pop()
+                                .unwrap(),
+                        ))
+                    }
+                }
+            }
+            let Some((tx, meta, receipt)) = tx_receipt else { return Ok(None) };
+            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+        }
+    }
 }
 
 impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
 }

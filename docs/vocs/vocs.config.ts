@@ -10,6 +10,9 @@ export default defineConfig({
   ogImageUrl: '/reth-prod.png',
   sidebar,
   basePath,
+  search: {
+    fuzzy: true
+  },
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk' },

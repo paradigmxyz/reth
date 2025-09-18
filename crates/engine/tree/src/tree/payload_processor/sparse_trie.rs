@@ -39,7 +39,7 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default + Clone,
 {
     /// Creates a new sparse trie, pre-populating with a [`ClearedSparseStateTrie`].
     pub(super) fn new_with_cleared_trie(
@@ -140,7 +140,7 @@ where
     BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
     BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
-    S: SparseTrieInterface + Send + Sync + Default,
+    S: SparseTrieInterface + Send + Sync + Default + Clone,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
@@ -204,7 +204,12 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+        .for_each_init(
+            || tx.clone(),
+            |tx, result| {
+                let _ = tx.send(result);
+            },
+        );
     drop(tx);
 
     // Defer leaf removals until after updates/additions, so that we don't delete an intermediate

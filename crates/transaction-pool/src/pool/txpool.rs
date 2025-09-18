@@ -641,31 +641,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.metrics.total_eip7702_transactions.set(eip7702_count as f64);
     }
 
-    /// Adds the transaction into the pool.
-    ///
-    /// This pool consists of four sub-pools: `Queued`, `Pending`, `BaseFee`, and `Blob`.
-    ///
-    /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
-    /// additional transactions that are note yet present in the pool. And transactions that the
-    /// sender can not afford with the current balance.
-    ///
-    /// The `Pending` pool contains all transactions that have no nonce gaps, and can be afforded by
-    /// the sender. It only contains transactions that are ready to be included in the pending
-    /// block. The pending pool contains all transactions that could be listed currently, but not
-    /// necessarily independently. However, this pool never contains transactions with nonce gaps. A
-    /// transaction is considered `ready` when it has the lowest nonce of all transactions from the
-    /// same sender. Which is equals to the chain nonce of the sender in the pending pool.
-    ///
-    /// The `BaseFee` pool contains transactions that currently can't satisfy the dynamic fee
-    /// requirement. With EIP-1559, transactions can become executable or not without any changes to
-    /// the sender's balance or nonce and instead their `feeCap` determines whether the
-    /// transaction is _currently_ (on the current state) ready or needs to be parked until the
-    /// `feeCap` satisfies the block's `baseFee`.
-    ///
-    /// The `Blob` pool contains _blob_ transactions that currently can't satisfy the dynamic fee
-    /// requirement, or blob fee requirement. Transactions become executable only if the
-    /// transaction `feeCap` is greater than the block's `baseFee` and the `maxBlobFee` is greater
-    /// than the block's `blobFee`.
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
@@ -686,7 +661,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             .update(on_chain_nonce, on_chain_balance);
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
-            Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
+            Ok(InsertOk { transaction, move_to, replaced_tx, updates, state }) => {
                 // replace the new tx and remove the replaced in the subpool(s)
                 self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
@@ -704,7 +679,14 @@ impl<T: TransactionOrdering> TxPool<T> {
                         replaced,
                     })
                 } else {
-                    AddedTransaction::Parked { transaction, subpool: move_to, replaced }
+                    // Determine the specific queued reason based on the transaction state
+                    let queued_reason = state.determine_queued_reason(move_to);
+                    AddedTransaction::Parked {
+                        transaction,
+                        subpool: move_to,
+                        replaced,
+                        queued_reason,
+                    }
                 };
 
                 // Update size metrics after adding and potentially moving transactions.
@@ -791,7 +773,11 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         if txs_by_sender.peek().is_none() {
             // Transaction with gapped nonce is not supported for delegated accounts
-            if transaction.nonce() > on_chain_nonce {
+            // but transaction can arrive out of order if more slots are allowed
+            // by default with a slot limit of 1 this will fail if the transaction's nonce >
+            // on_chain
+            let nonce_gap_distance = transaction.nonce().saturating_sub(on_chain_nonce);
+            if nonce_gap_distance >= self.config.max_inflight_delegated_slot_limit as u64 {
                 return Err(PoolError::new(
                     *transaction.hash(),
                     PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
@@ -2124,7 +2110,6 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
     /// Where to move the transaction to.
     move_to: SubPool,
     /// Current state of the inserted tx.
-    #[cfg_attr(not(test), expect(dead_code))]
     state: TxState,
     /// The transaction that was replaced by this.
     replaced_tx: Option<(Arc<ValidPoolTransaction<T>>, SubPool)>,

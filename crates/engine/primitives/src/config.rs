@@ -347,7 +347,7 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for using the parallel sparse trie
+    /// Setter for whether to disable the parallel sparse trie
     pub const fn with_disable_parallel_sparse_trie(
         mut self,
         disable_parallel_sparse_trie: bool,
