@@ -158,7 +158,10 @@ pub trait EthBlocks:
                     })
                     .collect::<Vec<_>>();
 
-                return self.tx_resp_builder().convert_receipts(inputs).map(Some)
+                return self
+                    .tx_resp_builder()
+                    .convert_receipts_with_block(inputs, block.sealed_block())
+                    .map(Some)
             }
 
             Ok(None)
