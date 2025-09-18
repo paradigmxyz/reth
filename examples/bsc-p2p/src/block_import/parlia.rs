@@ -63,15 +63,13 @@ mod tests {
     #[derive(Clone)]
     struct MockProvider {
         blocks: HashMap<BlockNumber, B256>,
-        head_number: BlockNumber,
-        head_hash: B256,
     }
 
     impl MockProvider {
         fn new(head_number: BlockNumber, head_hash: B256) -> Self {
             let mut blocks = HashMap::new();
             blocks.insert(head_number, head_hash);
-            Self { blocks, head_number, head_hash }
+            Self { blocks }
         }
     }
 
@@ -91,15 +89,17 @@ mod tests {
 
     impl BlockNumReader for MockProvider {
         fn chain_info(&self) -> Result<ChainInfo, ProviderError> {
-            Ok(ChainInfo { best_hash: self.head_hash, best_number: self.head_number })
+            let head_number = *self.blocks.keys().max().unwrap_or(&0);
+            let head_hash = self.blocks.get(&head_number).copied().unwrap_or(B256::zero());
+            Ok(ChainInfo { best_hash: head_hash, best_number: head_number })
         }
 
         fn best_block_number(&self) -> Result<BlockNumber, ProviderError> {
-            Ok(self.head_number)
+            Ok(*self.blocks.keys().max().unwrap_or(&0))
         }
 
         fn last_block_number(&self) -> Result<BlockNumber, ProviderError> {
-            Ok(self.head_number)
+            Ok(*self.blocks.keys().max().unwrap_or(&0))
         }
 
         fn block_number(&self, hash: B256) -> Result<Option<BlockNumber>, ProviderError> {
