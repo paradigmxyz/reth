@@ -610,11 +610,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Only handle promotions when base fee decreases
         if base_fee_decreased {
             self.handle_basefee_decrease(current_base_fee, |tx| outcome.promoted.push(tx.clone()));
-        }
-
-        // Blob promotions depend on both base- and blob-fee, so re-run the
-        // promotions whenever either threshold becomes cheaper.
-        if base_fee_decreased || blob_fee_decreased {
+            // Blob promotions depend on both base- and blob-fee affordability, so recheck blob
+            // transactions as well when the base fee drops.
+            self.handle_blob_fee_decrease(|tx| outcome.promoted.push(tx.clone()));
+        } else if blob_fee_decreased {
+            // Only blob fee dropped: recheck blob transactions.
             self.handle_blob_fee_decrease(|tx| outcome.promoted.push(tx.clone()));
         }
     }
