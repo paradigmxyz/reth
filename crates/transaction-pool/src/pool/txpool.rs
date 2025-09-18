@@ -604,14 +604,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         let current_base_fee = self.all_transactions.pending_fees.base_fee;
         let current_blob_fee = self.all_transactions.pending_fees.blob_fee;
 
+        let base_fee_decreased = current_base_fee < prev_base_fee;
+        let blob_fee_decreased = current_blob_fee < prev_blob_fee;
+
         // Only handle promotions when base fee decreases
-        if current_base_fee < prev_base_fee {
+        if base_fee_decreased {
             self.handle_basefee_decrease(current_base_fee, |tx| outcome.promoted.push(tx.clone()));
         }
 
-        // Only handle blob fee promotions when blob fee decreases
-        // Skip if base fee also decreased (already handled above)
-        if current_blob_fee < prev_blob_fee && current_base_fee >= prev_base_fee {
+        // Blob promotions depend on both base- and blob-fee, so re-run the
+        // promotions whenever either threshold becomes cheaper.
+        if base_fee_decreased || blob_fee_decreased {
             self.handle_blob_fee_decrease(|tx| outcome.promoted.push(tx.clone()));
         }
     }
@@ -3445,6 +3448,49 @@ mod tests {
 
         // Simulate the canonical state path updating pending fees before applying promotions.
         pool.all_transactions.pending_fees.blob_fee = tx.max_fee_per_blob_gas().unwrap();
+
+        let mut outcome = UpdateOutcome::default();
+        pool.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
+
+        assert_eq!(pool.pending_pool.len(), 1);
+        assert!(pool.blob_pool.is_empty());
+        assert_eq!(outcome.promoted.len(), 1);
+        assert_eq!(outcome.promoted[0].id(), &id);
+
+        let tx_meta = pool.all_transactions.txs.get(&id).unwrap();
+        assert_eq!(tx_meta.subpool, SubPool::Pending);
+        assert!(tx_meta.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
+        assert!(tx_meta.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+    }
+
+    #[test]
+    fn apply_fee_updates_promotes_blob_after_basefee_drop() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let initial_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+
+        let tx = MockTransaction::eip4844()
+            .with_max_fee(500)
+            .with_priority_fee(1)
+            .with_blob_fee(initial_blob_fee + 100);
+        let validated = f.validated(tx);
+        let id = *validated.id();
+        pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
+
+        assert_eq!(pool.pending_pool.len(), 1);
+
+        // Raise base fee beyond the transaction's cap so it gets parked in Blob pool.
+        let high_base_fee = 600;
+        pool.update_basefee(high_base_fee);
+        assert!(pool.pending_pool.is_empty());
+        assert_eq!(pool.blob_pool.len(), 1);
+
+        let prev_base_fee = high_base_fee;
+        let prev_blob_fee = pool.all_transactions.pending_fees.blob_fee;
+
+        // Simulate applying a lower base fee while keeping blob fee unchanged.
+        pool.all_transactions.pending_fees.base_fee = 400;
 
         let mut outcome = UpdateOutcome::default();
         pool.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
