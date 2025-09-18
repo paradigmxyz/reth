@@ -36,7 +36,7 @@ where
     let senders = public_keys
         .iter()
         .zip(block.body().transactions())
-        .map(|(vk, tx)| recover_sender(vk, tx, is_homestead))
+        .map(|(vk, tx)| verify_and_compute_sender(vk, tx, is_homestead))
         .collect::<Result<Vec<_>, _>>()?;
 
     // Create RecoveredBlock with verified senders
@@ -50,7 +50,7 @@ where
 /// will return an error.
 ///
 /// Returns the address derived from the public key.
-fn recover_sender(
+fn verify_and_compute_sender(
     vk: &UncompressedPublicKey,
     tx: &TransactionSigned,
     is_homestead: bool,
@@ -65,15 +65,15 @@ fn recover_sender(
     let sig_hash = tx.signature_hash();
     #[cfg(all(feature = "k256", feature = "secp256k1"))]
     {
-        let _ = recover_sender_unchecked_k256;
+        let _ = verify_and_compute_sender_unchecked_k256;
     }
     #[cfg(feature = "secp256k1")]
     {
-        recover_sender_unchecked_secp256k1(vk, sig, sig_hash)
+        verify_and_compute_sender_unchecked_secp256k1(vk, sig, sig_hash)
     }
     #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
     {
-        recover_sender_unchecked_k256(vk, sig, sig_hash)
+        verify_and_compute_sender_unchecked_k256(vk, sig, sig_hash)
     }
     #[cfg(not(any(feature = "secp256k1", feature = "k256")))]
     {
@@ -86,7 +86,7 @@ fn recover_sender(
     }
 }
 #[cfg(feature = "k256")]
-fn recover_sender_unchecked_k256(
+fn verify_and_compute_sender_unchecked_k256(
     vk: &UncompressedPublicKey,
     sig: &Signature,
     sig_hash: B256,
@@ -104,7 +104,7 @@ fn recover_sender_unchecked_k256(
 }
 
 #[cfg(feature = "secp256k1")]
-fn recover_sender_unchecked_secp256k1(
+fn verify_and_compute_sender_unchecked_secp256k1(
     vk: &UncompressedPublicKey,
     sig: &Signature,
     sig_hash: B256,
