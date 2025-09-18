@@ -150,7 +150,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     }
 
                     let current_timestamp = evm_env.block_env.timestamp.to::<u64>();
-                    if current_timestamp < parent_timestamp {
+                    if current_timestamp <= parent_timestamp {
                         return Err(EthApiError::other(
                             EthSimulateError::BlockTimestampNotIncreased,
                         )
