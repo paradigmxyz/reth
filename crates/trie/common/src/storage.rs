@@ -34,12 +34,12 @@ impl reth_codecs::Compact for StorageTrieEntry {
     }
 }
 
-/// Storage trie changeset entry representing the state of a storage trie node before a block.
+/// Trie changeset entry representing the state of a trie node before a block.
 ///
-/// `nibbles` is the subkey when used as a value in the `StorageTrieChangeSets` table.
+/// `nibbles` is the subkey when used as a value in the changeset tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
-pub struct StorageTrieChangeSetsEntry {
+pub struct TrieChangeSetsEntry {
     /// The nibbles of the intermediate node
     pub nibbles: StoredNibblesSubKey,
     /// Node value prior to the block being processed, None indicating it didn't exist.
@@ -47,7 +47,7 @@ pub struct StorageTrieChangeSetsEntry {
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
-impl reth_codecs::Compact for StorageTrieChangeSetsEntry {
+impl reth_codecs::Compact for TrieChangeSetsEntry {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -84,10 +84,9 @@ mod tests {
     use reth_codecs::Compact;
 
     #[test]
-    fn test_storage_trie_changesets_entry_full_empty() {
+    fn test_trie_changesets_entry_full_empty() {
         // Test a fully empty entry (empty nibbles, None node)
-        let entry =
-            StorageTrieChangeSetsEntry { nibbles: StoredNibblesSubKey::from(vec![]), node: None };
+        let entry = TrieChangeSetsEntry { nibbles: StoredNibblesSubKey::from(vec![]), node: None };
 
         let mut buf = BytesMut::new();
         let len = entry.to_compact(&mut buf);
@@ -98,17 +97,17 @@ mod tests {
         assert_eq!(buf.len(), 65);
 
         // Deserialize and verify
-        let (decoded, remaining) = StorageTrieChangeSetsEntry::from_compact(&buf, len);
+        let (decoded, remaining) = TrieChangeSetsEntry::from_compact(&buf, len);
         assert_eq!(decoded.nibbles.0.to_vec(), Vec::<u8>::new());
         assert_eq!(decoded.node, None);
         assert_eq!(remaining.len(), 0);
     }
 
     #[test]
-    fn test_storage_trie_changesets_entry_none_node() {
+    fn test_trie_changesets_entry_none_node() {
         // Test non-empty nibbles with None node
         let nibbles_data = vec![0x01, 0x02, 0x03, 0x04];
-        let entry = StorageTrieChangeSetsEntry {
+        let entry = TrieChangeSetsEntry {
             nibbles: StoredNibblesSubKey::from(nibbles_data.clone()),
             node: None,
         };
@@ -120,14 +119,14 @@ mod tests {
         assert_eq!(len, 65);
 
         // Deserialize and verify
-        let (decoded, remaining) = StorageTrieChangeSetsEntry::from_compact(&buf, len);
+        let (decoded, remaining) = TrieChangeSetsEntry::from_compact(&buf, len);
         assert_eq!(decoded.nibbles.0.to_vec(), nibbles_data);
         assert_eq!(decoded.node, None);
         assert_eq!(remaining.len(), 0);
     }
 
     #[test]
-    fn test_storage_trie_changesets_entry_empty_path_with_node() {
+    fn test_trie_changesets_entry_empty_path_with_node() {
         // Test empty path with Some node
         // Using the same signature as in the codebase: (state_mask, hash_mask, tree_mask, hashes,
         // value)
@@ -139,7 +138,7 @@ mod tests {
             None,                  // value
         );
 
-        let entry = StorageTrieChangeSetsEntry {
+        let entry = TrieChangeSetsEntry {
             nibbles: StoredNibblesSubKey::from(vec![]),
             node: Some(test_node.clone()),
         };
@@ -153,14 +152,14 @@ mod tests {
         assert_eq!(len, 65 + node_len);
 
         // Deserialize and verify
-        let (decoded, remaining) = StorageTrieChangeSetsEntry::from_compact(&buf, len);
+        let (decoded, remaining) = TrieChangeSetsEntry::from_compact(&buf, len);
         assert_eq!(decoded.nibbles.0.to_vec(), Vec::<u8>::new());
         assert_eq!(decoded.node, Some(test_node));
         assert_eq!(remaining.len(), 0);
     }
 
     #[test]
-    fn test_storage_trie_changesets_entry_normal() {
+    fn test_trie_changesets_entry_normal() {
         // Test normal case: non-empty path with Some node
         let nibbles_data = vec![0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
         // Using the same signature as in the codebase
@@ -172,7 +171,7 @@ mod tests {
             None,                  // value
         );
 
-        let entry = StorageTrieChangeSetsEntry {
+        let entry = TrieChangeSetsEntry {
             nibbles: StoredNibblesSubKey::from(nibbles_data.clone()),
             node: Some(test_node.clone()),
         };
@@ -186,17 +185,17 @@ mod tests {
         assert_eq!(len, 65 + node_len);
 
         // Deserialize and verify
-        let (decoded, remaining) = StorageTrieChangeSetsEntry::from_compact(&buf, len);
+        let (decoded, remaining) = TrieChangeSetsEntry::from_compact(&buf, len);
         assert_eq!(decoded.nibbles.0.to_vec(), nibbles_data);
         assert_eq!(decoded.node, Some(test_node));
         assert_eq!(remaining.len(), 0);
     }
 
     #[test]
-    fn test_storage_trie_changesets_entry_from_compact_zero_len() {
+    fn test_trie_changesets_entry_from_compact_zero_len() {
         // Test from_compact with zero length
         let buf = vec![0x01, 0x02, 0x03];
-        let (decoded, remaining) = StorageTrieChangeSetsEntry::from_compact(&buf, 0);
+        let (decoded, remaining) = TrieChangeSetsEntry::from_compact(&buf, 0);
 
         // Should return empty nibbles and None node
         assert_eq!(decoded.nibbles.0.to_vec(), Vec::<u8>::new());
