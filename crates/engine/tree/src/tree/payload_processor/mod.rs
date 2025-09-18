@@ -1,7 +1,10 @@
 //! Entrypoint for payload processing.
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
+    cached_state::{
+        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
+        SavedCache,
+    },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
@@ -33,8 +36,9 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
+    ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
+use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::sync::{
     atomic::AtomicBool,
     mpsc::{self, channel, Sender},
@@ -50,6 +54,14 @@ pub mod prewarm;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
+
+/// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
+///
+/// These values were determined by performing benchmarks using gradually increasing values to judge
+/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
+/// would deteriorate to the point where PST might as well not be used.
+pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
+    ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -76,9 +88,11 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+        parking_lot::Mutex<
+            Option<ClearedSparseStateTrie<ConfiguredSparseTrie, ConfiguredSparseTrie>>,
+        >,
     >,
-    /// Whether to use the parallel sparse trie.
+    /// Whether to disable the parallel sparse trie.
     disable_parallel_sparse_trie: bool,
     /// A cleared trie input, kept around to be reused so allocations can be minimized.
     trie_input: Option<TrieInput>,
@@ -343,7 +357,7 @@ where
     /// instance.
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
-            let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
     }
@@ -363,20 +377,24 @@ where
         // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
         let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let accounts_trie = if self.disable_parallel_sparse_trie {
+            let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
                 ConfiguredSparseTrie::Serial(Default::default())
             } else {
-                ConfiguredSparseTrie::Parallel(Default::default())
-            };
+                ConfiguredSparseTrie::Parallel(Box::new(
+                    ParallelSparseTrie::default()
+                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                ))
+            });
             ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
-                    .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
+                    .with_accounts_trie(default_trie.clone())
+                    .with_default_storage_trie(default_trie)
                     .with_updates(true),
             )
         });
 
         let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
+            SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
                 sparse_trie_rx,
                 proof_task_handle,
                 self.trie_metrics.clone(),
@@ -437,7 +455,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> ProviderCaches {
+    pub(super) fn caches(&self) -> StateExecutionCache {
         self.prewarm_handle.cache.clone()
     }
 
@@ -471,7 +489,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
-    cache: ProviderCaches,
+    cache: StateExecutionCache,
     /// Metrics for the caches
     cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
@@ -533,9 +551,14 @@ impl ExecutionCache {
         self.inner.write().take();
     }
 
-    /// Stores the provider cache
-    pub(crate) fn save_cache(&self, cache: SavedCache) {
-        self.inner.write().replace(cache);
+    /// Updates the cache with a closure that has exclusive access to the guard.
+    /// This ensures that all cache operations happen atomically.
+    pub(crate) fn update_with_guard<F>(&self, update_fn: F)
+    where
+        F: FnOnce(&mut Option<SavedCache>),
+    {
+        let mut guard = self.inner.write();
+        update_fn(&mut guard);
     }
 }
 

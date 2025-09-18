@@ -87,7 +87,7 @@ pub fn rng_with_seed(seed: &[u8]) -> StdRng {
 /// The parent hash of the first header
 /// in the result will be equal to `head`.
 ///
-/// The headers are assumed to not be correct if validated.
+/// The headers are assumed not to be correct if validated.
 pub fn random_header_range<R: Rng>(
     rng: &mut R,
     range: Range<u64>,
@@ -118,7 +118,7 @@ pub fn random_block_with_parent<R: Rng>(
 
 /// Generate a random [`SealedHeader`].
 ///
-/// The header is assumed to not be correct if validated.
+/// The header is assumed not to be correct if validated.
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = alloy_consensus::Header {
         number,
