@@ -254,7 +254,24 @@ impl<T: TransactionOrdering> TxPool<T> {
             }
             (Ordering::Less, _) | (_, Ordering::Less) => {
                 // decreased blob/base fee: recheck blob pool and promote all that are now valid
-                self.handle_blob_fee_decrease(|tx| on_promoted(tx));
+                let removed =
+                    self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
+                for tx in removed {
+                    let subpool = {
+                        let tx_meta =
+                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                        tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
+                        tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
+                        tx_meta.subpool = tx_meta.state.into();
+                        tx_meta.subpool
+                    };
+
+                    if subpool == SubPool::Pending {
+                        on_promoted(&tx);
+                    }
+
+                    self.add_transaction_to_subpool(subpool, tx);
+                }
             }
         }
     }
@@ -333,31 +350,6 @@ impl<T: TransactionOrdering> TxPool<T> {
 
                 Ordering::Less
             }
-        }
-    }
-
-    /// Handles promotions that become possible after a blob-fee decrease.
-    ///
-    /// The provided callback is invoked for each transaction that becomes pending.
-    fn handle_blob_fee_decrease<F>(&mut self, mut on_promoted: F)
-    where
-        F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>),
-    {
-        let removed = self.blob_pool.enforce_pending_fees(&self.all_transactions.pending_fees);
-        for tx in removed {
-            let subpool = {
-                let tx_meta = self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
-                tx_meta.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
-                tx_meta.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
-                tx_meta.subpool = tx_meta.state.into();
-                tx_meta.subpool
-            };
-
-            if subpool == SubPool::Pending {
-                on_promoted(&tx);
-            }
-
-            self.add_transaction_to_subpool(subpool, tx);
         }
     }
 
