@@ -9,6 +9,9 @@ use reth_primitives_traits::{Block as _, RecoveredBlock};
 #[cfg(not(any(feature = "k256", feature = "secp256k1")))]
 compile_error!("Either 'k256' or 'secp256k1' feature must be enabled");
 
+#[cfg(all(feature = "k256", feature = "secp256k1"))]
+use k256 as _;
+
 /// Serialized uncompressed public key
 pub type UncompressedPublicKey = [u8; 65];
 
