@@ -33,8 +33,7 @@ use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
-    BranchNodeCompact, TrieChangeSetsEntry, StorageTrieEntry, StoredNibbles,
-    StoredNibblesSubKey,
+    BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
