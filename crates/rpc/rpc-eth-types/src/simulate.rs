@@ -40,6 +40,12 @@ pub enum EthSimulateError {
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Block number in sequence did not increase.
+    #[error("Block number in sequence did not increase")]
+    BlockNumberNotIncreased,
+    /// Block timestamp in sequence did not increase or stay the same.
+    #[error("Block timestamp in sequence did not increase or stay the same")]
+    BlockTimestampNotIncreased,
 }
 
 impl EthSimulateError {
@@ -47,6 +53,8 @@ impl EthSimulateError {
         match self {
             Self::BlockGasLimitExceeded => -38015,
             Self::GasLimitReached => -38026,
+            Self::BlockNumberNotIncreased => -38020,
+            Self::BlockTimestampNotIncreased => -38021,
         }
     }
 }

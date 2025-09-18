@@ -138,6 +138,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             .map_err(Self::Error::from_eth_err)?;
                     }
 
+                    // Validate block number and timestamp
+                    if validation {
+                        if evm_env.block_env.number.to::<u64>() <= parent.number() {
+                            return Err(EthApiError::other(
+                                EthSimulateError::BlockNumberNotIncreased,
+                            )
+                            .into());
+                        }
+
+                        if evm_env.block_env.timestamp.to::<u64>() < parent.timestamp() {
+                            return Err(EthApiError::other(
+                                EthSimulateError::BlockTimestampNotIncreased,
+                            )
+                            .into());
+                        }
+                    }
+
                     let block_gas_limit = evm_env.block_env.gas_limit;
                     let chain_id = evm_env.cfg_env.chain_id;
 
