@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 /// Default value for stale filter ttl
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
+/// Default value for send raw transaction sync timeout
+pub const DEFAULT_SEND_RAW_TRANSACTION_SYNC_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Config for the locally built pending block
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -93,6 +96,8 @@ pub struct EthConfig {
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
     pub raw_tx_forwarder: ForwardConfig,
+    /// Timeout duration for `send_raw_transaction_sync` RPC method.
+    pub send_raw_transaction_sync_timeout: Duration,
 }
 
 impl EthConfig {
@@ -123,6 +128,7 @@ impl Default for EthConfig {
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
+            send_raw_transaction_sync_timeout: DEFAULT_SEND_RAW_TRANSACTION_SYNC_TIMEOUT,
         }
     }
 }
@@ -205,6 +211,12 @@ impl EthConfig {
         if let Some(tx_forwarder) = tx_forwarder {
             self.raw_tx_forwarder.tx_forwarder = Some(tx_forwarder);
         }
+        self
+    }
+
+    /// Configures the timeout duration for `send_raw_transaction_sync` RPC method.
+    pub const fn send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
+        self.send_raw_transaction_sync_timeout = timeout;
         self
     }
 }
