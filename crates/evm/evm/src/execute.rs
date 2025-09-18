@@ -200,7 +200,9 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
 }
 
 impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
+
     /// Creates a new [`BlockAssemblerInput`].
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
         execution_ctx: F::ExecutionCtx<'a>,
