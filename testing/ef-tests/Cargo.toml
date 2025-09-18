@@ -28,7 +28,7 @@ reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-revm = { workspace = true, features = ["std", "witness"] }
-reth-stateless = { workspace = true }
+reth-stateless = { workspace = true, features = ["secp256k1"] }
 reth-tracing.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true

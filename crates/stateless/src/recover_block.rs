@@ -6,9 +6,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 
-#[cfg(all(feature = "k256", feature = "secp256k1"))]
-compile_error!("Features 'k256' and 'secp256k1' are mutually exclusive");
-
 #[cfg(not(any(feature = "k256", feature = "secp256k1")))]
 compile_error!("Either 'k256' or 'secp256k1' feature must be enabled");
 
@@ -16,11 +13,12 @@ compile_error!("Either 'k256' or 'secp256k1' feature must be enabled");
 pub type UncompressedPublicKey = [u8; 65];
 
 /// Verifies a transaction using its signature and the given public key.
-/// 
+///
 /// Note: If the signature or the public key is incorrect, then this method
 /// will return an error.
 ///
 /// Returns the address derived from the public key.
+#[cfg(any(feature = "secp256k1", feature = "k256"))]
 fn recover_sender(
     vk: &UncompressedPublicKey,
     tx: &TransactionSigned,
@@ -36,7 +34,7 @@ fn recover_sender(
     let sig_hash = tx.signature_hash();
     recover_sender_unchecked(vk, sig, sig_hash)
 }
-#[cfg(feature = "k256")]
+#[cfg(not(feature = "secp256k1"))]
 fn recover_sender_unchecked(
     vk: &UncompressedPublicKey,
     sig: &Signature,
