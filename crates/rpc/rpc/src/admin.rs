@@ -13,29 +13,33 @@ use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
+use reth_transaction_pool::TransactionPool;
 
 /// `admin` API implementation.
 ///
 /// This type provides the functionality for handling `admin` related requests.
-pub struct AdminApi<N, ChainSpec> {
+pub struct AdminApi<N, ChainSpec, Pool> {
     /// An interface to interact with the network
     network: N,
     /// The specification of the blockchain's configuration.
     chain_spec: Arc<ChainSpec>,
+    /// The transaction pool
+    pool: Pool,
 }
 
-impl<N, ChainSpec> AdminApi<N, ChainSpec> {
+impl<N, ChainSpec, Pool> AdminApi<N, ChainSpec, Pool> {
     /// Creates a new instance of `AdminApi`.
-    pub const fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
-        Self { network, chain_spec }
+    pub const fn new(network: N, chain_spec: Arc<ChainSpec>, pool: Pool) -> Self {
+        Self { network, chain_spec, pool }
     }
 }
 
 #[async_trait]
-impl<N, ChainSpec> AdminApiServer for AdminApi<N, ChainSpec>
+impl<N, ChainSpec, Pool> AdminApiServer for AdminApi<N, ChainSpec, Pool>
 where
     N: NetworkInfo + Peers + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks + Send + Sync + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
@@ -189,9 +193,17 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         Err("admin_peerEvents is not implemented yet".into())
     }
+
+    /// Handler for `admin_clearTxpool`
+    async fn clear_txpool(&self) -> RpcResult<u64> {
+        let all_hashes = self.pool.all_transaction_hashes();
+        let count = all_hashes.len() as u64;
+        let _ = self.pool.remove_transactions(all_hashes);
+        Ok(count)
+    }
 }
 
-impl<N, ChainSpec> std::fmt::Debug for AdminApi<N, ChainSpec> {
+impl<N, ChainSpec, Pool> std::fmt::Debug for AdminApi<N, ChainSpec, Pool> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdminApi").finish_non_exhaustive()
     }
