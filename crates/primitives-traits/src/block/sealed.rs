@@ -308,10 +308,41 @@ impl<B: Block> Deref for SealedBlock<B> {
 
 impl<B: Block> Encodable for SealedBlock<B> {
     fn encode(&self, out: &mut dyn BufMut) {
-        // Compute payload length as the sum of the header and body payload lengths.
-        // This must exclude the outer list header bytes to be symmetrical with plain Block RLP.
-        let payload_length =
-            alloy_rlp::Encodable::length(self.header()) + alloy_rlp::Encodable::length(self.body());
+        // Derive the list payload length from the total block RLP length to avoid
+        // making assumptions about how `B` computes inner lengths.
+        let total_len = B::rlp_length(self.header(), self.body());
+
+        // Solve: total_len = header_len(payload_len) + payload_len
+        // where header_len(x) = 1              if x < 56
+        //                      = 1 + nbytes(x) otherwise
+        let payload_length = {
+            let small_payload = total_len.saturating_sub(1);
+            if small_payload < 56 {
+                small_payload
+            } else {
+                // Try possible length-of-length candidates (1..=9 bytes is plenty for practical
+                // sizes).
+                let mut derived = small_payload; // fallback, should be overwritten below
+                for num_len_bytes in 1..=9 {
+                    let header_len = 1 + num_len_bytes;
+                    if total_len <= header_len {
+                        continue;
+                    }
+                    let payload = total_len - header_len;
+                    if payload < 56 {
+                        continue;
+                    }
+                    // Check if `payload` fits in exactly `num_len_bytes` bytes.
+                    let fits_in_bytes = (payload >> (num_len_bytes * 8)) == 0 &&
+                        (num_len_bytes == 1 || (payload >> ((num_len_bytes - 1) * 8)) != 0);
+                    if fits_in_bytes {
+                        derived = payload;
+                        break;
+                    }
+                }
+                derived
+            }
+        };
         alloy_rlp::Header { list: true, payload_length }.encode(out);
         self.header().encode(out);
         self.body().encode(out);
