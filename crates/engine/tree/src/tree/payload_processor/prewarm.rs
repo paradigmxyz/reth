@@ -428,10 +428,6 @@ where
                 break
             }
 
-            // Skip sending outputs for the first transaction (index 0)
-            // as the main execution will be just as fast
-            let should_send_output = index > 0;
-
             // create the tx env
             let start = Instant::now();
             let res = match evm.transact(&tx) {
@@ -452,8 +448,9 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            // Only send outcome for transactions after the first one
-            if should_send_output {
+            // Only send outcome for transactions after the first txn
+            // as the main execution will be just as fast
+            if index > 0 {
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
