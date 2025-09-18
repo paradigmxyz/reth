@@ -27,8 +27,8 @@ alloy-consensus.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
-thiserror.workspace = true
 serde = { workspace = true, optional = true }
+thiserror.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }

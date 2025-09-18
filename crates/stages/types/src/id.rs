@@ -1,3 +1,7 @@
+use alloc::vec::Vec;
+#[cfg(feature = "std")]
+use std::{collections::HashMap, sync::OnceLock};
+
 /// Stage IDs for all known stages.
 ///
 /// For custom stages, use [`StageId::Other`]
@@ -8,6 +12,7 @@ pub enum StageId {
         note = "Static Files are generated outside of the pipeline and do not require a separate stage"
     )]
     StaticFile,
+    Era,
     Headers,
     Bodies,
     SenderRecovery,
@@ -26,9 +31,16 @@ pub enum StageId {
     Other(&'static str),
 }
 
+/// One-time-allocated stage ids encoded as raw Vecs, useful for database
+/// clients to reference them for queries instead of encoding anew per query
+/// (sad heap allocation required).
+#[cfg(feature = "std")]
+static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
+
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
+        Self::Era,
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
@@ -63,6 +75,7 @@ impl StageId {
         match self {
             #[expect(deprecated)]
             Self::StaticFile => "StaticFile",
+            Self::Era => "Era",
             Self::Headers => "Headers",
             Self::Bodies => "Bodies",
             Self::SenderRecovery => "SenderRecovery",
@@ -83,7 +96,7 @@ impl StageId {
 
     /// Returns true if it's a downloading stage [`StageId::Headers`] or [`StageId::Bodies`]
     pub const fn is_downloading_stage(&self) -> bool {
-        matches!(self, Self::Headers | Self::Bodies)
+        matches!(self, Self::Era | Self::Headers | Self::Bodies)
     }
 
     /// Returns `true` if it's [`TransactionLookup`](StageId::TransactionLookup) stage.
@@ -94,6 +107,25 @@ impl StageId {
     /// Returns true indicating if it's the finish stage [`StageId::Finish`]
     pub const fn is_finish(&self) -> bool {
         matches!(self, Self::Finish)
+    }
+
+    /// Get a pre-encoded raw Vec, for example, to be used as the DB key for
+    /// `tables::StageCheckpoints` and `tables::StageCheckpointProgresses`
+    pub fn get_pre_encoded(&self) -> Option<&Vec<u8>> {
+        #[cfg(not(feature = "std"))]
+        {
+            None
+        }
+        #[cfg(feature = "std")]
+        ENCODED_STAGE_IDS
+            .get_or_init(|| {
+                let mut map = HashMap::with_capacity(Self::ALL.len());
+                for stage_id in Self::ALL {
+                    map.insert(stage_id, stage_id.to_string().into_bytes());
+                }
+                map
+            })
+            .get(self)
     }
 }
 
@@ -109,6 +141,7 @@ mod tests {
 
     #[test]
     fn stage_id_as_string() {
+        assert_eq!(StageId::Era.to_string(), "Era");
         assert_eq!(StageId::Headers.to_string(), "Headers");
         assert_eq!(StageId::Bodies.to_string(), "Bodies");
         assert_eq!(StageId::SenderRecovery.to_string(), "SenderRecovery");
@@ -129,14 +162,8 @@ mod tests {
     fn is_downloading_stage() {
         assert!(StageId::Headers.is_downloading_stage());
         assert!(StageId::Bodies.is_downloading_stage());
+        assert!(StageId::Era.is_downloading_stage());
 
         assert!(!StageId::Execution.is_downloading_stage());
-    }
-
-    // Multiple places around the codebase assume headers is the first stage.
-    // Feel free to remove this test if the assumption changes.
-    #[test]
-    fn stage_all_headers_first() {
-        assert_eq!(*StageId::ALL.first().unwrap(), StageId::Headers);
     }
 }

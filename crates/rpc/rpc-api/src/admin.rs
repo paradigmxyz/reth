@@ -45,4 +45,9 @@ pub trait AdminApi {
     /// Returns the ENR of the node.
     #[method(name = "nodeInfo")]
     async fn node_info(&self) -> RpcResult<NodeInfo>;
+
+    /// Clears all transactions from the transaction pool.
+    /// Returns the number of transactions that were removed from the pool.
+    #[method(name = "clearTxpool")]
+    async fn clear_txpool(&self) -> RpcResult<u64>;
 }

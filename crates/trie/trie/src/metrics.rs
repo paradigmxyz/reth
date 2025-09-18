@@ -50,6 +50,8 @@ impl TrieRootMetrics {
 #[derive(Clone, Metrics)]
 #[metrics(scope = "trie.walker")]
 pub struct WalkerMetrics {
+    /// The number of branch nodes seeked by the walker.
+    branch_nodes_seeked_total: Counter,
     /// The number of subnodes out of order due to wrong tree mask.
     out_of_order_subnode: Counter,
 }
@@ -58,6 +60,11 @@ impl WalkerMetrics {
     /// Create new metrics for the given trie type.
     pub fn new(ty: TrieType) -> Self {
         Self::new_with_labels(&[("type", ty.as_str())])
+    }
+
+    /// Increment `branch_nodes_seeked_total`.
+    pub fn inc_branch_nodes_seeked(&self) {
+        self.branch_nodes_seeked_total.increment(1);
     }
 
     /// Increment `out_of_order_subnode`.
@@ -73,11 +80,9 @@ pub struct TrieNodeIterMetrics {
     /// The number of branch nodes returned by the iterator.
     branch_nodes_returned_total: Counter,
     /// The number of times the same hashed cursor key was seeked multiple times in a row by the
-    /// iterator. It does not mean mean the database seek was actually done, as the trie node
+    /// iterator. It does not mean the database seek was actually done, as the trie node
     /// iterator caches the last hashed cursor seek.
     leaf_nodes_same_seeked_total: Counter,
-    /// The number of times the same leaf node as we just advanced to was seeked by the iterator.
-    leaf_nodes_same_seeked_as_advanced_total: Counter,
     /// The number of leaf nodes seeked by the iterator.
     leaf_nodes_seeked_total: Counter,
     /// The number of leaf nodes advanced by the iterator.
@@ -100,11 +105,6 @@ impl TrieNodeIterMetrics {
     /// Increment `leaf_nodes_same_seeked_total`.
     pub fn inc_leaf_nodes_same_seeked(&self) {
         self.leaf_nodes_same_seeked_total.increment(1);
-    }
-
-    /// Increment `leaf_nodes_same_seeked_as_advanced_total`.
-    pub fn inc_leaf_nodes_same_seeked_as_advanced(&self) {
-        self.leaf_nodes_same_seeked_as_advanced_total.increment(1);
     }
 
     /// Increment `leaf_nodes_seeked_total`.

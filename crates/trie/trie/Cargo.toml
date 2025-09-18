@@ -30,7 +30,7 @@ alloy-consensus.workspace = true
 alloy-trie.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 
 # misc
 auto_impl.workspace = true
@@ -57,6 +57,7 @@ revm-state.workspace = true
 triehash.workspace = true
 
 # misc
+assert_matches.workspace = true
 criterion.workspace = true
 parking_lot.workspace = true
 pretty_assertions.workspace = true

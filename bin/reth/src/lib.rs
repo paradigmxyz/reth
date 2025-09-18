@@ -28,7 +28,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod cli;
-pub mod commands;
 
 /// Re-exported utils.
 pub mod utils {
@@ -176,9 +175,9 @@ pub mod rpc {
         pub use reth_rpc_server_types::result::*;
     }
 
-    /// Re-exported from `reth_rpc_types_compat`.
+    /// Re-exported from `reth_rpc_convert`.
     pub mod compat {
-        pub use reth_rpc_types_compat::*;
+        pub use reth_rpc_convert::*;
     }
 }
 
@@ -191,3 +190,7 @@ pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
 
 // for rendering diagrams
 use aquamarine as _;
+
+// used in main
+use clap as _;
+use reth_cli_util as _;

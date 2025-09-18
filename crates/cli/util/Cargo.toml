@@ -21,12 +21,15 @@ alloy-eips.workspace = true
 # misc
 cfg-if.workspace = true
 eyre.workspace = true
-rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+rand_08.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 
 tracy-client = { workspace = true, optional = true, features = ["demangle"] }
+
+[dev-dependencies]
+rand.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }

@@ -33,6 +33,7 @@ secp256k1 = { workspace = true, features = ["rand"] }
 serde_json.workspace = true
 enr.workspace = true
 tokio = { workspace = true, features = ["net", "macros", "rt"] }
+rand_08.workspace = true
 
 [features]
 default = ["std"]

@@ -14,12 +14,12 @@ use op_alloy_rpc_types_engine::{
     SuperchainSignal,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{EngineTypes, EngineValidator};
+use reth_node_api::{EngineApiValidator, EngineTypes};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApi;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
@@ -28,7 +28,6 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
-    "engine_exchangeTransitionConfigurationV1",
     "engine_getClientVersionV1",
     "engine_getPayloadV2",
     "engine_getPayloadV3",
@@ -205,7 +204,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
-    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
@@ -253,6 +252,16 @@ pub struct OpEngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpe
     inner: EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
 }
 
+impl<Provider, PayloadT, Pool, Validator, ChainSpec> Clone
+    for OpEngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
+where
+    PayloadT: EngineTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
 #[async_trait::async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -260,7 +269,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineApiValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
@@ -329,7 +338,7 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
+        debug!(target: "rpc::engine", id = %payload_id, "Serving engine_getPayloadV2");
         Ok(self.inner.get_payload_v2_metered(payload_id).await?)
     }
 

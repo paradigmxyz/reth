@@ -5,12 +5,12 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
-    "engine_exchangeTransitionConfigurationV1",
     "engine_getClientVersionV1",
     "engine_getPayloadV1",
     "engine_getPayloadV2",
     "engine_getPayloadV3",
     "engine_getPayloadV4",
+    "engine_getPayloadV5",
     "engine_newPayloadV1",
     "engine_newPayloadV2",
     "engine_newPayloadV3",
@@ -18,6 +18,7 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
     "engine_getBlobsV1",
+    "engine_getBlobsV2",
 ];
 
 // The list of all supported Engine capabilities available over the engine endpoint.

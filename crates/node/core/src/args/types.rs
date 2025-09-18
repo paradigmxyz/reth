@@ -108,7 +108,7 @@ where
     T::Value: Into<u64>,
 {
     /// Creates a new instance with the given inner parser
-    pub fn new(inner: T) -> Self {
+    pub const fn new(inner: T) -> Self {
         Self { inner }
     }
 }

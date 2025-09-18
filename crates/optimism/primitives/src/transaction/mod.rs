@@ -1,17 +1,12 @@
 //! Optimism transaction types
 
-pub mod signed;
-pub mod tx_type;
+mod tx_type;
 
-/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
-/// transaction is a deposit transaction.
-pub trait OpTransaction {
-    /// Whether or not the transaction is a dpeosit transaction.
-    fn is_deposit(&self) -> bool;
-}
+/// Kept for consistency tests
+#[cfg(test)]
+mod signed;
 
-impl OpTransaction for op_alloy_consensus::OpTxEnvelope {
-    fn is_deposit(&self) -> bool {
-        Self::is_deposit(self)
-    }
-}
+pub use op_alloy_consensus::{OpTransaction, OpTxType, OpTypedTransaction};
+
+/// Signed transaction.
+pub type OpTransactionSigned = op_alloy_consensus::OpTxEnvelope;

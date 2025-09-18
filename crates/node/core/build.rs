@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // if on a tag: v0.2.0-beta.3
     let not_on_tag = env::var("VERGEN_GIT_DESCRIBE")?.ends_with(&format!("-g{sha_short}"));
     let version_suffix = if is_dirty || not_on_tag { "-dev" } else { "" };
-    println!("cargo:rustc-env=RETH_VERSION_SUFFIX={}", version_suffix);
+    println!("cargo:rustc-env=RETH_VERSION_SUFFIX={version_suffix}");
 
     // Set short SHA
     println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT={}", &sha[..8]);

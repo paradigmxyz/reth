@@ -5,18 +5,23 @@ use clap::Parser;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
-use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
-use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_eth_wire::NetPrimitivesFor;
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_network::NetworkEventListenerProvider;
+use reth_node_api::FullNodeTypesAdapter;
+use reth_node_builder::{
+    Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
+};
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, StaticFileProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -82,6 +87,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         if config.stages.etl.dir.is_none() {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
+        if config.stages.era.folder.is_none() {
+            config.stages.era = config.stages.era.with_datadir(data_dir.data_dir());
+        }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
@@ -140,7 +148,11 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+            assert_ne!(
+                unwind_target,
+                PipelineTarget::Unwind(0),
+                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+            );
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -154,9 +166,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::<N::Primitives>::default(),
+                    NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
+                    None,
                 ))
                 .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
 
@@ -196,37 +209,77 @@ impl AccessRights {
     }
 }
 
-/// Helper trait with a common set of requirements for the
-/// [`NodeTypes`] in CLI.
-pub trait CliNodeTypes: NodeTypes + NodeTypesForProvider {}
-impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
+/// Helper alias to satisfy `FullNodeTypes` bound on [`Node`] trait generic.
+type FullTypesAdapter<T> = FullNodeTypesAdapter<
+    T,
+    Arc<DatabaseEnv>,
+    BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
+>;
 
-/// Helper trait aggregating components required for the CLI.
-pub trait CliNodeComponents<N: CliNodeTypes> {
-    /// Block executor.
-    type Executor: BlockExecutorProvider<Primitives = N::Primitives>;
-    /// Consensus implementation.
-    type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
-
-    /// Returns the block executor.
-    fn executor(&self) -> &Self::Executor;
-    /// Returns the consensus implementation.
-    fn consensus(&self) -> &Self::Consensus;
+/// Trait for block headers that can be modified through CLI operations.
+pub trait CliHeader {
+    fn set_number(&mut self, number: u64);
 }
 
-impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
-where
-    E: BlockExecutorProvider<Primitives = N::Primitives>,
-    C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
-{
-    type Executor = E;
-    type Consensus = C;
+impl CliHeader for alloy_consensus::Header {
+    fn set_number(&mut self, number: u64) {
+        self.number = number;
+    }
+}
 
-    fn executor(&self) -> &Self::Executor {
+/// Helper trait with a common set of requirements for the
+/// [`NodeTypes`] in CLI.
+pub trait CliNodeTypes: Node<FullTypesAdapter<Self>> + NodeTypesForProvider {
+    type Evm: ConfigureEvm<Primitives = Self::Primitives>;
+    type NetworkPrimitives: NetPrimitivesFor<Self::Primitives>;
+}
+
+impl<N> CliNodeTypes for N
+where
+    N: Node<FullTypesAdapter<Self>> + NodeTypesForProvider,
+{
+    type Evm = <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Evm;
+    type NetworkPrimitives = <<<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Network as NetworkEventListenerProvider>::Primitives;
+}
+
+type EvmFor<N> = <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+    FullTypesAdapter<N>,
+>>::Components as NodeComponents<FullTypesAdapter<N>>>::Evm;
+
+type ConsensusFor<N> =
+    <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+        FullTypesAdapter<N>,
+    >>::Components as NodeComponents<FullTypesAdapter<N>>>::Consensus;
+
+/// Helper trait aggregating components required for the CLI.
+pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static {
+    /// Returns the configured EVM.
+    fn evm_config(&self) -> &EvmFor<N>;
+    /// Returns the consensus implementation.
+    fn consensus(&self) -> &ConsensusFor<N>;
+}
+
+impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>) {
+    fn evm_config(&self) -> &EvmFor<N> {
         &self.0
     }
 
-    fn consensus(&self) -> &Self::Consensus {
+    fn consensus(&self) -> &ConsensusFor<N> {
         &self.1
     }
+}
+
+/// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
+pub trait CliComponentsBuilder<N: CliNodeTypes>:
+    FnOnce(Arc<N::ChainSpec>) -> Self::Components + Send + Sync + 'static
+{
+    type Components: CliNodeComponents<N>;
+}
+
+impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
+where
+    F: FnOnce(Arc<N::ChainSpec>) -> Comp + Send + Sync + 'static,
+    Comp: CliNodeComponents<N>,
+{
+    type Components = Comp;
 }

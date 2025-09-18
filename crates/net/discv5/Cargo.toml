@@ -43,3 +43,4 @@ metrics.workspace = true
 reth-tracing.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 secp256k1 = { workspace = true, features = ["std", "rand"] }
+rand_08.workspace = true

@@ -16,7 +16,6 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_network_p2p::test_utils::{TestBodiesClient, TestHeadersClient};
-//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use alloy_primitives::B256;
 //! # use reth_chainspec::MAINNET;
 //! # use reth_prune_types::PruneModes;
@@ -38,20 +37,21 @@
 //! # let consensus: Arc<dyn FullConsensus<reth_ethereum_primitives::EthPrimitives, Error = ConsensusError>> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
-//! #    consensus.clone().as_header_validator()
+//! #    consensus.clone()
 //! # );
 //! # let provider_factory = create_test_provider_factory();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
-//! #    consensus.clone().as_consensus(),
+//! #    consensus.clone(),
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_provider = EthExecutorProvider::mainnet();
+//! # let executor_provider = EthEvmConfig::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    PruneModes::default()
 //! # );
+//! # let era_import_source = None;
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::<MockNodeTypesWithDB>::builder()
@@ -65,6 +65,7 @@
 //!         executor_provider,
 //!         StageConfig::default(),
 //!         PruneModes::default(),
+//!         era_import_source,
 //!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```

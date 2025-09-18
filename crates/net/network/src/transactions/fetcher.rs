@@ -28,14 +28,12 @@
 use super::{
     config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    MessageFilter, PeerMetadata, PooledTransactions,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
     metrics::TransactionFetcherMetrics,
-    transactions::{validation, PartiallyFilterMessage},
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -43,7 +41,7 @@ use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
@@ -60,7 +58,6 @@ use std::{
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::trace;
-use validation::FilterOutcome;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -84,9 +81,7 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// which a [`GetPooledTransactions`] request is inflight.
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
-    pub(super) hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
-    /// Filter for valid announcement and response data.
-    pub(super) filter_valid_message: MessageFilter,
+    pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
     #[doc(hidden)]
@@ -370,6 +365,16 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.buffer_hashes(hashes, None)
     }
 
+    /// Number of hashes pending fetch.
+    pub fn num_pending_hashes(&self) -> usize {
+        self.hashes_pending_fetch.len()
+    }
+
+    /// Number of all transaction hashes in the fetcher.
+    pub fn num_all_hashes(&self) -> usize {
+        self.hashes_fetch_inflight_and_pending_fetch.len()
+    }
+
     /// Buffers hashes. Note: Only peers that haven't yet tried to request the hashes should be
     /// passed as `fallback_peer` parameter! For re-buffering hashes on failed request, use
     /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
@@ -511,7 +516,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -835,19 +840,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the given version of the protocol.
-    pub const fn approx_capacity_get_pooled_transactions_req(
-        &self,
-        announcement_version: EthVersion,
-    ) -> usize {
-        if announcement_version.is_eth68() {
-            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
-        } else {
-            approx_capacity_get_pooled_transactions_req_eth66()
-        }
-    }
-
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
     /// [`TransactionsManager`](super::TransactionsManager).
@@ -890,15 +882,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
-                if verification_outcome == VerificationOutcome::ReportPeer {
-                    // todo: report peer for sending hashes that weren't requested
+
+                let report_peer = if verification_outcome == VerificationOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unverified_len,
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
-                }
+                    true
+                } else {
+                    false
+                };
+
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
                     return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
@@ -909,20 +905,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 let unvalidated_payload_len = verified_payload.len();
 
-                let (validation_outcome, valid_payload) =
-                    self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+                let valid_payload = verified_payload.dedup();
 
                 // todo: validate based on announced tx size/type and report peer for sending
                 // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if validation_outcome == FilterOutcome::ReportPeer {
+                if valid_payload.len() != unvalidated_payload_len {
                     trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        unvalidated_payload_len,
-                        valid_payload_len=valid_payload.len(),
-                        "received invalid `PooledTransactions` response from peer, filtered out duplicate entries"
+                    peer_id=format!("{peer_id:#}"),
+                    unvalidated_payload_len,
+                    valid_payload_len=valid_payload.len(),
+                    "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
@@ -961,7 +956,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
                 let transactions = valid_payload.into_data().into_values().collect();
 
-                FetchEvent::TransactionsFetched { peer_id, transactions }
+                FetchEvent::TransactionsFetched { peer_id, transactions, report_peer }
             }
             Ok(Err(req_err)) => {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
@@ -1004,7 +999,6 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new(
                 DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
             ),
-            filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
         }
@@ -1027,7 +1021,7 @@ pub struct TxFetchMetadata {
 
 impl TxFetchMetadata {
     /// Returns a mutable reference to the fallback peers cache for this transaction hash.
-    pub fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
+    pub const fn fallback_peers_mut(&mut self) -> &mut LruCache<PeerId> {
         &mut self.fallback_peers
     }
 
@@ -1049,6 +1043,9 @@ pub enum FetchEvent<T = PooledTransaction> {
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
         transactions: PooledTransactions<T>,
+        /// Whether the peer should be penalized for sending unsolicited transactions or for
+        /// misbehavior.
+        report_peer: bool,
     },
     /// Triggered when there is an error in fetching transactions.
     FetchError {
@@ -1291,10 +1288,11 @@ struct TxFetcherSearchDurations {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::transactions::tests::{default_cache, new_mock_session};
+    use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 
@@ -1414,45 +1412,30 @@ mod test {
         peers.insert(peer_1, peer_1_data);
         peers.insert(peer_2, peer_2_data);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert seen_hashes into tx fetcher
         for i in 0..3 {
             // insert peer_2 as fallback peer for seen_hashes
-            let mut backups = default_cache();
-            backups.insert(peer_2);
-            let meta = TxFetchMetadata::new(0, backups, Some(seen_eth68_hashes_sizes[i]));
-            tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[i], meta);
+            buffer_hash_to_tx_fetcher(
+                tx_fetcher,
+                seen_hashes[i],
+                peer_2,
+                0,
+                Some(seen_eth68_hashes_sizes[i]),
+            );
         }
-        let meta = TxFetchMetadata::new(0, backups, None);
-        tx_fetcher.hashes_fetch_inflight_and_pending_fetch.insert(seen_hashes[3], meta);
+        buffer_hash_to_tx_fetcher(tx_fetcher, seen_hashes[3], peer_2, 0, None);
 
-        let mut backups = default_cache();
-        backups.insert(peer_2);
         // insert pending hash without peer_1 as fallback peer, only with peer_2 as fallback peer
         let hash_other = B256::from_slice(&[5; 32]);
-        tx_fetcher
-            .hashes_fetch_inflight_and_pending_fetch
-            .insert(hash_other, TxFetchMetadata::new(0, backups, None));
-        tx_fetcher.hashes_pending_fetch.insert(hash_other);
+        buffer_hash_to_tx_fetcher(tx_fetcher, hash_other, peer_2, 0, None);
 
         // add peer_1 as lru fallback peer for seen hashes
         for hash in &seen_hashes {
-            tx_fetcher
-                .hashes_fetch_inflight_and_pending_fetch
-                .get(hash)
-                .unwrap()
-                .fallback_peers_mut()
-                .insert(peer_1);
-        }
-
-        // mark seen hashes as pending fetch
-        for hash in &seen_hashes {
-            tx_fetcher.hashes_pending_fetch.insert(*hash);
+            buffer_hash_to_tx_fetcher(tx_fetcher, *hash, peer_1, 0, None);
         }
 
         // seen hashes and the random hash from peer_2 are pending fetch
-        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 5);
+        assert_eq!(tx_fetcher.num_pending_hashes(), 5);
 
         // TEST
 
@@ -1474,10 +1457,14 @@ mod test {
 
     #[test]
     fn verify_response_hashes() {
-        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa");
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa"
+        );
         let signed_tx_1: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
-        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
+        );
         let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
 

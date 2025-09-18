@@ -9,11 +9,11 @@ use alloy_primitives::{
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-use core::mem;
+use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Block, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -64,6 +64,17 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
     }
 }
 
+/// A trait for block payloads transmitted through p2p.
+pub trait NewBlockPayload:
+    Encodable + Decodable + Clone + Eq + Debug + Send + Sync + Unpin + 'static
+{
+    /// The block type.
+    type Block: Block;
+
+    /// Returns a reference to the block.
+    fn block(&self) -> &Self::Block;
+}
+
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
@@ -74,6 +85,14 @@ pub struct NewBlock<B = reth_ethereum_primitives::Block> {
     pub block: B,
     /// The current total difficulty.
     pub td: U128,
+}
+
+impl<B: Block + 'static> NewBlockPayload for NewBlock<B> {
+    type Block = B;
+
+    fn block(&self) -> &Self::Block {
+        &self.block
+    }
 }
 
 generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBlockTests);
@@ -150,7 +169,7 @@ impl NewPooledTransactionHashes {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
             }
             Self::Eth68(_) => {
-                matches!(version, EthVersion::Eth68)
+                matches!(version, EthVersion::Eth68 | EthVersion::Eth69)
             }
         }
     }
@@ -172,7 +191,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to transaction hashes.
-    pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
+    pub const fn hashes_mut(&mut self) -> &mut Vec<B256> {
         match self {
             Self::Eth66(msg) => &mut msg.0,
             Self::Eth68(msg) => &mut msg.hashes,
@@ -209,7 +228,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns true if the message is empty
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         match self {
             Self::Eth66(msg) => msg.0.is_empty(),
             Self::Eth68(msg) => msg.hashes.is_empty(),
@@ -217,7 +236,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns the number of hashes in the message
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Self::Eth66(msg) => msg.0.len(),
             Self::Eth68(msg) => msg.hashes.len(),
@@ -233,7 +252,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to the inner type if this an eth68 announcement.
-    pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
+    pub const fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(msg),
@@ -241,7 +260,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns a mutable reference to the inner type if this an eth66 announcement.
-    pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
+    pub const fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
             Self::Eth66(msg) => Some(msg),
             Self::Eth68(_) => None,
@@ -765,12 +784,26 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     }
 }
 
+/// The earliest block, the latest block and hash of the latest block which can be provided.
+/// See [BlockRangeUpdate](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#blockrangeupdate-0x11).
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct BlockRangeUpdate {
+    /// The earliest block which is available.
+    pub earliest: u64,
+    /// The latest block which is available.
+    pub latest: u64,
+    /// Latest available block's hash.
+    pub latest_hash: B256,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::Typed2718;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, PrimitiveSignature as Signature, U256};
+    use alloy_primitives::{b256, hex, Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 
@@ -805,115 +838,133 @@ mod tests {
     fn eth_68_tx_hash_roundtrip() {
         let vectors = vec![
             (
-            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] },
-            &hex!("c380c0c0")[..],
+                NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] },
+                &hex!("c380c0c0")[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0x00],
-                sizes: vec![0x00],
-                hashes: vec![B256::from_str(
-                    "0x0000000000000000000000000000000000000000000000000000000000000000",
-                )
-                .unwrap()],
-            },
-            &hex!("e500c180e1a00000000000000000000000000000000000000000000000000000000000000000")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0x00],
+                    sizes: vec![0x00],
+                    hashes: vec![
+                        B256::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "e500c180e1a00000000000000000000000000000000000000000000000000000000000000000"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0x00, 0x00],
-                sizes: vec![0x00, 0x00],
-                hashes: vec![
-                    B256::from_str(
-                        "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    )
-                    .unwrap(),
-                    B256::from_str(
-                        "0x0000000000000000000000000000000000000000000000000000000000000000",
-                    )
-                    .unwrap(),
-                ],
-            },
-            &hex!("f84a820000c28080f842a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0x00, 0x00],
+                    sizes: vec![0x00, 0x00],
+                    hashes: vec![
+                        B256::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        )
+                        .unwrap(),
+                        B256::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000000000000",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "f84a820000c28080f842a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0x02],
-                sizes: vec![0xb6],
-                hashes: vec![B256::from_str(
-                    "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
-                )
-                .unwrap()],
-            },
-            &hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0x02],
+                    sizes: vec![0xb6],
+                    hashes: vec![
+                        B256::from_str(
+                            "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0xff, 0xff],
-                sizes: vec![0xffffffff, 0xffffffff],
-                hashes: vec![
-                    B256::from_str(
-                        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                    )
-                    .unwrap(),
-                    B256::from_str(
-                        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                    )
-                    .unwrap(),
-                ],
-            },
-            &hex!("f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0xff, 0xff],
+                    sizes: vec![0xffffffff, 0xffffffff],
+                    hashes: vec![
+                        B256::from_str(
+                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                        )
+                        .unwrap(),
+                        B256::from_str(
+                            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0xff, 0xff],
-                sizes: vec![0xffffffff, 0xffffffff],
-                hashes: vec![
-                    B256::from_str(
-                        "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                    )
-                    .unwrap(),
-                    B256::from_str(
-                        "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
-                    )
-                    .unwrap(),
-                ],
-            },
-            &hex!("f85282ffffca84ffffffff84fffffffff842a0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafea0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0xff, 0xff],
+                    sizes: vec![0xffffffff, 0xffffffff],
+                    hashes: vec![
+                        B256::from_str(
+                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
+                        )
+                        .unwrap(),
+                        B256::from_str(
+                            "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "f85282ffffca84ffffffff84fffffffff842a0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafea0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0x10, 0x10],
-                sizes: vec![0xdeadc0de, 0xdeadc0de],
-                hashes: vec![
-                    B256::from_str(
-                        "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                    )
-                    .unwrap(),
-                    B256::from_str(
-                        "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
-                    )
-                    .unwrap(),
-                ],
-            },
-            &hex!("f852821010ca84deadc0de84deadc0def842a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0x10, 0x10],
+                    sizes: vec![0xdeadc0de, 0xdeadc0de],
+                    hashes: vec![
+                        B256::from_str(
+                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
+                        )
+                        .unwrap(),
+                        B256::from_str(
+                            "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "f852821010ca84deadc0de84deadc0def842a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2"
+                )[..],
             ),
             (
-            NewPooledTransactionHashes68 {
-                types: vec![0x6f, 0x6f],
-                sizes: vec![0x7fffffff, 0x7fffffff],
-                hashes: vec![
-                    B256::from_str(
-                        "0x0000000000000000000000000000000000000000000000000000000000000002",
-                    )
-                    .unwrap(),
-                    B256::from_str(
-                        "0x0000000000000000000000000000000000000000000000000000000000000002",
-                    )
-                    .unwrap(),
-                ],
-            },
-            &hex!("f852826f6fca847fffffff847ffffffff842a00000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000002")[..],
+                NewPooledTransactionHashes68 {
+                    types: vec![0x6f, 0x6f],
+                    sizes: vec![0x7fffffff, 0x7fffffff],
+                    hashes: vec![
+                        B256::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000000000002",
+                        )
+                        .unwrap(),
+                        B256::from_str(
+                            "0x0000000000000000000000000000000000000000000000000000000000000002",
+                        )
+                        .unwrap(),
+                    ],
+                },
+                &hex!(
+                    "f852826f6fca847fffffff847ffffffff842a00000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000002"
+                )[..],
             ),
         ];
 

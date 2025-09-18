@@ -107,13 +107,13 @@ impl TrieCursor for MockTrieCursor {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.trie_nodes.get(&key).cloned().map(|value| (key.clone(), value));
+        let entry = self.trie_nodes.get(&key).cloned().map(|value| (key, value));
         if let Some((key, _)) = &entry {
-            self.current_key = Some(key.clone());
+            self.current_key = Some(*key);
         }
         self.visited_keys.lock().push(KeyVisit {
             visit_type: KeyVisitType::SeekExact(key),
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
+            visited_key: entry.as_ref().map(|(k, _)| *k),
         });
         Ok(entry)
     }
@@ -124,14 +124,13 @@ impl TrieCursor for MockTrieCursor {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry =
-            self.trie_nodes.iter().find_map(|(k, v)| (k >= &key).then(|| (k.clone(), v.clone())));
+        let entry = self.trie_nodes.iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
-            self.current_key = Some(key.clone());
+            self.current_key = Some(*key);
         }
         self.visited_keys.lock().push(KeyVisit {
             visit_type: KeyVisitType::SeekNonExact(key),
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
+            visited_key: entry.as_ref().map(|(k, _)| *k),
         });
         Ok(entry)
     }
@@ -144,19 +143,19 @@ impl TrieCursor for MockTrieCursor {
         iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
             .expect("current key should exist in trie nodes");
         // Get the next key-value pair.
-        let entry = iter.next().map(|(k, v)| (k.clone(), v.clone()));
+        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
-            self.current_key = Some(key.clone());
+            self.current_key = Some(*key);
         }
         self.visited_keys.lock().push(KeyVisit {
             visit_type: KeyVisitType::Next,
-            visited_key: entry.as_ref().map(|(k, _)| k.clone()),
+            visited_key: entry.as_ref().map(|(k, _)| *k),
         });
         Ok(entry)
     }
 
     #[instrument(level = "trace", skip(self), ret)]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.current_key.clone())
+        Ok(self.current_key)
     }
 }

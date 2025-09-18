@@ -1,12 +1,11 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
-use reth_engine_primitives::BeaconConsensusEngineHandle;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BasicBlockExecutorProvider;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_node_ethereum::EthereumEngineValidator;
@@ -35,7 +34,7 @@ pub const fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
+    let beacon_engine_handle = ConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),
@@ -118,22 +117,14 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<
-    EthPrimitives,
-    NoopProvider,
-    TestPool,
-    NoopNetwork,
-    TokioTaskExecutor,
-    EthEvmConfig,
-    BasicBlockExecutorProvider<EthEvmConfig>,
-    NoopConsensus,
-> {
+pub fn test_rpc_builder(
+) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
+{
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::mainnet())
-        .with_block_executor(BasicBlockExecutorProvider::new(EthEvmConfig::mainnet()))
         .with_consensus(NoopConsensus::default())
 }

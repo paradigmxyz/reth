@@ -20,7 +20,6 @@ pub(crate) struct Sender {
     inner: SendHalf,
 }
 
-#[async_trait::async_trait]
 impl TransportSenderT for Sender {
     type Error = IpcError;
 
@@ -47,7 +46,6 @@ pub(crate) struct Receiver {
     pub(crate) inner: FramedRead<RecvHalf, StreamCodec>,
 }
 
-#[async_trait::async_trait]
 impl TransportReceiverT for Receiver {
     type Error = IpcError;
 
@@ -120,7 +118,7 @@ impl IpcClientBuilder {
     }
 
     /// Set request timeout (default is 60 seconds).
-    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+    pub const fn request_timeout(mut self, timeout: Duration) -> Self {
         self.request_timeout = timeout;
         self
     }

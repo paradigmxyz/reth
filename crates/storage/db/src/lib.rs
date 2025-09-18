@@ -1,6 +1,6 @@
 //! MDBX implementation for reth's database abstraction layer.
 //!
-//! This crate is an implementation of [`reth-db-api`] for MDBX, as well as a few other common
+//! This crate is an implementation of `reth-db-api` for MDBX, as well as a few other common
 //! database types.
 //!
 //! # Overview
@@ -103,7 +103,7 @@ pub mod test_utils {
         }
 
         /// Returns the reference to inner db.
-        pub fn db(&self) -> &DB {
+        pub const fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
 
@@ -162,7 +162,7 @@ pub mod test_utils {
     /// Get a temporary directory path to use for the database
     pub fn tempdir_path() -> PathBuf {
         let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
-        builder.expect(ERROR_TEMPDIR).into_path()
+        builder.expect(ERROR_TEMPDIR).keep()
     }
 
     /// Create read/write database for testing

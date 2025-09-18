@@ -8,15 +8,21 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+/// A configurable App on top of the cli parser.
+pub mod app;
 /// Chain specification parser.
 pub mod chainspec;
+pub mod interface;
+
+pub use app::CliApp;
+pub use interface::{Cli, Commands};
 
 #[cfg(test)]
 mod test {
+    use crate::chainspec::EthereumChainSpecParser;
     use clap::Parser;
     use reth_chainspec::DEV;
     use reth_cli_commands::NodeCommand;
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     #[test]
     #[ignore = "reth cmd will print op-reth output if optimism feature enabled"]

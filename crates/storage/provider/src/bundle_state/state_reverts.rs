@@ -173,7 +173,7 @@ mod tests {
                 (B256::from_slice(&[8; 32]), U256::from(70)), // Revert takes priority.
                 (B256::from_slice(&[9; 32]), U256::from(80)), // Only revert present.
                 (B256::from_slice(&[10; 32]), U256::from(85)), // Wiped entry.
-                (B256::from_slice(&[15; 32]), U256::from(90)), // WGreater revert entry
+                (B256::from_slice(&[15; 32]), U256::from(90)), // Greater revert entry
             ]
         );
     }

@@ -47,7 +47,7 @@ impl HelloMessageWithProtocols {
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand::thread_rng());
+    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
@@ -100,7 +100,7 @@ impl HelloMessageWithProtocols {
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
-/// supported RLPx protocol version and capabilities.
+/// supported `RLPx` protocol version and capabilities.
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -130,7 +130,7 @@ impl HelloMessage {
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
-    /// let secret_key = SecretKey::new(&mut rand::thread_rng());
+    /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
     /// ```
@@ -206,6 +206,7 @@ impl HelloMessageBuilder {
             client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             protocols: protocols.unwrap_or_else(|| {
                 vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
+                // TODO: enable: EthVersion::ALL_VERSIONS.iter().copied().map(Into::into).collect()
             }),
             port: port.unwrap_or(DEFAULT_TCP_PORT),
             id,
@@ -222,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_hello_encoding_round_trip() {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -242,7 +243,7 @@ mod tests {
 
     #[test]
     fn hello_encoding_length() {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,
@@ -261,7 +262,7 @@ mod tests {
     #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
         let id = pk2id(&secret_key.public_key(SECP256K1));
         let hello = P2PMessage::Hello(HelloMessage {
             protocol_version: ProtocolVersion::V5,

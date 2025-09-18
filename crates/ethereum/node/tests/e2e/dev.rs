@@ -5,7 +5,8 @@ use futures::StreamExt;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
-    rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
+    rpc::RethRpcAddOns, DebugNodeLauncher, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig,
+    NodeHandle,
 };
 use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
@@ -29,11 +30,12 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
         .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
+            let engine_launcher = EngineNodeLauncher::new(
                 builder.task_executor().clone(),
                 builder.config().datadir(),
                 Default::default(),
             );
+            let launcher = DebugNodeLauncher::new(engine_launcher);
             builder.launch_with(launcher)
         })
         .await?;
@@ -52,7 +54,9 @@ where
     let mut notifications = node.provider.canonical_state_stream();
 
     // submit tx through rpc
-    let raw_tx = hex!("02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090");
+    let raw_tx = hex!(
+        "02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090"
+    );
 
     let eth_api = node.rpc_registry.eth_api();
 

@@ -8,7 +8,7 @@ use thiserror::Error;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand::thread_rng())
+    SecretKey::new(&mut rand_08::thread_rng())
 }
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.

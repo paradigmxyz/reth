@@ -189,7 +189,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a mutable reference to the compressor.
-    pub fn compressor_mut(&mut self) -> Option<&mut Compressors> {
+    pub const fn compressor_mut(&mut self) -> Option<&mut Compressors> {
         self.compressor.as_mut()
     }
 
@@ -240,6 +240,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
+                debug!(target: "nippy-jar", ?path, "Removing file.");
                 reth_fs_util::remove_file(path)?;
             }
         }
@@ -432,9 +433,9 @@ mod tests {
         let num_rows = 100;
 
         let mut vec: Vec<u8> = vec![0; value_length];
-        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
+        let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_os_rng);
 
-        let mut gen = || {
+        let mut entry_gen = || {
             (0..num_rows)
                 .map(|_| {
                     rng.fill_bytes(&mut vec[..]);
@@ -443,7 +444,7 @@ mod tests {
                 .collect()
         };
 
-        (gen(), gen())
+        (entry_gen(), entry_gen())
     }
 
     fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {
@@ -678,7 +679,7 @@ mod tests {
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
-                data.shuffle(&mut rand::thread_rng());
+                data.shuffle(&mut rand::rng());
 
                 for (row_num, (v0, v1)) in data {
                     // Simulates `by_number` queries
@@ -716,7 +717,7 @@ mod tests {
 
                 // Shuffled for chaos.
                 let mut data = col1.iter().zip(col2.iter()).enumerate().collect::<Vec<_>>();
-                data.shuffle(&mut rand::thread_rng());
+                data.shuffle(&mut rand::rng());
 
                 // Imagine `Blocks` static file has two columns: `Block | StoredWithdrawals`
                 const BLOCKS_FULL_MASK: usize = 0b11;

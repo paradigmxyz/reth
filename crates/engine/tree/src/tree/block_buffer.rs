@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn simple_insertion() {
         let mut rng = generators::rng();
-        let parent = rng.gen();
+        let parent = rng.random();
         let block1 = create_block(&mut rng, 10, parent);
         let mut buffer = BlockBuffer::new(3);
 
@@ -249,11 +249,11 @@ mod tests {
     fn take_entire_chain_of_children() {
         let mut rng = generators::rng();
 
-        let main_parent_hash = rng.gen();
+        let main_parent_hash = rng.random();
         let block1 = create_block(&mut rng, 10, main_parent_hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.gen();
+        let parent4 = rng.random();
         let block4 = create_block(&mut rng, 14, parent4);
 
         let mut buffer = BlockBuffer::new(5);
@@ -282,7 +282,7 @@ mod tests {
     fn take_all_multi_level_children() {
         let mut rng = generators::rng();
 
-        let main_parent_hash = rng.gen();
+        let main_parent_hash = rng.random();
         let block1 = create_block(&mut rng, 10, main_parent_hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -316,7 +316,7 @@ mod tests {
     fn take_block_with_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -350,11 +350,11 @@ mod tests {
     fn remove_chain_of_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.gen();
+        let parent4 = rng.random();
         let block4 = create_block(&mut rng, 14, parent4);
 
         let mut buffer = BlockBuffer::new(5);
@@ -373,7 +373,7 @@ mod tests {
     fn remove_all_multi_level_children() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 11, block1.hash());
@@ -395,16 +395,16 @@ mod tests {
     fn remove_multi_chains() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block1a = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block2a = create_block(&mut rng, 11, block1.hash());
-        let random_parent1 = rng.gen();
+        let random_parent1 = rng.random();
         let random_block1 = create_block(&mut rng, 10, random_parent1);
-        let random_parent2 = rng.gen();
+        let random_parent2 = rng.random();
         let random_block2 = create_block(&mut rng, 11, random_parent2);
-        let random_parent3 = rng.gen();
+        let random_parent3 = rng.random();
         let random_block3 = create_block(&mut rng, 12, random_parent3);
 
         let mut buffer = BlockBuffer::new(10);
@@ -439,11 +439,11 @@ mod tests {
     fn evict_with_gap() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.gen();
+        let parent4 = rng.random();
         let block4 = create_block(&mut rng, 13, parent4);
 
         let mut buffer = BlockBuffer::new(3);
@@ -476,11 +476,11 @@ mod tests {
     fn simple_eviction() {
         let mut rng = generators::rng();
 
-        let main_parent = BlockNumHash::new(9, rng.gen());
+        let main_parent = BlockNumHash::new(9, rng.random());
         let block1 = create_block(&mut rng, 10, main_parent.hash);
         let block2 = create_block(&mut rng, 11, block1.hash());
         let block3 = create_block(&mut rng, 12, block2.hash());
-        let parent4 = rng.gen();
+        let parent4 = rng.random();
         let block4 = create_block(&mut rng, 13, parent4);
 
         let mut buffer = BlockBuffer::new(3);

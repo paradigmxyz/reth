@@ -6,7 +6,7 @@
 //! cargo run -p rpc-db
 //! ```
 //!
-//! This installs an additional RPC method `myrpcExt_customMethod` that can queried via [cast](https://github.com/foundry-rs/foundry)
+//! This installs an additional RPC method `myrpcExt_customMethod` that can be queried via [cast](https://github.com/foundry-rs/foundry)
 //!
 //! ```sh
 //! cast rpc myrpcExt_customMethod
@@ -16,25 +16,25 @@
 
 use std::{path::Path, sync::Arc};
 
-use reth::beacon_consensus::EthBeaconConsensus;
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
+    consensus::EthBeaconConsensus,
     network::api::noop::NoopNetwork,
-    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthExecutorProvider, EthereumNode},
+    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
         providers::{BlockchainProvider, StaticFileProvider},
-        ChainSpecProvider, ProviderFactory,
+        ProviderFactory,
     },
     rpc::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
     },
+    tasks::TokioTaskExecutor,
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-use reth::tasks::TokioTaskExecutor;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -65,9 +65,8 @@ async fn main() -> eyre::Result<()> {
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::new(spec.clone()))
-        .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 
     let eth_api = EthApiBuilder::new(

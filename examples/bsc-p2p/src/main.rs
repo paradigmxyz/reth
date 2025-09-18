@@ -1,4 +1,4 @@
-//! Example for how hook into the bsc p2p network
+//! Example for how to hook into the bsc p2p network
 //!
 //! Run with
 //!
@@ -8,7 +8,7 @@
 //!
 //! This launches a regular reth node overriding the engine api payload builder with our custom.
 //!
-//! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
+//! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
 use chainspec::{boot_nodes, bsc_chain_spec, head};
 use handshake::BscHandshake;

@@ -1,4 +1,4 @@
-//! Error types emitted by types or implementations of this crate.
+//! Error types for payload operations.
 
 use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::B256;
@@ -175,7 +175,7 @@ impl EngineObjectValidationError {
 #[derive(thiserror::Error, Debug)]
 pub enum InvalidPayloadAttributesError {
     /// Thrown if the timestamp of the payload attributes is invalid according to the engine specs.
-    #[error("parent beacon block root not supported before V3")]
+    #[error("invalid timestamp")]
     InvalidTimestamp,
     /// Another type of error that is not covered by the above variants.
     #[error("Invalid params: {0}")]

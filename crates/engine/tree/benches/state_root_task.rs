@@ -9,15 +9,16 @@ use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
-use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
-    executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
+    executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
+    StateProviderBuilder, TreeConfig,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
     providers::{BlockchainProvider, ConsistentDbView},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
@@ -41,46 +42,50 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
-    let mut updates = Vec::new();
+    let all_addresses: Vec<Address> =
+        (0..params.num_accounts).map(|_| Address::random_with(&mut rng)).collect();
+    let mut updates = Vec::with_capacity(params.updates_per_account);
 
     for _ in 0..params.updates_per_account {
         let mut state_update = EvmState::default();
-        let num_accounts_in_update = rng.gen_range(1..=params.num_accounts);
+        let num_accounts_in_update = rng.random_range(1..=params.num_accounts);
 
         // regular updates for randomly selected accounts
         for &address in &all_addresses[0..num_accounts_in_update] {
             // randomly choose to self-destruct with probability
             // (selfdestructs/accounts)
-            let is_selfdestruct =
-                rng.gen_bool(params.selfdestructs_per_update as f64 / params.num_accounts as f64);
+            let is_selfdestruct = rng
+                .random_bool(params.selfdestructs_per_update as f64 / params.num_accounts as f64);
 
             let account = if is_selfdestruct {
                 RevmAccount {
                     info: AccountInfo::default(),
                     storage: HashMap::default(),
                     status: AccountStatus::SelfDestructed,
+                    transaction_id: 0,
                 }
             } else {
                 RevmAccount {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.random::<u64>()),
+                        nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },
-                    storage: (0..rng.gen_range(0..=params.storage_slots_per_account))
+                    storage: (0..rng.random_range(0..=params.storage_slots_per_account))
                         .map(|_| {
                             (
-                                U256::from(rng.gen::<u64>()),
+                                U256::from(rng.random::<u64>()),
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
-                                    U256::from(rng.gen::<u64>()),
+                                    U256::from(rng.random::<u64>()),
+                                    0,
                                 ),
                             )
                         })
                         .collect(),
                     status: AccountStatus::Touched,
+                    transaction_id: 0,
                 }
             };
 
@@ -117,7 +122,7 @@ fn setup_provider(
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
-        let mut account_updates = Vec::new();
+        let mut account_updates = Vec::with_capacity(update.len());
 
         for (address, account) in update {
             // only process self-destructs if account exists, always process
@@ -211,23 +216,27 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+                        let payload_processor = PayloadProcessor::new(
                             WorkloadExecutor::default(),
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
+                            PrecompileCacheMap::default(),
                         );
                         let provider = BlockchainProvider::new(factory).unwrap();
 
                         (genesis_hash, payload_processor, provider, state_updates)
                     },
-                    |(genesis_hash, payload_processor, provider, state_updates)| {
+                    |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
-                                Default::default(),
+                                core::iter::empty::<
+                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                                >(),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),
+                                &TreeConfig::default(),
                             );
 
                             let mut state_hook = handle.state_hook();

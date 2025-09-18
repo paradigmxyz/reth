@@ -154,7 +154,7 @@ where
                 let interval = (total_hashes / 10).max(1);
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash, number) = hash_to_number?;
-                    if index > 0 && index % interval == 0 {
+                    if index > 0 && index.is_multiple_of(interval) {
                         info!(
                             target: "sync::stages::transaction_lookup",
                             ?append_only,
@@ -460,7 +460,7 @@ mod tests {
         ///
         /// 1. If there are any entries in the [`tables::TransactionHashNumbers`] table above a
         ///    given block number.
-        /// 2. If the is no requested block entry in the bodies table, but
+        /// 2. If there is no requested block entry in the bodies table, but
         ///    [`tables::TransactionHashNumbers`] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self

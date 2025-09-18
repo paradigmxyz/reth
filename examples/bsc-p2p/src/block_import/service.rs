@@ -2,7 +2,8 @@ use super::handle::ImportHandle;
 use crate::block_import::parlia::{ParliaConsensus, ParliaConsensusErr};
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
-use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
+use reth_engine_primitives::{ConsensusEngineHandle, EngineTypes};
+use reth_eth_wire::NewBlock;
 use reth_network::{
     import::{BlockImportError, BlockImportEvent, BlockImportOutcome, BlockValidation},
     message::NewBlockMessage,
@@ -25,13 +26,13 @@ pub type BscBlock<T> =
     <<<T as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block;
 
 /// Network message containing a new block
-pub(crate) type BlockMsg<T> = NewBlockMessage<BscBlock<T>>;
+pub(crate) type BlockMsg<T> = NewBlockMessage<NewBlock<BscBlock<T>>>;
 
 /// Import outcome for a block
-pub(crate) type Outcome<T> = BlockImportOutcome<BscBlock<T>>;
+pub(crate) type Outcome<T> = BlockImportOutcome<NewBlock<BscBlock<T>>>;
 
 /// Import event for a block
-pub(crate) type ImportEvent<T> = BlockImportEvent<BscBlock<T>>;
+pub(crate) type ImportEvent<T> = BlockImportEvent<NewBlock<BscBlock<T>>>;
 
 /// Future that processes a block import and returns its outcome
 type PayloadFut<T> = Pin<Box<dyn Future<Output = Outcome<T>> + Send + Sync>>;
@@ -51,7 +52,7 @@ where
     T: PayloadTypes,
 {
     /// The handle to communicate with the engine service
-    engine: BeaconConsensusEngineHandle<T>,
+    engine: ConsensusEngineHandle<T>,
     /// The consensus implementation
     consensus: Arc<ParliaConsensus<Provider>>,
     /// Receive the new block from the network
@@ -70,7 +71,7 @@ where
     /// Create a new block import service
     pub fn new(
         consensus: Arc<ParliaConsensus<Provider>>,
-        engine: BeaconConsensusEngineHandle<T>,
+        engine: ConsensusEngineHandle<T>,
     ) -> (Self, ImportHandle<T>) {
         let (to_import, from_network) = mpsc::unbounded_channel();
         let (to_network, import_outcome) = mpsc::unbounded_channel();
@@ -356,7 +357,7 @@ mod tests {
         async fn new(responses: EngineResponses) -> Self {
             let consensus = Arc::new(ParliaConsensus::new(MockProvider));
             let (to_engine, from_engine) = mpsc::unbounded_channel();
-            let engine_handle = BeaconConsensusEngineHandle::new(to_engine);
+            let engine_handle = ConsensusEngineHandle::new(to_engine);
 
             handle_engine_msg(from_engine, responses).await;
 
@@ -371,7 +372,7 @@ mod tests {
         /// Run a block import test with the given event assertion
         async fn assert_block_import<F>(&mut self, assert_fn: F)
         where
-            F: Fn(&BlockImportEvent<BscBlock<EthEngineTypes>>) -> bool,
+            F: Fn(&BlockImportEvent<NewBlock<BscBlock<EthEngineTypes>>>) -> bool,
         {
             let block_msg = create_test_block();
             self.handle.send_block(block_msg, PeerId::random()).unwrap();
@@ -394,14 +395,13 @@ mod tests {
             // Assert that at least one outcome matches our criteria
             assert!(
                 outcomes.iter().any(assert_fn),
-                "No outcome matched the expected criteria. Outcomes: {:?}",
-                outcomes
+                "No outcome matched the expected criteria. Outcomes: {outcomes:?}"
             );
         }
     }
 
     /// Creates a test block message
-    fn create_test_block() -> NewBlockMessage<Block> {
+    fn create_test_block() -> NewBlockMessage<NewBlock<Block>> {
         let block: reth_primitives::Block = Block::default();
         let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
         NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }

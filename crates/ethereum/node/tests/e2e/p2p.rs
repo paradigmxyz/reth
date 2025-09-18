@@ -53,9 +53,9 @@ async fn can_sync() -> eyre::Result<()> {
 async fn e2e_test_send_transactions() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -66,15 +66,21 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
     let mut node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().connect_http(node.rpc_url());
 
     advance_with_random_transactions(&mut node, 100, &mut rng, true).await?;
 
     let second_node = nodes.pop().unwrap();
-    let second_provider = ProviderBuilder::new().on_http(second_node.rpc_url());
+    let second_provider = ProviderBuilder::new().connect_http(second_node.rpc_url());
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
@@ -89,9 +95,9 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 async fn test_long_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -102,13 +108,19 @@ async fn test_long_reorg() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
 
-    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
+    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
 
     // Advance first node 100 blocks.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
@@ -139,9 +151,9 @@ async fn test_long_reorg() -> eyre::Result<()> {
 async fn test_reorg_through_backfill() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::rng().random();
     let mut rng = StdRng::from_seed(seed);
-    println!("Seed: {:?}", seed);
+    println!("Seed: {seed:?}");
 
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
@@ -152,13 +164,19 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
 
-    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
+    let first_provider = ProviderBuilder::new().connect_http(first_node.rpc_url());
 
     // Advance first node 100 blocks and finalize the chain.
     advance_with_random_transactions(&mut first_node, 100, &mut rng, true).await?;
@@ -167,9 +185,9 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
     second_node.sync_to(head.header.hash).await?;
 
-    // Produce an unfinalized fork chain with 5 blocks
+    // Produce an unfinalized fork chain with 30 blocks
     second_node.payload.timestamp = head.header.timestamp;
-    advance_with_random_transactions(&mut second_node, 5, &mut rng, false).await?;
+    advance_with_random_transactions(&mut second_node, 30, &mut rng, false).await?;
 
     // Now reorg second node to the finalized canonical head
     let head = first_provider.get_block_by_number(100.into()).await?.unwrap();

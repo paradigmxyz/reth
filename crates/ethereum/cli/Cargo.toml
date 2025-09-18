@@ -13,12 +13,54 @@ workspace = true
 [dependencies]
 # reth
 reth-cli.workspace = true
+reth-cli-commands.workspace = true
+reth-cli-runner.workspace = true
 reth-chainspec.workspace = true
+reth-db.workspace = true
+reth-node-builder.workspace = true
+reth-node-core.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-metrics.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tracing.workspace = true
+reth-node-api.workspace = true
 
 # misc
+clap.workspace = true
 eyre.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-clap.workspace = true
-reth-cli-commands.workspace = true
-reth-ethereum-cli.workspace = true
+# fs
+tempfile.workspace = true
+
+[features]
+default = ["jemalloc"]
+
+dev = ["reth-cli-commands/arbitrary"]
+
+asm-keccak = [
+    "reth-node-core/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
+]
+
+jemalloc = [
+    "reth-node-core/jemalloc",
+    "reth-node-metrics/jemalloc",
+]
+jemalloc-prof = [
+    "reth-node-core/jemalloc",
+]
+tracy-allocator = []
+
+# Because jemalloc is default and preferred over snmalloc when both features are
+# enabled, `--no-default-features` should be used when enabling snmalloc or
+# snmalloc-native.
+snmalloc = []
+snmalloc-native = []
+
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]

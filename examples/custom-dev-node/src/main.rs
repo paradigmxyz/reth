@@ -8,18 +8,16 @@ use std::sync::Arc;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
-use reth::{
-    builder::{NodeBuilder, NodeHandle},
-    tasks::TaskManager,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
-        core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction},
+        builder::{NodeBuilder, NodeHandle},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumNode,
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
+    tasks::TaskManager,
 };
 
 #[tokio::main]
@@ -41,7 +39,9 @@ async fn main() -> eyre::Result<()> {
     let mut notifications = node.provider.canonical_state_stream();
 
     // submit tx through rpc
-    let raw_tx = hex!("02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090");
+    let raw_tx = hex!(
+        "02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090"
+    );
 
     let eth_api = node.rpc_registry.eth_api();
 

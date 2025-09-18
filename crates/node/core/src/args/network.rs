@@ -1,11 +1,13 @@
 //! clap [Args](clap::Args) for network related arguments.
 
+use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
 };
 
+use crate::version::version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
 use reth_config::Config;
@@ -17,6 +19,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
+        config::TransactionPropagationKind,
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -26,7 +29,7 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             },
         },
-        TransactionFetcherConfig, TransactionsManagerConfig,
+        TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -35,8 +38,6 @@ use reth_network::{
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use tracing::error;
-
-use crate::version::P2P_CLIENT_VERSION;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -73,7 +74,7 @@ pub struct NetworkArgs {
     pub peers_file: Option<PathBuf>,
 
     /// Custom node identity
-    #[arg(long, value_name = "IDENTITY", default_value = P2P_CLIENT_VERSION)]
+    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version.as_ref())]
     pub identity: String,
 
     /// Secret key to use for this node.
@@ -154,6 +155,35 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    /// Transaction Propagation Policy
+    ///
+    /// The policy determines which peers transactions are gossiped to.
+    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
+    pub tx_propagation_policy: TransactionPropagationKind,
+
+    /// Disable transaction pool gossip
+    ///
+    /// Disables gossiping of transactions in the mempool to peers. This can be omitted for
+    /// personal nodes, though providers should always opt to enable this flag.
+    #[arg(long = "disable-tx-gossip")]
+    pub disable_tx_gossip: bool,
+
+    /// Sets the transaction propagation mode by determining how new pending transactions are
+    /// propagated to other peers in full.
+    ///
+    /// Examples: sqrt, all, max:10
+    #[arg(
+        long = "tx-propagation-mode",
+        default_value = "sqrt",
+        help = "Transaction propagation mode (sqrt, all, max:<number>)"
+    )]
+    pub propagation_mode: TransactionPropagationMode,
+
+    /// Comma separated list of required block hashes.
+    /// Peers that don't have these blocks will be filtered out.
+    #[arg(long = "required-block-hashes", value_delimiter = ',')]
+    pub required_block_hashes: Vec<B256>,
 }
 
 impl NetworkArgs {
@@ -185,7 +215,7 @@ impl NetworkArgs {
         })
     }
     /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
-    pub fn transactions_manager_config(&self) -> TransactionsManagerConfig {
+    pub const fn transactions_manager_config(&self) -> TransactionsManagerConfig {
         TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::new(
                 self.max_concurrent_tx_requests,
@@ -195,7 +225,7 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
-            propagation_mode: Default::default(),
+            propagation_mode: self.propagation_mode,
         }
     }
 
@@ -265,6 +295,8 @@ impl NetworkArgs {
                 // set discovery port based on instance number
                 self.discovery.port,
             ))
+            .disable_tx_gossip(self.disable_tx_gossip)
+            .required_block_hashes(self.required_block_hashes.clone())
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -318,7 +350,7 @@ impl Default for NetworkArgs {
             bootnodes: None,
             dns_retries: 0,
             peers_file: None,
-            identity: P2P_CLIENT_VERSION.to_string(),
+            identity: version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
@@ -335,6 +367,10 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            tx_propagation_policy: TransactionPropagationKind::default(),
+            disable_tx_gossip: false,
+            propagation_mode: TransactionPropagationMode::Sqrt,
+            required_block_hashes: vec![],
         }
     }
 }
@@ -433,7 +469,7 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_nat();
         }
 
-        if !self.disable_discovery && self.enable_discv5_discovery {
+        if self.should_enable_discv5() {
             network_config_builder = network_config_builder
                 .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
@@ -480,6 +516,17 @@ impl DiscoveryArgs {
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
+    }
+
+    /// Returns true if discv5 discovery should be configured
+    const fn should_enable_discv5(&self) -> bool {
+        if self.disable_discovery {
+            return false;
+        }
+
+        self.enable_discv5_discovery ||
+            self.discv5_addr.is_some() ||
+            self.discv5_addr_ipv6.is_some()
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
@@ -599,10 +646,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_disable_tx_gossip_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
+        assert!(args.disable_tx_gossip);
+    }
+
+    #[test]
     fn network_args_default_sanity_test() {
         let default_args = NetworkArgs::default();
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn parse_required_block_hashes() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--required-block-hashes",
+            "0x1111111111111111111111111111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222222222222222222222222222",
+        ])
+        .args;
+
+        assert_eq!(args.required_block_hashes.len(), 2);
+        assert_eq!(
+            args.required_block_hashes[0].to_string(),
+            "0x1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert_eq!(
+            args.required_block_hashes[1].to_string(),
+            "0x2222222222222222222222222222222222222222222222222222222222222222"
+        );
+    }
+
+    #[test]
+    fn parse_empty_required_block_hashes() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+        assert!(args.required_block_hashes.is_empty());
     }
 }

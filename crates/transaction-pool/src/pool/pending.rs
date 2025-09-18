@@ -1,3 +1,5 @@
+//! Pending transactions
+
 use crate::{
     identifier::{SenderId, TransactionId},
     pool::{
@@ -99,7 +101,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// time in pool (were added earlier) are returned first.
     ///
     /// NOTE: while this iterator returns transaction that pool considers valid at this point, they
-    /// could potentially be become invalid at point of execution. Therefore, this iterator
+    /// could potentially become invalid at point of execution. Therefore, this iterator
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
@@ -109,6 +111,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             independent: self.independent_transactions.values().cloned().collect(),
             invalid: Default::default(),
             new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
+            last_priority: None,
             skip_blobs: false,
         }
     }
@@ -132,11 +135,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn best_with_unlocked(
+    pub(crate) fn best_with_unlocked_and_attributes(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         base_fee: u64,
-    ) -> BestTransactions<T> {
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
@@ -151,13 +155,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        best
+        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
     }
 
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    ) -> impl ExactSizeIterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id.values().map(|tx| tx.transaction.clone())
     }
 
@@ -180,7 +184,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
         // Drain and iterate over all transactions.
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
         while let Some((id, tx)) = transactions_iter.next() {
-            if tx.transaction.max_fee_per_blob_gas() < Some(blob_fee) {
+            if tx.transaction.is_eip4844() && tx.transaction.max_fee_per_blob_gas() < Some(blob_fee)
+            {
                 // Add this tx to the removed collection since it no longer satisfies the blob fee
                 // condition. Decrease the total pool size.
                 removed.push(Arc::clone(&tx.transaction));
@@ -291,7 +296,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
         base_fee: u64,
     ) {
-        assert!(
+        debug_assert!(
             !self.contains(tx.id()),
             "transaction already included {:?}",
             self.get(tx.id()).unwrap().transaction
@@ -348,7 +353,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         Some(tx.transaction)
     }
 
-    fn next_id(&mut self) -> u64 {
+    const fn next_id(&mut self) -> u64 {
         let id = self.submission_id;
         self.submission_id = self.submission_id.wrapping_add(1);
         id
@@ -508,6 +513,21 @@ impl<T: TransactionOrdering> PendingPool<T> {
         self.by_id.len()
     }
 
+    /// All transactions grouped by id
+    pub const fn by_id(&self) -> &BTreeMap<TransactionId, PendingTransaction<T>> {
+        &self.by_id
+    }
+
+    /// Independent transactions
+    pub const fn independent_transactions(&self) -> &FxHashMap<SenderId, PendingTransaction<T>> {
+        &self.independent_transactions
+    }
+
+    /// Subscribes to new transactions
+    pub fn new_transaction_receiver(&self) -> broadcast::Receiver<PendingTransaction<T>> {
+        self.new_transaction_notifier.subscribe()
+    }
+
     /// Whether the pool is empty
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
@@ -521,11 +541,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.iter_txs_by_sender(sender).copied().collect()
+    }
+
+    /// Returns an iterator over all transaction with the sender id
+    pub(crate) fn iter_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> impl Iterator<Item = &TransactionId> + '_ {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(tx_id, _)| *tx_id)
-            .collect()
+            .map(|(tx_id, _)| tx_id)
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.
@@ -560,18 +587,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
 /// A transaction that is ready to be included in a block.
 #[derive(Debug)]
-pub(crate) struct PendingTransaction<T: TransactionOrdering> {
+pub struct PendingTransaction<T: TransactionOrdering> {
     /// Identifier that tags when transaction was submitted in the pool.
-    pub(crate) submission_id: u64,
+    pub submission_id: u64,
     /// Actual transaction.
-    pub(crate) transaction: Arc<ValidPoolTransaction<T::Transaction>>,
+    pub transaction: Arc<ValidPoolTransaction<T::Transaction>>,
     /// The priority value assigned by the used `Ordering` function.
-    pub(crate) priority: Priority<T::PriorityValue>,
+    pub priority: Priority<T::PriorityValue>,
 }
 
 impl<T: TransactionOrdering> PendingTransaction<T> {
     /// The next transaction of the sender: `nonce + 1`
-    pub(crate) fn unlocks(&self) -> TransactionId {
+    pub fn unlocks(&self) -> TransactionId {
         self.transaction.transaction_id.descendant()
     }
 }
@@ -738,7 +765,7 @@ mod tests {
 
         // the independent set is the roots of each of these tx chains, these are the highest
         // nonces for each sender
-        let expected_highest_nonces = vec![d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
+        let expected_highest_nonces = [d[0].clone(), c[2].clone(), b[2].clone(), a[3].clone()]
             .iter()
             .map(|tx| (tx.sender(), tx.nonce()))
             .collect::<HashSet<_>>();
@@ -1019,5 +1046,13 @@ mod tests {
 
         let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
         pool.truncate_pool(pool_limit);
+
+        let sender_a = f.ids.sender_id(&a).unwrap();
+        let sender_b = f.ids.sender_id(&b).unwrap();
+        let sender_c = f.ids.sender_id(&c).unwrap();
+
+        assert_eq!(pool.get_txs_by_sender(sender_a).len(), 10);
+        assert!(pool.get_txs_by_sender(sender_b).is_empty());
+        assert!(pool.get_txs_by_sender(sender_c).is_empty());
     }
 }

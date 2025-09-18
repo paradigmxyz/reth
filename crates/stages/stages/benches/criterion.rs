@@ -113,7 +113,7 @@ fn merkle(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    let stage = MerkleStage::Both { clean_threshold: u64::MAX };
+    let stage = MerkleStage::Both { rebuild_threshold: u64::MAX, incremental_threshold: u64::MAX };
     measure_stage(
         runtime,
         &mut group,
@@ -124,7 +124,7 @@ fn merkle(c: &mut Criterion, runtime: &Runtime) {
         "Merkle-incremental".to_string(),
     );
 
-    let stage = MerkleStage::Both { clean_threshold: 0 };
+    let stage = MerkleStage::Both { rebuild_threshold: 0, incremental_threshold: 0 };
     measure_stage(
         runtime,
         &mut group,

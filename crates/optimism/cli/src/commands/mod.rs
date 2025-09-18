@@ -7,7 +7,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, dump_genesis, init_cmd,
     node::{self, NoArgs},
-    p2p, prune, recover, stage,
+    p2p, prune, re_execute, recover, stage,
 };
 use std::{fmt, sync::Arc};
 
@@ -20,7 +20,6 @@ pub mod test_vectors;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// Start the node
@@ -48,7 +47,7 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     Stage(Box<stage::Command<Spec>>),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
-    P2P(p2p::Command<Spec>),
+    P2P(Box<p2p::Command<Spec>>),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
@@ -62,6 +61,9 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
+    /// Re-execute blocks in parallel to verify historical sync correctness.
+    #[command(name = "re-execute")]
+    ReExecute(re_execute::Command<Spec>),
 }
 
 impl<
@@ -86,6 +88,7 @@ impl<
             Self::ImportReceiptsOp(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
+            Self::ReExecute(cmd) => cmd.chain_spec(),
         }
     }
 }

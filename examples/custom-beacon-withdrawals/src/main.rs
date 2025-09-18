@@ -7,24 +7,23 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
+    precompiles::PrecompilesMap,
+    revm::context::result::ResultAndState,
     EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
-use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext},
-    cli::Cli,
-    primitives::SealedBlock,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
+    cli::interface::Cli,
     evm::{
         primitives::{
             execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-            Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+            Database, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
+            NextBlockEnvAttributes, OnStateHook,
         },
         revm::{
-            context::{result::ExecutionResult, TxEnv},
+            context::TxEnv,
             db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
@@ -32,13 +31,15 @@ use reth_ethereum::{
         EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
     node::{
-        api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext},
         node::EthereumAddOns,
-        BasicBlockExecutorProvider, EthereumNode,
+        EthereumNode,
     },
-    primitives::{Header, SealedHeader},
+    primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
-    EthPrimitives, Receipt, TransactionSigned,
+    rpc::types::engine::ExecutionData,
+    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -76,16 +77,11 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = CustomEvmConfig;
-    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
-    async fn build_evm(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
-        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
-        Ok((evm_config, executor))
+        Ok(evm_config)
     }
 }
 
@@ -106,7 +102,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I>,
+        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
@@ -151,7 +147,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
         self.inner.context_for_block(block)
     }
 
@@ -161,6 +157,20 @@ impl ConfigureEvm for CustomEvmConfig {
         attributes: Self::NextBlockEnvCtx,
     ) -> EthBlockExecutionCtx<'_> {
         self.inner.context_for_next_block(parent, attributes)
+    }
+}
+
+impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
+        self.inner.evm_env_for_payload(payload)
+    }
+
+    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self> {
+        self.inner.context_for_payload(payload)
+    }
+
+    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
+        self.inner.tx_iterator_for_payload(payload)
     }
 }
 
@@ -182,12 +192,19 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+    ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
     ) -> Result<u64, BlockExecutionError> {
-        self.inner.execute_transaction_with_result_closure(tx, f)
+        self.inner.commit_transaction(output, tx)
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
@@ -238,7 +255,7 @@ pub fn apply_withdrawals_contract_call(
         Ok(res) => res.state,
         Err(e) => {
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
-                format!("withdrawal contract system call revert: {}", e).into(),
+                format!("withdrawal contract system call revert: {e}").into(),
             )))
         }
     };

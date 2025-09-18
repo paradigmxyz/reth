@@ -6,7 +6,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
-use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
+use jsonrpsee::http_client::HttpClient;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
@@ -18,16 +18,16 @@ use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
-    StageCheckpointReader,
+    HeaderProvider, StageCheckpointReader,
 };
+use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
-use reth_rpc_layer::AuthClientService;
 use reth_stages_types::StageId;
 use std::pin::Pin;
 use tokio_stream::StreamExt;
 use url::Url;
 
-/// An helper struct to handle node actions
+/// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
 pub struct NodeTestContext<Node, AddOns>
 where
@@ -161,8 +161,8 @@ where
             }
 
             if check {
-                if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
+                if let Some(latest_header) = self.inner.provider.header_by_number(number)? {
+                    assert_eq!(latest_header.hash_slow(), expected_block_hash);
                     break
                 }
                 assert!(
@@ -293,7 +293,7 @@ where
     /// Returns the RPC URL.
     pub fn rpc_url(&self) -> Url {
         let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
-        format!("http://{}", addr).parse().unwrap()
+        format!("http://{addr}").parse().unwrap()
     }
 
     /// Returns an RPC client.
@@ -302,7 +302,7 @@ where
     }
 
     /// Returns an Engine API client.
-    pub fn engine_api_client(&self) -> HttpClient<AuthClientService<HttpBackend>> {
-        self.inner.auth_server_handle().http_client()
+    pub fn auth_server_handle(&self) -> AuthServerHandle {
+        self.inner.auth_server_handle().clone()
     }
 }

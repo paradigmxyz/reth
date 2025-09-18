@@ -3,7 +3,7 @@
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
-    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, LogFormat,
+    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
     RethTracer, Tracer,
 };
 use std::{fmt, fmt::Display};
@@ -34,6 +34,10 @@ pub struct LogArgs {
     /// The path to put log files in.
     #[arg(long = "log.file.directory", value_name = "PATH", global = true, default_value_t)]
     pub log_file_directory: PlatformPath<LogsDir>,
+
+    /// The prefix name of the log files.
+    #[arg(long = "log.file.name", value_name = "NAME", global = true, default_value = "reth.log")]
+    pub log_file_name: String,
 
     /// The maximum size (in MB) of one log file.
     #[arg(long = "log.file.max-size", value_name = "SIZE", global = true, default_value_t = 200)]
@@ -73,7 +77,7 @@ pub struct LogArgs {
 
 impl LogArgs {
     /// Creates a [`LayerInfo`] instance.
-    fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
+    fn layer_info(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,
             self.verbosity.directive().to_string(),
@@ -86,6 +90,7 @@ impl LogArgs {
     fn file_info(&self) -> FileInfo {
         FileInfo::new(
             self.log_file_directory.clone().into(),
+            self.log_file_name.clone(),
             self.log_file_max_size * MB_TO_BYTES,
             self.log_file_max_files,
         )
@@ -93,11 +98,24 @@ impl LogArgs {
 
     /// Initializes tracing with the configured options from cli args.
     ///
-    /// Returns the file worker guard, and the file name, if a file worker was configured.
+    /// Uses default layers for tracing. If you need to include custom layers,
+    /// use `init_tracing_with_layers` instead.
+    ///
+    /// Returns the file worker guard if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        self.init_tracing_with_layers(Layers::new())
+    }
+
+    /// Initializes tracing with the configured options from cli args.
+    ///
+    /// Returns the file worker guard, and the file name, if a file worker was configured.
+    pub fn init_tracing_with_layers(
+        &self,
+        layers: Layers,
+    ) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
-        let stdout = self.layer(self.log_stdout_format, self.log_stdout_filter.clone(), true);
+        let stdout = self.layer_info(self.log_stdout_format, self.log_stdout_filter.clone(), true);
         tracer = tracer.with_stdout(stdout);
 
         if self.journald {
@@ -106,11 +124,11 @@ impl LogArgs {
 
         if self.log_file_max_files > 0 {
             let info = self.file_info();
-            let file = self.layer(self.log_file_format, self.log_file_filter.clone(), false);
+            let file = self.layer_info(self.log_file_format, self.log_file_filter.clone(), false);
             tracer = tracer.with_file(file, info);
         }
 
-        let guard = tracer.init()?;
+        let guard = tracer.init_with_layers(layers)?;
         Ok(guard)
     }
 }

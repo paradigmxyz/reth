@@ -67,7 +67,7 @@ impl Compact for BranchNodeCompact {
             buf.put_slice(root_hash.as_slice());
         }
 
-        for hash in &self.hashes {
+        for hash in self.hashes.iter() {
             buf_size += B256::len_bytes();
             buf.put_slice(hash.as_slice());
         }

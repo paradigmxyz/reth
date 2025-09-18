@@ -36,7 +36,7 @@ impl Decodable for NodeType {
 
 impl NodeType {
     /// Return `true` if node type is stateful.
-    pub fn is_stateful(&self) -> bool {
+    pub const fn is_stateful(&self) -> bool {
         matches!(self, Self::Stateful)
     }
 
@@ -48,7 +48,7 @@ impl NodeType {
     /// ----------|-----------|----------|
     /// stateless |     +     |     +    |
     /// stateful  |     +     |     -    |
-    pub fn is_valid_connection(&self, other: &Self) -> bool {
+    pub const fn is_valid_connection(&self, other: &Self) -> bool {
         !self.is_stateful() || !other.is_stateful()
     }
 }

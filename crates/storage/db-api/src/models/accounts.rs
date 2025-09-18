@@ -107,13 +107,13 @@ impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{thread_rng, Rng};
-    use std::str::FromStr;
+    use alloy_primitives::address;
+    use rand::{rng, Rng};
 
     #[test]
     fn test_block_number_address() {
         let num = 1u64;
-        let hash = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let hash = address!("0xba5e000000000000000000000000000000000000");
         let key = BlockNumberAddress((num, hash));
 
         let mut bytes = [0u8; 28];
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn test_block_number_address_rand() {
         let mut bytes = [0u8; 28];
-        thread_rng().fill(bytes.as_mut_slice());
+        rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_address_storage_key() {
         let storage_key = StorageKey::random();
-        let address = Address::from_str("ba5e000000000000000000000000000000000000").unwrap();
+        let address = address!("0xba5e000000000000000000000000000000000000");
         let key = AddressStorageKey((address, storage_key));
 
         let mut bytes = [0u8; 52];
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn test_address_storage_key_rand() {
         let mut bytes = [0u8; 52];
-        thread_rng().fill(bytes.as_mut_slice());
+        rng().fill(bytes.as_mut_slice());
         let key = AddressStorageKey::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }

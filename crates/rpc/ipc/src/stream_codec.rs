@@ -209,7 +209,7 @@ mod tests {
         let request2 = codec
             .decode(&mut buf)
             .expect("There should be no error in first 2nd test")
-            .expect("There should be aa request in 2nd whitespace test");
+            .expect("There should be a request in 2nd whitespace test");
         // TODO: maybe actually trim it out
         assert_eq!(request2, "\n\n\n\n{ test: 2 }");
 
@@ -299,5 +299,19 @@ mod tests {
 
         assert_eq!(request, "{ test: 1 }");
         assert_eq!(request2, "{ test: 2 }");
+    }
+
+    #[test]
+    fn serde_json_accepts_whitespace_wrapped_json() {
+        let json = "   { \"key\": \"value\" }   ";
+
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Obj {
+            key: String,
+        }
+
+        let parsed: Result<Obj, _> = serde_json::from_str(json);
+        assert!(parsed.is_ok(), "serde_json should accept whitespace-wrapped JSON");
+        assert_eq!(parsed.unwrap(), Obj { key: "value".into() });
     }
 }

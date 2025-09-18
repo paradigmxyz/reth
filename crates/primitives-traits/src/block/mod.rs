@@ -1,4 +1,26 @@
 //! Block abstraction.
+//!
+//! This module provides the core block types and transformations:
+//!
+//! ```rust
+//! # use reth_primitives_traits::{Block, SealedBlock, RecoveredBlock};
+//! # fn example<B: Block + 'static>(block: B) -> Result<(), Box<dyn std::error::Error>>
+//! # where B::Body: reth_primitives_traits::BlockBody<Transaction: reth_primitives_traits::SignedTransaction> {
+//! // Basic block flow
+//! let block: B = block;
+//!
+//! // Seal (compute hash)
+//! let sealed: SealedBlock<B> = block.seal();
+//!
+//! // Recover senders
+//! let recovered: RecoveredBlock<B> = sealed.try_recover()?;
+//!
+//! // Access components
+//! let senders = recovered.senders();
+//! let hash = recovered.hash();
+//! # Ok(())
+//! # }
+//! ```
 
 pub(crate) mod sealed;
 pub use sealed::SealedBlock;
@@ -47,7 +69,7 @@ pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
 ///
 /// This type defines the structure of a block in the blockchain.
 /// A [`Block`] is composed of a header and a body.
-/// It is expected that a block can always be completely reconstructed from its header and body.
+/// It is expected that a block can always be completely reconstructed from its header and body
 pub trait Block:
     Send
     + Sync
@@ -168,14 +190,32 @@ pub trait Block:
     /// transactions.
     ///
     /// Returns the block as error if a signature is invalid.
-    fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>>
-    where
-        <Self::Body as BlockBody>::Transaction: SignedTransaction,
-    {
+    fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>> {
         let Ok(signers) = self.body().recover_signers() else {
             return Err(BlockRecoveryError::new(self))
         };
         Ok(RecoveredBlock::new_unhashed(self, signers))
+    }
+
+    /// A Convenience function to convert this type into the regular ethereum block that
+    /// consists of:
+    ///
+    /// - Header
+    ///
+    /// And the ethereum block body [`alloy_consensus::BlockBody`], see also
+    /// [`BlockBody::into_ethereum_body`].
+    /// - Transactions
+    /// - Withdrawals
+    /// - Ommers
+    ///
+    /// Note: This conversion can be incomplete. It is not expected that this `Block` is the same as
+    /// [`alloy_consensus::Block`] only that it can be converted into it which is useful for
+    /// the `eth_` RPC namespace (e.g. RPC block).
+    fn into_ethereum_block(
+        self,
+    ) -> alloy_consensus::Block<<Self::Body as BlockBody>::Transaction, Self::Header> {
+        let (header, body) = self.split();
+        alloy_consensus::Block::new(header, body.into_ethereum_body())
     }
 }
 
@@ -205,6 +245,10 @@ where
 
     fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
         Self::rlp_length_for(header, body)
+    }
+
+    fn into_ethereum_block(self) -> Self {
+        self
     }
 }
 

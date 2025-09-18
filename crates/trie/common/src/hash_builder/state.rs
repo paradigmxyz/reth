@@ -37,7 +37,7 @@ impl From<HashBuilderState> for HashBuilder {
             key: Nibbles::from_nibbles_unchecked(state.key),
             stack: state.stack,
             value: state.value,
-            groups: state.groups,
+            state_masks: state.groups,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
@@ -51,10 +51,10 @@ impl From<HashBuilderState> for HashBuilder {
 impl From<HashBuilder> for HashBuilderState {
     fn from(state: HashBuilder) -> Self {
         Self {
-            key: state.key.into(),
+            key: state.key.to_vec(),
             stack: state.stack,
             value: state.value,
-            groups: state.groups,
+            groups: state.state_masks,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,

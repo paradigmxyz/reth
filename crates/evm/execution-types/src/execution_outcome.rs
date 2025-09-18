@@ -113,7 +113,7 @@ impl<T> ExecutionOutcome<T> {
                 )
             }),
             reverts.into_iter().map(|(_, reverts)| {
-                // does not needs to be sorted, it is done when taking reverts.
+                // does not need to be sorted, it is done when taking reverts.
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
@@ -158,12 +158,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable revm bundle state.
-    pub fn state_mut(&mut self) -> &mut BundleState {
+    pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
 
     /// Set first block.
-    pub fn set_first_block(&mut self, first_block: BlockNumber) {
+    pub const fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
     }
 
@@ -201,7 +201,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Transform block number to the index of block.
-    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub const fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
@@ -214,7 +214,7 @@ impl<T> ExecutionOutcome<T> {
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
@@ -229,7 +229,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
+    pub const fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
         &mut self.receipts
     }
 
@@ -240,12 +240,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Is execution outcome empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Number of blocks in the execution outcome.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.receipts.len()
     }
 
@@ -255,7 +255,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Return last block of the execution outcome
-    pub fn last_block(&self) -> BlockNumber {
+    pub const fn last_block(&self) -> BlockNumber {
         (self.first_block + self.len() as u64).saturating_sub(1)
     }
 
@@ -534,7 +534,7 @@ pub(super) mod serde_bincode_compat {
             }
 
             let mut bytes = [0u8; 1024];
-            rand::thread_rng().fill(bytes.as_mut_slice());
+            rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 data: ExecutionOutcome {
                     bundle: Default::default(),
@@ -558,7 +558,7 @@ mod tests {
     use alloy_primitives::{bytes, Address, LogData, B256};
 
     #[test]
-    fn test_initialisation() {
+    fn test_initialization() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
             vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
@@ -648,7 +648,7 @@ mod tests {
         // Test before the first block
         assert_eq!(exec_res.block_number_to_index(12), None);
 
-        // Test after after the first block but index larger than receipts length
+        // Test after the first block but index larger than receipts length
         assert_eq!(exec_res.block_number_to_index(133), None);
 
         // Test after the first block

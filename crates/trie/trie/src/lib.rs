@@ -41,7 +41,10 @@ pub use trie::{StateRoot, StorageRoot, TrieType};
 
 /// Utilities for state root checkpoint progress.
 mod progress;
-pub use progress::{IntermediateStateRootState, StateRootProgress};
+pub use progress::{
+    IntermediateStateRootState, IntermediateStorageRootState, StateRootProgress,
+    StorageRootProgress,
+};
 
 /// Trie calculation stats.
 pub mod stats;
@@ -60,3 +63,6 @@ pub mod test_utils;
 /// Collection of mock types for testing.
 #[cfg(test)]
 pub mod mock;
+
+/// Verification of existing stored trie nodes against state data.
+pub mod verify;

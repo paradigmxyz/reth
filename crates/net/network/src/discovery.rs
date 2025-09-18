@@ -200,6 +200,7 @@ impl Discovery {
     }
 
     /// Add a node to the discv4 table.
+    #[expect(clippy::result_large_err)]
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
             discv5.add_node(enr).map_err(NetworkError::Discv5Error)?;
@@ -338,14 +339,12 @@ impl Discovery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::thread_rng;
     use secp256k1::SECP256K1;
     use std::net::{Ipv4Addr, SocketAddrV4};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_discovery_setup() {
-        let mut rng = thread_rng();
-        let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
+        let (secret_key, _) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
         let _discovery = Discovery::new(
             discovery_addr,
@@ -364,7 +363,7 @@ mod tests {
     use tracing::trace;
 
     async fn start_discovery_node(udp_port_discv4: u16, udp_port_discv5: u16) -> Discovery {
-        let secret_key = SecretKey::new(&mut thread_rng());
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
 
         let discv4_addr = format!("127.0.0.1:{udp_port_discv4}").parse().unwrap();
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();

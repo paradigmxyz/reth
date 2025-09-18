@@ -11,7 +11,7 @@ use reth_storage_errors::provider::ProviderResult;
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
-pub trait AccountReader: Send + Sync {
+pub trait AccountReader {
     /// Get basic account information.
     ///
     /// Returns `None` if the account doesn't exist.
@@ -20,7 +20,7 @@ pub trait AccountReader: Send + Sync {
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
-pub trait AccountExtReader: Send + Sync {
+pub trait AccountExtReader {
     /// Iterate over account changesets and return all account address that were changed.
     fn changed_accounts_with_range(
         &self,
@@ -46,9 +46,9 @@ pub trait AccountExtReader: Send + Sync {
     ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
-/// AccountChange reader
+/// `AccountChange` reader
 #[auto_impl(&, Arc, Box)]
-pub trait ChangeSetReader: Send + Sync {
+pub trait ChangeSetReader {
     /// Iterate over account changesets and return the account state from before this block.
     fn account_block_changeset(
         &self,

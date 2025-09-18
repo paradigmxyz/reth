@@ -12,7 +12,7 @@ pub struct SizeTracker(isize);
 
 impl SizeTracker {
     /// Reset the size tracker.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.0 = 0;
     }
 }

@@ -12,7 +12,7 @@ use reth_downloaders::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::ReceiptTy;
-use reth_node_core::version::SHORT_VERSION;
+use reth_node_core::version::version_metadata;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
 use reth_primitives_traits::NodePrimitives;
@@ -52,7 +52,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = OpPrimitives>>(
         self,
     ) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+        info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
         debug!(target: "reth::cli",
             chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
@@ -83,7 +83,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
 
 impl<C: ChainSpecParser> ImportReceiptsOpCommand<C> {
     /// Returns the underlying chain being used to run this command
-    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+    pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)
     }
 }
@@ -154,7 +154,9 @@ where
             }
         }
         None => {
-            eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
+            eyre::bail!(
+                "Receipts was not initialized. Please import blocks and transactions before calling this command."
+            );
         }
     }
 
@@ -243,12 +245,16 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     if total_receipts != total_imported_txns {
-        eyre::bail!("Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}")
+        eyre::bail!(
+            "Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}"
+        )
     }
 
     // Only commit if the receipt block height matches the one from transactions.
     if highest_block_receipts != highest_block_transactions {
-        eyre::bail!("Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}")
+        eyre::bail!(
+            "Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}"
+        )
     }
 
     // Required or any access-write provider factory will attempt to unwind to 0.
@@ -309,7 +315,6 @@ mod test {
         let db = TestStageDB::default();
         init_genesis(&db.factory).unwrap();
 
-        // todo: where does import command init receipts ? probably somewhere in pipeline
         let provider_factory =
             create_test_provider_factory_with_node_types::<OpNode>(OP_MAINNET.clone());
         let ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns } =

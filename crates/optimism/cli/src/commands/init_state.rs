@@ -1,8 +1,9 @@
 //! Command that initializes the node from a genesis file.
 
+use alloy_consensus::Header;
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment};
+use reth_cli_commands::common::{AccessRights, CliHeader, CliNodeTypes, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{
@@ -58,6 +59,11 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                     &provider_rw,
                     SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
                     BEDROCK_HEADER_TTD,
+                    |number| {
+                        let mut header = Header::default();
+                        header.set_number(number);
+                        header
+                    },
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they

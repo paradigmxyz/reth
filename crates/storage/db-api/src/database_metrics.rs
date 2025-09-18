@@ -39,4 +39,16 @@ impl<DB: DatabaseMetrics> DatabaseMetrics for Arc<DB> {
     fn report_metrics(&self) {
         <DB as DatabaseMetrics>::report_metrics(self)
     }
+
+    fn gauge_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        <DB as DatabaseMetrics>::gauge_metrics(self)
+    }
+
+    fn counter_metrics(&self) -> Vec<(&'static str, u64, Vec<Label>)> {
+        <DB as DatabaseMetrics>::counter_metrics(self)
+    }
+
+    fn histogram_metrics(&self) -> Vec<(&'static str, f64, Vec<Label>)> {
+        <DB as DatabaseMetrics>::histogram_metrics(self)
+    }
 }

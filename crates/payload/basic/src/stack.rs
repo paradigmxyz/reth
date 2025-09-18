@@ -28,8 +28,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Left(l) => write!(f, "Left: {}", l),
-            Self::Right(r) => write!(f, "Right: {}", r),
+            Self::Left(l) => write!(f, "Left: {l}"),
+            Self::Right(r) => write!(f, "Right: {r}"),
         }
     }
 }

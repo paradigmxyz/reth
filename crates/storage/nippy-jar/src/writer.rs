@@ -48,7 +48,7 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// If will  **always** attempt to heal any inconsistent state when called.
+    /// If will **always** attempt to heal any inconsistent state when called.
     pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
@@ -98,7 +98,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     ///
     /// Since there's no way of knowing if `H` has been actually changed, this sets `self.dirty` to
     /// true.
-    pub fn user_header_mut(&mut self) -> &mut H {
+    pub const fn user_header_mut(&mut self) -> &mut H {
         self.dirty = true;
         &mut self.jar.user_header
     }
@@ -109,7 +109,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     /// Sets writer as dirty.
-    pub fn set_dirty(&mut self) {
+    pub const fn set_dirty(&mut self) {
         self.dirty = true
     }
 
@@ -436,7 +436,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Returns a mutable reference to the offsets vector.
     #[cfg(test)]
-    pub fn offsets_mut(&mut self) -> &mut Vec<u64> {
+    pub const fn offsets_mut(&mut self) -> &mut Vec<u64> {
         &mut self.offsets
     }
 
@@ -454,7 +454,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Returns a mutable reference to the buffered writer for the data file.
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn data_file(&mut self) -> &mut BufWriter<File> {
+    pub const fn data_file(&mut self) -> &mut BufWriter<File> {
         &mut self.data_file
     }
 

@@ -1,4 +1,4 @@
-//! Execution layer specific types for era1 files
+//! Execution layer specific types for `.era1` files
 //!
 //! Contains implementations for compressed execution layer data structures:
 //! - [`CompressedHeader`] - Block header
@@ -9,8 +9,72 @@
 //! These types use Snappy compression to match the specification.
 //!
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+//!
+//! # Examples
+//!
+//! ## [`CompressedHeader`]
+//!
+//! ```rust
+//! use alloy_consensus::Header;
+//! use reth_era::{execution_types::CompressedHeader, DecodeCompressed};
+//!
+//! let header = Header { number: 100, ..Default::default() };
+//! // Compress the header: rlp encoding and Snappy compression
+//! let compressed = CompressedHeader::from_header(&header)?;
+//! // Decompressed and decode typed compressed header
+//! let decoded_header: Header = compressed.decode_header()?;
+//! assert_eq!(decoded_header.number, 100);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ```
+//!
+//! ## [`CompressedBody`]
+//!
+//! ```rust
+//! use alloy_consensus::{BlockBody, Header};
+//! use alloy_primitives::Bytes;
+//! use reth_era::{execution_types::CompressedBody, DecodeCompressed};
+//! use reth_ethereum_primitives::TransactionSigned;
+//!
+//! let body: BlockBody<Bytes> = BlockBody {
+//!     transactions: vec![Bytes::from(vec![1, 2, 3])],
+//!     ommers: vec![],
+//!     withdrawals: None,
+//! };
+//! // Compress the body: rlp encoding and snappy compression
+//! let compressed_body = CompressedBody::from_body(&body)?;
+//! // Decode back to typed body by decompressing and decoding
+//! let decoded_body: alloy_consensus::BlockBody<alloy_primitives::Bytes> =
+//!     compressed_body.decode()?;
+//! assert_eq!(decoded_body.transactions.len(), 1);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ```
+//!
+//! ## [`CompressedReceipts`]
+//!
+//! ```rust
+//! use alloy_consensus::ReceiptWithBloom;
+//! use reth_era::{execution_types::CompressedReceipts, DecodeCompressed};
+//! use reth_ethereum_primitives::{Receipt, TxType};
+//!
+//! let receipt = Receipt {
+//!     tx_type: TxType::Legacy,
+//!     success: true,
+//!     cumulative_gas_used: 21000,
+//!     logs: vec![],
+//! };
+//! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
+//! // Compress the receipt: rlp encoding and snappy compression
+//! let compressed_receipt_data = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
+//! // Get raw receipt by decoding and decompressing compressed and encoded receipt
+//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
+//! assert_eq!(decompressed_receipt.receipt.cumulative_gas_used, 21000);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ``````
 
-use crate::e2s_types::{E2sError, Entry};
+use crate::{
+    e2s_types::{E2sError, Entry},
+    DecodeCompressed,
+};
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -47,7 +111,7 @@ pub struct SnappyRlpCodec<T> {
 
 impl<T> SnappyRlpCodec<T> {
     /// Create a new codec for the given type
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { _phantom: PhantomData }
     }
 }
@@ -58,12 +122,11 @@ impl<T: Decodable> SnappyRlpCodec<T> {
         let mut decoder = FrameDecoder::new(compressed_data);
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress data: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress data: {e}"))
         })?;
 
         let mut slice = decompressed.as_slice();
-        T::decode(&mut slice)
-            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {}", e)))
+        T::decode(&mut slice).map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 }
 
@@ -78,11 +141,11 @@ impl<T: Encodable> SnappyRlpCodec<T> {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, &rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress data: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress data: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
 
@@ -97,15 +160,9 @@ pub struct CompressedHeader {
     pub data: Vec<u8>,
 }
 
-/// Extension trait for generic decoding from compressed data
-pub trait DecodeCompressed {
-    /// Decompress and decode the data into the given type
-    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
-}
-
 impl CompressedHeader {
     /// Create a new [`CompressedHeader`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -116,11 +173,11 @@ impl CompressedHeader {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -131,7 +188,7 @@ impl CompressedHeader {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress header: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress header: {e}"))
         })?;
 
         Ok(decompressed)
@@ -162,9 +219,9 @@ impl CompressedHeader {
         self.decode()
     }
 
-    /// Create a [`CompressedHeader`] from an `alloy_consensus::Header`
-    pub fn from_header(header: &Header) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpCodec::<Header>::new();
+    /// Create a [`CompressedHeader`] from a header
+    pub fn from_header<H: Encodable>(header: &H) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpCodec::new();
         let compressed = encoder.encode(header)?;
         Ok(Self::new(compressed))
     }
@@ -186,7 +243,7 @@ pub struct CompressedBody {
 
 impl CompressedBody {
     /// Create a new [`CompressedBody`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -197,11 +254,11 @@ impl CompressedBody {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -212,7 +269,7 @@ impl CompressedBody {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress body: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress body: {e}"))
         })?;
 
         Ok(decompressed)
@@ -237,12 +294,21 @@ impl CompressedBody {
 
     /// Decode this [`CompressedBody`] into an `alloy_consensus::BlockBody`
     pub fn decode_body<T: Decodable, H: Decodable>(&self) -> Result<BlockBody<T, H>, E2sError> {
-        self.decode()
+        let decompressed = self.decompress()?;
+        Self::decode_body_from_decompressed(&decompressed)
     }
 
-    /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
-    pub fn from_body<T: Encodable, H: Encodable>(body: &BlockBody<T, H>) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpCodec::<BlockBody<T, H>>::new();
+    /// Decode decompressed body data into an `alloy_consensus::BlockBody`
+    pub fn decode_body_from_decompressed<T: Decodable, H: Decodable>(
+        data: &[u8],
+    ) -> Result<BlockBody<T, H>, E2sError> {
+        alloy_rlp::decode_exact::<BlockBody<T, H>>(data)
+            .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
+    }
+
+    /// Create a [`CompressedBody`] from a block body (e.g.  `alloy_consensus::BlockBody`)
+    pub fn from_body<B: Encodable>(body: &B) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpCodec::new();
         let compressed = encoder.encode(body)?;
         Ok(Self::new(compressed))
     }
@@ -264,7 +330,7 @@ pub struct CompressedReceipts {
 
 impl CompressedReceipts {
     /// Create a new [`CompressedReceipts`] from compressed data
-    pub fn new(data: Vec<u8>) -> Self {
+    pub const fn new(data: Vec<u8>) -> Self {
         Self { data }
     }
 
@@ -275,11 +341,11 @@ impl CompressedReceipts {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {}", e))
+                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to flush encoder: {}", e))
+                E2sError::SnappyCompression(format!("Failed to flush encoder: {e}"))
             })?;
         }
         Ok(Self { data: compressed })
@@ -289,7 +355,7 @@ impl CompressedReceipts {
         let mut decoder = FrameDecoder::new(self.data.as_slice());
         let mut decompressed = Vec::new();
         Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-            E2sError::SnappyDecompression(format!("Failed to decompress receipts: {}", e))
+            E2sError::SnappyDecompression(format!("Failed to decompress receipts: {e}"))
         })?;
 
         Ok(decompressed)
@@ -325,6 +391,18 @@ impl CompressedReceipts {
         let compressed = encoder.encode(data)?;
         Ok(Self::new(compressed))
     }
+    /// Encode a list of receipts to RLP format
+    pub fn encode_receipts_to_rlp<T: Encodable>(receipts: &[T]) -> Result<Vec<u8>, E2sError> {
+        let mut rlp_data = Vec::new();
+        alloy_rlp::encode_list(receipts, &mut rlp_data);
+        Ok(rlp_data)
+    }
+
+    /// Encode and compress a list of receipts
+    pub fn from_encodable_list<T: Encodable>(receipts: &[T]) -> Result<Self, E2sError> {
+        let rlp_data = Self::encode_receipts_to_rlp(receipts)?;
+        Self::from_rlp(&rlp_data)
+    }
 }
 
 impl DecodeCompressed for CompressedReceipts {
@@ -343,7 +421,7 @@ pub struct TotalDifficulty {
 
 impl TotalDifficulty {
     /// Create a new [`TotalDifficulty`] from a U256 value
-    pub fn new(value: U256) -> Self {
+    pub const fn new(value: U256) -> Self {
         Self { value }
     }
 
@@ -395,7 +473,7 @@ pub struct Accumulator {
 
 impl Accumulator {
     /// Create a new [`Accumulator`] from a root hash
-    pub fn new(root: B256) -> Self {
+    pub const fn new(root: B256) -> Self {
         Self { root }
     }
 
@@ -445,7 +523,7 @@ pub struct BlockTuple {
 
 impl BlockTuple {
     /// Create a new [`BlockTuple`]
-    pub fn new(
+    pub const fn new(
         header: CompressedHeader,
         body: CompressedBody,
         receipts: CompressedReceipts,
@@ -482,34 +560,14 @@ impl BlockTuple {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, B64};
+    use alloy_primitives::{Bytes, U256};
+    use reth_ethereum_primitives::{Receipt, TxType};
 
     #[test]
     fn test_header_conversion_roundtrip() {
-        let header = Header {
-            parent_hash: B256::default(),
-            ommers_hash: B256::default(),
-            beneficiary: Address::default(),
-            state_root: B256::default(),
-            transactions_root: B256::default(),
-            receipts_root: B256::default(),
-            logs_bloom: Default::default(),
-            difficulty: U256::from(123456u64),
-            number: 100,
-            gas_limit: 5000000,
-            gas_used: 21000,
-            timestamp: 1609459200,
-            extra_data: Bytes::default(),
-            mix_hash: B256::default(),
-            nonce: B64::default(),
-            base_fee_per_gas: Some(10),
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
-        };
+        let header = create_header();
 
         let compressed_header = CompressedHeader::from_header(&header).unwrap();
 
@@ -575,29 +633,7 @@ mod tests {
     #[test]
     fn test_block_tuple_with_data() {
         // Create block with transactions and withdrawals
-        let header = Header {
-            parent_hash: B256::default(),
-            ommers_hash: B256::default(),
-            beneficiary: Address::default(),
-            state_root: B256::default(),
-            transactions_root: B256::default(),
-            receipts_root: B256::default(),
-            logs_bloom: Default::default(),
-            difficulty: U256::from(123456u64),
-            number: 100,
-            gas_limit: 5000000,
-            gas_used: 21000,
-            timestamp: 1609459200,
-            extra_data: Bytes::default(),
-            mix_hash: B256::default(),
-            nonce: B64::default(),
-            base_fee_per_gas: Some(10),
-            withdrawals_root: Some(B256::default()),
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
-        };
+        let header = create_header();
 
         let transactions = vec![Bytes::from(vec![1, 2, 3, 4]), Bytes::from(vec![5, 6, 7, 8])];
 
@@ -621,5 +657,64 @@ mod tests {
         assert_eq!(decoded_block.body.transactions[0], Bytes::from(vec![1, 2, 3, 4]));
         assert_eq!(decoded_block.body.transactions[1], Bytes::from(vec![5, 6, 7, 8]));
         assert!(decoded_block.body.withdrawals.is_some());
+    }
+
+    #[test]
+    fn test_single_receipt_compression_roundtrip() {
+        let test_receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+
+        // Compress the receipt
+        let compressed_receipts =
+            CompressedReceipts::from_encodable(&test_receipt).expect("Failed to compress receipt");
+
+        // Verify compression
+        assert!(!compressed_receipts.data.is_empty());
+
+        // Decode the compressed receipt back
+        let decoded_receipt: Receipt =
+            compressed_receipts.decode().expect("Failed to decode compressed receipt");
+
+        // Verify that the decoded receipt matches the original
+        assert_eq!(decoded_receipt.tx_type, test_receipt.tx_type);
+        assert_eq!(decoded_receipt.success, test_receipt.success);
+        assert_eq!(decoded_receipt.cumulative_gas_used, test_receipt.cumulative_gas_used);
+        assert_eq!(decoded_receipt.logs.len(), test_receipt.logs.len());
+
+        // Verify each log
+        for (original_log, decoded_log) in test_receipt.logs.iter().zip(decoded_receipt.logs.iter())
+        {
+            assert_eq!(decoded_log.address, original_log.address);
+            assert_eq!(decoded_log.data.topics(), original_log.data.topics());
+        }
+    }
+
+    #[test]
+    fn test_receipt_list_compression() {
+        let receipts = create_test_receipts();
+
+        // Compress the list of receipts
+        let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
+            .expect("Failed to compress receipt list");
+
+        // Decode the compressed receipts back
+        // Note: most likely the decoding for real era files will be done to reach
+        // `Vec<ReceiptWithBloom>``
+        let decoded_receipts: Vec<Receipt> =
+            compressed_receipts.decode().expect("Failed to decode compressed receipt list");
+
+        // Verify that the decoded receipts match the original
+        assert_eq!(decoded_receipts.len(), receipts.len());
+
+        for (original, decoded) in receipts.iter().zip(decoded_receipts.iter()) {
+            assert_eq!(decoded.tx_type, original.tx_type);
+            assert_eq!(decoded.success, original.success);
+            assert_eq!(decoded.cumulative_gas_used, original.cumulative_gas_used);
+            assert_eq!(decoded.logs.len(), original.logs.len());
+
+            for (original_log, decoded_log) in original.logs.iter().zip(decoded.logs.iter()) {
+                assert_eq!(decoded_log.address, original_log.address);
+                assert_eq!(decoded_log.data.topics(), original_log.data.topics());
+            }
+        }
     }
 }

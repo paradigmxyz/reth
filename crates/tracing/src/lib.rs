@@ -50,14 +50,13 @@ pub use tracing_subscriber;
 
 // Re-export our types
 pub use formatter::LogFormat;
-pub use layers::{FileInfo, FileWorkerGuard};
+pub use layers::{FileInfo, FileWorkerGuard, Layers};
 pub use test_tracer::TestTracer;
 
 mod formatter;
 mod layers;
 mod test_tracer;
 
-use crate::layers::Layers;
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -171,12 +170,29 @@ impl Default for LayerInfo {
 /// in an application. Implementations of this trait can specify different logging setups,
 /// such as standard output logging, file logging, journald logging, or custom logging
 /// configurations tailored for specific environments (like testing).
-pub trait Tracer {
+pub trait Tracer: Sized {
     /// Initialize the logging configuration.
-    ///  # Returns
-    ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
-    ///  or an `Err` in case of an error during initialization.
-    fn init(self) -> eyre::Result<Option<WorkerGuard>>;
+    ///
+    /// By default, this method creates a new `Layers` instance and delegates to `init_with_layers`.
+    ///
+    /// # Returns
+    /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
+    /// or an `Err` in case of an error during initialization.
+    fn init(self) -> eyre::Result<Option<WorkerGuard>> {
+        self.init_with_layers(Layers::new())
+    }
+    /// Initialize the logging configuration with additional custom layers.
+    ///
+    /// This method allows for more customized setup by accepting pre-configured
+    /// `Layers` which can be further customized before initialization.
+    ///
+    /// # Arguments
+    /// * `layers` - Pre-configured `Layers` instance to use for initialization
+    ///
+    /// # Returns
+    /// An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
+    /// or an `Err` in case of an error during initialization.
+    fn init_with_layers(self, layers: Layers) -> eyre::Result<Option<WorkerGuard>>;
 }
 
 impl Tracer for RethTracer {
@@ -190,9 +206,7 @@ impl Tracer for RethTracer {
     ///  # Returns
     ///  An `eyre::Result` which is `Ok` with an optional `WorkerGuard` if a file layer is used,
     ///  or an `Err` in case of an error during initialization.
-    fn init(self) -> eyre::Result<Option<WorkerGuard>> {
-        let mut layers = Layers::new();
-
+    fn init_with_layers(self, mut layers: Layers) -> eyre::Result<Option<WorkerGuard>> {
         layers.stdout(
             self.stdout.format,
             self.stdout.default_directive.parse()?,

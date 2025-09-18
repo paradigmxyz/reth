@@ -54,6 +54,9 @@ pub const DEFAULT_MAX_SIMULATE_BLOCKS: u64 = 256;
 /// The default eth historical proof window.
 pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
 
+/// The default eth tx fee cap is 1 ETH
+pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
+
 /// Maximum eth historical proof window. Equivalent to roughly 6 months of data on a 12
 /// second block time, and a month on a 2 second block time.
 pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60 / 2;
@@ -101,18 +104,6 @@ pub mod gas_oracle {
 
 /// Cache specific constants
 pub mod cache {
-    // TODO: memory based limiter is currently disabled pending <https://github.com/paradigmxyz/reth/issues/3503>
-    /// Default cache size for the block cache: 500MB
-    ///
-    /// With an average block size of ~100kb this should be able to cache ~5000 blocks.
-    pub const DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB: usize = 500;
-
-    /// Default cache size for the receipts cache: 500MB
-    pub const DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB: usize = 500;
-
-    /// Default cache size for the env cache: 1MB
-    pub const DEFAULT_ENV_CACHE_SIZE_BYTES_MB: usize = 1;
-
     /// Default cache size for the block cache: 5000 blocks.
     pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
 

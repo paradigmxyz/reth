@@ -5,6 +5,10 @@ use crate::{
 use core::fmt;
 
 /// Configures all the primitive types of the node.
+///
+/// This trait defines the core types used throughout the node for representing
+/// blockchain data. It serves as the foundation for type consistency across
+/// different node implementations.
 pub trait NodePrimitives:
     Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
 {
@@ -15,6 +19,9 @@ pub trait NodePrimitives:
     /// Block body primitive.
     type BlockBody: FullBlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
+    ///
+    /// This represents the transaction as it exists in the blockchain - the consensus
+    /// format that includes the signature and can be included in a block.
     type SignedTx: FullSignedTx;
     /// A receipt.
     type Receipt: Receipt;

@@ -148,7 +148,7 @@ where
     /// Max requests to handle at the same time
     ///
     /// This depends on the number of active peers but will always be
-    /// [`min_concurrent_requests`..`max_concurrent_requests`]
+    /// `min_concurrent_requests..max_concurrent_requests`
     #[inline]
     fn concurrent_request_limit(&self) -> usize {
         let num_peers = self.client.num_connected_peers();
@@ -954,7 +954,7 @@ struct HeadersRequestOutcome<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> HeadersRequestOutcome<H> {
-    fn block_number(&self) -> u64 {
+    const fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -970,7 +970,7 @@ struct OrderedHeadersResponse<H> {
 // === impl OrderedHeadersResponse ===
 
 impl<H> OrderedHeadersResponse<H> {
-    fn block_number(&self) -> u64 {
+    const fn block_number(&self) -> u64 {
         self.request.start.as_number().expect("is number")
     }
 }
@@ -1067,7 +1067,7 @@ impl SyncTargetBlock {
     ///
     /// If the target block is a hash, this be converted into a `HashAndNumber`, but return `None`.
     /// The semantics should be equivalent to that of `Option::replace`.
-    fn replace_number(&mut self, number: u64) -> Option<u64> {
+    const fn replace_number(&mut self, number: u64) -> Option<u64> {
         match self {
             Self::Hash(hash) => {
                 *self = Self::HashAndNumber { hash: *hash, number };

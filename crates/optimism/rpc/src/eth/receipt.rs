@@ -1,58 +1,103 @@
 //! Loads and formats OP receipt RPC response.
 
-use alloy_consensus::transaction::TransactionMeta;
+use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
+use alloy_consensus::{BlockHeader, Receipt, TxReceipt};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
-use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
+use op_alloy_consensus::{OpReceiptEnvelope, OpTransaction};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_optimism_chainspec::OpChainSpec;
+use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
+use reth_optimism_primitives::OpReceipt;
+use reth_primitives_traits::SealedBlock;
+use reth_rpc_eth_api::{
+    helpers::LoadReceipt,
+    transaction::{ConvertReceiptInput, ReceiptConverter},
+    RpcConvert,
+};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::{ReceiptProvider, TransactionsProvider};
+use reth_storage_api::BlockReader;
+use std::fmt::Debug;
 
-use crate::{OpEthApi, OpEthApiError};
-
-impl<N> LoadReceipt for OpEthApi<N>
+impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
 where
-    Self: Send + Sync,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    Self::Provider: TransactionsProvider<Transaction = OpTransactionSigned>
-        + ReceiptProvider<Receipt = OpReceipt>,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
-    async fn build_transaction_receipt(
+}
+
+/// Converter for OP receipts.
+#[derive(Debug, Clone)]
+pub struct OpReceiptConverter<Provider> {
+    provider: Provider,
+}
+
+impl<Provider> OpReceiptConverter<Provider> {
+    /// Creates a new [`OpReceiptConverter`].
+    pub const fn new(provider: Provider) -> Self {
+        Self { provider }
+    }
+}
+
+impl<Provider, N> ReceiptConverter<N> for OpReceiptConverter<Provider>
+where
+    N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
+    Provider:
+        BlockReader<Block = N::Block> + ChainSpecProvider<ChainSpec: OpHardforks> + Debug + 'static,
+{
+    type RpcReceipt = OpTransactionReceipt;
+    type Error = OpEthApiError;
+
+    fn convert_receipts(
         &self,
-        tx: OpTransactionSigned,
-        meta: TransactionMeta,
-        receipt: OpReceipt,
-    ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
-        let (block, receipts) = self
-            .inner
-            .eth_api
-            .cache()
-            .get_block_and_receipts(meta.block_hash)
-            .await
-            .map_err(Self::Error::from_eth_err)?
-            .ok_or(Self::Error::from_eth_err(EthApiError::HeaderNotFound(
-                meta.block_hash.into(),
-            )))?;
+        inputs: Vec<ConvertReceiptInput<'_, N>>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        let Some(block_number) = inputs.first().map(|r| r.meta.block_number) else {
+            return Ok(Vec::new());
+        };
 
-        let mut l1_block_info =
-            reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
+        let block = self
+            .provider
+            .block_by_number(block_number)?
+            .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
 
-        Ok(OpReceiptBuilder::new(
-            &self.inner.eth_api.provider().chain_spec(),
-            &tx,
-            meta,
-            &receipt,
-            &receipts,
-            &mut l1_block_info,
-        )?
-        .build())
+        self.convert_receipts_with_block(inputs, &SealedBlock::new_unhashed(block))
+    }
+
+    fn convert_receipts_with_block(
+        &self,
+        inputs: Vec<ConvertReceiptInput<'_, N>>,
+        block: &SealedBlock<N::Block>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
+            Ok(l1_block_info) => l1_block_info,
+            Err(err) => {
+                // If it is the genesis block (i.e. block number is 0), there is no L1 info, so
+                // we return an empty l1_block_info.
+                if block.header().number() == 0 {
+                    return Ok(vec![]);
+                }
+                return Err(err.into());
+            }
+        };
+
+        let mut receipts = Vec::with_capacity(inputs.len());
+
+        for input in inputs {
+            // We must clear this cache as different L2 transactions can have different
+            // L1 costs. A potential improvement here is to only clear the cache if the
+            // new transaction input has changed, since otherwise the L1 cost wouldn't.
+            l1_block_info.clear_tx_l1_cost();
+
+            receipts.push(
+                OpReceiptBuilder::new(&self.provider.chain_spec(), input, &mut l1_block_info)?
+                    .build(),
+            );
+        }
+
+        Ok(receipts)
     }
 }
 
@@ -113,10 +158,10 @@ impl OpReceiptFieldsBuilder {
     }
 
     /// Applies [`L1BlockInfo`](op_revm::L1BlockInfo).
-    pub fn l1_block_info(
+    pub fn l1_block_info<T: Encodable2718 + OpTransaction>(
         mut self,
-        chain_spec: &OpChainSpec,
-        tx: &OpTransactionSigned,
+        chain_spec: &impl OpHardforks,
+        tx: &T,
         l1_block_info: &mut op_revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
@@ -222,44 +267,50 @@ pub struct OpReceiptBuilder {
 
 impl OpReceiptBuilder {
     /// Returns a new builder.
-    pub fn new(
-        chain_spec: &OpChainSpec,
-        transaction: &OpTransactionSigned,
-        meta: TransactionMeta,
-        receipt: &OpReceipt,
-        all_receipts: &[OpReceipt],
+    pub fn new<N>(
+        chain_spec: &impl OpHardforks,
+        input: ConvertReceiptInput<'_, N>,
         l1_block_info: &mut op_revm::L1BlockInfo,
-    ) -> Result<Self, OpEthApiError> {
-        let timestamp = meta.timestamp;
-        let block_number = meta.block_number;
-        let core_receipt =
-            build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
-                match receipt {
-                    OpReceipt::Legacy(_) => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
-                    OpReceipt::Eip2930(_) => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
-                    OpReceipt::Eip1559(_) => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-                    OpReceipt::Eip7702(_) => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
-                    OpReceipt::Deposit(receipt) => {
-                        OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
-                            receipt: OpDepositReceipt::<Log> {
-                                inner: receipt_with_bloom.receipt,
-                                deposit_nonce: receipt.deposit_nonce,
-                                deposit_receipt_version: receipt.deposit_receipt_version,
-                            },
-                            logs_bloom: receipt_with_bloom.logs_bloom,
-                        })
-                    }
+    ) -> Result<Self, OpEthApiError>
+    where
+        N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
+    {
+        let timestamp = input.meta.timestamp;
+        let block_number = input.meta.block_number;
+        let tx_signed = *input.tx.inner();
+        let core_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
+            let map_logs = move |receipt: alloy_consensus::Receipt| {
+                let Receipt { status, cumulative_gas_used, logs } = receipt;
+                let logs = Log::collect_for_receipt(next_log_index, meta, logs);
+                Receipt { status, cumulative_gas_used, logs }
+            };
+            match receipt {
+                OpReceipt::Legacy(receipt) => {
+                    OpReceiptEnvelope::Legacy(map_logs(receipt).into_with_bloom())
                 }
-            })?;
+                OpReceipt::Eip2930(receipt) => {
+                    OpReceiptEnvelope::Eip2930(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Eip1559(receipt) => {
+                    OpReceiptEnvelope::Eip1559(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Eip7702(receipt) => {
+                    OpReceiptEnvelope::Eip7702(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Deposit(receipt) => {
+                    OpReceiptEnvelope::Deposit(receipt.map_inner(map_logs).into_with_bloom())
+                }
+            }
+        });
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
-            .l1_block_info(chain_spec, transaction, l1_block_info)?
+            .l1_block_info(chain_spec, tx_signed, l1_block_info)?
             .build();
 
         Ok(Self { core_receipt, op_receipt_fields })
     }
 
-    /// Builds [`OpTransactionReceipt`] by combing core (l1) receipt fields and additional OP
+    /// Builds [`OpTransactionReceipt`] by combining core (l1) receipt fields and additional OP
     /// receipt fields.
     pub fn build(self) -> OpTransactionReceipt {
         let Self { core_receipt: inner, op_receipt_fields } = self;
@@ -277,16 +328,21 @@ mod test {
     use alloy_primitives::{hex, U256};
     use op_alloy_network::eip2718::Decodable2718;
     use reth_optimism_chainspec::{BASE_MAINNET, OP_MAINNET};
+    use reth_optimism_primitives::OpTransactionSigned;
 
     /// OP Mainnet transaction at index 0 in block 124665056.
     ///
     /// <https://optimistic.etherscan.io/tx/0x312e290cf36df704a2217b015d6455396830b0ce678b860ebfcc30f41403d7b1>
-    const TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056: [u8; 251] = hex!("7ef8f8a0683079df94aa5b9cf86687d739a60a9b4f0835e520ec4d664e2e415dca17a6df94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
+    const TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056: [u8; 251] = hex!(
+        "7ef8f8a0683079df94aa5b9cf86687d739a60a9b4f0835e520ec4d664e2e415dca17a6df94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e200000146b000f79c500000000000000040000000066d052e700000000013ad8a3000000000000000000000000000000000000000000000000000000003ef1278700000000000000000000000000000000000000000000000000000000000000012fdf87b89884a61e74b322bbcf60386f543bfae7827725efaaf0ab1de2294a590000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985"
+    );
 
     /// OP Mainnet transaction at index 1 in block 124665056.
     ///
     /// <https://optimistic.etherscan.io/tx/0x1059e8004daff32caa1f1b1ef97fe3a07a8cf40508f5b835b66d9420d87c4a4a>
-    const TX_1_OP_MAINNET_BLOCK_124665056: [u8; 1176] = hex!("02f904940a8303fba78401d6d2798401db2b6d830493e0943e6f4f7866654c18f536170780344aa8772950b680b904246a761202000000000000000000000000087000a300de7200382b55d40045000000e5d60e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000022482ad56cb0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000120000000000000000000000000dc6ff44d5d932cbd77b52e5612ba0529dc6226f1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c0000000000000000000000000000000000000000000000049b9ca9a6943400000000000000000000000000000000000000000000000000000000000000000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024b6b55f250000000000000000000000000000000000000000000000049b9ca9a694340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000415ec214a3950bea839a7e6fbb0ba1540ac2076acd50820e2d5ef83d0902cdffb24a47aff7de5190290769c4f0a9c6fabf63012986a0d590b1b571547a8c7050ea1b00000000000000000000000000000000000000000000000000000000000000c080a06db770e6e25a617fe9652f0958bd9bd6e49281a53036906386ed39ec48eadf63a07f47cf51a4a40b4494cf26efc686709a9b03939e20ee27e59682f5faa536667e");
+    const TX_1_OP_MAINNET_BLOCK_124665056: [u8; 1176] = hex!(
+        "02f904940a8303fba78401d6d2798401db2b6d830493e0943e6f4f7866654c18f536170780344aa8772950b680b904246a761202000000000000000000000000087000a300de7200382b55d40045000000e5d60e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000022482ad56cb0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000120000000000000000000000000dc6ff44d5d932cbd77b52e5612ba0529dc6226f1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b300000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c0000000000000000000000000000000000000000000000049b9ca9a6943400000000000000000000000000000000000000000000000000000000000000000000000000000000000021c4928109acb0659a88ae5329b5374a3024694c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000024b6b55f250000000000000000000000000000000000000000000000049b9ca9a694340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000415ec214a3950bea839a7e6fbb0ba1540ac2076acd50820e2d5ef83d0902cdffb24a47aff7de5190290769c4f0a9c6fabf63012986a0d590b1b571547a8c7050ea1b00000000000000000000000000000000000000000000000000000000000000c080a06db770e6e25a617fe9652f0958bd9bd6e49281a53036906386ed39ec48eadf63a07f47cf51a4a40b4494cf26efc686709a9b03939e20ee27e59682f5faa536667e"
+    );
 
     /// Timestamp of OP mainnet block 124665056.
     ///
@@ -337,7 +393,7 @@ mod test {
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
-            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
+            .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 
@@ -408,7 +464,7 @@ mod test {
         l1_block_info.operator_fee_constant = Some(U256::from(2));
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
-            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
+            .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 
@@ -431,7 +487,7 @@ mod test {
         l1_block_info.operator_fee_constant = Some(U256::ZERO);
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
-            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
+            .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 
@@ -446,7 +502,9 @@ mod test {
     #[test]
     fn base_receipt_gas_fields() {
         // https://basescan.org/tx/0x510fd4c47d78ba9f97c91b0f2ace954d5384c169c9545a77a373cf3ef8254e6e
-        let system = hex!("7ef8f8a0389e292420bcbf9330741f72074e39562a09ff5a00fd22e4e9eee7e34b81bca494deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000008dd00101c120000000000000004000000006721035b00000000014189960000000000000000000000000000000000000000000000000000000349b4dcdc000000000000000000000000000000000000000000000000000000004ef9325cc5991ce750960f636ca2ffbb6e209bb3ba91412f21dd78c14ff154d1930f1f9a0000000000000000000000005050f69a9786f081509234f1a7f4684b5e5b76c9");
+        let system = hex!(
+            "7ef8f8a0389e292420bcbf9330741f72074e39562a09ff5a00fd22e4e9eee7e34b81bca494deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000008dd00101c120000000000000004000000006721035b00000000014189960000000000000000000000000000000000000000000000000000000349b4dcdc000000000000000000000000000000000000000000000000000000004ef9325cc5991ce750960f636ca2ffbb6e209bb3ba91412f21dd78c14ff154d1930f1f9a0000000000000000000000005050f69a9786f081509234f1a7f4684b5e5b76c9"
+        );
         let tx_0 = OpTransactionSigned::decode_2718(&mut &system[..]).unwrap();
 
         let block: alloy_consensus::Block<OpTransactionSigned> = Block {
@@ -457,11 +515,13 @@ mod test {
             reth_optimism_evm::extract_l1_info(&block.body).expect("should extract l1 info");
 
         // https://basescan.org/tx/0xf9420cbaf66a2dda75a015488d37262cbfd4abd0aad7bb2be8a63e14b1fa7a94
-        let tx = hex!("02f86c8221058034839a4ae283021528942f16386bb37709016023232523ff6d9daf444be380841249c58bc080a001b927eda2af9b00b52a57be0885e0303c39dd2831732e14051c2336470fd468a0681bf120baf562915841a48601c2b54a6742511e535cf8f71c95115af7ff63bd");
+        let tx = hex!(
+            "02f86c8221058034839a4ae283021528942f16386bb37709016023232523ff6d9daf444be380841249c58bc080a001b927eda2af9b00b52a57be0885e0303c39dd2831732e14051c2336470fd468a0681bf120baf562915841a48601c2b54a6742511e535cf8f71c95115af7ff63bd"
+        );
         let tx_1 = OpTransactionSigned::decode_2718(&mut &tx[..]).unwrap();
 
         let receipt_meta = OpReceiptFieldsBuilder::new(1730216981, 21713817)
-            .l1_block_info(&BASE_MAINNET, &tx_1, &mut l1_block_info)
+            .l1_block_info(&*BASE_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 

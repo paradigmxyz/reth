@@ -41,12 +41,12 @@ impl Default for TrieTracker {
 
 impl TrieTracker {
     /// Increment the number of branches added to the hash builder during the calculation.
-    pub fn inc_branch(&mut self) {
+    pub const fn inc_branch(&mut self) {
         self.branches_added += 1;
     }
 
     /// Increment the number of leaves added to the hash builder during the calculation.
-    pub fn inc_leaf(&mut self) {
+    pub const fn inc_leaf(&mut self) {
         self.leaves_added += 1;
     }
 

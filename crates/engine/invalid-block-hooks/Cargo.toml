@@ -12,7 +12,8 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
+revm-bytecode.workspace = true
+revm-database.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true

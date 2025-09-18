@@ -11,7 +11,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
-    /// AccessList type natively
+    /// `AccessList` type natively
     #[derive(
         Clone,
         Debug,

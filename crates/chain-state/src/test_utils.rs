@@ -1,10 +1,8 @@
 use crate::{
     in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateSubscriptions, ExecutedTrieUpdates,
 };
-use alloy_consensus::{
-    Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
-};
+use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE},
     eip7685::Requests,
@@ -13,7 +11,7 @@ use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{
     Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
@@ -25,7 +23,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
+use reth_trie::{root::state_root_unhashed, HashedPostState};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
@@ -96,7 +94,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         number: BlockNumber,
         parent_hash: B256,
     ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
@@ -114,7 +112,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             TransactionSigned::new_unhashed(tx, signature).with_signer(self.signer)
         };
 
-        let num_txs = rng.gen_range(0..5);
+        let num_txs = rng.random_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
         let transactions: Vec<Recovered<_>> = (0..num_txs)
             .map(|_| {
@@ -222,7 +220,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 vec![Requests::default()],
             )),
             Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
+            ExecutedTrieUpdates::empty(),
         )
     }
 
@@ -232,7 +230,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlockWithTrieUpdates {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::rng().random::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
@@ -266,6 +264,16 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         block: RecoveredBlock<reth_ethereum_primitives::Block>,
     ) -> ExecutionOutcome {
+        let num_txs = block.body().transactions.len() as u64;
+        let single_cost = Self::single_tx_cost();
+
+        let mut final_balance = self.signer_execute_account_info.balance;
+        for _ in 0..num_txs {
+            final_balance -= single_cost;
+        }
+
+        let final_nonce = self.signer_execute_account_info.nonce + num_txs;
+
         let receipts = block
             .body()
             .transactions
@@ -279,26 +287,18 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             })
             .collect::<Vec<_>>();
 
-        let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
-
-        for tx in &block.body().transactions {
-            self.signer_execute_account_info.balance -= Self::single_tx_cost();
-            bundle_state_builder = bundle_state_builder.state_present_account_info(
+        let bundle_state = BundleState::builder(block.number..=block.number)
+            .state_present_account_info(
                 self.signer,
-                AccountInfo {
-                    nonce: tx.nonce(),
-                    balance: self.signer_execute_account_info.balance,
-                    ..Default::default()
-                },
-            );
-        }
+                AccountInfo { nonce: final_nonce, balance: final_balance, ..Default::default() },
+            )
+            .build();
 
-        let execution_outcome = ExecutionOutcome::new(
-            bundle_state_builder.build(),
-            vec![vec![]],
-            block.number,
-            Vec::new(),
-        );
+        self.signer_execute_account_info.balance = final_balance;
+        self.signer_execute_account_info.nonce = final_nonce;
+
+        let execution_outcome =
+            ExecutionOutcome::new(bundle_state, vec![vec![]], block.number, Vec::new());
 
         execution_outcome.with_receipts(vec![receipts])
     }

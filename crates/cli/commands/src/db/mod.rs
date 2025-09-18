@@ -13,6 +13,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod repair_trie;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -48,6 +49,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Verifies trie consistency and outputs any inconsistencies
+    RepairTrie(repair_trie::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -112,7 +115,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
+                    print!(
+                        "Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): "
+                    );
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 
@@ -131,6 +136,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Clear(command) => {
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::RepairTrie(command) => {
+                let access_rights =
+                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
+                let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {
@@ -155,7 +166,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         Ok(())
     }
+}
 
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)

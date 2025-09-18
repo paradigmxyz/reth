@@ -30,15 +30,15 @@ impl SessionCounter {
         }
     }
 
-    pub(crate) fn inc_pending_inbound(&mut self) {
+    pub(crate) const fn inc_pending_inbound(&mut self) {
         self.pending_inbound += 1;
     }
 
-    pub(crate) fn inc_pending_outbound(&mut self) {
+    pub(crate) const fn inc_pending_outbound(&mut self) {
         self.pending_outbound += 1;
     }
 
-    pub(crate) fn dec_pending(&mut self, direction: &Direction) {
+    pub(crate) const fn dec_pending(&mut self, direction: &Direction) {
         match direction {
             Direction::Outgoing(_) => {
                 self.pending_outbound -= 1;
@@ -49,7 +49,7 @@ impl SessionCounter {
         }
     }
 
-    pub(crate) fn inc_active(&mut self, direction: &Direction) {
+    pub(crate) const fn inc_active(&mut self, direction: &Direction) {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound += 1;
@@ -60,7 +60,7 @@ impl SessionCounter {
         }
     }
 
-    pub(crate) fn dec_active(&mut self, direction: &Direction) {
+    pub(crate) const fn dec_active(&mut self, direction: &Direction) {
         match direction {
             Direction::Outgoing(_) => {
                 self.active_outbound -= 1;

@@ -146,9 +146,11 @@ impl<N: ProviderNodeTypes> DbTool<N> {
         fs::remove_dir_all(static_files_path)?;
         fs::create_dir_all(static_files_path)?;
 
-        let exex_wal_path = exex_wal_path.as_ref();
-        info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
-        fs::remove_dir_all(exex_wal_path)?;
+        if exex_wal_path.as_ref().exists() {
+            let exex_wal_path = exex_wal_path.as_ref();
+            info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
+            fs::remove_dir_all(exex_wal_path)?;
+        }
 
         Ok(())
     }
@@ -183,12 +185,12 @@ pub struct ListFilter {
 
 impl ListFilter {
     /// If `search` has a list of bytes, then filter for rows that have this sequence.
-    pub fn has_search(&self) -> bool {
+    pub const fn has_search(&self) -> bool {
         !self.search.is_empty()
     }
 
     /// Updates the page with new `skip` and `len` values.
-    pub fn update_page(&mut self, skip: usize, len: usize) {
+    pub const fn update_page(&mut self, skip: usize, len: usize) {
         self.skip = skip;
         self.len = len;
     }

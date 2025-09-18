@@ -31,6 +31,9 @@ pub struct DatabaseArgs {
     /// Read transaction timeout in seconds, 0 means no timeout.
     #[arg(long = "db.read-transaction-timeout")]
     pub read_transaction_timeout: Option<u64>,
+    /// Maximum number of readers allowed to access the database concurrently.
+    #[arg(long = "db.max-readers")]
+    pub max_readers: Option<u64>,
 }
 
 impl DatabaseArgs {
@@ -57,6 +60,7 @@ impl DatabaseArgs {
             .with_max_read_transaction_duration(max_read_transaction_duration)
             .with_geometry_max_size(self.max_size)
             .with_growth_step(self.growth_step)
+            .with_max_readers(self.max_readers)
     }
 }
 
@@ -136,7 +140,7 @@ impl FromStr for ByteSize {
             "MB" => 1024 * 1024,
             "GB" => 1024 * 1024 * 1024,
             "TB" => 1024 * 1024 * 1024 * 1024,
-            _ => return Err(format!("Invalid unit: {}. Use B, KB, MB, GB, or TB.", unit)),
+            _ => return Err(format!("Invalid unit: {unit}. Use B, KB, MB, GB, or TB.")),
         };
 
         Ok(Self(num * multiplier))
@@ -162,7 +166,7 @@ impl fmt::Display for ByteSize {
             (self.0 as f64, "B")
         };
 
-        write!(f, "{:.2}{}", size, unit)
+        write!(f, "{size:.2}{unit}")
     }
 }
 

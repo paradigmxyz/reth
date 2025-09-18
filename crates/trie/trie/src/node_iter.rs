@@ -1,10 +1,10 @@
 use crate::{
-    hashed_cursor::HashedCursor, trie::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
-    Nibbles,
+    hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
 };
 use alloy_primitives::B256;
+use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -44,13 +44,18 @@ struct SeekedHashedEntry<V> {
     result: Option<(B256, V)>,
 }
 
-/// An iterator over existing intermediate branch nodes and updated leaf nodes.
+/// Iterates over trie nodes for hash building.
+///
+/// This iterator depends on the ordering guarantees of [`TrieCursor`],
+/// and additionally uses hashed cursor lookups when operating on storage tries.
 #[derive(Debug)]
-pub struct TrieNodeIter<C, H: HashedCursor> {
+pub struct TrieNodeIter<C, H: HashedCursor, K> {
     /// The walker over intermediate nodes.
-    pub walker: TrieWalker<C>,
+    pub walker: TrieWalker<C, K>,
     /// The cursor for the hashed entries.
     pub hashed_cursor: H,
+    /// The type of the trie.
+    trie_type: TrieType,
     /// The previous hashed key. If the iteration was previously interrupted, this value can be
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
@@ -67,28 +72,40 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
     #[cfg(feature = "metrics")]
     metrics: crate::metrics::TrieNodeIterMetrics,
-    /// The key that the [`HashedCursor`] previously advanced to using [`HashedCursor::next`].
-    #[cfg(feature = "metrics")]
-    previously_advanced_to_key: Option<B256>,
+    /// Stores the result of the last successful [`Self::next_hashed_entry`], used to avoid a
+    /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
+    /// was just returned by `next()`.
+    last_next_result: Option<(B256, H::Value)>,
 }
 
-impl<C, H: HashedCursor> TrieNodeIter<C, H>
+impl<C, H: HashedCursor, K> TrieNodeIter<C, H, K>
 where
     H::Value: Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
+    /// Creates a new [`TrieNodeIter`] for the state trie.
+    pub fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
+        Self::new(walker, hashed_cursor, TrieType::State)
+    }
+
+    /// Creates a new [`TrieNodeIter`] for the storage trie.
+    pub fn storage_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
+        Self::new(walker, hashed_cursor, TrieType::Storage)
+    }
+
     /// Creates a new [`TrieNodeIter`].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, _trie_type: TrieType) -> Self {
+    fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
+            trie_type,
             previous_hashed_key: None,
             current_hashed_entry: None,
             should_check_walker_key: false,
             last_seeked_hashed_entry: None,
             #[cfg(feature = "metrics")]
-            metrics: crate::metrics::TrieNodeIterMetrics::new(_trie_type),
-            #[cfg(feature = "metrics")]
-            previously_advanced_to_key: None,
+            metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
+            last_next_result: None,
         }
     }
 
@@ -105,6 +122,18 @@ where
     ///
     /// If `metrics` feature is enabled, also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        if let Some((last_key, last_value)) = self.last_next_result {
+            if last_key == key {
+                trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
+                self.last_next_result = None; // Consume the cached value
+
+                let result = Some((last_key, last_value));
+                self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+
+                return Ok(result);
+            }
+        }
+
         if let Some(entry) = self
             .last_seeked_hashed_entry
             .as_ref()
@@ -116,16 +145,13 @@ where
             return Ok(entry);
         }
 
+        trace!(target: "trie::node_iter", ?key, "performing hashed cursor seek");
         let result = self.hashed_cursor.seek(key)?;
         self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
-
-            if Some(key) == self.previously_advanced_to_key {
-                self.metrics.inc_leaf_nodes_same_seeked_as_advanced();
-            }
         }
         Ok(result)
     }
@@ -135,22 +161,23 @@ where
     /// If `metrics` feature is enabled, also updates the metrics.
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let result = self.hashed_cursor.next();
+
+        self.last_next_result = result.clone()?;
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
-
-            self.previously_advanced_to_key =
-                result.as_ref().ok().and_then(|result| result.as_ref().map(|(k, _)| *k));
         }
         result
     }
 }
 
-impl<C, H> TrieNodeIter<C, H>
+impl<C, H, K> TrieNodeIter<C, H, K>
 where
     C: TrieCursor,
     H: HashedCursor,
     H::Value: Copy,
+    K: AsRef<AddedRemovedKeys>,
 {
     /// Return the next trie node to be added to the hash builder.
     ///
@@ -163,6 +190,13 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
+    #[instrument(
+        level = "trace",
+        target = "trie::node_iter",
+        skip_all,
+        fields(trie_type = ?self.trie_type),
+        ret
+    )]
     pub fn try_next(
         &mut self,
     ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
@@ -180,7 +214,7 @@ where
                         #[cfg(feature = "metrics")]
                         self.metrics.inc_branch_nodes_returned();
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
-                            key.clone(),
+                            *key,
                             self.walker.hash().unwrap(),
                             self.walker.children_are_in_trie(),
                         ))))
@@ -247,13 +281,13 @@ where
                     // of this, we need to check that the current walker key has a prefix of the key
                     // that we seeked to.
                     if can_skip_node &&
-                        self.walker.key().is_some_and(|key| key.has_prefix(&seek_prefix)) &&
+                        self.walker.key().is_some_and(|key| key.starts_with(&seek_prefix)) &&
                         self.walker.children_are_in_trie()
                     {
                         trace!(
                             target: "trie::node_iter",
                             ?seek_key,
-                            walker_hash = ?self.walker.hash(),
+                            walker_hash = ?self.walker.maybe_hash(),
                             "skipping hashed seek"
                         );
 
@@ -272,8 +306,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
+    use crate::{
+        hashed_cursor::{
+            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
+            HashedPostStateAccountCursor,
+        },
+        mock::{KeyVisit, KeyVisitType},
+        trie_cursor::{
+            mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
+        },
+        walker::TrieWalker,
+    };
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
@@ -287,19 +330,7 @@ mod tests {
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
         RlpNode,
     };
-
-    use crate::{
-        hashed_cursor::{
-            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
-            HashedPostStateAccountCursor,
-        },
-        mock::{KeyVisit, KeyVisitType},
-        trie::TrieType,
-        trie_cursor::{
-            mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
-        },
-        walker::TrieWalker,
-    };
+    use std::collections::BTreeMap;
 
     use super::{TrieElement, TrieNodeIter};
 
@@ -312,7 +343,7 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::new(NoopAccountTrieCursor, prefix_set.freeze());
+        let walker = TrieWalker::<_>::state_trie(NoopAccountTrieCursor, prefix_set.freeze());
 
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
@@ -320,13 +351,12 @@ mod tests {
             }))
             .into_sorted();
 
-        let mut node_iter = TrieNodeIter::new(
+        let mut node_iter = TrieNodeIter::state_trie(
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
-            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -442,8 +472,10 @@ mod tests {
         prefix_set.insert(Nibbles::unpack(account_3));
         let prefix_set = prefix_set.freeze();
 
-        let walker =
-            TrieWalker::new(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
+        let walker = TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            prefix_set,
+        );
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
@@ -456,10 +488,9 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter = TrieNodeIter::new(
+        let mut iter = TrieNodeIter::state_trie(
             walker,
             hashed_cursor_factory.hashed_account_cursor().unwrap(),
-            TrieType::State,
         );
 
         // Walk the iterator until it's exhausted.
@@ -477,7 +508,7 @@ mod tests {
                     visited_key: Some(branch_node_0.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0),
                     visited_key: Some(branch_node_2.0)
                 },
                 KeyVisit {
@@ -502,12 +533,6 @@ mod tests {
                 // Collect the siblings of the modified account
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );

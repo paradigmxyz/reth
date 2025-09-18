@@ -4,7 +4,7 @@
 
 use crate::{
     hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
-    Status, UnauthedP2PStream,
+    Status, StatusMessage, UnauthedP2PStream, UnifiedStatus,
 };
 use alloy_chains::Chain;
 use alloy_primitives::{B256, U256};
@@ -19,7 +19,7 @@ pub type P2pPassthroughTcpStream = P2PStream<Framed<TcpStream, LengthDelimitedCo
 
 /// Returns a new testing `HelloMessage` and new secretkey
 pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
-    let server_key = SecretKey::new(&mut rand::thread_rng());
+    let server_key = SecretKey::new(&mut rand_08::thread_rng());
     let protocols = vec![EthVersion::Eth67.into()];
     let hello = HelloMessageWithProtocols {
         protocol_version: ProtocolVersion::V5,
@@ -32,7 +32,7 @@ pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
 }
 
 /// Returns testing eth handshake status and fork filter.
-pub fn eth_handshake() -> (Status, ForkFilter) {
+pub fn eth_handshake() -> (UnifiedStatus, ForkFilter) {
     let genesis = B256::random();
     let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
@@ -45,7 +45,9 @@ pub fn eth_handshake() -> (Status, ForkFilter) {
         // Pass the current fork id.
         forkid: fork_filter.current(),
     };
-    (status, fork_filter)
+    let unified_status = UnifiedStatus::from_message(StatusMessage::Legacy(status));
+
+    (unified_status, fork_filter)
 }
 
 /// Connects to a remote node and returns an authenticated `P2PStream` with the remote node.

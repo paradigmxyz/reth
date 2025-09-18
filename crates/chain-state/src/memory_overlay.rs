@@ -4,8 +4,8 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -21,12 +21,12 @@ pub struct MemoryOverlayStateProviderRef<
     'a,
     N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
 > {
-    /// Historical state provider for state lookups that are not found in in-memory blocks.
+    /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
     pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
     /// Lazy-loaded in-memory trie data.
-    pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
+    pub(crate) trie_input: OnceLock<TrieInput>,
 }
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
@@ -45,7 +45,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
         historical: Box<dyn StateProvider + 'a>,
         in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
     ) -> Self {
-        Self { historical, in_memory, trie_state: OnceLock::new() }
+        Self { historical, in_memory, trie_input: OnceLock::new() }
     }
 
     /// Turn this state provider into a state provider
@@ -54,14 +54,14 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     }
 
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
-    fn trie_state(&self) -> &MemoryOverlayTrieState {
-        self.trie_state.get_or_init(|| {
-            let mut trie_state = MemoryOverlayTrieState::default();
-            for block in self.in_memory.iter().rev() {
-                trie_state.state.extend_ref(block.hashed_state.as_ref());
-                trie_state.nodes.extend_ref(block.trie.as_ref());
-            }
-            trie_state
+    fn trie_input(&self) -> &TrieInput {
+        self.trie_input.get_or_init(|| {
+            TrieInput::from_blocks(
+                self.in_memory
+                    .iter()
+                    .rev()
+                    .map(|block| (block.hashed_state.as_ref(), block.trie.as_ref())),
+            )
         })
     }
 }
@@ -84,13 +84,21 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
     ) -> ProviderResult<Vec<B256>> {
         let range = start..end;
         let mut earliest_block_number = None;
-        let mut in_memory_hashes = Vec::new();
+        let mut in_memory_hashes = Vec::with_capacity(range.size_hint().0);
+
+        // iterate in ascending order (oldest to newest = low to high)
         for block in &self.in_memory {
-            if range.contains(&block.recovered_block().number()) {
-                in_memory_hashes.insert(0, block.recovered_block().hash());
-                earliest_block_number = Some(block.recovered_block().number());
+            let block_num = block.recovered_block().number();
+            if range.contains(&block_num) {
+                in_memory_hashes.push(block.recovered_block().hash());
+                earliest_block_number = Some(block_num);
             }
         }
+
+        // `self.in_memory` stores executed blocks in ascending order (oldest to newest).
+        // However, `in_memory_hashes` should be constructed in descending order (newest to oldest),
+        // so we reverse the vector after collecting the hashes.
+        in_memory_hashes.reverse();
 
         let mut hashes =
             self.historical.canonical_hashes_range(start, earliest_block_number.unwrap_or(end))?;
@@ -117,8 +125,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
-        input.prepend_cached(nodes, state);
+        input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes(input)
     }
 
@@ -133,8 +140,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         &self,
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
-        input.prepend_cached(nodes, state);
+        input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes_with_updates(input)
     }
 }
@@ -142,7 +148,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
-        let state = &self.trie_state().state;
+        let state = &self.trie_input().state;
         let mut hashed_storage =
             state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
@@ -156,7 +162,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         slot: B256,
         storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let state = &self.trie_state().state;
+        let state = &self.trie_input().state;
         let mut hashed_storage =
             state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
@@ -170,7 +176,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         slots: &[B256],
         storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        let state = &self.trie_state().state;
+        let state = &self.trie_input().state;
         let mut hashed_storage =
             state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
         hashed_storage.extend(&storage);
@@ -185,8 +191,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
-        input.prepend_cached(nodes, state);
+        input.prepend_self(self.trie_input().clone());
         self.historical.proof(input, address, slots)
     }
 
@@ -195,14 +200,12 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         mut input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
-        input.prepend_cached(nodes, state);
+        input.prepend_self(self.trie_input().clone());
         self.historical.multiproof(input, targets)
     }
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
-        input.prepend_cached(nodes, state);
+        input.prepend_self(self.trie_input().clone());
         self.historical.witness(input, target)
     }
 }
@@ -227,7 +230,9 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
 
         self.historical.storage(address, storage_key)
     }
+}
 
+impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
             if let Some(contract) = block.execution_output.bytecode(code_hash) {
@@ -237,13 +242,4 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
 
         self.historical.bytecode_by_hash(code_hash)
     }
-}
-
-/// The collection of data necessary for trie-related operations for [`MemoryOverlayStateProvider`].
-#[derive(Clone, Default, Debug)]
-pub(crate) struct MemoryOverlayTrieState {
-    /// The collection of aggregated in-memory trie updates.
-    pub(crate) nodes: TrieUpdates,
-    /// The collection of hashed state from in-memory blocks.
-    pub(crate) state: HashedPostState,
 }

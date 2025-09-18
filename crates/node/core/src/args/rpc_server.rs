@@ -14,7 +14,10 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
+use reth_cli_util::parse_ether_value;
+use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+use url::Url;
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
@@ -53,6 +56,10 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = constants::DEFAULT_HTTP_RPC_PORT)]
     pub http_port: u16,
 
+    /// Disable compression for HTTP responses
+    #[arg(long = "http.disable-compression", default_value_t = false)]
+    pub http_disable_compression: bool,
+
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
@@ -89,6 +96,12 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = constants::DEFAULT_IPC_ENDPOINT.to_string())]
     pub ipcpath: String,
 
+    /// Set the permissions for the IPC socket file, in octal format.
+    ///
+    /// If not specified, the permissions will be set by the system's umask.
+    #[arg(long = "ipc.permissions")]
+    pub ipc_socket_permissions: Option<String>,
+
     /// Auth server address to listen on
     #[arg(long = "authrpc.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub auth_addr: IpAddr,
@@ -113,6 +126,13 @@ pub struct RpcServerArgs {
     /// Filename for auth IPC socket/pipe within the datadir
     #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
     pub auth_ipc_path: String,
+
+    /// Disable the auth/engine API server.
+    ///
+    /// This will prevent the authenticated engine-API server from starting. Use this if you're
+    /// running a node that doesn't need to serve engine API requests.
+    #[arg(long = "disable-auth-server", alias = "disable-engine-api")]
+    pub disable_auth_server: bool,
 
     /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
     /// `--ws.api`.
@@ -169,6 +189,16 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
+    /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
+    #[arg(
+        long = "rpc.txfeecap",
+        alias = "rpc-txfeecap",
+        value_name = "TX_FEE_CAP",
+        value_parser = parse_ether_value,
+        default_value = "1.0"
+    )]
+    pub rpc_tx_fee_cap: u128,
+
     /// Maximum number of blocks for `eth_simulateV1` call.
     #[arg(
         long = "rpc.max-simulate-blocks",
@@ -190,6 +220,17 @@ pub struct RpcServerArgs {
     /// Maximum number of concurrent getproof requests.
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
+
+    /// Configures the pending block behavior for RPC responses.
+    ///
+    /// Options: full (include all transactions), empty (header only), none (disable pending
+    /// blocks).
+    #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
+    pub rpc_pending_block: PendingBlockKind,
+
+    /// Endpoint to forward transactions to.
+    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
+    pub rpc_forwarder: Option<Url>,
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
@@ -224,10 +265,23 @@ impl RpcServerArgs {
         self
     }
 
+    /// Configures modules for WS-RPC server.
+    pub fn with_ws_api(mut self, ws_api: RpcModuleSelection) -> Self {
+        self.ws_api = Some(ws_api);
+        self
+    }
+
     /// Enables the Auth IPC
     pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
+    }
+
+    /// Configures modules for both the HTTP-RPC server and WS-RPC server.
+    ///
+    /// This is the same as calling both [`Self::with_http_api`] and [`Self::with_ws_api`].
+    pub fn with_api(self, api: RpcModuleSelection) -> Self {
+        self.with_http_api(api.clone()).with_ws_api(api)
     }
 
     /// Change rpc port numbers based on the instance number, if provided.
@@ -282,11 +336,8 @@ impl RpcServerArgs {
     /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
     /// are being run on the same machine.
     pub fn with_ipc_random_path(mut self) -> Self {
-        let random_string: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(8)
-            .map(char::from)
-            .collect();
+        let random_string: String =
+            rand::rng().sample_iter(rand::distr::Alphanumeric).take(8).map(char::from).collect();
         self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
         self
     }
@@ -300,6 +351,14 @@ impl RpcServerArgs {
         self = self.with_ipc_random_path();
         self
     }
+
+    /// Apply a function to the args.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -308,6 +367,7 @@ impl Default for RpcServerArgs {
             http: false,
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
+            http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -317,11 +377,13 @@ impl Default for RpcServerArgs {
             ws_api: None,
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
+            ipc_socket_permissions: None,
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
             auth_ipc: false,
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
+            disable_auth_server: false,
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
@@ -332,17 +394,20 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
+            rpc_pending_block: PendingBlockKind::Full,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            rpc_forwarder: None,
             builder_disallow: Default::default(),
         }
     }
 }
 
-/// clap value parser for [`RpcModuleSelection`].
+/// clap value parser for [`RpcModuleSelection`] with configurable validation.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;
@@ -353,23 +418,20 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     fn parse_ref(
         &self,
         _cmd: &Command,
-        arg: Option<&Arg>,
+        _arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        val.parse::<RpcModuleSelection>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = RethRpcModule::all_variant_names().to_vec().join(",");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-        })
+        // This will now accept any module name, creating Other(name) for unknowns
+        Ok(val
+            .parse::<RpcModuleSelection>()
+            .expect("RpcModuleSelection parsing cannot fail with Other variant"))
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values = RethRpcModule::all_variant_names().iter().map(PossibleValue::new);
+        // Only show standard modules in help text (excludes "other")
+        let values = RethRpcModule::standard_variant_names().map(PossibleValue::new);
         Some(Box::new(values))
     }
 }
@@ -424,5 +486,33 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_integer() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
+        let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_decimal() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "1.5"]).args;
+        let expected = 1_500_000_000_000_000_000u128; // 1.5 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_zero() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "0"]).args;
+        assert_eq!(args.rpc_tx_fee_cap, 0); // 0 = no cap
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let expected = 1_000_000_000_000_000_000u128;
+        assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }
 }

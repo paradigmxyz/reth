@@ -54,7 +54,7 @@ async fn main() -> eyre::Result<()> {
         // print network events
         let mut events = handle.event_listener();
         while let Some(event) = events.next().await {
-            println!("Received event: {:?}", event);
+            println!("Received event: {event:?}");
         }
     });
 
@@ -81,6 +81,7 @@ async fn main() -> eyre::Result<()> {
                         IncomingEthRequest::GetBlockBodies { .. } => {}
                         IncomingEthRequest::GetNodeData { .. } => {}
                         IncomingEthRequest::GetReceipts { .. } => {}
+                        IncomingEthRequest::GetReceipts69 { .. } => {}
                     }
              }
              transaction_message = transactions_rx.recv() => {
@@ -121,7 +122,7 @@ async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
     let client: FetchClient = peer.fetch_client().await?;
 
     let header = client.get_header(BlockHashOrNumber::Number(0)).await.unwrap();
-    println!("Got header: {:?}", header);
+    println!("Got header: {header:?}");
 
     // send a (bogus) hashes message
     let hashes = NewPooledTransactionHashes68 {

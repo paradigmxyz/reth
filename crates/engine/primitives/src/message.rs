@@ -1,6 +1,5 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    ExecutionPayload, ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -15,8 +14,12 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineHandle instead")]
+pub type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -161,8 +164,6 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
-    /// Message with exchanged transition configuration.
-    TransitionConfigurationExchanged,
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -186,25 +187,22 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload_attrs.is_some()
                 )
             }
-            Self::TransitionConfigurationExchanged => {
-                write!(f, "TransitionConfigurationExchanged")
-            }
         }
     }
 }
 
-/// A clonable sender type that can be used to send engine API messages.
+/// A cloneable sender type that can be used to send engine API messages.
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]
-pub struct BeaconConsensusEngineHandle<Payload>
+pub struct ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {
     to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
-impl<Payload> BeaconConsensusEngineHandle<Payload>
+impl<Payload> ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {
@@ -258,15 +256,5 @@ where
             version,
         });
         rx
-    }
-
-    /// Sends a transition configuration exchange message to the beacon consensus engine.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
-    ///
-    /// This only notifies about the exchange. The actual exchange is done by the engine API impl
-    /// itself.
-    pub fn transition_configuration_exchanged(&self) {
-        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
     }
 }
