@@ -11,7 +11,7 @@ use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpReceipt;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::SealedBlock;
 use reth_rpc_eth_api::{
     helpers::LoadReceipt,
     transaction::{ConvertReceiptInput, ReceiptConverter},
@@ -63,13 +63,13 @@ where
             .block_by_number(block_number)?
             .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
 
-        self.convert_receipts_with_block(inputs, &block)
+        self.convert_receipts_with_block(inputs, &SealedBlock::new_unhashed(block))
     }
 
     fn convert_receipts_with_block(
         &self,
         inputs: Vec<ConvertReceiptInput<'_, N>>,
-        block: &N::Block,
+        block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
             Ok(l1_block_info) => l1_block_info,

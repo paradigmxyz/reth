@@ -20,7 +20,8 @@ use reth_evm::{
     ConfigureEvm, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
+    BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
+    TxTy,
 };
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
@@ -61,7 +62,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
-        _block: &N::Block,
+        _block: &SealedBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
     }
@@ -164,6 +165,16 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    ///
+    /// Also accepts the corresponding block in case the receipt requires additional metadata.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 
     /// Converts a primitive header to an RPC header.
@@ -940,6 +951,14 @@ where
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts(receipts)
+    }
+
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts_with_block(receipts, block)
     }
 
     fn convert_header(
