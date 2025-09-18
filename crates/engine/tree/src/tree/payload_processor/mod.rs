@@ -531,23 +531,15 @@ impl Drop for CacheTaskHandle {
 ///
 /// This process assumes that payloads are received sequentially.
 ///
-/// ## Critical Cache Safety Requirements
+/// ## Cache Safety
 ///
-/// **IMPORTANT**: When calling cache update operations (especially through `update_with_guard`),
-/// there must be **no other active cache users**. This is the #1 requirement with the caches.
-/// We must make sure there are no more cache users when we call the method, otherwise a
-/// dangling prewarm task or something could kill the cache.
+/// **CRITICAL**: Cache update operations require exclusive access. All concurrent cache users
+/// (such as prewarming tasks) must be terminated before calling `update_with_guard`, otherwise
+/// the cache may be corrupted or cleared.
 ///
-/// ### Thread Safety and Exclusive Access
+/// ## Cache vs Prewarming Distinction
 ///
-/// - Cache updates require exclusive access to prevent corruption
-/// - Before calling `update_with_guard`, ensure all concurrent operations are completed
-/// - Specifically, ensure no [`PrewarmCacheTask`] instances are running that could interfere with
-///   cache operations
-///
-/// ### Cache vs Prewarming Distinction
-///
-/// **`ExecutionCache`** (this struct):
+/// **`ExecutionCache`**:
 /// - Stores parent block's execution state after completion
 /// - Used to fetch parent data for next block's execution
 /// - Must be exclusively accessed during save operations
@@ -556,11 +548,6 @@ impl Drop for CacheTaskHandle {
 /// - Speculatively loads accounts/storage that might be used in transaction execution
 /// - Prepares data for state root proof computation
 /// - Runs concurrently but must not interfere with cache saves
-///
-/// Failure to follow these requirements can lead to:
-/// - Incorrect parent state data during block execution
-/// - State root computation errors
-/// - Potential consensus failures
 #[derive(Clone, Debug, Default)]
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
