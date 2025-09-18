@@ -37,14 +37,15 @@ assert_matches.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-chainspec/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "alloy-rpc-types-engine/std",
-    "op-alloy-rpc-types-engine?/std",
-    "serde/std",
-    "thiserror/std",
-    "reth-primitives-traits/std",
+	"reth-chainspec/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-rpc-types-engine/std",
+	"op-alloy-rpc-types-engine?/std",
+	"serde/std",
+	"thiserror/std",
+	"reth-primitives-traits/std",
+	"either/std"
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",

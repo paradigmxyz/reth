@@ -1,6 +1,7 @@
 //! Core traits for working with execution payloads.
 
-use alloc::vec::Vec;
+use crate::PayloadBuilderError;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -10,8 +11,6 @@ use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadI
 use core::fmt;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
-
-use crate::PayloadBuilderError;
 
 /// Represents a successfully built execution payload (block).
 ///
