@@ -143,10 +143,6 @@ where
         }
     }
 
-    /// Save the state to the shared cache for the given block.
-    ///
-    /// ## CRITICAL CACHE SAFETY
-    ///
     /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
     /// It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
@@ -154,7 +150,6 @@ where
     /// 3. The prewarming phase has finished (typically signaled by `FinishedTxExecution`)
     ///
     /// This method is called from `run()` only after all execution tasks are complete,
-    /// ensuring the exclusive access requirement is met.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
