@@ -11,7 +11,6 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -37,7 +36,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -61,27 +60,22 @@ impl EngineNodeLauncher {
     ) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir), engine_tree_config }
     }
-}
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
-where
-    Types: NodeTypesForProvider + NodeTypes,
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: FullNodeTypes<
-        Types = Types,
-        DB = DB,
-        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
-    >,
-    CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-{
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
-
-    async fn launch_node(
+    async fn launch_node<T, CB, AO>(
         self,
         target: NodeBuilderWithComponents<T, CB, AO>,
-    ) -> eyre::Result<Self::Node> {
+    ) -> eyre::Result<NodeHandle<NodeAdapter<T, CB::Components>, AO>>
+    where
+        T: FullNodeTypes<
+            Types: NodeTypesForProvider,
+            Provider = BlockchainProvider<
+                NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+            >,
+        >,
+        CB: NodeComponentsBuilder<T>,
+        AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
+            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+    {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
@@ -112,7 +106,7 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<Types::ChainSpec>, _>>| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
@@ -366,5 +360,26 @@ where
         };
 
         Ok(handle)
+    }
+}
+
+impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+where
+    T: FullNodeTypes<
+        Types: NodeTypesForProvider,
+        Provider = BlockchainProvider<
+            NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+        >,
+    >,
+    CB: NodeComponentsBuilder<T> + 'static,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + 'static,
+{
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
+    type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;
+
+    fn launch_node(self, target: NodeBuilderWithComponents<T, CB, AO>) -> Self::Future {
+        Box::pin(self.launch_node(target))
     }
 }

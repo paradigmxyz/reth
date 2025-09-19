@@ -1078,9 +1078,7 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
-                if self.config.always_process_payload_attributes_on_canonical_head() {
-                    // TODO(mattsse): This behavior is technically a different setting and we need a
-                    // new config setting for this
+                if self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
             }
@@ -2528,21 +2526,9 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
-        // Temporary fix for EIP-7623 test compatibility:
-        // Map gas floor errors to the expected format for test compatibility
-        // TODO: Remove this workaround once https://github.com/paradigmxyz/reth/issues/18369 is resolved
-        let mut error_str = validation_err.to_string();
-        if error_str.contains("gas floor") && error_str.contains("exceeds the gas limit") {
-            // Replace "gas floor" with "call gas cost" for compatibility with some tests
-            error_str = error_str.replace("gas floor", "call gas cost");
-            // The test also expects the error to contain
-            // "TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST"
-            error_str =
-                format!("TransactionException.INTRINSIC_GAS_BELOW_FLOOR_GAS_COST: {}", error_str);
-        }
 
         Ok(PayloadStatus::new(
-            PayloadStatusEnum::Invalid { validation_error: error_str },
+            PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
     }
