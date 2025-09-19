@@ -548,12 +548,6 @@ impl SavedCache {
         Arc::strong_count(&self.usage_guard) == 1
     }
 
-    /// Returns a guard if the cache is available, marking it as "in-use".
-    /// Holding the returned guard keeps the cache locked.
-    pub(crate) fn try_lock(&self) -> Option<Arc<()>> {
-        self.is_available().then(|| self.usage_guard.clone())
-    }
-
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub(crate) const fn cache(&self) -> &ExecutionCache {
         &self.caches
@@ -829,28 +823,6 @@ mod tests {
 
         // Now the cache should not be available (two references)
         assert!(!cache.is_available(), "Cache should not be available with active guard");
-    }
-
-    #[test]
-    fn test_saved_cache_try_lock() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
-        let cache =
-            SavedCache::new(B256::from([1u8; 32]), execution_cache, CachedStateMetrics::zeroed());
-
-        // First lock should succeed
-        let guard1 = cache.try_lock();
-        assert!(guard1.is_some(), "First try_lock should succeed");
-
-        // Second lock should fail while first guard is held
-        let guard2 = cache.try_lock();
-        assert!(guard2.is_none(), "Second try_lock should fail while guard is held");
-
-        // Drop the first guard
-        drop(guard1);
-
-        // Now locking should succeed again
-        let guard3 = cache.try_lock();
-        assert!(guard3.is_some(), "try_lock should succeed after guard is dropped");
     }
 
     #[test]

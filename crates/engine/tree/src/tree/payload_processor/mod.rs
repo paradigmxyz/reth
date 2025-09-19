@@ -314,13 +314,15 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (saved_cache, cache_usage_guard) = self.cache_for(env.parent_hash);
+        let saved_cache = self.cache_for(env.parent_hash);
+        let cache_clone = saved_cache.cache().clone();
+        let cache_metrics_clone = saved_cache.metrics().clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            cache: saved_cache.cache().clone(),
-            cache_metrics: saved_cache.metrics().clone(),
+            cache: cache_clone.clone(),
+            cache_metrics: cache_metrics_clone.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -332,7 +334,7 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            Arc::clone(&cache_usage_guard),
+            saved_cache,
             to_multi_proof,
         );
 
@@ -344,7 +346,11 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, cache_usage_guard, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle {
+            cache: cache_clone,
+            cache_metrics: cache_metrics_clone,
+            to_prewarm_task: Some(to_prewarm_task),
+        }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
@@ -357,18 +363,14 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     #[instrument(target = "engine::caching", skip(self))]
-    fn cache_for(&self, parent_hash: B256) -> (SavedCache, Arc<()>) {
-        if let Some((cache, guard)) = self.execution_cache.get_cache_for(parent_hash) {
+    fn cache_for(&self, parent_hash: B256) -> SavedCache {
+        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
-            (cache, guard)
+            cache
         } else {
             debug!("creating new execution cache on cache miss");
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            let saved_cache = SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed());
-            let guard = saved_cache
-                .try_lock()
-                .expect("new cache should be immediately available for locking");
-            (saved_cache, guard)
+            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         }
     }
 
@@ -498,20 +500,19 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 /// Access to the spawned [`PrewarmCacheTask`].
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
-    saved_cache: SavedCache,
-    #[allow(dead_code)]
-    cache_usage_guard: Arc<()>,
+    cache: StateExecutionCache,
+    cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
 }
 
 impl CacheTaskHandle {
     fn cache(&self) -> StateExecutionCache {
-        self.saved_cache.cache().clone()
+        self.cache.clone()
     }
 
     fn cache_metrics(&self) -> CachedStateMetrics {
-        self.saved_cache.metrics().clone()
+        self.cache_metrics.clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -574,16 +575,16 @@ struct ExecutionCache {
 }
 
 impl ExecutionCache {
-    /// Returns the idle cache for `parent_hash` with a lock guard, or None if unavailable.
-    pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<(SavedCache, Arc<()>)> {
+    /// Returns the idle cache for `parent_hash`, or `None` if unavailable.
+    pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let guard = self.inner.write();
         let cache = guard.as_ref()?;
 
-        if cache.executed_block_hash() != parent_hash {
+        if cache.executed_block_hash() != parent_hash || !cache.is_available() {
             return None
         }
 
-        cache.try_lock().map(|lock| (cache.clone(), lock))
+        Some(cache.clone())
     }
 
     /// Clears the tracked cache
