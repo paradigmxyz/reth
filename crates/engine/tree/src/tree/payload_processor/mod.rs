@@ -568,10 +568,10 @@ impl ExecutionCache {
     /// - No other tasks are currently using it (checked via Arc reference count)
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let cache = self.inner.read();
-        cache.as_ref().and_then(|cache| {
-            (cache.executed_block_hash() == parent_hash && cache.is_available())
-                .then(|| cache.clone())
-        })
+        cache
+            .as_ref()
+            .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
+            .cloned()
     }
 
     /// Clears the tracked cache
