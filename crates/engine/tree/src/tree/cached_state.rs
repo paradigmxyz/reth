@@ -543,8 +543,7 @@ impl SavedCache {
         (self.caches, self.metrics)
     }
 
-    /// Checks if the cache is currently available to be checked out.
-    /// It is considered available if no other component holds a reference to its usage guard.
+    /// Returns true if the cache is idle (no other tasks are using it).
     pub(crate) fn is_available(&self) -> bool {
         Arc::strong_count(&self.usage_guard) == 1
     }
