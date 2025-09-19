@@ -63,7 +63,7 @@ where
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// RAII guard that keeps the cache locked for the duration of the task.
-    _usage_guard: Arc<()>,
+    _cache_usage_guard: Arc<()>,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -85,7 +85,7 @@ where
             Self {
                 executor,
                 execution_cache,
-                _usage_guard: usage_guard,
+                _cache_usage_guard: usage_guard,
                 ctx,
                 max_concurrency: 64,
                 to_multi_proof,
@@ -157,7 +157,7 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        drop(self._usage_guard);
+        drop(self._cache_usage_guard);
         let hash = self.ctx.env.hash;
         let caches = self.ctx.cache;
         let metrics = self.ctx.cache_metrics;

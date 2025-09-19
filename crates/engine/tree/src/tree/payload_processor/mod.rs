@@ -326,9 +326,6 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
-            // Pass the guard to the context. This locks the cache for the lifetime of the prewarm
-            // task.
-            cache_usage_guard: Some(saved_cache.usage_guard.clone()),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
