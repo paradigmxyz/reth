@@ -496,7 +496,9 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 /// Access to the spawned [`PrewarmCacheTask`].
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
+    /// The shared cache the task operates with.
     cache: StateExecutionCache,
+    /// Metrics for the caches
     cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
