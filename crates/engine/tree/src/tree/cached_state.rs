@@ -558,11 +558,6 @@ impl SavedCache {
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
         self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
     }
-
-    /// Returns the metrics for this cache.
-    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
-        &self.metrics
-    }
 }
 
 /// Cache for an individual account's storage slots.

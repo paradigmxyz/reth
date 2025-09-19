@@ -12,12 +12,10 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
-    },
+    cached_state::{CachedStateMetrics, CachedStateProvider, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage,
-        ExecutionCache as PayloadExecutionCache,
+        ExecutionCache as PayloadExecutionCache, StateExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -62,8 +60,6 @@ where
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
-    /// Holds the saved cache clone, keeping the usage guard alive.
-    saved_cache: SavedCache,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -77,7 +73,6 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        saved_cache: SavedCache,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
@@ -85,7 +80,6 @@ where
             Self {
                 executor,
                 execution_cache,
-                saved_cache,
                 ctx,
                 max_concurrency: 64,
                 to_multi_proof,
@@ -157,15 +151,15 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        let PrewarmCacheTask { execution_cache, ctx, saved_cache, .. } = self;
-
-        drop(saved_cache);
-        let hash = ctx.env.hash;
-        let caches = ctx.cache;
-        let metrics = ctx.cache_metrics;
+        if let Some(saved_cache) = self.execution_cache.get_cache_for(self.ctx.env.parent_hash) {
+            drop(saved_cache)
+        }
+        let hash = self.ctx.env.hash;
+        let caches = self.ctx.cache;
+        let metrics = self.ctx.cache_metrics;
 
         // Perform all cache operations atomically under the lock
-        execution_cache.update_with_guard(|cached| {
+        self.execution_cache.update_with_guard(|cached| {
             let new_cache = SavedCache::new(hash, caches, metrics);
 
             // Insert state into cache while holding the lock
@@ -183,7 +177,7 @@ where
             *cached = Some(new_cache);
         });
 
-        ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.

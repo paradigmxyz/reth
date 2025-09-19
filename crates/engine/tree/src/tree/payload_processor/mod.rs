@@ -334,7 +334,6 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            saved_cache,
             to_multi_proof,
         );
 
