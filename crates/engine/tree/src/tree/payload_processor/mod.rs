@@ -314,7 +314,7 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (saved_cache, usage_guard) = self.checkout_cache(env.parent_hash);
+        let (saved_cache, cache_usage_guard) = self.cache_for(env.parent_hash);
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -326,13 +326,16 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+// Pass the guard to the context. This locks the cache for the lifetime of the prewarm
+            // task.
+            cache_usage_guard: Some(saved_cache.usage_guard.clone()),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
-            Arc::clone(&usage_guard),
+            Arc::clone(&cache_usage_guard),
             to_multi_proof,
         );
 
@@ -344,7 +347,11 @@ where
             });
         }
 
-        CacheTaskHandle { saved_cache, usage_guard, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle {
+            saved_cache,
+            cache_usage_guard,
+            to_prewarm_task: Some(to_prewarm_task),
+        }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
@@ -357,7 +364,7 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     #[instrument(target = "engine::caching", skip(self))]
-    fn checkout_cache(&self, parent_hash: B256) -> (SavedCache, Arc<()>) {
+    fn cache_for(&self, parent_hash: B256) -> (SavedCache, Arc<()>) {
         if let Some((cache, guard)) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
             (cache, guard)
@@ -500,7 +507,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 pub(crate) struct CacheTaskHandle {
     saved_cache: SavedCache,
     #[allow(dead_code)]
-    usage_guard: Arc<()>,
+    cache_usage_guard: Arc<()>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
 }
