@@ -21,9 +21,14 @@ use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
+use futures::StreamExt;
+use reth_chain_state::CanonStateSubscriptions;
+use reth_primitives_traits::BlockBody;
+use reth_rpc_eth_types::EthApiError;
 use std::{
     fmt::{Debug, Formatter},
     future::Future,
+    time::Duration,
 };
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
@@ -71,6 +76,59 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
+    }
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// And awaits the receipt, checking both canonical blocks and flashblocks for faster confirmation.
+    fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send
+    where
+        Self: LoadReceipt + 'static,
+    {
+        let this = self.clone();
+        async move {
+            let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
+            let mut canonical_stream = this.provider().canonical_state_stream();
+            const TIMEOUT_DURATION: Duration = Duration::from_secs(30);
+
+            tokio::time::timeout(TIMEOUT_DURATION, async {
+                while let Some(notification) = canonical_stream.next().await {
+                    // First check flashblocks for faster confirmation (Optimism-specific)
+                    if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                        let block_and_receipts = pending_block.into_block_and_receipts();
+                        if block_and_receipts.block.body().contains_transaction(&hash) {
+                            if let Some(receipt) = this.transaction_receipt(hash).await? {
+                                return Ok(receipt);
+                            }
+                        }
+                    }
+
+                    // Then check canonical blocks (existing behavior)
+                    let chain = notification.committed();
+                    for block in chain.blocks_iter() {
+                        if block.body().contains_transaction(&hash) {
+                            if let Some(receipt) = this.transaction_receipt(hash).await? {
+                                return Ok(receipt);
+                            }
+                        }
+                    }
+                }
+                Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
+                    hash,
+                    duration: TIMEOUT_DURATION,
+                }))
+            })
+            .await
+            .unwrap_or_else(|_elapsed| {
+                Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
+                    hash,
+                    duration: TIMEOUT_DURATION,
+                }))
+            })
+        }
     }
 
     /// Returns the transaction receipt for the given hash.
