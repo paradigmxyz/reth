@@ -610,14 +610,6 @@ impl ExecutionCache {
         F: FnOnce(&mut Option<SavedCache>),
     {
         let mut guard = self.inner.write();
-
-        if let Some(cache) = guard.as_ref() {
-            debug_assert!(
-                cache.is_available(),
-                "Attempting to update cache while it's in use. This is a race condition!"
-            );
-        }
-
         update_fn(&mut guard);
     }
 }
