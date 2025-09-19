@@ -950,3 +950,63 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
         "In-memory state: Latest block hash should be updated to canonical ancestor"
     );
 }
+
+#[tokio::test]
+async fn test_race_condition_during_reorganization() {
+    // Test case for the race condition where a new block arrives while
+    // a reorganization is removing blocks, causing the persistence kind
+    // to be incorrectly classified as PersistingNotDescendant
+    // see <https://github.com/paradigmxyz/reth/issues/18408> for details
+
+    reth_tracing::init_test_tracing();
+    let chain_spec = MAINNET.clone();
+
+    let mut test_harness = TestHarness::new(chain_spec);
+    test_harness.tree.config = test_harness.tree.config.with_persistence_threshold(1);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    // Create a chain of blocks up to block 14
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..15).collect();
+
+    for block in &blocks {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+
+    // Set block 12 as the finalized/persisted block
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[11].recovered_block().num_hash();
+
+    // Set block 13 as the current canonical head
+    test_harness.tree.state.tree_state.set_canonical_head(blocks[12].recovered_block().num_hash());
+
+    // Simulate a reorganization by starting a RemoveBlocks operation
+    // This simulates the situation where we need to remove blocks above block 12
+    let (_tx, rx) = oneshot::channel();
+    test_harness.tree.persistence_state.start_remove(12, rx);
+
+    // Verify that we're now in the RemovingBlocks state
+    assert_eq!(
+        test_harness.tree.persistence_state.current_action(),
+        Some(&crate::tree::persistence_state::CurrentPersistenceAction::RemovingBlocks {
+            new_tip_num: 12
+        })
+    );
+
+    // Now simulate a new block (block 14) arriving while the reorganization is in progress
+    let block_14 = &blocks[13];
+
+    let persisting_kind =
+        test_harness.tree.persisting_kind_for(block_14.recovered_block().block_with_parent());
+
+    // This allows parallel state root computation to proceed normally
+    assert!(
+        matches!(persisting_kind, PersistingKind::NotPersisting),
+        "Expected NotPersisting after fix - block 14 > new_tip_num (12), so it should not conflict with removal"
+    );
+
+    // Test that parallel state root computation is now enabled
+    assert!(
+        persisting_kind.can_run_parallel_state_root(),
+        "Parallel state root should be enabled with NotPersisting, fixing the race condition"
+    );
+}
