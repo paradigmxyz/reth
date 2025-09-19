@@ -500,14 +500,10 @@ where
                     .map(|num| self.provider().convert_block_number(num))
                     .transpose()?
                     .flatten();
+
                 if let Some(f) = from {
                     if f > info.best_number {
-                        return Ok(Vec::new());
-                    }
-                }
-
-                if let (Some(f), Some(t)) = (from, to) {
-                    if f > t {
+                        // start block higher than local head, can return empty
                         return Ok(Vec::new());
                     }
                 }
