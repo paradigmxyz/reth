@@ -1,9 +1,23 @@
 //! Caching and prewarming related functionality.
+//!
+//! Prewarming executes transactions in parallel before the actual block execution
+//! to populate the execution cache with state that will likely be accessed during
+//! block processing.
+//!
+//! ## How Prewarming Works
+//!
+//! 1. Incoming transactions are split into two streams: one for prewarming (executed in parallel)
+//!    and one for actual execution (executed sequentially)
+//! 2. Prewarming tasks execute transactions in parallel using shared caches
+//! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
+    cached_state::{
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
+    },
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+        executor::WorkloadExecutor, multiproof::MultiProofMessage,
+        ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -39,7 +53,7 @@ where
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
-    execution_cache: ExecutionCache,
+    execution_cache: PayloadExecutionCache,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, Evm>,
     /// How many transactions should be executed in parallel
@@ -59,7 +73,7 @@ where
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
-        execution_cache: ExecutionCache,
+        execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
@@ -129,7 +143,13 @@ where
         }
     }
 
-    /// Save the state to the shared cache for the given block.
+    /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
+    /// It should only be called after ensuring that:
+    /// 1. All prewarming tasks have completed execution
+    /// 2. No other concurrent operations are accessing the cache
+    /// 3. The prewarming phase has finished (typically signaled by `FinishedTxExecution`)
+    ///
+    /// This method is called from `run()` only after all execution tasks are complete,
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
@@ -146,11 +166,12 @@ where
             if cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
                 *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
             }
 
             cache.update_metrics();
-            debug!(target: "engine::caching", "Updated state caches");
+            debug!(target: "engine::caching", parent_hash=?cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(cache);
@@ -225,7 +246,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: ProviderCaches,
+    pub(super) cache: StateExecutionCache,
     pub(super) cache_metrics: CachedStateMetrics,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,

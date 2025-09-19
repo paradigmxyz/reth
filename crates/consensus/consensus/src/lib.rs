@@ -437,7 +437,7 @@ pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);
 
 /// EIP-7825: Transaction gas limit exceeds maximum allowed
 #[derive(thiserror::Error, Debug, Eq, PartialEq, Clone)]
-#[error("transaction {tx_hash} gas limit {gas_limit} exceeds maximum {max_allowed}")]
+#[error("transaction gas limit ({gas_limit}) is greater than the cap ({max_allowed})")]
 pub struct TxGasLimitTooHighErr {
     /// Hash of the transaction that violates the rule
     pub tx_hash: B256,
