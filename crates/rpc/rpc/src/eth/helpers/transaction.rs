@@ -28,7 +28,6 @@ where
         self.inner.send_raw_transaction_sync_timeout()
     }
 
-
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.

@@ -23,7 +23,8 @@ use reth_transaction_pool::{
 };
 use std::{
     fmt::{Debug, Formatter},
-    future::Future, time::Duration,
+    future::Future,
+    time::Duration,
 };
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
