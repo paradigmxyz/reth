@@ -1,6 +1,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_primitives::{Address, B256};
+use eyre::Context;
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
@@ -21,16 +22,20 @@ use reth_ethereum::{
 // Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
     // The path to data directory, e.g. "~/.local/reth/share/mainnet"
-    let datadir = std::env::var("RETH_DATADIR")?;
+    let datadir = std::env::var("RETH_DATADIR").with_context(|| {
+        "RETH_DATADIR environment variable not set. Please set it to your reth data directory path (e.g., ~/.local/share/reth/mainnet)"
+    })?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided datadir path.
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))
+        .with_context(|| "Failed to open database. Make sure the RETH_DATADIR path exists and contains a valid reth database")?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
-    let provider = factory.provider()?;
+    let provider = factory.provider()
+        .with_context(|| "Failed to create database provider. The database may be corrupted or in use by another process")?;
 
     // Run basic queries against the DB
     let block_num = 100;
