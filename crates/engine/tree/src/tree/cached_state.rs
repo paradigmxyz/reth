@@ -552,11 +552,7 @@ impl SavedCache {
     /// Returns a guard if the cache is available, marking it as "in-use".
     /// Holding the returned guard keeps the cache locked.
     pub(crate) fn try_lock(&self) -> Option<Arc<()>> {
-        if self.is_available() {
-            Some(self.usage_guard.clone())
-        } else {
-            None
-        }
+        self.is_available().then(|| self.usage_guard.clone())
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
@@ -628,7 +624,7 @@ impl Default for AccountStorageCache {
 }
 
 #[cfg(test)]
-mod inline_tests {
+mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
     use rand::Rng;

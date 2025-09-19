@@ -583,11 +583,7 @@ impl ExecutionCache {
             return None
         }
 
-        if let Some(lock) = cache.try_lock() {
-            Some((cache.clone(), lock))
-        } else {
-            None
-        }
+        cache.try_lock().map(|lock| (cache.clone(), lock))
     }
 
     /// Clears the tracked cache
