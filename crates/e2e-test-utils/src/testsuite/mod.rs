@@ -2,23 +2,39 @@
 
 use crate::{
     testsuite::actions::{Action, ActionBox},
-    NodeBuilderHelper, PayloadAttributesBuilder,
+    NodeBuilderHelper, NodeHelperType, PayloadAttributesBuilder,
 };
 use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
+use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::PayloadId;
-use std::{collections::HashMap, marker::PhantomData};
+use reth_trie_common::updates::TrieUpdates;
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use tokio::sync::{mpsc, Mutex};
+
+/// Type alias for shared trie updates storage
+type SharedTrieUpdatesStorage = Vec<Arc<Mutex<HashMap<B256, TrieUpdates>>>>;
 pub mod actions;
 pub mod setup;
 use crate::testsuite::setup::Setup;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use reth_rpc_builder::auth::AuthServerHandle;
-use std::sync::Arc;
 use url::Url;
+
+/// Event carrying trie updates from canonical state notifications
+#[derive(Debug, Clone)]
+pub struct TrieUpdateEvent {
+    /// Index of the node that emitted this event
+    pub node_idx: usize,
+    /// Block hash associated with these trie updates
+    pub block_hash: B256,
+    /// The trie updates from the canonical chain
+    pub trie_updates: TrieUpdates,
+}
 
 /// Client handles for both regular RPC and Engine API endpoints
 #[derive(Clone)]
@@ -53,6 +69,11 @@ impl NodeClient {
     /// Check if the node is ready by attempting to get the latest block
     pub async fn is_ready(&self) -> bool {
         self.get_block_by_number(alloy_eips::BlockNumberOrTag::Latest).await.is_ok()
+    }
+
+    /// Get the alloy provider for direct access to node data
+    pub fn provider(&self) -> Arc<dyn Provider + Send + Sync> {
+        self.provider.clone()
     }
 }
 
@@ -103,6 +124,8 @@ where
     pub latest_payload_envelope: Option<I::ExecutionPayloadEnvelopeV3>,
     /// Fork base block number for validation (if this node is currently on a fork)
     pub current_fork_base: Option<u64>,
+    /// Stores trie updates for blocks by hash (for internal test verification)
+    pub block_trie_updates: HashMap<B256, TrieUpdates>,
 }
 
 impl<I> Default for NodeState<I>
@@ -121,6 +144,7 @@ where
             latest_payload_executed: None,
             latest_payload_envelope: None,
             current_fork_base: None,
+            block_trie_updates: HashMap::new(),
         }
     }
 }
@@ -141,12 +165,12 @@ where
             .field("latest_payload_executed", &self.latest_payload_executed)
             .field("latest_payload_envelope", &"<ExecutionPayloadEnvelopeV3>")
             .field("current_fork_base", &self.current_fork_base)
+            .field("block_trie_updates", &format!("<{} entries>", self.block_trie_updates.len()))
             .finish()
     }
 }
 
 /// Represents a test environment.
-#[derive(Debug)]
 pub struct Environment<I>
 where
     I: EngineTypes,
@@ -169,6 +193,36 @@ where
     pub block_registry: HashMap<String, (BlockInfo, usize)>,
     /// Currently active node index for backward compatibility with single-node actions
     pub active_node_idx: usize,
+    /// Node contexts for accessing canonical streams (wrapped in `Arc<Mutex>` for sharing)
+    pub node_contexts: Option<Arc<Mutex<Vec<NodeHelperType<EthereumNode>>>>>,
+    /// Shared storage for trie updates captured from canonical state notifications
+    pub shared_trie_updates: Option<SharedTrieUpdatesStorage>,
+    /// Receiver for trie update events from canonical state notifications
+    pub trie_update_rx: Option<mpsc::UnboundedReceiver<TrieUpdateEvent>>,
+}
+
+impl<I> std::fmt::Debug for Environment<I>
+where
+    I: EngineTypes,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Environment")
+            .field("node_clients", &self.node_clients.len())
+            .field("node_states", &self.node_states.len())
+            .field("last_producer_idx", &self.last_producer_idx)
+            .field("block_timestamp_increment", &self.block_timestamp_increment)
+            .field("slots_to_safe", &self.slots_to_safe)
+            .field("slots_to_finalized", &self.slots_to_finalized)
+            .field("block_registry", &format!("<{} entries>", self.block_registry.len()))
+            .field("active_node_idx", &self.active_node_idx)
+            .field("node_contexts", &self.node_contexts.as_ref().map(|_| "<node contexts>"))
+            .field(
+                "shared_trie_updates",
+                &self.shared_trie_updates.as_ref().map(|v| format!("<{} nodes>", v.len())),
+            )
+            .field("trie_update_rx", &self.trie_update_rx.as_ref().map(|_| "<receiver>"))
+            .finish()
+    }
 }
 
 impl<I> Default for Environment<I>
@@ -186,6 +240,9 @@ where
             slots_to_finalized: 0,
             block_registry: HashMap::new(),
             active_node_idx: 0,
+            node_contexts: None,
+            shared_trie_updates: None,
+            trie_update_rx: None,
         }
     }
 }
@@ -241,6 +298,59 @@ where
     /// Initialize node states when nodes are created
     pub fn initialize_node_states(&mut self, node_count: usize) {
         self.node_states = (0..node_count).map(|_| NodeState::default()).collect();
+    }
+
+    /// Set the node contexts (storing them for future access)
+    pub fn set_node_contexts(&mut self, nodes: Vec<NodeHelperType<EthereumNode>>) {
+        let node_contexts = Arc::new(Mutex::new(nodes));
+        self.node_contexts = Some(node_contexts);
+    }
+
+    /// Drain all pending trie update events from the receiver and persist them to node states
+    /// This should be called before asserting on trie updates to ensure all events are processed
+    pub fn drain_trie_updates(&mut self) {
+        let mut events = Vec::new();
+
+        // First, collect all events without holding the borrow on self
+        if let Some(rx) = &mut self.trie_update_rx {
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+
+        // Then, process each event
+        for event in events {
+            if event.node_idx < self.node_states.len() {
+                self.node_states[event.node_idx]
+                    .block_trie_updates
+                    .insert(event.block_hash, event.trie_updates);
+                tracing::debug!(
+                    "Persisted trie updates for block {} from node {}",
+                    event.block_hash,
+                    event.node_idx
+                );
+            } else {
+                tracing::warn!(
+                    "Received trie update event for invalid node index: {}",
+                    event.node_idx
+                );
+            }
+        }
+    }
+
+    /// Get trie updates for a specific block on a specific node
+    pub async fn get_trie_updates(
+        &self,
+        node_idx: usize,
+        block_hash: alloy_primitives::B256,
+    ) -> Option<TrieUpdates> {
+        if let Some(shared_updates) = &self.shared_trie_updates {
+            if let Some(node_updates) = shared_updates.get(node_idx) {
+                let map = node_updates.lock().await;
+                return map.get(&block_hash).cloned();
+            }
+        }
+        None
     }
 
     /// Get current block info from active node

@@ -113,7 +113,7 @@ pub fn default_reth_version_metadata() -> RethCliVersionConsts {
         vergen_git_sha: Cow::Owned(env!("VERGEN_GIT_SHA_SHORT").to_string()),
         vergen_build_timestamp: Cow::Owned(env!("VERGEN_BUILD_TIMESTAMP").to_string()),
         vergen_cargo_target_triple: Cow::Owned(env!("VERGEN_CARGO_TARGET_TRIPLE").to_string()),
-        vergen_cargo_features: Cow::Owned(env!("VERGEN_CARGO_FEATURES").to_string()),
+        vergen_cargo_features: Cow::Owned(String::new()),
         short_version: Cow::Owned(env!("RETH_SHORT_VERSION").to_string()),
         long_version: Cow::Owned(format!(
             "{}\n{}\n{}\n{}\n{}",
