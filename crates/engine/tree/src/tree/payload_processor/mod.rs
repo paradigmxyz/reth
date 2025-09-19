@@ -40,13 +40,10 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
-use std::{
-    ops::Deref,
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{self, channel, Sender},
-        Arc,
-    },
+use std::sync::{
+    atomic::AtomicBool,
+    mpsc::{self, channel, Sender},
+    Arc,
 };
 use tracing::{debug, instrument};
 
@@ -317,13 +314,13 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let checkout = self.checkout_cache(env.parent_hash);
+        let (saved_cache, usage_guard) = self.checkout_cache(env.parent_hash);
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            cache: checkout.cache_clone(),
-            cache_metrics: checkout.cache_metrics_clone(),
+            cache: saved_cache.cache().clone(),
+            cache_metrics: saved_cache.metrics().clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -335,6 +332,7 @@ where
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
+            Arc::clone(&usage_guard),
             to_multi_proof,
         );
 
@@ -346,7 +344,7 @@ where
             });
         }
 
-        CacheTaskHandle { checkout, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle { saved_cache, usage_guard, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
@@ -359,15 +357,18 @@ where
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
     #[instrument(target = "engine::caching", skip(self))]
-    fn checkout_cache(&self, parent_hash: B256) -> CacheCheckout {
-        if let Some(lease) = self.execution_cache.get_cache_for(parent_hash) {
+    fn checkout_cache(&self, parent_hash: B256) -> (SavedCache, Arc<()>) {
+        if let Some((cache, guard)) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
-            CacheCheckout::reused(lease)
+            (cache, guard)
         } else {
             debug!("creating new execution cache on cache miss");
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
             let saved_cache = SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed());
-            CacheCheckout::fresh(saved_cache)
+            let guard = saved_cache
+                .try_lock()
+                .expect("new cache should be immediately available for locking");
+            (saved_cache, guard)
         }
     }
 
@@ -497,48 +498,20 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 /// Access to the spawned [`PrewarmCacheTask`].
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
-    checkout: CacheCheckout,
+    saved_cache: SavedCache,
+    #[allow(dead_code)]
+    usage_guard: Arc<()>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
 }
 
-#[derive(Debug)]
-struct CacheCheckout {
-    saved_cache: SavedCache,
-    lease: Option<CacheLease>,
-}
-
-impl CacheCheckout {
-    fn fresh(saved_cache: SavedCache) -> Self {
-        Self { saved_cache, lease: None }
-    }
-
-    fn reused(lease: CacheLease) -> Self {
-        Self { saved_cache: lease.saved_cache().clone(), lease: Some(lease) }
-    }
-
-    fn cache_clone(&self) -> StateExecutionCache {
+impl CacheTaskHandle {
+    fn cache(&self) -> StateExecutionCache {
         self.saved_cache.cache().clone()
     }
 
-    fn cache_metrics_clone(&self) -> CachedStateMetrics {
-        self.saved_cache.metrics().clone()
-    }
-
-    fn release_lease(&mut self) {
-        if let Some(mut lease) = self.lease.take() {
-            lease.release();
-        }
-    }
-}
-
-impl CacheTaskHandle {
-    fn cache(&self) -> StateExecutionCache {
-        self.checkout.cache_clone()
-    }
-
     fn cache_metrics(&self) -> CachedStateMetrics {
-        self.checkout.cache_metrics_clone()
+        self.saved_cache.metrics().clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -554,9 +527,6 @@ impl CacheTaskHandle {
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
     pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
-        if block_output.is_some() {
-            self.checkout.release_lease();
-        }
         self.to_prewarm_task
             .take()
             .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
@@ -565,7 +535,8 @@ impl CacheTaskHandle {
 
 impl Drop for CacheTaskHandle {
     fn drop(&mut self) {
-        self.checkout.release_lease();
+        // Release the guard once prewarming is done.
+        // The guard will be dropped naturally here.
         // Ensure we always terminate on drop
         self.terminate_caching(None);
     }
@@ -578,135 +549,50 @@ impl Drop for CacheTaskHandle {
 ///  - Update cache upon successful payload execution
 ///
 /// This process assumes that payloads are received sequentially.
-///
-/// ## Cache Safety
-///
-/// **CRITICAL**: Cache update operations require exclusive access. All concurrent cache users
-/// (such as prewarming tasks) must be terminated before calling `update_with_guard`, otherwise
-/// the cache may be corrupted or cleared.
-///
-/// ## Cache vs Prewarming Distinction
-///
-/// **`ExecutionCache`**:
-/// - Stores parent block's execution state after completion
-/// - Used to fetch parent data for next block's execution
-/// - Must be exclusively accessed during save operations
-///
-/// **`PrewarmCacheTask`**:
-/// - Speculatively loads accounts/storage that might be used in transaction execution
-/// - Prepares data for state root proof computation
-/// - Runs concurrently but must not interfere with cache saves
-#[derive(Debug, Default)]
-struct TrackedCache {
-    cache: Option<SavedCache>,
-    in_use: bool,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ExecutionCache {
-    /// Guarded cache identified by block hash with a lightweight in-use flag.
-    inner: Arc<RwLock<TrackedCache>>,
-}
-
-impl Default for ExecutionCache {
-    fn default() -> Self {
-        Self { inner: Arc::new(RwLock::new(TrackedCache::default())) }
-    }
+    /// Guarded cache identified by block hash.
+    inner: Arc<RwLock<Option<SavedCache>>>,
 }
 
 impl ExecutionCache {
     /// Returns a lease over the cache if the stored cache is for `parent_hash` and currently idle.
-    pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<CacheLease> {
-        let mut guard = self.inner.write();
+    pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<(SavedCache, Arc<()>)> {
+        let guard = self.inner.write();
+        let cache = guard.as_ref()?;
 
-        if guard.in_use {
-            return None;
+        if cache.executed_block_hash() != parent_hash {
+            return None
         }
 
-        let cached = match guard.cache.as_ref() {
-            Some(cache) if cache.executed_block_hash() == parent_hash => cache.clone(),
-            _ => return None,
-        };
-
-        guard.in_use = true;
-        Some(CacheLease::new(cached, Arc::clone(&self.inner)))
+        if let Some(lock) = cache.try_lock() {
+            Some((cache.clone(), lock))
+        } else {
+            None
+        }
     }
 
     /// Clears the tracked cache
     #[expect(unused)]
     pub(crate) fn clear(&self) {
-        let mut guard = self.inner.write();
-        guard.cache = None;
-        guard.in_use = false;
+        self.inner.write().take();
     }
 
-    /// Updates the cache with a closure that has exclusive access to the guard.
-    /// This ensures that all cache operations happen atomically.
-    ///
-    /// ## CRITICAL SAFETY REQUIREMENT
-    ///
-    /// **Before calling this method, you MUST ensure there are no other active cache users.**
-    /// This includes:
-    /// - No running [`PrewarmCacheTask`] instances that could write to the cache
-    /// - No concurrent transactions that might access the cached state
-    /// - All prewarming operations must be completed or cancelled
-    ///
-    /// Violating this requirement can result in cache corruption, incorrect state data,
-    /// and potential consensus failures.
+    /// Updates the cache with a closure that has exclusive access.
     pub(crate) fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),
     {
         let mut guard = self.inner.write();
 
-        debug_assert!(
-            !guard.in_use,
-            "Attempting to update cache while it's in use. This is a race condition!"
-        );
-
-        update_fn(&mut guard.cache);
-        guard.in_use = false;
-    }
-}
-
-#[derive(Debug)]
-struct CacheLease {
-    cache: SavedCache,
-    state: Arc<RwLock<TrackedCache>>,
-    released: bool,
-}
-
-impl CacheLease {
-    fn new(cache: SavedCache, state: Arc<RwLock<TrackedCache>>) -> Self {
-        Self { cache, state, released: false }
-    }
-
-    fn saved_cache(&self) -> &SavedCache {
-        &self.cache
-    }
-
-    fn release(&mut self) {
-        if self.released {
-            return;
+        if let Some(cache) = guard.as_ref() {
+            debug_assert!(
+                cache.is_available(),
+                "Attempting to update cache while it's in use. This is a race condition!"
+            );
         }
 
-        let mut guard = self.state.write();
-        guard.in_use = false;
-        self.released = true;
-    }
-}
-
-impl Drop for CacheLease {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
-impl Deref for CacheLease {
-    type Target = SavedCache;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cache
+        update_fn(&mut guard);
     }
 }
 
@@ -780,9 +666,12 @@ mod tests {
         assert!(first.is_some(), "expected initial checkout to succeed");
 
         let second = execution_cache.get_cache_for(hash);
-        assert!(second.is_none(), "second checkout should be blocked while lease is active");
+        assert!(second.is_none(), "second checkout should be blocked while guard is active");
 
         drop(first);
+
+        let third = execution_cache.get_cache_for(hash);
+        assert!(third.is_some(), "third checkout should succeed after guard is dropped");
     }
 
     #[test]
@@ -793,13 +682,13 @@ mod tests {
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
 
         {
-            let lease = execution_cache.get_cache_for(hash);
-            assert!(lease.is_some(), "expected checkout to succeed");
-            // Lease dropped at end of scope
+            let guard = execution_cache.get_cache_for(hash);
+            assert!(guard.is_some(), "expected checkout to succeed");
+            // Guard dropped at end of scope
         }
 
         let retry = execution_cache.get_cache_for(hash);
-        assert!(retry.is_some(), "checkout should succeed after lease drop");
+        assert!(retry.is_some(), "checkout should succeed after guard drop");
     }
 
     #[test]
@@ -820,10 +709,10 @@ mod tests {
 
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
 
-        let lease =
+        let guard =
             execution_cache.get_cache_for(initial).expect("expected initial checkout to succeed");
 
-        drop(lease);
+        drop(guard);
 
         let updated = B256::from([6u8; 32]);
         execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));

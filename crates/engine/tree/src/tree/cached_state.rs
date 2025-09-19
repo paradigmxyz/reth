@@ -15,7 +15,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
 pub(crate) type Cache<K, V> =
@@ -520,16 +520,16 @@ pub(crate) struct SavedCache {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// A guard to track in-flight usage of this cache.
+    /// The cache is considered available if the strong count is 1.
+    pub(crate) usage_guard: Arc<()>,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) const fn new(
-        hash: B256,
-        caches: ExecutionCache,
-        metrics: CachedStateMetrics,
-    ) -> Self {
-        Self { hash, caches, metrics }
+    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -541,6 +541,22 @@ impl SavedCache {
     #[allow(dead_code)]
     pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
         (self.caches, self.metrics)
+    }
+
+    /// Checks if the cache is currently available to be checked out.
+    /// It is considered available if no other component holds a reference to its usage guard.
+    pub(crate) fn is_available(&self) -> bool {
+        Arc::strong_count(&self.usage_guard) == 1
+    }
+
+    /// Returns a guard if the cache is available, marking it as "in-use".
+    /// Holding the returned guard keeps the cache locked.
+    pub(crate) fn try_lock(&self) -> Option<Arc<()>> {
+        if self.is_available() {
+            Some(self.usage_guard.clone())
+        } else {
+            None
+        }
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
