@@ -314,8 +314,7 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let saved_cache = self.cache_for(env.parent_hash);
-        let (cache, cache_metrics) = saved_cache.clone().split();
+        let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
 
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
