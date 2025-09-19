@@ -6,7 +6,6 @@ use eyre::Result;
 use reth_node_api::EngineTypes;
 use std::{future::Future, pin::Pin, time::Duration};
 use tokio::time::sleep;
-use tracing::error;
 
 /// Action that asserts whether a block has missing trie updates
 #[derive(Debug)]
@@ -63,7 +62,7 @@ where
                     updates.removed_nodes.is_empty();
 
                 if is_empty {
-                    eprintln!("⚠️  Block has EMPTY trie updates (all fields empty)");
+                    eprintln!("Block has EMPTY trie updates (all fields empty)");
                     eprintln!("    This is effectively the same as ExecutedTrieUpdates::Missing");
 
                     if !self.expect_missing {
@@ -73,7 +72,7 @@ where
                         ));
                     }
                 } else {
-                    eprintln!("✅ Block has PRESENT trie updates:");
+                    eprintln!("Block has PRESENT trie updates:");
                     eprintln!("    Account nodes: {}", updates.account_nodes.len());
                     eprintln!("    Storage tries: {}", updates.storage_tries.len());
                     eprintln!("    Removed nodes: {}", updates.removed_nodes.len());
@@ -86,7 +85,7 @@ where
                     }
                 }
             } else {
-                error!("Block has NO trie updates (ExecutedTrieUpdates::Missing)");
+                eprintln!("Block has NO trie updates (ExecutedTrieUpdates::Missing)");
 
                 if !self.expect_missing {
                     return Err(eyre::eyre!(
