@@ -813,4 +813,68 @@ mod tests {
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Empty);
     }
+
+    // Tests for SavedCache locking mechanism
+
+    #[test]
+    fn test_saved_cache_is_available() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+
+        // Initially, the cache should be available (only one reference)
+        assert!(cache.is_available(), "Cache should be available initially");
+
+        // Clone the usage guard (simulating it being handed out)
+        let _guard = cache.usage_guard.clone();
+
+        // Now the cache should not be available (two references)
+        assert!(!cache.is_available(), "Cache should not be available with active guard");
+    }
+
+    #[test]
+    fn test_saved_cache_try_lock() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache =
+            SavedCache::new(B256::from([1u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+
+        // First lock should succeed
+        let guard1 = cache.try_lock();
+        assert!(guard1.is_some(), "First try_lock should succeed");
+
+        // Second lock should fail while first guard is held
+        let guard2 = cache.try_lock();
+        assert!(guard2.is_none(), "Second try_lock should fail while guard is held");
+
+        // Drop the first guard
+        drop(guard1);
+
+        // Now locking should succeed again
+        let guard3 = cache.try_lock();
+        assert!(guard3.is_some(), "try_lock should succeed after guard is dropped");
+    }
+
+    #[test]
+    fn test_saved_cache_multiple_references() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache =
+            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+
+        // Create multiple references to the usage guard
+        let guard1 = cache.usage_guard.clone();
+        let guard2 = cache.usage_guard.clone();
+        let guard3 = guard1.clone();
+
+        // Cache should not be available with multiple guards
+        assert!(!cache.is_available());
+
+        // Drop guards one by one
+        drop(guard1);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard2);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard3);
+        assert!(cache.is_available()); // Now available
+    }
 }
