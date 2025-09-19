@@ -62,8 +62,8 @@ where
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
-    /// RAII guard that keeps the cache locked for the duration of the task.
-    _cache_usage_guard: Arc<()>,
+    /// Holds the saved cache clone, keeping the usage guard alive.
+    cache_guard: SavedCache,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -77,7 +77,7 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        usage_guard: Arc<()>,
+        cache_guard: SavedCache,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
@@ -85,7 +85,7 @@ where
             Self {
                 executor,
                 execution_cache,
-                _cache_usage_guard: usage_guard,
+                cache_guard,
                 ctx,
                 max_concurrency: 64,
                 to_multi_proof,
@@ -157,13 +157,15 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        drop(self._cache_usage_guard);
-        let hash = self.ctx.env.hash;
-        let caches = self.ctx.cache;
-        let metrics = self.ctx.cache_metrics;
+        let PrewarmCacheTask { execution_cache, ctx, cache_guard, .. } = self;
+
+        drop(cache_guard);
+        let hash = ctx.env.hash;
+        let caches = ctx.cache;
+        let metrics = ctx.cache_metrics;
 
         // Perform all cache operations atomically under the lock
-        self.execution_cache.update_with_guard(|cached| {
+        execution_cache.update_with_guard(|cached| {
             let new_cache = SavedCache::new(hash, caches, metrics);
 
             // Insert state into cache while holding the lock
@@ -181,7 +183,7 @@ where
             *cached = Some(new_cache);
         });
 
-        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
