@@ -12,7 +12,6 @@ use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{Block, GotExpected, InMemorySize, SealedBlock, SealedHeader};
 use std::{
     collections::VecDeque,
-    mem,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -166,7 +165,6 @@ where
     where
         C::Body: InMemorySize,
     {
-        let bodies_capacity = bodies.capacity();
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
