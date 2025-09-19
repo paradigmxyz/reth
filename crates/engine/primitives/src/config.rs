@@ -100,6 +100,8 @@ pub struct TreeConfig {
     always_process_payload_attributes_on_canonical_head: bool,
     /// Maximum concurrency for the prewarm task.
     prewarm_max_concurrency: usize,
+    /// Whether to unwind canonical header to ancestor during forkchoice updates.
+    allow_unwind_canonical_header: bool,
 }
 
 impl Default for TreeConfig {
@@ -123,6 +125,7 @@ impl Default for TreeConfig {
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
+            allow_unwind_canonical_header: false,
         }
     }
 }
@@ -149,6 +152,7 @@ impl TreeConfig {
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
         prewarm_max_concurrency: usize,
+        allow_unwind_canonical_header: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -169,6 +173,7 @@ impl TreeConfig {
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
             prewarm_max_concurrency,
+            allow_unwind_canonical_header,
         }
     }
 
@@ -263,6 +268,11 @@ impl TreeConfig {
     /// canonical.
     pub const fn always_process_payload_attributes_on_canonical_head(&self) -> bool {
         self.always_process_payload_attributes_on_canonical_head
+    }
+
+    /// Returns true if canonical header should be unwound to ancestor during forkchoice updates.
+    pub const fn unwind_canonical_header(&self) -> bool {
+        self.allow_unwind_canonical_header
     }
 
     /// Setter for persistence threshold.
@@ -380,6 +390,12 @@ impl TreeConfig {
     /// Setter for whether to use state root fallback, useful for testing.
     pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
         self.state_root_fallback = state_root_fallback;
+        self
+    }
+
+    /// Setter for whether to unwind canonical header to ancestor during forkchoice updates.
+    pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
+        self.allow_unwind_canonical_header = unwind_canonical_header;
         self
     }
 

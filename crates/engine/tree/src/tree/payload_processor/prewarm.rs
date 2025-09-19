@@ -231,7 +231,13 @@ where
         }
     }
 
-    /// Save the state to the shared cache for the given block.
+    /// This method calls `ExecutionCache::update_with_guard` which requires exclusive access.
+    /// It should only be called after ensuring that:
+    /// 1. All prewarming tasks have completed execution
+    /// 2. No other concurrent operations are accessing the cache
+    /// 3. The prewarming phase has finished (typically signaled by `FinishedTxExecution`)
+    ///
+    /// This method is called from `run()` only after all execution tasks are complete,
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
@@ -248,11 +254,12 @@ where
             if cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
                 *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
             }
 
             cache.update_metrics();
-            debug!(target: "engine::caching", "Updated state caches");
+            debug!(target: "engine::caching", parent_hash=?cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
             *cached = Some(cache);

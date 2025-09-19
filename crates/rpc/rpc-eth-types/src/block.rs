@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use alloy_primitives::TxHash;
-use reth_primitives_traits::{BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock};
+use reth_primitives_traits::{
+    BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
+};
 
 /// A pair of an [`Arc`] wrapped [`RecoveredBlock`] and its corresponding receipts.
 ///
@@ -36,5 +38,10 @@ impl<N: NodePrimitives> BlockAndReceipts<N> {
         let indexed_tx = self.block.find_indexed(tx_hash)?;
         let receipt = self.receipts.get(indexed_tx.index())?;
         Some((indexed_tx, receipt))
+    }
+
+    /// Returns the underlying sealed block.
+    pub fn sealed_block(&self) -> &SealedBlock<BlockTy<N>> {
+        self.block.sealed_block()
     }
 }

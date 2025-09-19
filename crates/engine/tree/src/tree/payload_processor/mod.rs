@@ -1,5 +1,6 @@
 //! Entrypoint for payload processing.
 
+use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
         CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
@@ -44,8 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-
-use super::precompile_cache::PrecompileCacheMap;
+use tracing::{debug, instrument};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -374,11 +374,17 @@ where
     ///
     /// If the given hash is different then what is recently cached, then this will create a new
     /// instance.
+    #[instrument(target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
-            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
-        })
+        self.execution_cache
+            .get_cache_for(parent_hash)
+            .inspect(|_| debug!("reusing execution cache"))
+            .unwrap_or_else(|| {
+                debug!("creating new execution cache on cache miss");
+                let cache =
+                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
+                SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            })
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
@@ -549,6 +555,24 @@ impl Drop for CacheTaskHandle {
 ///  - Update cache upon successful payload execution
 ///
 /// This process assumes that payloads are received sequentially.
+///
+/// ## Cache Safety
+///
+/// **CRITICAL**: Cache update operations require exclusive access. All concurrent cache users
+/// (such as prewarming tasks) must be terminated before calling `update_with_guard`, otherwise
+/// the cache may be corrupted or cleared.
+///
+/// ## Cache vs Prewarming Distinction
+///
+/// **`ExecutionCache`**:
+/// - Stores parent block's execution state after completion
+/// - Used to fetch parent data for next block's execution
+/// - Must be exclusively accessed during save operations
+///
+/// **`PrewarmCacheTask`**:
+/// - Speculatively loads accounts/storage that might be used in transaction execution
+/// - Prepares data for state root proof computation
+/// - Runs concurrently but must not interfere with cache saves
 #[derive(Clone, Debug, Default)]
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
@@ -572,6 +596,17 @@ impl ExecutionCache {
 
     /// Updates the cache with a closure that has exclusive access to the guard.
     /// This ensures that all cache operations happen atomically.
+    ///
+    /// ## CRITICAL SAFETY REQUIREMENT
+    ///
+    /// **Before calling this method, you MUST ensure there are no other active cache users.**
+    /// This includes:
+    /// - No running [`PrewarmCacheTask`] instances that could write to the cache
+    /// - No concurrent transactions that might access the cached state
+    /// - All prewarming operations must be completed or cancelled
+    ///
+    /// Violating this requirement can result in cache corruption, incorrect state data,
+    /// and potential consensus failures.
     pub(crate) fn update_with_guard<F>(&self, update_fn: F)
     where
         F: FnOnce(&mut Option<SavedCache>),

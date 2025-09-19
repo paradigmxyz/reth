@@ -95,6 +95,11 @@ pub struct EngineArgs {
         default_value = "false"
     )]
     pub always_process_payload_attributes_on_canonical_head: bool,
+
+    /// Allow unwinding canonical header to ancestor during forkchoice updates.
+    /// See `TreeConfig::unwind_canonical_header` for more details.
+    #[arg(long = "engine.allow-unwind-canonical-header", default_value = "false")]
+    pub allow_unwind_canonical_header: bool,
 }
 
 #[allow(deprecated)]
@@ -118,6 +123,7 @@ impl Default for EngineArgs {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            allow_unwind_canonical_header: false,
         }
     }
 }
@@ -141,6 +147,7 @@ impl EngineArgs {
             .with_always_process_payload_attributes_on_canonical_head(
                 self.always_process_payload_attributes_on_canonical_head,
             )
+            .with_unwind_canonical_header(self.allow_unwind_canonical_header)
     }
 }
 
