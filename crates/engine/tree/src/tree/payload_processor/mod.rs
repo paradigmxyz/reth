@@ -326,7 +326,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
-// Pass the guard to the context. This locks the cache for the lifetime of the prewarm
+            // Pass the guard to the context. This locks the cache for the lifetime of the prewarm
             // task.
             cache_usage_guard: Some(saved_cache.usage_guard.clone()),
         };
@@ -347,11 +347,7 @@ where
             });
         }
 
-        CacheTaskHandle {
-            saved_cache,
-            cache_usage_guard,
-            to_prewarm_task: Some(to_prewarm_task),
-        }
+        CacheTaskHandle { saved_cache, cache_usage_guard, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
