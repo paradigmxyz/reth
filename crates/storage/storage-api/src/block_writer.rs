@@ -5,7 +5,7 @@ use reth_db_models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie_common::HashedPostStateSorted;
+use reth_trie_common::{updates::TrieUpdates, HashedPostStateSorted};
 
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:
@@ -107,7 +107,7 @@ pub trait BlockWriter: Send + Sync {
     /// updates the post-state.
     ///
     /// Inserts the blocks into the database and updates the state with
-    /// provided `BundleState`. The database's trie state is _not_ updated.
+    /// provided `BundleState`.
     ///
     /// # Parameters
     ///
@@ -122,5 +122,6 @@ pub trait BlockWriter: Send + Sync {
         blocks: Vec<RecoveredBlock<Self::Block>>,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
+        trie_updates: TrieUpdates,
     ) -> ProviderResult<()>;
 }

@@ -82,6 +82,7 @@ where
         vec![block.clone()],
         &execution_outcome,
         Default::default(),
+        Default::default(),
     )?;
     provider_rw.commit()?;
 
@@ -214,6 +215,7 @@ where
     provider_rw.append_blocks_with_state(
         vec![block1.clone(), block2.clone()],
         &execution_outcome,
+        Default::default(),
         Default::default(),
     )?;
     provider_rw.commit()?;
