@@ -2,26 +2,39 @@ use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
 use alloy_eips::{eip7685::Requests, Encodable2718};
 use alloy_primitives::{Bloom, Bytes, B256};
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{DepositContract, EthereumHardforks}; 
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
     receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
 };
 
+/// Temp for proof of concept
+pub trait DepositContractProvider {
+    /// Womp
+    fn get_deposit_contract(&self) -> Option<DepositContract>;
+}
+
+/// Temp for proof of concept
+impl DepositContractProvider for reth_chainspec::ChainSpec {
+    fn get_deposit_contract(&self) -> Option<DepositContract> {
+        self.deposit_contract
+    }
+}
+
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution<B, R, ChainSpec>(
+pub fn validate_block_post_execution<B, R, CS>(
     block: &RecoveredBlock<B>,
-    chain_spec: &ChainSpec,
+    chain_spec: &CS,
     receipts: &[R],
     requests: &Requests,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
     R: Receipt,
-    ChainSpec: EthereumHardforks,
+    CS: EthereumHardforks + DepositContractProvider,
 {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
@@ -50,8 +63,24 @@ where
         }
     }
 
-    // Validate that the header requests hash matches the calculated requests hash
+    // Validate deposit event data layout and requests hash
     if chain_spec.is_prague_active_at_timestamp(block.header().timestamp()) {
+        // Validate deposit event data layout
+        if let Some(deposit_contract) = chain_spec.get_deposit_contract() {
+            for receipt in receipts {
+                for log in receipt.logs() {
+                    if log.address == deposit_contract.address 
+                        && log.topics().first() == Some(&deposit_contract.topic) 
+                    {
+                        if !verify_deposit_event_data(&log.data.data) {
+                            return Err(ConsensusError::InvalidDepositEventLayout);
+                        }
+                    }
+                }
+            }
+        }
+    
+        // Validate requests hash
         let Some(header_requests_hash) = block.header().requests_hash() else {
             return Err(ConsensusError::RequestsHashMissing)
         };
@@ -111,6 +140,103 @@ fn compare_receipts_root_and_logs_bloom(
     }
 
     Ok(())
+}
+
+/// Validates deposit event data according to EIP-6110 specification
+fn verify_deposit_event_data(deposit_event_data: &[u8]) -> bool {
+    // Check if the event data length is exactly 576 bytes
+    if deposit_event_data.len() != 576 {
+        return false;
+    }
+
+    // Extract offsets from the first 160 bytes
+    let pubkey_offset = u32::from_be_bytes([
+        deposit_event_data[28], deposit_event_data[29], 
+        deposit_event_data[30], deposit_event_data[31]
+    ]) as usize;
+    
+    let withdrawal_credentials_offset = u32::from_be_bytes([
+        deposit_event_data[60], deposit_event_data[61], 
+        deposit_event_data[62], deposit_event_data[63]
+    ]) as usize;
+    
+    let amount_offset = u32::from_be_bytes([
+        deposit_event_data[92], deposit_event_data[93],
+        deposit_event_data[94], deposit_event_data[95]
+    ]) as usize;
+    
+    let signature_offset = u32::from_be_bytes([
+        deposit_event_data[124], deposit_event_data[125],
+        deposit_event_data[126], deposit_event_data[127]
+    ]) as usize;
+    
+    let index_offset = u32::from_be_bytes([
+        deposit_event_data[156], deposit_event_data[157],
+        deposit_event_data[158], deposit_event_data[159]
+    ]) as usize;
+
+    // Validate the expected offset values
+    if pubkey_offset != 160
+        || withdrawal_credentials_offset != 256
+        || amount_offset != 320
+        || signature_offset != 384
+        || index_offset != 512
+    {
+        return false;
+    }
+
+    // Check bounds for all offsets
+    if pubkey_offset + 32 > deposit_event_data.len()
+        || withdrawal_credentials_offset + 32 > deposit_event_data.len()
+        || amount_offset + 32 > deposit_event_data.len()
+        || signature_offset + 32 > deposit_event_data.len()
+        || index_offset + 32 > deposit_event_data.len()
+    {
+        return false;
+    }
+
+    // Extract sizes from the offset locations
+    let pubkey_size = u32::from_be_bytes([
+        deposit_event_data[pubkey_offset + 28],
+        deposit_event_data[pubkey_offset + 29],
+        deposit_event_data[pubkey_offset + 30],
+        deposit_event_data[pubkey_offset + 31]
+    ]);
+    
+    let withdrawal_credentials_size = u32::from_be_bytes([
+        deposit_event_data[withdrawal_credentials_offset + 28],
+        deposit_event_data[withdrawal_credentials_offset + 29],
+        deposit_event_data[withdrawal_credentials_offset + 30],
+        deposit_event_data[withdrawal_credentials_offset + 31]
+    ]);
+    
+    let amount_size = u32::from_be_bytes([
+        deposit_event_data[amount_offset + 28],
+        deposit_event_data[amount_offset + 29],
+        deposit_event_data[amount_offset + 30],
+        deposit_event_data[amount_offset + 31]
+    ]);
+    
+    let signature_size = u32::from_be_bytes([
+        deposit_event_data[signature_offset + 28],
+        deposit_event_data[signature_offset + 29],
+        deposit_event_data[signature_offset + 30],
+        deposit_event_data[signature_offset + 31]
+    ]);
+    
+    let index_size = u32::from_be_bytes([
+        deposit_event_data[index_offset + 28],
+        deposit_event_data[index_offset + 29],
+        deposit_event_data[index_offset + 30],
+        deposit_event_data[index_offset + 31]
+    ]);
+
+    // Validate the expected sizes
+    pubkey_size == 48
+        && withdrawal_credentials_size == 32
+        && amount_size == 8
+        && signature_size == 96
+        && index_size == 8
 }
 
 #[cfg(test)]

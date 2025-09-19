@@ -268,6 +268,10 @@ pub enum ConsensusError {
     #[error("unexpected requests hash")]
     RequestsHashUnexpected,
 
+    /// Error when deposit event data layout is invalid
+    #[error("failed to decode deposit requests from receipts")]
+    InvalidDepositEventLayout,
+
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
