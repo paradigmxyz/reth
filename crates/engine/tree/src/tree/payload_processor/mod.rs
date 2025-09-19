@@ -315,7 +315,6 @@ where
         }
 
         let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
-
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -344,7 +343,7 @@ where
             });
         }
 
-        CacheTaskHandle { cache, cache_metrics, to_prewarm_task: Some(to_prewarm_task) }
+        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
@@ -462,11 +461,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> StateExecutionCache {
-        self.prewarm_handle.cache()
+        self.prewarm_handle.cache().clone()
     }
 
+    /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
-        self.prewarm_handle.cache_metrics()
+        self.prewarm_handle.cache_metrics().clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -503,14 +503,6 @@ pub(crate) struct CacheTaskHandle {
 }
 
 impl CacheTaskHandle {
-    fn cache(&self) -> StateExecutionCache {
-        self.cache.clone()
-    }
-
-    fn cache_metrics(&self) -> CachedStateMetrics {
-        self.cache_metrics.clone()
-    }
-
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
