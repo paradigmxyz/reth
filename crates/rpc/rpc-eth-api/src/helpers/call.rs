@@ -771,8 +771,8 @@ pub trait Call:
             request.as_mut().set_gas_limit(self.call_gas_limit());
         }
 
-        // Disable block gas limit check to allow executing transactions with higher gas limit (call gas limit):
-        // https://github.com/paradigmxyz/reth/issues/18577
+        // Disable block gas limit check to allow executing transactions with higher gas limit (call
+        // gas limit): https://github.com/paradigmxyz/reth/issues/18577
         evm_env.cfg_env.disable_block_gas_limit = true;
 
         // Disabled because eth_call is sometimes used with eoa senders
@@ -783,7 +783,6 @@ pub trait Call:
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
-
 
         // Disable EIP-7825 transaction gas limit to support larger transactions
         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
