@@ -162,10 +162,11 @@ where
         // Insert the blocks
         for ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock { recovered_block, execution_output, hashed_state },
-            trie,
+            mut trie,
         } in blocks
         {
             let block_hash = recovered_block.hash();
+            let block_number = recovered_block.number();
             self.database()
                 .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
@@ -180,9 +181,18 @@ where
             // insert hashes and intermediate merkle nodes
             self.database()
                 .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
-            self.database().write_trie_updates(
-                trie.as_ref().ok_or(ProviderError::MissingTrieUpdates(block_hash))?,
-            )?;
+
+            let trie_updates =
+                trie.take_present().ok_or(ProviderError::MissingTrieUpdates(block_hash))?;
+
+            // sort trie updates and insert changesets
+            // TODO(mediocregopher): We should rework `write_trie_updates` to also accept a
+            // `TrieUpdatesSorted`, and then the `trie` field of `ExecutedBlockWithTrieUpdates` to
+            // carry a TrieUpdatesSorted.
+            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
+            self.database().write_trie_changesets(block_number, &trie_updates_sorted)?;
+
+            self.database().write_trie_updates(&trie_updates)?;
         }
 
         // update history indices
