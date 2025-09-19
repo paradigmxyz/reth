@@ -568,8 +568,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Updates only the pending fees without triggering subpool updates.
     /// Returns the previous base fee and blob fee values.
-    #[allow(clippy::missing_const_for_fn)]
-    fn update_pending_fees_only(
+    const fn update_pending_fees_only(
         &mut self,
         mut new_base_fee: u64,
         new_blob_fee: Option<u128>,
@@ -586,8 +585,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         (new_base_fee, prev_blob_fee)
     }
 
-    /// Applies fee-based promotion updates.
-    /// Directly modifies the provided outcome by pushing promoted transactions.
+    /// Applies fee-based promotion updates based on the previous fees.
+    ///
+    /// Records promoted transactions based on fee swings.
+    ///
+    /// Caution: This expects that the fees were previously already updated via
+    /// [`Self::update_pending_fees_only`].
     fn apply_fee_updates(
         &mut self,
         prev_base_fee: u64,
@@ -598,10 +601,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         let new_blob_fee = self.all_transactions.pending_fees.blob_fee;
 
         if new_base_fee == prev_base_fee && new_blob_fee == prev_blob_fee {
+            // nothing to update
             return;
         }
 
-        // Restore previous fees so that the update helpers detect the delta.
+        // IMPORTANT:
+        // Restore previous fees so that the update fee functions correctly handle fee swings
         self.all_transactions.pending_fees.base_fee = prev_base_fee;
         self.all_transactions.pending_fees.blob_fee = prev_blob_fee;
 
@@ -657,7 +662,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         // Update removed transactions metric
         self.metrics.removed_transactions.increment(removed_txs_count);
 
-        // Update fees internally first without triggering subpool updates
+        // Update fees internally first without triggering subpool updates based on fee movements
+        // This must happen before we update the changed so that all account updates use the new fee
+        // values, this way all changed accounts remain unaffected by the fee updates that are
+        // performed in next step and we don't collect promotions twice
         let (prev_base_fee, prev_blob_fee) =
             self.update_pending_fees_only(block_info.pending_basefee, block_info.pending_blob_fee);
 
@@ -665,7 +673,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut outcome = self.update_accounts(changed_senders);
 
         // Apply subpool updates based on fee changes
-        // This directly pushes to outcome.promoted and outcome.discarded
+        // This will record any additional promotions based on fee movements
         self.apply_fee_updates(prev_base_fee, prev_blob_fee, &mut outcome);
 
         // Update the rest of block info (without triggering fee updates again)
