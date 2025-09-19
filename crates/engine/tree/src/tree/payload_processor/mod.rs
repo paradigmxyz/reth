@@ -556,7 +556,7 @@ impl Drop for CacheTaskHandle {
 /// - Runs concurrently but must not interfere with cache saves
 #[derive(Clone, Debug, Default)]
 struct ExecutionCache {
-    /// Guarded cache identified by block hash.
+    /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
 }
 
