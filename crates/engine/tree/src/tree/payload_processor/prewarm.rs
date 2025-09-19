@@ -151,9 +151,6 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        if let Some(saved_cache) = self.execution_cache.get_cache_for(self.ctx.env.parent_hash) {
-            drop(saved_cache)
-        }
         let hash = self.ctx.env.hash;
         let caches = self.ctx.cache;
         let metrics = self.ctx.cache_metrics;
