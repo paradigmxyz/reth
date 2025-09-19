@@ -561,7 +561,11 @@ struct ExecutionCache {
 }
 
 impl ExecutionCache {
-    /// Returns the idle cache for `parent_hash`, or `None` if unavailable.
+    /// Returns the cache for `parent_hash` if it's available for use.
+    ///
+    /// A cache is considered available when:
+    /// - It exists and matches the requested parent hash
+    /// - No other tasks are currently using it (checked via Arc reference count)
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let cache = self.inner.read();
         cache.as_ref().and_then(|cache| {

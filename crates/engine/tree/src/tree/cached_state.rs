@@ -542,7 +542,7 @@ impl SavedCache {
         (self.caches, self.metrics)
     }
 
-    /// Returns true if the cache is idle (no other tasks are using it).
+    /// Returns true if the cache is available for use (no other tasks are currently using it).
     pub(crate) fn is_available(&self) -> bool {
         Arc::strong_count(&self.usage_guard) == 1
     }
