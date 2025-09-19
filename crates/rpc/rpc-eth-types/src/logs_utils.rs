@@ -145,7 +145,9 @@ where
     Ok(())
 }
 
-/// Computes the block range based on the filter range and current block numbers
+/// Computes the block range based on the filter range and current block numbers.
+///
+/// This returns `(min(best,from), min(best,to))`.
 pub fn get_filter_block_range(
     from_block: Option<u64>,
     to_block: Option<u64>,

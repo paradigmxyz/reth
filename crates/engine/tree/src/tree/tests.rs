@@ -880,12 +880,9 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
     // Create test harness
     let mut test_harness = TestHarness::new(chain_spec.clone());
 
-    // Set engine kind to OpStack to ensure the fix is triggered
-    test_harness.tree.config = test_harness
-        .tree
-        .config
-        .clone()
-        .with_always_process_payload_attributes_on_canonical_head(true);
+    // Set engine kind to OpStack and enable unwind_canonical_header to ensure the fix is triggered
+    test_harness.tree.engine_kind = EngineApiKind::OpStack;
+    test_harness.tree.config = test_harness.tree.config.clone().with_unwind_canonical_header(true);
     let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
     // Create a chain of blocks

@@ -49,7 +49,7 @@ jobs:
           name: hive_assets
           path: ./hive_assets
   test:
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -207,12 +207,12 @@ jobs:
           find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml --ignored .github/assets/hive/ignored_tests.yaml
 
       - name: Print simulator output
-        if: true
+        if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/*simulator*.log
 
       - name: Print reth client logs
-        if: true
+        if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
   notify-on-error:

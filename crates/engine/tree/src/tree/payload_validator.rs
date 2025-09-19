@@ -503,21 +503,21 @@ where
         if let (Some(executed_bal), Some(block_bal)) =
             (output.result.block_access_list.as_ref(), block.body().block_access_list())
         {
-            tracing::error!(
-                "BlockAccessList mismatch!\n  block BAL = {:?}\n  executed BAL = {:?}",
-                block_bal,
-                executed_bal
-            );
+            if !alloy_evm::eth::utils::validate_block_access_list_against_execution(block_bal) ||
+                block_bal.as_slice() != executed_bal.as_slice()
+            {
+                tracing::debug!(
+                    "BlockAccessList mismatch!\n  block BAL = {:?}\n  executed BAL = {:?}",
+                    block_bal,
+                    executed_bal
+                );
 
-            //     if !validate_block_access_list_against_execution(block_bal) ||
-            //         block_bal.as_slice() != executed_bal.as_slice()
-            //     {
-            //         return Err(InsertBlockError::new(
-            //             block.into_sealed_block(),
-            //             ConsensusError::BlockAccessListMismatch.into(),
-            //         )
-            //         .into());
-            //     }
+                return Err(InsertBlockError::new(
+                    block.into_sealed_block(),
+                    ConsensusError::BlockAccessListMismatch.into(),
+                )
+                .into());
+            }
         }
 
         // A helper macro that returns the block in case there was an error
@@ -593,7 +593,7 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(target: "engine::tree", %error, "Background parallel state root computation failed");
+                        debug!(target: "engine::tree", %error, "State root task failed");
                     }
                 }
             } else {
@@ -613,15 +613,8 @@ where
                         );
                         maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
-                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                        debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
-                    }
                     Err(error) => {
-                        return Err(InsertBlockError::new(
-                            block.into_sealed_block(),
-                            InsertBlockErrorKind::Other(Box::new(error)),
-                        )
-                        .into())
+                        debug!(target: "engine::tree", %error, "Parallel state root computation failed");
                     }
                 }
             }
