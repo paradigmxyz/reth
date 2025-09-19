@@ -1,7 +1,7 @@
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
-use core::ops::{RangeBounds, RangeInclusive};
+use core::ops::RangeBounds;
 use reth_db_api::models::BlockNumberAddress;
 use reth_db_models::AccountBeforeTx;
 use reth_primitives_traits::{Account, StorageEntry};
@@ -69,17 +69,4 @@ pub trait HashingWriter: Send + Sync {
         &self,
         storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = StorageEntry>)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
-
-    /// Calculate the hashes of all changed accounts and storages, and finally calculate the state
-    /// root.
-    ///
-    /// The hashes are calculated from `fork_block_number + 1` to `current_block_number`.
-    ///
-    /// The resulting state root is compared with `expected_state_root`.
-    fn insert_hashes(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-        end_block_hash: B256,
-        expected_state_root: B256,
-    ) -> ProviderResult<()>;
 }
