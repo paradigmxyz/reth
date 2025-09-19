@@ -803,7 +803,6 @@ mod tests {
     }
 
     // Tests for SavedCache locking mechanism
-
     #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
