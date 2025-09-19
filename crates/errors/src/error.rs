@@ -46,7 +46,10 @@ impl RethError {
 
     /// Create a new `RethError` from a given message.
     pub fn msg(msg: impl Display) -> Self {
-        Self::Other(msg.to_string().into())
+        Self::Other(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            msg.to_string(),
+        )))
     }
 }
 
