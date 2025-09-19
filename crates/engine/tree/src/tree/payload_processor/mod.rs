@@ -461,12 +461,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> StateExecutionCache {
-        self.prewarm_handle.cache().clone()
+        self.prewarm_handle.cache.clone()
     }
 
     /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
-        self.prewarm_handle.cache_metrics().clone()
+        self.prewarm_handle.cache_metrics.clone()
     }
 
     /// Terminates the pre-warming transaction processing.
