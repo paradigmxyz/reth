@@ -63,7 +63,7 @@ where
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Holds the saved cache clone, keeping the usage guard alive.
-    cache_guard: SavedCache,
+    saved_cache: SavedCache,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -77,7 +77,7 @@ where
         executor: WorkloadExecutor,
         execution_cache: PayloadExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        cache_guard: SavedCache,
+        saved_cache: SavedCache,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> (Self, Sender<PrewarmTaskEvent>) {
         let (actions_tx, actions_rx) = channel();
@@ -85,7 +85,7 @@ where
             Self {
                 executor,
                 execution_cache,
-                cache_guard,
+                saved_cache,
                 ctx,
                 max_concurrency: 64,
                 to_multi_proof,
@@ -157,9 +157,9 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        let PrewarmCacheTask { execution_cache, ctx, cache_guard, .. } = self;
+        let PrewarmCacheTask { execution_cache, ctx, saved_cache, .. } = self;
 
-        drop(cache_guard);
+        drop(saved_cache);
         let hash = ctx.env.hash;
         let caches = ctx.cache;
         let metrics = ctx.cache_metrics;
