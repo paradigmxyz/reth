@@ -534,8 +534,6 @@ impl CacheTaskHandle {
 
 impl Drop for CacheTaskHandle {
     fn drop(&mut self) {
-        // Release the guard once prewarming is done.
-        // The guard will be dropped naturally here.
         // Ensure we always terminate on drop
         self.terminate_caching(None);
     }
