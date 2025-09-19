@@ -538,7 +538,6 @@ impl SavedCache {
     }
 
     /// Splits the cache into its caches and metrics, consuming it.
-    #[allow(dead_code)]
     pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
         (self.caches, self.metrics)
     }

@@ -315,14 +315,14 @@ where
         }
 
         let saved_cache = self.cache_for(env.parent_hash);
-        let cache_clone = saved_cache.cache().clone();
-        let cache_metrics_clone = saved_cache.metrics().clone();
+        let (cache, cache_metrics) = saved_cache.clone().split();
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            cache: cache_clone.clone(),
-            cache_metrics: cache_metrics_clone.clone(),
+            cache: cache.clone(),
+            cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -346,11 +346,7 @@ where
             });
         }
 
-        CacheTaskHandle {
-            cache: cache_clone,
-            cache_metrics: cache_metrics_clone,
-            to_prewarm_task: Some(to_prewarm_task),
-        }
+        CacheTaskHandle { cache, cache_metrics, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
