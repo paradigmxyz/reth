@@ -577,14 +577,11 @@ struct ExecutionCache {
 impl ExecutionCache {
     /// Returns the idle cache for `parent_hash`, or `None` if unavailable.
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
-        let guard = self.inner.write();
-        let cache = guard.as_ref()?;
-
-        if cache.executed_block_hash() != parent_hash || !cache.is_available() {
-            return None
-        }
-
-        Some(cache.clone())
+        let guard = self.inner.read();
+        guard.as_ref().and_then(|cache| {
+            (cache.executed_block_hash() == parent_hash && cache.is_available())
+                .then(|| cache.clone())
+        })
     }
 
     /// Clears the tracked cache
