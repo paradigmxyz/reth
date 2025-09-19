@@ -574,7 +574,7 @@ struct ExecutionCache {
 }
 
 impl ExecutionCache {
-    /// Returns a lease over the cache if the stored cache is for `parent_hash` and currently idle.
+    /// Returns the idle cache for `parent_hash` with a lock guard, or None if unavailable.
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<(SavedCache, Arc<()>)> {
         let guard = self.inner.write();
         let cache = guard.as_ref()?;
