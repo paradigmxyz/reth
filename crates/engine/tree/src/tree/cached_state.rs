@@ -538,6 +538,7 @@ impl SavedCache {
     }
 
     /// Splits the cache into its caches and metrics, consuming it.
+    #[allow(dead_code)]
     pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
         (self.caches, self.metrics)
     }
@@ -552,6 +553,11 @@ impl SavedCache {
         self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
         self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
+    }
+
+    /// Returns the metrics for this cache.
+    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
+        &self.metrics
     }
 }
 
@@ -606,7 +612,7 @@ impl Default for AccountStorageCache {
 }
 
 #[cfg(test)]
-mod tests {
+mod inline_tests {
     use super::*;
     use alloy_primitives::{B256, U256};
     use rand::Rng;
