@@ -1441,8 +1441,11 @@ mod tests {
             let key = ShardedKey::new(real_key, if i == shards { u64::MAX } else { i * 100 });
             let list = IntegerList::new_pre_sorted([i * 100u64]);
 
-            db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect("Failed to put AccountsHistory"))
-                .unwrap();
+            db.update(|tx| {
+                tx.put::<AccountsHistory>(key.clone(), list.clone())
+                    .expect("Failed to put AccountsHistory")
+            })
+            .unwrap();
         }
 
         // Seek value with non existing key.
