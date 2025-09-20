@@ -14,8 +14,10 @@ struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
 }
 
-impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Future
-    for MyExEx<Node>
+impl<Node> Future for MyExEx<Node>
+where
+    Node: FullNodeComponents,
+    Node::Types: NodeTypes<Primitives = EthPrimitives>,
 {
     type Output = eyre::Result<()>;
 
@@ -26,6 +28,9 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
+                    this.ctx
+                        .events
+                        .send(ExExEvent::FinishedHeight(new.tip().num_hash()))?;
                 }
                 ExExNotification::ChainReorged { old, new } => {
                     info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
@@ -34,26 +39,23 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
                     info!(reverted_chain = ?old.range(), "Received revert");
                 }
             };
-
-            if let Some(committed_chain) = notification.committed_chain() {
-                this.ctx
-                    .events
-                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
-            }
         }
 
         Poll::Ready(Ok(()))
     }
 }
 
-fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(async move |builder, _| {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", async move |ctx| Ok(MyExEx { ctx }))
-            .launch()
-            .await?;
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    reth::cli::Cli::parse_args()
+        .run(async move |builder, _| {
+            let handle = builder
+                .node(EthereumNode::default())
+                .install_exex("my-exex", async move |ctx| Ok(MyExEx { ctx }))
+                .launch()
+                .await?;
 
-        handle.wait_for_node_exit().await
-    })
+            handle.wait_for_node_exit().await
+        })
+        .await
 }
