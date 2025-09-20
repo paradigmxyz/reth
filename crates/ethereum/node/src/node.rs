@@ -59,6 +59,7 @@ use reth_transaction_pool::{
 };
 use revm::context::TxEnv;
 use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
+use reth_ethereum_consensus::DepositContractProvider;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -78,7 +79,7 @@ impl EthereumNode {
     where
         Node: FullNodeTypes<
             Types: NodeTypes<
-                ChainSpec: Hardforks + EthereumHardforks + EthExecutorSpec,
+                ChainSpec: Hardforks + EthereumHardforks + EthExecutorSpec + DepositContractProvider,
                 Primitives = EthPrimitives,
             >,
         >,
@@ -544,12 +545,9 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks, Primitives = EthPrimitives>,
-    >,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks + DepositContractProvider, Primitives = EthPrimitives>>,
 {
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
-
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
     }
