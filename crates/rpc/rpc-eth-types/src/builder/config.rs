@@ -10,15 +10,12 @@ use reqwest::Url;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
-    DEFAULT_PROOF_PERMITS,
+    DEFAULT_PROOF_PERMITS, RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
-
-/// Default value for send raw transaction sync timeout
-pub const DEFAULT_SEND_RAW_TRANSACTION_SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Config for the locally built pending block
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -128,7 +125,7 @@ impl Default for EthConfig {
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
-            send_raw_transaction_sync_timeout: DEFAULT_SEND_RAW_TRANSACTION_SYNC_TIMEOUT,
+            send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
         }
     }
 }

@@ -1,12 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use std::{
-    collections::HashSet,
-    ffi::OsStr,
-    net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
+use crate::args::{
+    types::{MaxU32, ZeroAsNoneU64},
+    GasPriceOracleArgs, RpcStateCacheArgs,
 };
-
 use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
@@ -14,15 +11,17 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_cli_util::parse_ether_value;
+use reth_cli_util::{parse_duration_from_secs_or_ms, parse_ether_value};
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
-use url::Url;
-
-use crate::args::{
-    types::{MaxU32, ZeroAsNoneU64},
-    GasPriceOracleArgs, RpcStateCacheArgs,
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+    time::Duration,
 };
+use url::Url;
 
 use super::types::MaxOr;
 
@@ -39,9 +38,6 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 
 /// Default number of incoming connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
-
-/// Default timeout for send raw transaction sync in seconds.
-pub(crate) const RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS: u64 = 30;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -248,13 +244,14 @@ pub struct RpcServerArgs {
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
 
-    /// Timeout in seconds for `send_raw_transaction_sync` RPC method.
+    /// Timeout for `send_raw_transaction_sync` RPC method.
     #[arg(
         long = "rpc.send-raw-transaction-sync-timeout",
         value_name = "SECONDS",
-        default_value_t = RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS
+        default_value = "30s",
+        value_parser = parse_duration_from_secs_or_ms,
     )]
-    pub rpc_send_raw_transaction_sync_timeout: u64,
+    pub rpc_send_raw_transaction_sync_timeout: Duration,
 }
 
 impl RpcServerArgs {
@@ -372,8 +369,8 @@ impl RpcServerArgs {
     }
 
     /// Configures the timeout for send raw transaction sync.
-    pub const fn with_send_raw_transaction_sync_timeout(mut self, timeout_secs: u64) -> Self {
-        self.rpc_send_raw_transaction_sync_timeout = timeout_secs;
+    pub const fn with_send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
+        self.rpc_send_raw_transaction_sync_timeout = timeout;
         self
     }
 }
@@ -420,7 +417,8 @@ impl Default for RpcServerArgs {
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             rpc_forwarder: None,
             builder_disallow: Default::default(),
-            rpc_send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
+            rpc_send_raw_transaction_sync_timeout:
+                constants::RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
         }
     }
 }

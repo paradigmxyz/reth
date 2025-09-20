@@ -468,6 +468,11 @@ Gas Price Oracle:
       --gpo.default-suggested-fee <DEFAULT_SUGGESTED_FEE>
           The default gas price to use if there are no blocks to use
 
+      --rpc.send-raw-transaction-sync-timeout <SECONDS>
+          Timeout for `send_raw_transaction_sync` RPC method
+
+          [default: 30s]
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
