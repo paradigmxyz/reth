@@ -483,6 +483,7 @@ where
                 propagate,
                 bytecode_hash,
                 authorities,
+                block_info: _block_info,
             } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
@@ -1372,7 +1373,9 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_eips::{
+        eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant, NumHash,
+    };
     use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
 
@@ -1434,6 +1437,8 @@ mod tests {
                 blob_store.insert(*tx.get_hash(), sidecar.clone()).unwrap();
             }
 
+            let block_info = NumHash::default();
+
             // Add the transaction to the pool with external origin and valid outcome.
             test_pool.add_transactions(
                 TransactionOrigin::External,
@@ -1447,6 +1452,7 @@ mod tests {
                     },
                     propagate: true,
                     authorities: None,
+                    block_info,
                 }],
             );
         }
@@ -1478,6 +1484,7 @@ mod tests {
                 transaction: ValidTransaction::Valid(tx),
                 propagate: true,
                 authorities: Some(vec![auth]),
+                block_info: NumHash::default(),
             }],
         );
 

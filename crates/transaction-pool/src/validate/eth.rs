@@ -23,7 +23,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
-    eip7840::BlobParams,
+    eip7840::BlobParams, NumHash,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
@@ -181,6 +181,13 @@ where
     /// Returns the current max gas limit
     pub fn block_gas_limit(&self) -> u64 {
         self.max_gas_limit()
+    }
+
+    /// Gets the current block number and hash
+    fn current_block_info(&self) -> Option<NumHash> {
+        let number = self.client().best_block_number().ok()?;
+        let hash = self.client().block_hash(number).ok()??;
+        Some(NumHash::new(number, hash))
     }
 
     /// Validates a single transaction.
@@ -542,6 +549,8 @@ where
         };
 
         let authorities = self.recover_authorities(&transaction);
+        let block_info = self.current_block_info().unwrap_or_default();
+
         // Return the valid transaction
         TransactionValidationOutcome::Valid {
             balance: account.balance,
@@ -557,6 +566,7 @@ where
                 TransactionOrigin::Private => false,
             },
             authorities,
+            block_info,
         }
     }
 

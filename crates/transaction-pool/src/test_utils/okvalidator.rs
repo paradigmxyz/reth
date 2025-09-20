@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+use alloy_eips::NumHash;
+
 use crate::{
     validate::ValidTransaction, EthPooledTransaction, PoolTransaction, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidator,
@@ -43,6 +45,7 @@ where
         let authorities = transaction.authorization_list().map(|auths| {
             auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
         });
+        let block_info = NumHash::default();
         TransactionValidationOutcome::Valid {
             balance: *transaction.cost(),
             state_nonce: transaction.nonce(),
@@ -50,6 +53,7 @@ where
             transaction: ValidTransaction::Valid(transaction),
             propagate: self.propagate,
             authorities,
+            block_info,
         }
     }
 }
