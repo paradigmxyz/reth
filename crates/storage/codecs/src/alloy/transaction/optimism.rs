@@ -1,7 +1,7 @@
 //! Compact implementation for [`AlloyTxDeposit`]
 
 use crate::{
-    alloy::transaction::ethereum::{CompactEnvelope, Envelope, FromTxCompact, ToTxCompact},
+    alloy::transaction::ethereum::{Envelope, FromTxCompact, ToTxCompact},
     generate_tests,
     txtype::{
         COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
@@ -13,7 +13,7 @@ use alloy_consensus::{
     constants::EIP7702_TX_TYPE_ID, Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
 };
 use alloy_primitives::{Address, Bytes, Sealed, Signature, TxKind, B256, U256};
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use op_alloy_consensus::{OpTxEnvelope, OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit};
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -235,16 +235,94 @@ impl Envelope for OpTxEnvelope {
     }
 }
 
+// Direct impl for OpTxEnvelope since we can't use generic impl due to trait conflicts
 impl Compact for OpTxEnvelope {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
-        CompactEnvelope::to_compact(self, buf)
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature().to_compact(buf) as u8;
+        let zstd_bit = self.input().len() >= 32;
+
+        let tx_bits = if zstd_bit {
+            // compress the tx prefixed with txtype
+            let mut tx_buf = Vec::with_capacity(256);
+            let tx_bits = self.tx_type().to_compact(&mut tx_buf) as u8;
+            self.to_tx_compact(&mut tx_buf);
+
+            buf.put_slice(
+                &{
+                    #[cfg(feature = "std")]
+                    {
+                        reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
+                            let mut compressor = compressor.borrow_mut();
+                            compressor.compress(&tx_buf)
+                        })
+                    }
+                    #[cfg(not(feature = "std"))]
+                    {
+                        let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                        compressor.compress(&tx_buf)
+                    }
+                }
+                .expect("Failed to compress"),
+            );
+            tx_bits
+        } else {
+            let tx_bits = self.tx_type().to_compact(buf) as u8;
+            self.to_tx_compact(buf);
+            tx_bits
+        };
+
+        let flags = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+        buf.as_mut()[start] = flags;
+
+        buf.as_mut().len() - start
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        CompactEnvelope::from_compact(buf, len)
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        let flags = buf.get_u8() as usize;
+
+        let sig_bit = flags & 1;
+        let tx_bits = (flags & 0b110) >> 1;
+        let zstd_bit = flags >> 3;
+
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let (transaction, buf) = if zstd_bit != 0 {
+            #[cfg(feature = "std")]
+            {
+                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
+                    let decompressed = decompressor.decompress(buf);
+
+                    let (tx_type, tx_buf) = OpTxType::from_compact(decompressed, tx_bits);
+                    let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
+
+                    (tx, buf)
+                })
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
+                let decompressed = decompressor.decompress(buf);
+                let (tx_type, tx_buf) = OpTxType::from_compact(decompressed, tx_bits);
+                let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
+
+                (tx, buf)
+            }
+        } else {
+            let (tx_type, buf) = OpTxType::from_compact(buf, tx_bits);
+            Self::from_tx_compact(buf, tx_type, signature)
+        };
+
+        (transaction, buf)
     }
 }
 
