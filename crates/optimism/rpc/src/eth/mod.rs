@@ -307,8 +307,17 @@ where
         Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
     >,
 {
-    fn with_dev_accounts(&self) {
-        *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
+    fn with_dev_accounts(&self, dev_mnemonic: Option<Option<String>>) {
+        const DEFAULT_MNEMONIC: &str =
+            "test test test test test test test test test test test junk";
+        let phrase = match dev_mnemonic {
+            None => return,                  // no dev accounts
+            Some(None) => DEFAULT_MNEMONIC,  // flag given without value
+            Some(Some(ref m)) => m.as_str(), // custom mnemonic
+        };
+
+        let signers = DevSigner::from_mnemonic(phrase, 20);
+        *self.inner.eth_api.signers().write() = signers;
     }
 }
 
