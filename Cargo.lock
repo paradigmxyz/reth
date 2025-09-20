@@ -9473,6 +9473,7 @@ dependencies = [
  "async-trait",
  "derive_more",
  "eyre",
+ "futures",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
