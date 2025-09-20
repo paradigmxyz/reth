@@ -7,7 +7,7 @@ use alloy_primitives::{Sealed, Signature, B256};
 use alloy_rlp::BufMut;
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
-    alloy::transaction::{CompactEnvelope, FromTxCompact, ToTxCompact},
+    alloy::transaction::{Envelope, FromTxCompact, ToTxCompact},
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
@@ -81,11 +81,26 @@ impl Compact for CustomTransaction {
     where
         B: BufMut + AsMut<[u8]>,
     {
-        <Self as CompactEnvelope>::to_compact(self, buf)
+        // Simple implementation: just serialize tx_type + signature + tx_data
+        let start = buf.as_mut().len();
+
+        // Serialize signature
+        let _sig_len = self.signature().to_compact(buf);
+
+        // Serialize tx type
+        let _tx_type_len = self.tx_type().to_compact(buf);
+
+        // Serialize transaction data
+        self.to_tx_compact(buf);
+
+        buf.as_mut().len() - start
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        <Self as CompactEnvelope>::from_compact(buf, len)
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        // Simple implementation: deserialize signature + tx_type + tx_data
+        let (signature, buf) = Signature::from_compact(buf, 0);
+        let (tx_type, buf) = TxTypeCustom::from_compact(buf, 0);
+        Self::from_tx_compact(buf, tx_type, signature)
     }
 }
 

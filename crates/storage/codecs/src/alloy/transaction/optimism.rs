@@ -10,10 +10,10 @@ use crate::{
     Compact,
 };
 use alloy_consensus::{
-    constants::EIP7702_TX_TYPE_ID, Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    constants::EIP7702_TX_TYPE_ID, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
 };
 use alloy_primitives::{Address, Bytes, Sealed, Signature, TxKind, B256, U256};
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 use op_alloy_consensus::{OpTxEnvelope, OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit};
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -235,7 +235,8 @@ impl Envelope for OpTxEnvelope {
     }
 }
 
-// Direct impl for OpTxEnvelope since we can't use generic impl due to trait conflicts
+// Direct impl for OpTxEnvelope
+// Note: We cannot use a generic impl<T: Envelope + ...> due to Rust's orphan rules
 impl Compact for OpTxEnvelope {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
@@ -287,6 +288,7 @@ impl Compact for OpTxEnvelope {
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         let flags = buf.get_u8() as usize;
 
         let sig_bit = flags & 1;

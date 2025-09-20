@@ -112,7 +112,9 @@ impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
     }
 }
 
-// Direct impl for EthereumTxEnvelope since we can't use generic impl due to trait conflicts
+// Direct impl for EthereumTxEnvelope
+// Note: We cannot use a generic impl<T: Envelope + ...> due to Rust's orphan rules
+// conflicting with the existing impl<T: Compact> Compact for &T in lib.rs
 impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
     for EthereumTxEnvelope<Eip4844>
 {
@@ -191,7 +193,7 @@ impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
             {
                 let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
                 let decompressed = decompressor.decompress(buf);
-                let (tx_type, tx_buf) = T::TxType::from_compact(decompressed, tx_bits);
+                let (tx_type, tx_buf) = TxType::from_compact(decompressed, tx_bits);
                 let (tx, _) = Self::from_tx_compact(tx_buf, tx_type, signature);
 
                 (tx, buf)
