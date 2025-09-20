@@ -33,12 +33,10 @@ def get_output_filename(base_path, suffix=None):
     if suffix is None:
         return base_path
     
-    # Split the base path into directory, name, and extension
     dir_name = os.path.dirname(base_path)
     base_name = os.path.basename(base_path)
     name, ext = os.path.splitext(base_name)
     
-    # Create new filename with suffix
     new_name = f"{name}_{suffix}{ext}"
     return os.path.join(dir_name, new_name) if dir_name else new_name
 
@@ -47,35 +45,31 @@ def format_gas_units(value, pos):
     if value == 0:
         return '0'
     
-    # Define unit thresholds and labels
     units = [
-        (1e12, 'Tgas'),  # Teragas
-        (1e9, 'Ggas'),   # Gigagas
-        (1e6, 'Mgas'),   # Megagas
-        (1e3, 'Kgas'),   # Kilogas
-        (1, 'gas')       # gas
+        (1e12, 'Tgas'),
+        (1e9, 'Ggas'),
+        (1e6, 'Mgas'),
+        (1e3, 'Kgas'),
+        (1, 'gas')
     ]
     
     abs_value = abs(value)
     for threshold, unit in units:
         if abs_value >= threshold:
             scaled_value = value / threshold
-            # Format with appropriate precision
             if scaled_value >= 100:
-                return f'{scaled_value:.0f}{unit}/s'
+                return f'{scaled_value:.0f} {unit}/s'
             elif scaled_value >= 10:
-                return f'{scaled_value:.1f}{unit}/s'
+                return f'{scaled_value:.1f} {unit}/s'
             else:
-                return f'{scaled_value:.2f}{unit}/s'
+                return f'{scaled_value:.2f} {unit}/s'
     
-    return f'{value:.0f}gas/s'
+    return f'{value:.0f} gas/s'
 
 def moving_average(data, window_size):
     """Calculate moving average with given window size."""
     if window_size <= 1:
         return data
-    
-    # Use pandas for efficient rolling mean calculation
     series = pd.Series(data)
     return series.rolling(window=window_size, center=True, min_periods=1).mean().values
 
@@ -90,7 +84,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Parse graph selection
     if args.graphs.lower() == 'all':
         selected_graphs = {'histogram', 'line', 'gas'}
     else:
@@ -119,7 +112,6 @@ def main():
         print(f"Error: 'total_latency' column not found in {args.comparison_csv}", file=sys.stderr)
         sys.exit(1)
 
-    # Check for gas_used column if gas graph is selected
     if 'gas' in selected_graphs:
         if 'gas_used' not in df1.columns:
             print(f"Error: 'gas_used' column not found in {args.baseline_csv} (required for gas graph)", file=sys.stderr)
@@ -134,48 +126,44 @@ def main():
         df1 = df1.head(min_len)
         df2 = df2.head(min_len)
 
-    # Convert from microseconds to milliseconds for better readability
     latency1 = df1['total_latency'].values / 1000.0
     latency2 = df2['total_latency'].values / 1000.0
 
-    # Handle division by zero
     with np.errstate(divide='ignore', invalid='ignore'):
         percent_diff = ((latency2 - latency1) / latency1) * 100
 
-    # Remove infinite and NaN values
-    percent_diff = percent_diff[np.isfinite(percent_diff)]
+    mask = np.isfinite(percent_diff)
+    latency1 = latency1[mask]
+    latency2 = latency2[mask]
+    percent_diff = percent_diff[mask]
+    if 'gas' in selected_graphs:
+        gas1 = df1['gas_used'].values[mask]
+        gas2 = df2['gas_used'].values[mask]
 
     if len(percent_diff) == 0:
         print("Error: No valid percent differences could be calculated", file=sys.stderr)
         sys.exit(1)
 
-    # Calculate statistics once for use in graphs and output
     mean_diff = np.mean(percent_diff)
     median_diff = np.median(percent_diff)
 
-    # Determine number of subplots and create figure
     num_plots = len(selected_graphs)
     if num_plots == 0:
         print("Error: No valid graphs selected", file=sys.stderr)
         sys.exit(1)
 
-    # Store output filenames
     output_files = []
     
-    if args.separate:
-        # We'll create individual figures for each graph
-        pass
-    else:
-        # Create combined figure
+    if not args.separate:
         if num_plots == 1:
             fig, ax = plt.subplots(1, 1, figsize=(12, 6))
             axes = [ax]
         else:
             fig, axes = plt.subplots(num_plots, 1, figsize=(12, 6 * num_plots))
+            axes = np.atleast_1d(axes)
 
     plot_idx = 0
 
-    # Plot histogram if selected
     if 'histogram' in selected_graphs:
         if args.separate:
             fig, ax = plt.subplots(1, 1, figsize=(12, 6))
@@ -185,7 +173,6 @@ def main():
         min_diff = np.floor(percent_diff.min())
         max_diff = np.ceil(percent_diff.max())
 
-        # Create histogram with 1% buckets
         bins = np.arange(min_diff, max_diff + 1, 1)
 
         ax.hist(percent_diff, bins=bins, edgecolor='black', alpha=0.7)
@@ -194,7 +181,6 @@ def main():
         ax.set_title(f'Total Latency Percent Difference Histogram\n({args.baseline_csv} vs {args.comparison_csv})')
         ax.grid(True, alpha=0.3)
 
-        # Add statistics to the histogram
         ax.axvline(mean_diff, color='red', linestyle='--', label=f'Mean: {mean_diff:.2f}%')
         ax.axvline(median_diff, color='orange', linestyle='--', label=f'Median: {median_diff:.2f}%')
         ax.legend()
@@ -208,26 +194,22 @@ def main():
         else:
             plot_idx += 1
 
-    # Plot line graph if selected
     if 'line' in selected_graphs:
         if args.separate:
             fig, ax = plt.subplots(1, 1, figsize=(12, 6))
         else:
             ax = axes[plot_idx]
             
-        # Determine comparison color based on median change. The median being
-        # negative means processing time got faster, so that becomes green.
         comparison_color = 'green' if median_diff < 0 else 'red'
 
-        # Apply moving average if requested
-        plot_latency1 = latency1[:len(percent_diff)]
-        plot_latency2 = latency2[:len(percent_diff)]
+        plot_latency1 = latency1
+        plot_latency2 = latency2
         
         if args.average:
             plot_latency1 = moving_average(plot_latency1, args.average)
             plot_latency2 = moving_average(plot_latency2, args.average)
         if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+            block_numbers = df1['block_number'].values[:len(plot_latency1)]
             ax.plot(block_numbers, plot_latency1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, plot_latency2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
@@ -239,8 +221,7 @@ def main():
             ax.grid(True, alpha=0.3)
             ax.legend()
         else:
-            # If no block_number column, use index
-            indices = np.arange(len(percent_diff))
+            indices = np.arange(len(plot_latency1))
             ax.plot(indices, plot_latency1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(indices, plot_latency2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Index')
@@ -261,42 +242,31 @@ def main():
         else:
             plot_idx += 1
 
-    # Plot gas/s graph if selected
     if 'gas' in selected_graphs:
         if args.separate:
             fig, ax = plt.subplots(1, 1, figsize=(12, 6))
         else:
             ax = axes[plot_idx]
             
-        # Calculate gas per second (gas/s)
-        # latency is in microseconds, so convert to seconds for gas/s calculation
-        gas1 = df1['gas_used'].values[:len(percent_diff)]
-        gas2 = df2['gas_used'].values[:len(percent_diff)]
+        latency1_sec = df1['total_latency'].values[mask] / 1_000_000.0
+        latency2_sec = df2['total_latency'].values[mask] / 1_000_000.0
         
-        # Convert latency from microseconds to seconds
-        latency1_sec = df1['total_latency'].values[:len(percent_diff)] / 1_000_000.0
-        latency2_sec = df2['total_latency'].values[:len(percent_diff)] / 1_000_000.0
-        
-        # Calculate gas per second
         gas_per_sec1 = gas1 / latency1_sec
         gas_per_sec2 = gas2 / latency2_sec
         
-        # Store original values for statistics before averaging
         original_gas_per_sec1 = gas_per_sec1.copy()
         original_gas_per_sec2 = gas_per_sec2.copy()
         
-        # Apply moving average if requested
         if args.average:
             gas_per_sec1 = moving_average(gas_per_sec1, args.average)
             gas_per_sec2 = moving_average(gas_per_sec2, args.average)
         
-        # Calculate median gas/s for color determination (use original values)
         median_gas_per_sec1 = np.median(original_gas_per_sec1)
         median_gas_per_sec2 = np.median(original_gas_per_sec2)
         comparison_color = 'green' if median_gas_per_sec2 > median_gas_per_sec1 else 'red'
         
         if 'block_number' in df1.columns and 'block_number' in df2.columns:
-            block_numbers = df1['block_number'].values[:len(percent_diff)]
+            block_numbers = df1['block_number'].values[:len(gas_per_sec1)]
             ax.plot(block_numbers, gas_per_sec1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(block_numbers, gas_per_sec2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Number')
@@ -307,13 +277,10 @@ def main():
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
             ax.legend()
-            
-            # Format Y-axis with gas units
             formatter = FuncFormatter(format_gas_units)
             ax.yaxis.set_major_formatter(formatter)
         else:
-            # If no block_number column, use index
-            indices = np.arange(len(percent_diff))
+            indices = np.arange(len(gas_per_sec1))
             ax.plot(indices, gas_per_sec1, 'orange', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
             ax.plot(indices, gas_per_sec2, comparison_color, alpha=0.7, label=f'Comparison ({args.comparison_csv})')
             ax.set_xlabel('Block Index')
@@ -324,8 +291,6 @@ def main():
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
             ax.legend()
-            
-            # Format Y-axis with gas units
             formatter = FuncFormatter(format_gas_units)
             ax.yaxis.set_major_formatter(formatter)
         
@@ -338,13 +303,11 @@ def main():
         else:
             plot_idx += 1
 
-    # Save combined figure if not using separate files
     if not args.separate:
         plt.tight_layout()
         plt.savefig(args.output, dpi=300, bbox_inches='tight')
         output_files.append(args.output)
 
-    # Create graph type description for output message
     graph_types = []
     if 'histogram' in selected_graphs:
         graph_types.append('histogram')
@@ -354,7 +317,6 @@ def main():
         graph_types.append('gas/s graph')
     graph_desc = ' and '.join(graph_types)
     
-    # Print output file(s) information
     if args.separate:
         print(f"Saved {len(output_files)} separate files:")
         for output_file in output_files:
@@ -362,7 +324,6 @@ def main():
     else:
         print(f"{graph_desc.capitalize()} saved to {args.output}")
 
-    # Always print statistics
     print(f"\nStatistics:")
     print(f"Mean percent difference: {mean_diff:.2f}%")
     print(f"Median percent difference: {median_diff:.2f}%")
@@ -371,9 +332,7 @@ def main():
     print(f"Max: {percent_diff.max():.2f}%")
     print(f"Total blocks analyzed: {len(percent_diff)}")
     
-    # Print gas/s statistics if gas data is available
     if 'gas' in selected_graphs:
-        # Use original values for statistics (not averaged)
         print(f"\nGas/s Statistics:")
         print(f"Baseline median gas/s: {median_gas_per_sec1:,.0f}")
         print(f"Comparison median gas/s: {median_gas_per_sec2:,.0f}")
