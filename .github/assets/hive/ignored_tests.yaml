@@ -29,5 +29,6 @@ engine-api:
   - Transaction Re-Org, Re-Org to Different Block (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Paris) (reth)
   - Multiple New Payloads Extending Canonical Chain, Set Head to First Payload Received (Paris) (reth)
