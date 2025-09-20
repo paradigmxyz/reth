@@ -14,6 +14,9 @@ pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
+/// Default maximum concurrency for prewarm task.
+pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -95,6 +98,8 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
+    /// Maximum concurrency for the prewarm task.
+    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
 }
@@ -119,6 +124,7 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
         }
     }
@@ -145,6 +151,7 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
+        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
     ) -> Self {
         Self {
@@ -165,6 +172,7 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
+            prewarm_max_concurrency,
             allow_unwind_canonical_header,
         }
     }
@@ -394,5 +402,16 @@ impl TreeConfig {
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
+    }
+
+    /// Setter for prewarm max concurrency.
+    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
+        self.prewarm_max_concurrency = prewarm_max_concurrency;
+        self
+    }
+
+    /// Return the prewarm max concurrency.
+    pub const fn prewarm_max_concurrency(&self) -> usize {
+        self.prewarm_max_concurrency
     }
 }
