@@ -597,6 +597,7 @@ tokio-tungstenite = "0.26.2"
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 # async
+async-compression = { version = "0.4", default-features = false }
 async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3"
