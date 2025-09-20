@@ -15,7 +15,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
 pub(crate) type Cache<K, V> =
@@ -520,16 +520,16 @@ pub(crate) struct SavedCache {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// A guard to track in-flight usage of this cache.
+    /// The cache is considered available if the strong count is 1.
+    pub(crate) usage_guard: Arc<()>,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) const fn new(
-        hash: B256,
-        caches: ExecutionCache,
-        metrics: CachedStateMetrics,
-    ) -> Self {
-        Self { hash, caches, metrics }
+    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -540,6 +540,11 @@ impl SavedCache {
     /// Splits the cache into its caches and metrics, consuming it.
     pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
         (self.caches, self.metrics)
+    }
+
+    /// Returns true if the cache is available for use (no other tasks are currently using it).
+    pub(crate) fn is_available(&self) -> bool {
+        Arc::strong_count(&self.usage_guard) == 1
     }
 
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
@@ -795,5 +800,46 @@ mod tests {
         // check that the storage is empty
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Empty);
+    }
+
+    // Tests for SavedCache locking mechanism
+    #[test]
+    fn test_saved_cache_is_available() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+
+        // Initially, the cache should be available (only one reference)
+        assert!(cache.is_available(), "Cache should be available initially");
+
+        // Clone the usage guard (simulating it being handed out)
+        let _guard = cache.usage_guard.clone();
+
+        // Now the cache should not be available (two references)
+        assert!(!cache.is_available(), "Cache should not be available with active guard");
+    }
+
+    #[test]
+    fn test_saved_cache_multiple_references() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache =
+            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+
+        // Create multiple references to the usage guard
+        let guard1 = cache.usage_guard.clone();
+        let guard2 = cache.usage_guard.clone();
+        let guard3 = guard1.clone();
+
+        // Cache should not be available with multiple guards
+        assert!(!cache.is_available());
+
+        // Drop guards one by one
+        drop(guard1);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard2);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard3);
+        assert!(cache.is_available()); // Now available
     }
 }

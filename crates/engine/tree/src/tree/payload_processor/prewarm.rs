@@ -12,12 +12,10 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
-    },
+    cached_state::{CachedStateMetrics, CachedStateProvider, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage,
-        ExecutionCache as PayloadExecutionCache,
+        ExecutionCache as PayloadExecutionCache, StateExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -153,28 +151,27 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        // Precompute outside the lock
         let hash = self.ctx.env.hash;
-        let caches = self.ctx.cache.clone();
-        let metrics = self.ctx.cache_metrics.clone();
+        let caches = self.ctx.cache;
+        let metrics = self.ctx.cache_metrics;
 
         // Perform all cache operations atomically under the lock
         self.execution_cache.update_with_guard(|cached| {
-            let cache = SavedCache::new(hash, caches, metrics);
+            let new_cache = SavedCache::new(hash, caches, metrics);
 
             // Insert state into cache while holding the lock
-            if cache.cache().insert_state(&state).is_err() {
+            if new_cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
             }
 
-            cache.update_metrics();
-            debug!(target: "engine::caching", parent_hash=?cache.executed_block_hash(), "Updated execution cache");
+            new_cache.update_metrics();
+            debug!(target: "engine::caching", parent_hash=?new_cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
-            *cached = Some(cache);
+            *cached = Some(new_cache);
         });
 
         self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
