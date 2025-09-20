@@ -21,6 +21,7 @@ reth-stages-types = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types = { workspace = true, features = ["serde", "reth-codec"] }
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
+reth-log-index-common.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -69,6 +70,7 @@ test-utils = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-log-index-common/test-utils",
 ]
 arbitrary = [
     "reth-db-models/arbitrary",

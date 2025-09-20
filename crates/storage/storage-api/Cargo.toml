@@ -24,6 +24,7 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 revm-database.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-log-index-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -50,11 +51,10 @@ std = [
     "reth-storage-errors/std",
     "reth-db-models/std",
     "reth-trie-common/std",
+    "reth-log-index-common/std",
 ]
 
-db-api = [
-    "dep:reth-db-api",
-]
+db-api = ["dep:reth-db-api"]
 
 serde = [
     "reth-ethereum-primitives/serde",
@@ -69,6 +69,7 @@ serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-rpc-types-engine/serde",
+    "reth-log-index-common/serde",
 ]
 
 serde-bincode-compat = [
