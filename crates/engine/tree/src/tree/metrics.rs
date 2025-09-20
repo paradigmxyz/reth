@@ -309,6 +309,7 @@ mod tests {
                     receipts: vec![],
                     requests: Requests::default(),
                     gas_used: 1000,
+                    block_access_list: None,
                 },
             ))
         }
@@ -405,6 +406,7 @@ mod tests {
                     storage,
                     status: AccountStatus::default(),
                     transaction_id: 0,
+                    ..Default::default()
                 },
             );
             state
