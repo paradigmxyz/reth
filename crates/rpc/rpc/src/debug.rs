@@ -1,5 +1,6 @@
 use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_evm::evm::EvmFactoryExt;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -30,7 +31,7 @@ use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{cache::db::StateCacheDbRefMutWrapper, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
@@ -92,7 +93,59 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        // replay all transactions of the block
+        // For complex tracer types, fall back to the original approach
+        if opts.tracer.is_some() {
+            return self.trace_block_with_individual_transactions(block, evm_env, opts).await;
+        }
+
+        let config = opts.config;
+        let this = self.clone();
+        self.eth_api()
+            .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+
+                // Setup inspector for the default structlog tracer
+                let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+                let inspector_setup = || TracingInspector::new(inspector_config);
+
+                let results = this
+                    .eth_api()
+                    .evm_config()
+                    .evm_factory()
+                    .create_tracer(StateCacheDbRefMutWrapper(&mut db), evm_env, inspector_setup())
+                    .try_trace_many(block.transactions_recovered(), |ctx| {
+                        let tx_hash = *ctx.tx.tx_hash();
+
+                        // Extract trace data from the efficient tracing context
+                        let gas_used = ctx.result.gas_used();
+                        let return_value = ctx.result.into_output().unwrap_or_default();
+
+                        // Build the trace frame using the inspector from the context
+                        // Note: We don't have direct access to gas_limit in this context,
+                        // but the TracingInspector should handle this internally
+                        let frame = ctx.inspector.geth_builder().geth_traces(
+                            gas_used,
+                            return_value,
+                            config,
+                        );
+
+                        Ok(TraceResult::Success { result: frame.into(), tx_hash: Some(tx_hash) })
+                    })
+                    .collect::<Result<Vec<_>, Eth::Error>>()?;
+
+                Ok(results)
+            })
+            .await
+    }
+
+    /// Fallback method for complex tracer types that need individual transaction handling
+    async fn trace_block_with_individual_transactions(
+        &self,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+        evm_env: EvmEnvFor<Eth::Evm>,
+        opts: GethDebugTracingOptions,
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
