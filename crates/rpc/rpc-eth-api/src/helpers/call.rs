@@ -766,10 +766,14 @@ pub trait Call:
                 warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
+        } else {
+            // cap request's gas limit to call gas limit
+            request.as_mut().set_gas_limit(self.call_gas_limit());
         }
 
-        // apply configured gas cap
-        evm_env.block_env.gas_limit = self.call_gas_limit();
+        // Disable block gas limit check to allow executing transactions with higher gas limit (call
+        // gas limit): https://github.com/paradigmxyz/reth/issues/18577
+        evm_env.cfg_env.disable_block_gas_limit = true;
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
