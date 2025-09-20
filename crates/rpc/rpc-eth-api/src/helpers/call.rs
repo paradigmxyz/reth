@@ -100,8 +100,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                let mut parent_number = parent.number();
-                let mut parent_timestamp = parent.timestamp();
+                let mut previous_number = base_block.number();
+                let mut previous_timestamp = base_block.timestamp();
 
                 for block in block_state_calls {
                     let mut evm_env = this
@@ -143,22 +143,27 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     // Validate block number and timestamp
                     let current_number = evm_env.block_env.number.to::<u64>();
-                    if current_number <= parent_number {
-                        return Err(
-                            EthApiError::other(EthSimulateError::BlockNumberNotIncreased).into()
-                        );
+                    if current_number <= previous_number {
+                        return Err(EthApiError::other(EthSimulateError::BlockNumberNotIncreased {
+                            current: current_number,
+                            previous: previous_number,
+                        })
+                        .into());
                     }
 
                     let current_timestamp = evm_env.block_env.timestamp.to::<u64>();
-                    if current_timestamp <= parent_timestamp {
+                    if current_timestamp <= previous_timestamp {
                         return Err(EthApiError::other(
-                            EthSimulateError::BlockTimestampNotIncreased,
+                            EthSimulateError::BlockTimestampNotIncreased {
+                                current: current_timestamp,
+                                previous: previous_timestamp,
+                            },
                         )
                         .into());
                     }
 
-                    parent_number = current_number;
-                    parent_timestamp = current_timestamp;
+                    previous_number = current_number;
+                    previous_timestamp = current_timestamp;
 
                     let block_gas_limit = evm_env.block_env.gas_limit;
                     let chain_id = evm_env.cfg_env.chain_id;
