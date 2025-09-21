@@ -22,6 +22,7 @@ use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use futures::StreamExt;
+use tokio_stream::wrappers::WatchStream;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::EthApiError;
@@ -92,26 +93,45 @@ where
         async move {
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut canonical_stream = this.provider().canonical_state_stream();
+            let flashblock_rx = this.pending_block_rx();
+            let mut flashblock_stream = flashblock_rx.map(WatchStream::new);
             const TIMEOUT_DURATION: Duration = Duration::from_secs(30);
 
             tokio::time::timeout(TIMEOUT_DURATION, async {
-                while let Some(notification) = canonical_stream.next().await {
-                    // First check flashblocks for faster confirmation (Optimism-specific)
-                    if let Ok(Some(pending_block)) = this.pending_flashblock() {
-                        let block_and_receipts = pending_block.into_block_and_receipts();
-                        if block_and_receipts.block.body().contains_transaction(&hash) {
-                            if let Some(receipt) = this.transaction_receipt(hash).await? {
-                                return Ok(receipt);
+                loop {
+                    tokio::select! {
+                        // Branch 1: Listen for canonical block updates
+                        canonical_notification = canonical_stream.next() => {
+                            if let Some(notification) = canonical_notification {
+                                let chain = notification.committed();
+                                for block in chain.blocks_iter() {
+                                    if block.body().contains_transaction(&hash) {
+                                        if let Some(receipt) = this.transaction_receipt(hash).await? {
+                                            return Ok(receipt);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Canonical stream ended
+                                break;
                             }
                         }
-                    }
-
-                    // Then check canonical blocks (existing behavior)
-                    let chain = notification.committed();
-                    for block in chain.blocks_iter() {
-                        if block.body().contains_transaction(&hash) {
-                            if let Some(receipt) = this.transaction_receipt(hash).await? {
-                                return Ok(receipt);
+                        // Branch 2: Listen for flashblock updates
+                        _flashblock_update = async {
+                            if let Some(ref mut stream) = flashblock_stream {
+                                stream.next().await
+                            } else {
+                                futures::future::pending().await
+                            }
+                        } => {
+                            // Check flashblocks for faster confirmation (Optimism-specific)
+                            if let Ok(Some(pending_block)) = this.pending_flashblock() {
+                                let block_and_receipts = pending_block.into_block_and_receipts();
+                                if block_and_receipts.block.body().contains_transaction(&hash) {
+                                    if let Some(receipt) = this.transaction_receipt(hash).await? {
+                                        return Ok(receipt);
+                                    }
+                                }
                             }
                         }
                     }
