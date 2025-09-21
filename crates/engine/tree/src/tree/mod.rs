@@ -486,6 +486,116 @@ where
         Ok(None)
     }
 
+   
+  
+    /// Records metrics for new payload processing
+    fn record_metrics(&mut self, _payload: &T::ExecutionData) -> Instant {
+        let start = Instant::now();
+        trace!(target: "engine::tree", "invoked new payload");
+        self.metrics.engine.new_payload_messages.increment(1);
+        start
+    }
+
+    /// Emits block received event
+    fn emit_block_received_event(&mut self, payload: &T::ExecutionData) {
+        let num_hash = payload.num_hash();
+        let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+    }
+
+    /// Checks for invalid ancestors and returns status if found
+    fn check_invalid_ancestors(
+        &mut self,
+        payload: &T::ExecutionData,
+    ) -> Result<Option<PayloadStatus>, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+        let block_hash = payload.block_hash();
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
+        if lowest_buffered_ancestor == block_hash {
+            lowest_buffered_ancestor = parent_hash;
+        }
+
+        // now check if the block has an invalid ancestor
+        if let Some(invalid) = self.state.invalid_headers.get(&lowest_buffered_ancestor) {
+            // Here we might have 2 cases
+            // 1. the block is well formed and indeed links to an invalid header, meaning we should
+            //    remember it as invalid
+            // 2. the block is not well formed (i.e block hash is incorrect), and we should just
+            //    return an error and forget it
+            let block = match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
+                Ok(block) => block,
+                Err(error) => {
+                    let status = self.on_new_payload_error(error, parent_hash)?;
+                    return Ok(Some(status))
+                }
+            };
+
+            let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
+            return Ok(Some(status))
+        }
+        Ok(None)
+    }
+
+    /// Processes payload during normal sync
+    fn process_payload_during_sync(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let block_hash = payload.block_hash();
+        let num_hash = payload.num_hash();
+        let parent_hash = payload.parent_hash();
+        let mut latest_valid_hash = None;
+        
+        match self.insert_payload(payload) {
+            Ok(status) => {
+                let status = match status {
+                    InsertPayloadOk::Inserted(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        self.try_connect_buffered_blocks(num_hash)?;
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                        // not known to be invalid, but we don't know anything else
+                        PayloadStatusEnum::Syncing
+                    }
+                };
+
+                Ok(PayloadStatus::new(status, latest_valid_hash))
+            }
+            Err(error) => match error {
+                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
+                InsertPayloadError::Payload(error) => {
+                    Ok(self.on_new_payload_error(error, parent_hash)?)
+                }
+            },
+        }
+    }
+
+    /// Buffers payload during backfill sync
+    fn buffer_payload_during_backfill(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+        
+        match self.payload_validator.ensure_well_formed_payload(payload) {
+            // if the block is well-formed, buffer it for later
+            Ok(block) => {
+                if let Err(error) = self.buffer_block(block) {
+                    Ok(self.on_insert_block_error(error)?)
+                } else {
+                    Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
+                }
+            }
+            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+        }
+    }
+
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
     /// [`PayloadTypes::ExecutionData`], for example
@@ -500,134 +610,32 @@ where
     ///
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
+    
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
     fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
-        trace!(target: "engine::tree", "invoked new payload");
-        self.metrics.engine.new_payload_messages.increment(1);
+        let start = self.record_metrics(&payload);
+        self.emit_block_received_event(&payload);
 
-        // start timing for the new payload process
-        let start = Instant::now();
-
-        // Ensures that the given payload does not violate any consensus rules that concern the
-        // block's layout, like:
-        //    - missing or invalid base fee
-        //    - invalid extra data
-        //    - invalid transactions
-        //    - incorrect hash
-        //    - the versioned hashes passed with the payload do not exactly match transaction
-        //      versioned hashes
-        //    - the block does not contain blob transactions if it is pre-cancun
-        //
-        // This validates the following engine API rule:
-        //
-        // 3. Given the expected array of blob versioned hashes client software **MUST** run its
-        //    validation by taking the following steps:
-        //
-        //   1. Obtain the actual array by concatenating blob versioned hashes lists
-        //      (`tx.blob_versioned_hashes`) of each [blob
-        //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
-        //      in the payload, respecting the order of inclusion. If the payload has no blob
-        //      transactions the expected array **MUST** be `[]`.
-        //
-        //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage |
-        //      null}` if the expected and the actual arrays don't match.
-        //
-        // This validation **MUST** be instantly run in all cases even during active sync process.
-        let parent_hash = payload.parent_hash();
-
-        let num_hash = payload.num_hash();
-        let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
-        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
-
-        let block_hash = num_hash.hash;
-        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
-        if lowest_buffered_ancestor == block_hash {
-            lowest_buffered_ancestor = parent_hash;
+        if let Some(invalid_status) = self.check_invalid_ancestors(&payload)? {
+            return Ok(TreeOutcome::new(invalid_status));
         }
-
-        // now check if the block has an invalid ancestor
-        if let Some(invalid) = self.state.invalid_headers.get(&lowest_buffered_ancestor) {
-            // Here we might have 2 cases
-            // 1. the block is well formed and indeed links to an invalid header, meaning we should
-            //    remember it as invalid
-            // 2. the block is not well formed (i.e block hash is incorrect), and we should just
-            //    return an error and forget it
-            let block = match self.payload_validator.ensure_well_formed_payload(payload) {
-                Ok(block) => block,
-                Err(error) => {
-                    let status = self.on_new_payload_error(error, parent_hash)?;
-                    return Ok(TreeOutcome::new(status))
-                }
-            };
-
-            let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
-            return Ok(TreeOutcome::new(status))
-        }
-        // record pre-execution phase duration
-        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
-            let mut latest_valid_hash = None;
-            match self.insert_payload(payload) {
-                Ok(status) => {
-                    let status = match status {
-                        InsertPayloadOk::Inserted(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            self.try_connect_buffered_blocks(num_hash)?;
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                            // not known to be invalid, but we don't know anything else
-                            PayloadStatusEnum::Syncing
-                        }
-                    };
-
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-                Err(error) => match error {
-                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, parent_hash)?
-                    }
-                },
-            }
+            self.process_payload_during_sync(payload)?
         } else {
-            match self.payload_validator.ensure_well_formed_payload(payload) {
-                // if the block is well-formed, buffer it for later
-                Ok(block) => {
-                    if let Err(error) = self.buffer_block(block) {
-                        self.on_insert_block_error(error)?
-                    } else {
-                        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-                    }
-                }
-                Err(error) => self.on_new_payload_error(error, parent_hash)?,
-            }
+            self.buffer_payload_during_backfill(payload)?
         };
 
-        let mut outcome = TreeOutcome::new(status);
-        // if the block is valid and it is the current sync target head, make it canonical
-        if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // but only if it isn't already the canonical head
-            if self.state.tree_state.canonical_block_hash() != block_hash {
-                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                    sync_target_head: block_hash,
-                }));
-            }
-        }
+        // Record payload validation metrics
+        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
-        // record total newPayload duration
+        // Record total newPayload duration
         self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
 
-        Ok(outcome)
+        Ok(TreeOutcome::new(status))
     }
 
     /// Returns the new chain for the given head.
