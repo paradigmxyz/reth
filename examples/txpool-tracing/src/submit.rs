@@ -32,7 +32,7 @@ pub async fn submit_transaction<FC>(
     max_fee_per_gas: u128,
 ) -> eyre::Result<TxHash>
 where
-    // This enforces `EthPrimitives` types for this node, this unlocks the proper conversions when
+    // This enforces `EthPrimitives` types for this node, which unlocks the proper conversions when
     FC: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 {
     // Create the transaction request
