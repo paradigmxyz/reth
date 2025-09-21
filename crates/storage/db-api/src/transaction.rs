@@ -50,6 +50,12 @@ pub trait DbTxMut: Send + Sync {
 
     /// Put value to database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    /// Append value with the largest key to database. This should have the same
+    /// outcome as `put`, but databases like MDBX provide dedicated modes to make
+    /// it much faster, typically from O(logN) down to O(1) thanks to no lookup.
+    fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put::<T>(key, value)
+    }
     /// Delete value from database
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>)
         -> Result<bool, DatabaseError>;

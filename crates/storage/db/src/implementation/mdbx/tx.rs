@@ -340,28 +340,64 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PutKind {
+    /// Default kind that inserts a new key-value or overwrites an existed key.
+    Upsert,
+    /// Append the key-value to the end of the table -- fast path when the new
+    /// key is the highest so far, like the latest block number.
+    Append,
+}
+
+impl PutKind {
+    const fn into_operation_and_flags(self) -> (Operation, DatabaseWriteOperation, WriteFlags) {
+        match self {
+            Self::Upsert => {
+                (Operation::PutUpsert, DatabaseWriteOperation::PutUpsert, WriteFlags::UPSERT)
+            }
+            Self::Append => {
+                (Operation::PutAppend, DatabaseWriteOperation::PutAppend, WriteFlags::APPEND)
+            }
+        }
+    }
+}
+
+impl Tx<RW> {
+    /// The inner implementation mapping to `mdbx_put` that supports different
+    /// put kinds like upserting and appending.
+    fn put<T: Table>(
+        &self,
+        kind: PutKind,
+        key: T::Key,
+        value: T::Value,
+    ) -> Result<(), DatabaseError> {
+        let key = key.encode();
+        let value = value.compress();
+        let (operation, write_operation, flags) = kind.into_operation_and_flags();
+        self.execute_with_operation_metric::<T, _>(operation, Some(value.as_ref().len()), |tx| {
+            tx.put(self.get_dbi::<T>()?, key.as_ref(), value, flags).map_err(|e| {
+                DatabaseWriteError {
+                    info: e.into(),
+                    operation: write_operation,
+                    table_name: T::NAME,
+                    key: key.into(),
+                }
+                .into()
+            })
+        })
+    }
+}
+
 impl DbTxMut for Tx<RW> {
     type CursorMut<T: Table> = Cursor<RW, T>;
     type DupCursorMut<T: DupSort> = Cursor<RW, T>;
 
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
-        let key = key.encode();
-        let value = value.compress();
-        self.execute_with_operation_metric::<T, _>(
-            Operation::Put,
-            Some(value.as_ref().len()),
-            |tx| {
-                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
-                    DatabaseWriteError {
-                        info: e.into(),
-                        operation: DatabaseWriteOperation::Put,
-                        table_name: T::NAME,
-                        key: key.into(),
-                    }
-                    .into()
-                })
-            },
-        )
+        self.put::<T>(PutKind::Upsert, key, value)
+    }
+
+    fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        self.put::<T>(PutKind::Append, key, value)
     }
 
     fn delete<T: Table>(
