@@ -67,13 +67,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into());
+            .into())
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into());
+            .into())
         }
 
         let transactions = txs
@@ -129,7 +129,7 @@ where
             if gas_limit > evm_env.block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                );
+                )
             }
             evm_env.block_env.gas_limit = gas_limit;
         }
