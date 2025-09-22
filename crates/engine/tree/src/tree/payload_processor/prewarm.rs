@@ -155,8 +155,11 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        let Self { execution_cache, ctx, .. } = self;
-        let PrewarmContext { env, metrics, saved_cache, .. } = ctx;
+        let Self {
+            execution_cache,
+            ctx: PrewarmContext { env, metrics, saved_cache, .. },
+            ..
+        } = self;
         let hash = env.hash;
 
         // Perform all cache operations atomically under the lock
