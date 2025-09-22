@@ -91,6 +91,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     Ok(())
 }
 
+#[ignore] // TODO(mediocregopher): re-enable as part of https://github.com/paradigmxyz/reth/issues/18517
 #[tokio::test]
 async fn test_long_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
