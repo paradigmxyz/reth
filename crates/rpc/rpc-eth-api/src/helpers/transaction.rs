@@ -163,7 +163,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
-                return Ok(Some(tx));
+                return Ok(Some(tx))
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -372,7 +372,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         async move {
             if let Some(block) = self.recovered_block(block_id).await? {
                 if let Some(tx) = block.body().transactions().get(index) {
-                    return Ok(Some(tx.encoded_2718().into()));
+                    return Ok(Some(tx.encoded_2718().into()))
                 }
             }
 
