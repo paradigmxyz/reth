@@ -1224,7 +1224,7 @@ mod check_invalid_ancestors_tests {
         assert!(status.is_invalid(), "Status should be invalid when parent is invalid");
     }
 
-    /// Test genesis block handling (parent_hash = B256::ZERO)
+    /// Test genesis block handling (parent_hash = `B256::ZERO`)
     #[test]
     fn test_genesis_block_handling() {
         reth_tracing::init_test_tracing();
@@ -1288,8 +1288,7 @@ mod check_invalid_ancestors_tests {
 
         // Intentionally corrupt the block to make it malformed
         // Modify the block after creation to make validation fail
-        let block_with_senders = block.clone();
-        let (sealed_block, _senders) = block_with_senders.split_sealed();
+        let (sealed_block, _senders) = block.split_sealed();
         let unsealed_block = sealed_block.unseal();
 
         // Create payload with wrong hash (this makes it malformed)
@@ -1302,12 +1301,13 @@ mod check_invalid_ancestors_tests {
     }
 }
 
-/// Test suite for execute_payload_during_normal_sync and buffer_payload_for_backfill_sync methods
+/// Test suite for `execute_payload_during_normal_sync` and `buffer_payload_for_backfill_sync`
+/// methods
 #[cfg(test)]
 mod payload_execution_tests {
     use super::*;
 
-    /// Test execute_payload_during_normal_sync with different InsertPayloadOk variants
+    /// Test `execute_payload_during_normal_sync` with different `InsertPayloadOk` variants
     #[test]
     fn test_execute_payload_during_normal_sync_variants() {
         reth_tracing::init_test_tracing();
@@ -1333,7 +1333,7 @@ mod payload_execution_tests {
         assert!(result.is_ok(), "Should handle valid payload without error");
     }
 
-    /// Test buffer_payload_for_backfill_sync with validation errors
+    /// Test `buffer_payload_for_backfill_sync` with validation errors
     #[test]
     fn test_buffer_payload_validation_errors() {
         reth_tracing::init_test_tracing();
@@ -1353,7 +1353,7 @@ mod payload_execution_tests {
         );
     }
 
-    /// Test buffer_payload_for_backfill_sync with valid payload
+    /// Test `buffer_payload_for_backfill_sync` with valid payload
     #[test]
     fn test_buffer_payload_valid_payload() {
         reth_tracing::init_test_tracing();
