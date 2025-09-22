@@ -162,7 +162,7 @@ where
         // Perform all cache operations atomically under the lock
         execution_cache.update_with_guard(|cached| {
 
-            // consumes the `SavedCache` held by the task, which releases its usage guard
+            // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
             let (caches, cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
