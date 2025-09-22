@@ -1850,10 +1850,10 @@ where
     /// 3. Checking if this ancestor is in the `invalid_headers` map
     ///
     /// If an invalid ancestor is found, this function handles two scenarios:
-    /// 1. **Well-formed payload**: The payload is marked as invalid since it descends from
-    ///    a known-bad block, which violates consensus rules
-    /// 2. **Malformed payload**: Returns an appropriate error status since the payload
-    ///    cannot be validated due to its own structural issues
+    /// 1. **Well-formed payload**: The payload is marked as invalid since it descends from a
+    ///    known-bad block, which violates consensus rules
+    /// 2. **Malformed payload**: Returns an appropriate error status since the payload cannot be
+    ///    validated due to its own structural issues
     ///
     /// Returns `Ok(Some(PayloadStatus))` if the payload is invalid due to an invalid ancestor,
     /// `Ok(None)` if no invalid ancestor is found, or `Err(...)` if an internal error occurs.
