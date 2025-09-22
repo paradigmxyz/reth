@@ -536,7 +536,6 @@ where
         //      null}` if the expected and the actual arrays don't match.
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
-        let parent_hash = payload.parent_hash();
 
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
@@ -545,61 +544,23 @@ where
         let block_hash = num_hash.hash;
 
         // Check for invalid ancestors
-        if let Some(status) = self.check_invalid_ancestors(&payload)? {
-            return Ok(TreeOutcome::new(status))
+        if let Some(invalid_status) = self.check_invalid_ancestors(&payload)? {
+            return Ok(TreeOutcome::new(invalid_status));
         }
 
         // record pre-execution phase duration
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
-            let mut latest_valid_hash = None;
-            match self.insert_payload(payload) {
-                Ok(status) => {
-                    let status = match status {
-                        InsertPayloadOk::Inserted(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            self.try_connect_buffered_blocks(num_hash)?;
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
-                            latest_valid_hash = Some(block_hash);
-                            PayloadStatusEnum::Valid
-                        }
-                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
-                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                            // not known to be invalid, but we don't know anything else
-                            PayloadStatusEnum::Syncing
-                        }
-                    };
-
-                    PayloadStatus::new(status, latest_valid_hash)
-                }
-                Err(error) => match error {
-                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
-                    InsertPayloadError::Payload(error) => {
-                        self.on_new_payload_error(error, parent_hash)?
-                    }
-                },
-            }
+            self.execute_payload_during_normal_sync(payload)?
         } else {
-            match self.payload_validator.ensure_well_formed_payload(payload) {
-                // if the block is well-formed, buffer it for later
-                Ok(block) => {
-                    if let Err(error) = self.buffer_block(block) {
-                        self.on_insert_block_error(error)?
-                    } else {
-                        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-                    }
-                }
-                Err(error) => self.on_new_payload_error(error, parent_hash)?,
-            }
+            self.buffer_payload_for_backfill_sync(payload)?
         };
 
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // but only if it isn't already the canonical head
+            // Only create the canonical event if this block isn't already the canonical head
             if self.state.tree_state.canonical_block_hash() != block_hash {
                 outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
                     sync_target_head: block_hash,
@@ -611,6 +572,72 @@ where
         self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
 
         Ok(outcome)
+    }
+
+    /// Executes and validates a payload during normal sync operations.
+    ///
+    /// Inserts the payload into the tree, handles validation results, and returns
+    /// appropriate status. Called when not in backfill sync mode.
+    fn execute_payload_during_normal_sync(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let block_hash = payload.block_hash();
+        let num_hash = payload.num_hash();
+        let parent_hash = payload.parent_hash();
+        let mut latest_valid_hash = None;
+
+        match self.insert_payload(payload) {
+            Ok(status) => {
+                let status = match status {
+                    InsertPayloadOk::Inserted(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        self.try_connect_buffered_blocks(num_hash)?;
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
+                        latest_valid_hash = Some(block_hash);
+                        PayloadStatusEnum::Valid
+                    }
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                        // not known to be invalid, but we don't know anything else
+                        PayloadStatusEnum::Syncing
+                    }
+                };
+
+                Ok(PayloadStatus::new(status, latest_valid_hash))
+            }
+            Err(error) => match error {
+                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
+                InsertPayloadError::Payload(error) => {
+                    Ok(self.on_new_payload_error(error, parent_hash)?)
+                }
+            },
+        }
+    }
+
+    /// Validates and buffers a payload for later processing during backfill sync.
+    ///
+    /// If the payload is well-formed, it is buffered for processing once sync completes.
+    /// Returns SYNCING status on success, or handles validation errors appropriately.
+    fn buffer_payload_for_backfill_sync(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+
+        match self.payload_validator.ensure_well_formed_payload(payload) {
+            // if the block is well-formed, buffer it for later
+            Ok(block) => {
+                if let Err(error) = self.buffer_block(block) {
+                    Ok(self.on_insert_block_error(error)?)
+                } else {
+                    Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
+                }
+            }
+            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+        }
     }
 
     /// Returns the new chain for the given head.
@@ -2297,6 +2324,14 @@ where
         Ok(None)
     }
 
+    /// Inserts a payload into the tree and executes it.
+    ///
+    /// This function validates the payload's basic structure, then executes it using the
+    /// payload validator. The execution includes running all transactions in the payload
+    /// and validating the resulting state transitions.
+    ///
+    /// Returns `InsertPayloadOk` if the payload was successfully inserted and executed,
+    /// or `InsertPayloadError` if validation or execution failed.
     fn insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -2321,6 +2356,22 @@ where
         )
     }
 
+    /// Inserts a block or payload into the blockchain tree with full execution.
+    ///
+    /// This is a generic function that handles both blocks and payloads by accepting
+    /// a block identifier, input data, and execution/validation functions. It performs
+    /// comprehensive checks and execution:
+    ///
+    /// - Validates that the block doesn't already exist in the tree
+    /// - Ensures parent state is available, buffering if necessary
+    /// - Executes the block/payload using the provided execute function
+    /// - Handles both canonical and fork chain insertions
+    /// - Updates pending block state when appropriate
+    /// - Emits consensus engine events and records metrics
+    ///
+    /// Returns `InsertPayloadOk::Inserted(BlockStatus::Valid)` on successful execution,
+    /// `InsertPayloadOk::AlreadySeen` if the block already exists, or
+    /// `InsertPayloadOk::Inserted(BlockStatus::Disconnected)` if parent state is missing.
     fn insert_block_or_payload<Input, Err>(
         &mut self,
         block_id: BlockWithParent,
