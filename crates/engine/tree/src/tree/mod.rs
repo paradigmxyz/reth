@@ -544,8 +544,9 @@ where
         let block_hash = num_hash.hash;
 
         // Check for invalid ancestors
-        if let Some(invalid_status) = self.check_invalid_ancestors(&payload)? {
-            return Ok(TreeOutcome::new(invalid_status));
+        if let Some(invalid) = self.find_invalid_ancestor(&payload) {
+            let status = self.handle_invalid_ancestor_payload(payload, invalid)?;
+            return Ok(TreeOutcome::new(status));
         }
 
         // record pre-execution phase duration
@@ -1866,7 +1867,7 @@ where
         Ok(status)
     }
 
-    /// Checks if the given payload has a known invalid ancestor.
+    /// Finds any invalid ancestor for the given payload.
     ///
     /// This function walks up the chain of buffered ancestors from the payload's block
     /// hash and checks if any ancestor is marked as invalid in the tree state.
@@ -1876,18 +1877,8 @@ where
     /// 2. If the ancestor is the same as the block hash itself, using the parent hash instead
     /// 3. Checking if this ancestor is in the `invalid_headers` map
     ///
-    /// If an invalid ancestor is found, this function handles two scenarios:
-    /// 1. **Well-formed payload**: The payload is marked as invalid since it descends from a
-    ///    known-bad block, which violates consensus rules
-    /// 2. **Malformed payload**: Returns an appropriate error status since the payload cannot be
-    ///    validated due to its own structural issues
-    ///
-    /// Returns `Ok(Some(PayloadStatus))` if the payload is invalid due to an invalid ancestor,
-    /// `Ok(None)` if no invalid ancestor is found, or `Err(...)` if an internal error occurs.
-    fn check_invalid_ancestors(
-        &mut self,
-        payload: &T::ExecutionData,
-    ) -> Result<Option<PayloadStatus>, InsertBlockFatalError> {
+    /// Returns the invalid ancestor block info if found, or None if no invalid ancestor exists.
+    fn find_invalid_ancestor(&mut self, payload: &T::ExecutionData) -> Option<BlockWithParent> {
         let parent_hash = payload.parent_hash();
         let block_hash = payload.block_hash();
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
@@ -1895,25 +1886,36 @@ where
             lowest_buffered_ancestor = parent_hash;
         }
 
-        // now check if the block has an invalid ancestor
-        if let Some(invalid) = self.state.invalid_headers.get(&lowest_buffered_ancestor) {
-            // Here we might have 2 cases
-            // 1. the block is well formed and indeed links to an invalid header, meaning we should
-            //    remember it as invalid
-            // 2. the block is not well formed (i.e block hash is incorrect), and we should just
-            //    return an error and forget it
-            let block = match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
-                Ok(block) => block,
-                Err(error) => {
-                    let status = self.on_new_payload_error(error, parent_hash)?;
-                    return Ok(Some(status))
-                }
-            };
+        // Check if the block has an invalid ancestor
+        self.state.invalid_headers.get(&lowest_buffered_ancestor)
+    }
 
-            let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
-            return Ok(Some(status))
-        }
-        Ok(None)
+    /// Handles a payload that has an invalid ancestor.
+    ///
+    /// This function validates the payload and processes it according to whether it's
+    /// well-formed or malformed:
+    /// 1. **Well-formed payload**: The payload is marked as invalid since it descends from a
+    ///    known-bad block, which violates consensus rules
+    /// 2. **Malformed payload**: Returns an appropriate error status since the payload cannot be
+    ///    validated due to its own structural issues
+    fn handle_invalid_ancestor_payload(
+        &mut self,
+        payload: T::ExecutionData,
+        invalid: BlockWithParent,
+    ) -> Result<PayloadStatus, InsertBlockFatalError> {
+        let parent_hash = payload.parent_hash();
+
+        // Here we might have 2 cases
+        // 1. the block is well formed and indeed links to an invalid header, meaning we should
+        //    remember it as invalid
+        // 2. the block is not well formed (i.e block hash is incorrect), and we should just return
+        //    an error and forget it
+        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+            Ok(block) => block,
+            Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
+        };
+
+        Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response

@@ -1170,7 +1170,7 @@ mod check_invalid_ancestors_tests {
         };
 
         // Check for invalid ancestors - should return None since none are marked invalid
-        let result = test_harness.tree.check_invalid_ancestors(&payload).unwrap();
+        let result = test_harness.tree.find_invalid_ancestor(&payload);
         assert!(result.is_none(), "Should return None when no invalid ancestors exist");
     }
 
@@ -1212,11 +1212,15 @@ mod check_invalid_ancestors_tests {
         };
 
         // Check for invalid ancestors - should detect invalid parent
-        let result = test_harness.tree.check_invalid_ancestors(&payload2).unwrap();
+        let invalid_ancestor = test_harness.tree.find_invalid_ancestor(&payload2);
         assert!(
-            result.is_some(),
-            "Should return Some(PayloadStatus) when invalid parent is detected"
+            invalid_ancestor.is_some(),
+            "Should find invalid ancestor when parent is marked as invalid"
         );
-        assert!(result.unwrap().is_invalid(), "Status should be invalid when parent is invalid");
+
+        // Now test that handling the payload with invalid ancestor returns invalid status
+        let invalid = invalid_ancestor.unwrap();
+        let status = test_harness.tree.handle_invalid_ancestor_payload(payload2, invalid).unwrap();
+        assert!(status.is_invalid(), "Status should be invalid when parent is invalid");
     }
 }
