@@ -110,17 +110,24 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         let Some(action) = self.persistence().current_action() else {
             return PersistingKind::NotPersisting
         };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
+        match action {
+            CurrentPersistenceAction::SavingBlocks { highest } => {
+                // The block being validated can only be a descendant if its number is higher than
+                // the highest block persisting. Otherwise, it's likely a fork of a lower block.
+                if block.block.number > highest.number &&
+                    self.state().tree_state.is_descendant(*highest, block)
+                {
+                    return PersistingKind::PersistingDescendant
+                }
+            }
+            CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+                // During reorganization, blocks above the new tip are being removed.
+                // If the incoming block number is higher than the removal point,
+                // it should be treated as not persisting to allow normal validation.
+                if block.block.number > *new_tip_num {
+                    return PersistingKind::NotPersisting
+                }
+            }
         }
 
         // In all other cases, the block is not a descendant.
