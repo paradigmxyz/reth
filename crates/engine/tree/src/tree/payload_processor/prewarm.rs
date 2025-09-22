@@ -145,7 +145,11 @@ where
     /// It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
-    /// 3. The prewarming phase has finished (typically signaled by `FinishedTxExecution`)
+    ///
+    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    ///
+    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
+    /// the new, warmed cache to be inserted.
     ///
     /// This method is called from `run()` only after all execution tasks are complete,
     fn save_cache(self, state: BundleState) {
@@ -157,6 +161,8 @@ where
 
         // Perform all cache operations atomically under the lock
         execution_cache.update_with_guard(|cached| {
+
+            // consumes the `SavedCache` held by the task, which releases its usage guard
             let (caches, cache_metrics) = saved_cache.split();
             let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
