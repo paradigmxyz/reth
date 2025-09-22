@@ -15,24 +15,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: x86_64-unknown-linux-gnu
-      - name: Install cross main
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
       - name: Install cargo-cache
         run: |
           cargo install cargo-cache
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
       - name: Build Reth
         run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-1
+          make build-reth-reproducible
+          mv target/x86_64-unknown-linux-gnu/reproducible/reth reth-build-1
       - name: Clean cache
         run: make clean && cargo cache -a
       - name: Build Reth again
         run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-2
+          make build-reth-reproducible
+          mv target/x86_64-unknown-linux-gnu/reproducible/reth reth-build-2
       - name: Compare binaries
         run: cmp reth-build-1 reth-build-2
