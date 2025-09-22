@@ -72,10 +72,7 @@ impl BlockingTaskPool {
     /// Uses [`rayon::ThreadPoolBuilder::build`](rayon::ThreadPoolBuilder::build) defaults but
     /// increases the stack size to 8MB.
     pub fn build() -> Result<Self, rayon::ThreadPoolBuildError> {
-        Self::builder()
-            .stack_size(8 * 1024 * 1024)
-            .build()
-            .map(Self::new)
+        Self::builder().stack_size(8 * 1024 * 1024).build().map(Self::new)
     }
 
     /// Asynchronous wrapper around Rayon's
