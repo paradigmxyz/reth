@@ -5,7 +5,7 @@ use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network_peers::NodeRecord;
-use std::{net::SocketAddr, str::FromStr};
+use std::net::SocketAddr;
 use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
@@ -13,9 +13,9 @@ use tracing::info;
 /// Start a discovery only bootnode.
 #[derive(Parser, Debug)]
 pub struct Command {
-    /// Listen address for the bootnode (default: ":30301").
-    #[arg(long, default_value = ":30301")]
-    pub addr: String,
+    /// Listen address for the bootnode (default: "0.0.0.0:30301").
+    #[arg(long, default_value = "0.0.0.0:30301")]
+    pub addr: SocketAddr,
 
     /// Generate a new node key and save it to the specified file.
     #[arg(long, default_value = "")]
@@ -39,15 +39,13 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         info!("Bootnode started with config: {:?}", self);
         let sk = reth_network::config::rng_secret_key();
-        let socket_addr = SocketAddr::from_str(&self.addr)?;
-        let local_enr = NodeRecord::from_secret_key(socket_addr, &sk);
+        let local_enr = NodeRecord::from_secret_key(self.addr, &sk);
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
-        let (_discv4, mut discv4_service) =
-            Discv4::bind(socket_addr, local_enr, sk, config).await?;
+        let (_discv4, mut discv4_service) = Discv4::bind(self.addr, local_enr, sk, config).await?;
 
-        info!("Started discv4 at address:{:?}", socket_addr);
+        info!("Started discv4 at address:{:?}", self.addr);
 
         let mut discv4_updates = discv4_service.update_stream();
         discv4_service.spawn();
@@ -57,7 +55,7 @@ impl Command {
 
         if self.v5 {
             info!("Starting discv5");
-            let config = Config::builder(socket_addr).build();
+            let config = Config::builder(self.addr).build();
             let (_discv5, updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
             discv5_updates = Some(updates);
         };
