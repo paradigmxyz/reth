@@ -398,9 +398,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
             evm_env.cfg_env.disable_base_fee = true;
 
-            // Disable EIP-7825 transaction gas limit to support larger transactions
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
 
