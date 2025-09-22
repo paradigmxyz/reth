@@ -19,7 +19,7 @@ use crate::{
     TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
+    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Header, TxReceipt,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -47,7 +47,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedHeader, SignedTransaction, StorageEntry,
+    SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
