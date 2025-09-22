@@ -155,7 +155,7 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        let PrewarmCacheTask { execution_cache, ctx, .. } = self;
+        let Self { execution_cache, ctx, .. } = self;
         let PrewarmContext { env, metrics, saved_cache, .. } = ctx;
         let hash = env.hash;
 
