@@ -767,7 +767,7 @@ impl RequestTxHashes {
         self.hashes.retain(|hash| {
             if i >= count {
                 rest.insert(*hash);
-                return false;
+                return false
             }
             i += 1;
 
