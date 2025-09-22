@@ -151,7 +151,7 @@ where
     /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
     /// the new, warmed cache to be inserted.
     ///
-    /// This method is called from `run()` only after all execution tasks are complete,
+    /// This method is called from `run()` only after all execution tasks are complete.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
