@@ -1113,8 +1113,7 @@ fn test_on_new_payload_malformed_payload() {
     let sealed = block.seal_slow();
 
     // Create a payload with incorrect block hash to trigger malformed validation
-    let mut payload =
-        ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block());
+    let mut payload = ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block());
 
     // Corrupt the block hash - this makes the computed hash not match the provided hash
     // This will cause ensure_well_formed_payload to fail
