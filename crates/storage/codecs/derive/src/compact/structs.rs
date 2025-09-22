@@ -98,7 +98,7 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `from_compact` code for a struct field.
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
-        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, .. } = field_descriptor;
+        let StructFieldDescriptor { name, ftype, is_compact: _, use_alt_impl, .. } = field_descriptor;
 
         let (name, len) = if name.is_empty() {
             self.is_wrapper = true;
@@ -145,19 +145,15 @@ impl<'a> StructHandler<'a> {
             })
         } else {
             let ident_type = format_ident!("{ftype}");
-            if !is_flag_type(ftype) {
-                // It's a type that handles its own length requirements. (B256, Custom, ...)
-                self.lines.push(quote! {
-                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, buf.len());
-                })
-            } else if *is_compact {
+            if is_flag_type(ftype) {
                 self.lines.push(quote! {
                     let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
                 });
             } else {
+                // It's a type that handles its own length requirements. (B256, Custom, ...)
                 self.lines.push(quote! {
-                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
-                });
+                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, buf.len());
+                })
             }
             self.lines.push(quote! {
                 buf = new_buf;
