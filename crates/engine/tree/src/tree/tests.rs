@@ -973,7 +973,7 @@ fn test_on_new_payload_canonical_insertion() {
     let outcome1 = test_harness
         .tree
         .on_new_payload(ExecutionData {
-            payload: payload1.clone().into(),
+            payload: payload1.into(),
             sidecar: ExecutionPayloadSidecar::none(),
         })
         .unwrap();
@@ -1022,7 +1022,7 @@ fn test_on_new_payload_invalid_ancestor() {
     // Verify block2's parent is block1
     assert_eq!(sealed2.parent_hash(), hash1, "Block 2 should have block 1 as parent");
 
-    let payload2 = ExecutionPayloadV1::from_block_unchecked(hash2, &sealed2.clone().into_block());
+    let payload2 = ExecutionPayloadV1::from_block_unchecked(hash2, &sealed2.into_block());
 
     // Submit payload 2 (child of invalid block 1)
     let outcome = test_harness
@@ -1114,7 +1114,7 @@ fn test_on_new_payload_malformed_payload() {
 
     // Create a payload with incorrect block hash to trigger malformed validation
     let mut payload =
-        ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.clone().into_block());
+        ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block());
 
     // Corrupt the block hash - this makes the computed hash not match the provided hash
     // This will cause ensure_well_formed_payload to fail
