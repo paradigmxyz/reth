@@ -17,7 +17,7 @@ use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
-    ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
+    ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
@@ -97,7 +97,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             let provider = provider_factory.provider_rw()?;
 
             provider
-                .remove_block_and_execution_above(target, StorageLocation::Both)
+                .remove_block_and_execution_above(target)
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             // update finalized block if needed

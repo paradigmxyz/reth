@@ -15,7 +15,7 @@ use reth_provider::{
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
+    StateWriter, StaticFileProviderFactory, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -264,11 +264,7 @@ where
         Vec::new(),
     );
 
-    provider.write_state(
-        &execution_outcome,
-        OriginalValuesKnown::Yes,
-        StorageLocation::Database,
-    )?;
+    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 

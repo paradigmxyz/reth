@@ -15,7 +15,7 @@ use crate::{
     HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
@@ -31,6 +31,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_db::static_file::TransactionMask;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -72,7 +73,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
 use tracing::{debug, trace};
@@ -344,14 +345,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         from_tx: TxNumber,
         last_block: BlockNumber,
-        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        if remove_from.database() {
+        if self.prune_modes.has_receipts_pruning() {
             // iterate over block body and remove receipts
             self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
-        }
-
-        if remove_from.static_files() && !self.prune_modes.has_receipts_pruning() {
+        } else {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -415,9 +413,8 @@ impl<
         N: NodeTypesForProvider<Primitives: NodePrimitives<BlockHeader = Header>>,
     > DatabaseProvider<Tx, N>
 {
-    // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
-    // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn insert_historical_block(
         &self,
         block: RecoveredBlock<<Self as BlockWriter>::Block>,
@@ -444,7 +441,7 @@ impl<
 
         writer.append_header(block.header(), ttd, &block.hash())?;
 
-        self.insert_block(block, StorageLocation::Database)
+        self.insert_block(block)
     }
 }
 
@@ -545,23 +542,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    fn transactions_by_tx_range_with_cursor<C>(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-        cursor: &mut C,
-    ) -> ProviderResult<Vec<TxTy<N>>>
-    where
-        C: DbCursorRO<tables::Transactions<TxTy<N>>>,
-    {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            to_range(range),
-            |static_file, range, _| static_file.transactions_by_tx_range(range),
-            |range, _| self.cursor_collect(cursor, range),
-            |_| true,
-        )
-    }
-
     fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
@@ -631,7 +611,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
 
         // If the body indices are not found, this means that the transactions either do
         // not exist in the database yet, or they do exit but are
@@ -650,7 +629,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                self.transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                self.transactions_by_tx_range(tx_range.clone())?
             };
 
             inputs.push((header.as_ref(), transactions));
@@ -1459,15 +1438,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
-
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
+                    Ok(Some(self.transactions_by_tx_range(tx_range)?))
                 }
             }
         }
@@ -1479,7 +1456,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         let range = to_range(range);
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
 
         self.block_body_indices_range(range.start..=range.end.saturating_sub(1))?
             .into_iter()
@@ -1488,10 +1464,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                 if tx_num_range.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    Ok(self
-                        .transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
-                        .into_iter()
-                        .collect())
+                    self.transactions_by_tx_range(tx_num_range)
                 }
             })
             .collect()
@@ -1501,9 +1474,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.transactions_by_tx_range_with_cursor(
-            range,
-            &mut self.tx.cursor_read::<tables::Transactions<_>>()?,
+        self.static_file_provider.fetch_range_with_predicate(
+            StaticFileSegment::Transactions,
+            to_range(range),
+            |cursor, number| cursor.get_one::<TransactionMask<Self::Transaction>>(number.into()),
+            |_| true,
         )
     }
 
@@ -1776,7 +1751,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
-        write_receipts_to: StorageLocation,
     ) -> ProviderResult<()> {
         let first_block = execution_outcome.first_block();
         let block_count = execution_outcome.len() as u64;
@@ -1812,15 +1786,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         //
         // We are writing to database if requested or if there's any kind of receipt pruning
         // configured
-        let mut receipts_cursor = (write_receipts_to.database() || has_receipts_pruning)
+        let mut receipts_cursor = has_receipts_pruning
             .then(|| self.tx.cursor_write::<tables::Receipts<Self::Receipt>>())
             .transpose()?;
 
         // Prepare receipts static writer if we are going to write receipts to static files
         //
         // We are writing to static files if requested and if there's no receipt pruning configured
-        let mut receipts_static_writer = (write_receipts_to.static_files() &&
-            !has_receipts_pruning)
+        let mut receipts_static_writer = has_receipts_pruning
+            .not()
             .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
             .transpose()?;
 
@@ -2075,11 +2049,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn remove_state_above(
-        &self,
-        block: BlockNumber,
-        remove_receipts_from: StorageLocation,
-    ) -> ProviderResult<()> {
+    fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()> {
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
@@ -2144,7 +2114,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        self.remove_receipts_from(from_transaction_num, block, remove_receipts_from)?;
+        self.remove_receipts_from(from_transaction_num, block)?;
 
         Ok(())
     }
@@ -2173,7 +2143,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn take_state_above(
         &self,
         block: BlockNumber,
-        remove_receipts_from: StorageLocation,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
         let range = block + 1..=self.last_block_number()?;
 
@@ -2279,7 +2248,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts.push(block_receipts);
         }
 
-        self.remove_receipts_from(from_transaction_num, block, remove_receipts_from)?;
+        self.remove_receipts_from(from_transaction_num, block)?;
 
         Ok(ExecutionOutcome::new_init(
             state,
@@ -2744,20 +2713,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     fn take_block_and_execution_above(
         &self,
         block: BlockNumber,
-        remove_from: StorageLocation,
     ) -> ProviderResult<Chain<Self::Primitives>> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;
 
         // get execution res
-        let execution_state = self.take_state_above(block, remove_from)?;
+        let execution_state = self.take_state_above(block)?;
 
         let blocks = self.recovered_block_range(range)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block, remove_from)?;
+        self.remove_blocks_above(block)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
@@ -2765,21 +2733,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         Ok(Chain::new(blocks, execution_state, None))
     }
 
-    fn remove_block_and_execution_above(
-        &self,
-        block: BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
+    fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
         let range = block + 1..=self.last_block_number()?;
 
         self.unwind_trie_state_range(range)?;
 
         // remove execution res
-        self.remove_state_above(block, remove_from)?;
+        self.remove_state_above(block)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
-        self.remove_blocks_above(block, remove_from)?;
+        self.remove_blocks_above(block)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(block, true)?;
@@ -2817,7 +2781,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn insert_block(
         &self,
         block: RecoveredBlock<Self::Block>,
-        write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
 
@@ -2833,23 +2796,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             parent_ttd + block.header().difficulty()
         };
 
-        if write_to.database() {
-            self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
-            durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
-
-            // Put header with canonical hashes.
-            self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header().clone())?;
-            durations_recorder.record_relative(metrics::Action::InsertHeaders);
-
-            self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
-            durations_recorder.record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
-        }
-
-        if write_to.static_files() {
-            let mut writer =
-                self.static_file_provider.get_writer(block_number, StaticFileSegment::Headers)?;
-            writer.append_header(block.header(), ttd, &block.hash())?;
-        }
+        self.static_file_provider
+            .get_writer(block_number, StaticFileSegment::Headers)?
+            .append_header(block.header(), ttd, &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
@@ -2879,7 +2828,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             next_tx_num += 1;
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.into_body()))], write_to)?;
+        self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
 
         debug!(
             target: "providers::db",
@@ -2894,35 +2843,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
-        write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
         // Initialize writer if we will be writing transactions to staticfiles
-        let mut tx_static_writer = write_to
-            .static_files()
-            .then(|| {
-                self.static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)
-            })
-            .transpose()?;
+        let mut tx_writer =
+            self.static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
 
         let mut block_indices_cursor = self.tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
-
-        // Initialize cursor if we will be writing transactions to database
-        let mut tx_cursor = write_to
-            .database()
-            .then(|| self.tx.cursor_write::<tables::Transactions<TxTy<N>>>())
-            .transpose()?;
 
         // Get id for the next tx_num or zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         for (block_number, body) in &bodies {
             // Increment block on static file header.
-            if let Some(writer) = tx_static_writer.as_mut() {
-                writer.increment_block(*block_number)?;
-            }
+            tx_writer.increment_block(*block_number)?;
 
             let tx_count = body.as_ref().map(|b| b.transactions().len() as u64).unwrap_or_default();
             let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
@@ -2944,28 +2880,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
             // write transactions
             for transaction in body.transactions() {
-                if let Some(writer) = tx_static_writer.as_mut() {
-                    writer.append_transaction(next_tx_num, transaction)?;
-                }
-                if let Some(cursor) = tx_cursor.as_mut() {
-                    cursor.append(next_tx_num, transaction)?;
-                }
+                tx_writer.append_transaction(next_tx_num, transaction)?;
 
                 // Increment transaction id for each transaction.
                 next_tx_num += 1;
             }
         }
 
-        self.storage.writer().write_block_bodies(self, bodies, write_to)?;
+        self.storage.writer().write_block_bodies(self, bodies)?;
 
         Ok(())
     }
 
-    fn remove_blocks_above(
-        &self,
-        block: BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
+    fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
         for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
@@ -3000,17 +2927,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
 
-        self.remove_bodies_above(block, remove_from)?;
+        self.remove_bodies_above(block)?;
 
         Ok(())
     }
 
-    fn remove_bodies_above(
-        &self,
-        block: BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
-        self.storage.writer().remove_block_bodies_above(self, block, remove_from)?;
+    fn remove_bodies_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        self.storage.writer().remove_block_bodies_above(self, block)?;
 
         // First transaction to be removed
         let unwind_tx_from = self
@@ -3021,23 +2944,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
 
-        if remove_from.database() {
-            self.remove::<tables::Transactions<TxTy<N>>>(unwind_tx_from..)?;
-        }
+        let static_file_tx_num =
+            self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Transactions);
 
-        if remove_from.static_files() {
-            let static_file_tx_num = self
-                .static_file_provider
-                .get_highest_static_file_tx(StaticFileSegment::Transactions);
+        let to_delete = static_file_tx_num
+            .map(|static_tx| (static_tx + 1).saturating_sub(unwind_tx_from))
+            .unwrap_or_default();
 
-            let to_delete = static_file_tx_num
-                .map(|static_tx| (static_tx + 1).saturating_sub(unwind_tx_from))
-                .unwrap_or_default();
-
-            self.static_file_provider
-                .latest_writer(StaticFileSegment::Transactions)?
-                .prune_transactions(to_delete, block)?;
-        }
+        self.static_file_provider
+            .latest_writer(StaticFileSegment::Transactions)?
+            .prune_transactions(to_delete, block)?;
 
         Ok(())
     }
@@ -3067,11 +2983,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block, StorageLocation::Database)?;
+            self.insert_block(block)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
-        self.write_state(execution_outcome, OriginalValuesKnown::No, StorageLocation::Database)?;
+        self.write_state(execution_outcome, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -3229,22 +3145,9 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
-        provider_rw
-            .insert_block(data.blocks[0].0.clone(), crate::StorageLocation::Database)
-            .unwrap();
-        provider_rw
-            .write_state(
-                &data.blocks[0].1,
-                crate::OriginalValuesKnown::No,
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
+        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(data.blocks[0].0.clone()).unwrap();
+        provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -3262,23 +3165,10 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
+        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
         for i in 0..3 {
-            provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
-                .unwrap();
-            provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    crate::StorageLocation::Database,
-                )
-                .unwrap();
+            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3299,25 +3189,12 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
+        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
-            provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
-                .unwrap();
-            provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    crate::StorageLocation::Database,
-                )
-                .unwrap();
+            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3337,23 +3214,10 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
+        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
         for i in 0..3 {
-            provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
-                .unwrap();
-            provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    crate::StorageLocation::Database,
-                )
-                .unwrap();
+            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3388,9 +3252,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         for block in blocks {
-            provider_rw
-                .insert_block(block.try_recover().unwrap(), crate::StorageLocation::Database)
-                .unwrap();
+            provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3409,23 +3271,10 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw
-            .insert_block(
-                data.genesis.clone().try_recover().unwrap(),
-                crate::StorageLocation::Database,
-            )
-            .unwrap();
+        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
         for i in 0..3 {
-            provider_rw
-                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
-                .unwrap();
-            provider_rw
-                .write_state(
-                    &data.blocks[i].1,
-                    crate::OriginalValuesKnown::No,
-                    crate::StorageLocation::Database,
-                )
-                .unwrap();
+            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
 

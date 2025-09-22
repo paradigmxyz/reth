@@ -19,7 +19,7 @@ use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    StateWriter, StaticFileProviderFactory, StatsReader,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -232,11 +232,7 @@ where
             ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
         // finally, write the receipts
-        provider.write_state(
-            &execution_outcome,
-            OriginalValuesKnown::Yes,
-            StorageLocation::StaticFiles,
-        )?;
+        provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
     }
 
     // Only commit if we have imported as many receipts as the number of transactions.

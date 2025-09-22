@@ -8,7 +8,7 @@ use reth_db_api::{
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
-    StaticFileProviderFactory, StatsReader, StorageLocation,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -206,8 +206,6 @@ where
                 .into_iter()
                 .map(|response| (response.block_number(), response.into_body()))
                 .collect(),
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
         )?;
 
         // The stage is "done" if:
@@ -230,7 +228,7 @@ where
         self.buffer.take();
 
         ensure_consistency(provider, Some(input.unwind_to))?;
-        provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
+        provider.remove_bodies_above(input.unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)

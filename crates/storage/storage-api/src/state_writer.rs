@@ -7,8 +7,6 @@ use revm_database::{
     OriginalValuesKnown,
 };
 
-use super::StorageLocation;
-
 /// A trait specifically for writing state changes or reverts
 pub trait StateWriter {
     /// Receipt type included into [`ExecutionOutcome`].
@@ -20,7 +18,6 @@ pub trait StateWriter {
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
-        write_receipts_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Write state reverts to the database.
@@ -40,17 +37,12 @@ pub trait StateWriter {
 
     /// Remove the block range of state above the given block. The state of the passed block is not
     /// removed.
-    fn remove_state_above(
-        &self,
-        block: BlockNumber,
-        remove_receipts_from: StorageLocation,
-    ) -> ProviderResult<()>;
+    fn remove_state_above(&self, block: BlockNumber) -> ProviderResult<()>;
 
     /// Take the block range of state, recreating the [`ExecutionOutcome`]. The state of the passed
     /// block is not removed.
     fn take_state_above(
         &self,
         block: BlockNumber,
-        remove_receipts_from: StorageLocation,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
 }

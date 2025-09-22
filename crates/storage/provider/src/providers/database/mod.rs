@@ -621,7 +621,7 @@ mod tests {
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StorageLocation, TransactionsProvider,
+        TransactionsProvider,
     };
     use alloy_primitives::{TxNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -689,11 +689,7 @@ mod tests {
         let block = TEST_BLOCK.clone();
         {
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body().transactions[0].recover_signer().unwrap()
@@ -711,11 +707,7 @@ mod tests {
                 ..PruneModes::none()
             };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(
                 provider.transaction_id(*block.body().transactions[0].tx_hash()),
@@ -736,11 +728,7 @@ mod tests {
         for range in tx_ranges {
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(
-                provider
-                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
-                Ok(_)
-            );
+            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
 
             let senders = provider.take::<tables::TransactionSenders>(range.clone());
             assert_eq!(

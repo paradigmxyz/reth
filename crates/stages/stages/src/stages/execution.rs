@@ -13,7 +13,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -452,7 +452,7 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes)?;
 
         let db_write_duration = time.elapsed();
         debug!(
@@ -504,8 +504,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts =
-            provider.take_state_above(unwind_to, StorageLocation::Both)?;
+        let bundle_state_with_receipts = provider.take_state_above(unwind_to)?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
