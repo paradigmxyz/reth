@@ -314,13 +314,14 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
+        let saved_cache = self.cache_for(env.parent_hash);
+        let cache = saved_cache.cache().clone();
+        let cache_metrics = saved_cache.metrics().clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            cache: cache.clone(),
-            cache_metrics: cache_metrics.clone(),
+            saved_cache,
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),

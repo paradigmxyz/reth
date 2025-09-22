@@ -523,7 +523,7 @@ pub(crate) struct SavedCache {
 
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
-    pub(crate) usage_guard: Arc<()>,
+    usage_guard: Arc<()>,
 }
 
 impl SavedCache {
@@ -552,11 +552,23 @@ impl SavedCache {
         &self.caches
     }
 
+    /// Returns the metrics associated with this cache.
+    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
+        &self.metrics
+    }
+
     /// Updates the metrics for the [`ExecutionCache`].
     pub(crate) fn update_metrics(&self) {
         self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
         self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
+    }
+}
+
+#[cfg(test)]
+impl SavedCache {
+    fn clone_guard_for_test(&self) -> Arc<()> {
+        self.usage_guard.clone()
     }
 }
 
@@ -812,7 +824,7 @@ mod tests {
         assert!(cache.is_available(), "Cache should be available initially");
 
         // Clone the usage guard (simulating it being handed out)
-        let _guard = cache.usage_guard.clone();
+        let _guard = cache.clone_guard_for_test();
 
         // Now the cache should not be available (two references)
         assert!(!cache.is_available(), "Cache should not be available with active guard");
@@ -825,8 +837,8 @@ mod tests {
             SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
 
         // Create multiple references to the usage guard
-        let guard1 = cache.usage_guard.clone();
-        let guard2 = cache.usage_guard.clone();
+        let guard1 = cache.clone_guard_for_test();
+        let guard2 = cache.clone_guard_for_test();
         let guard3 = guard1.clone();
 
         // Cache should not be available with multiple guards

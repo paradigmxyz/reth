@@ -12,10 +12,10 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, CachedStateProvider, SavedCache},
+    cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage,
-        ExecutionCache as PayloadExecutionCache, StateExecutionCache,
+        ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     ExecutionEnv, StateProviderBuilder,
@@ -151,13 +151,14 @@ where
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        let hash = self.ctx.env.hash;
-        let caches = self.ctx.cache;
-        let metrics = self.ctx.cache_metrics;
+        let PrewarmCacheTask { execution_cache, ctx, .. } = self;
+        let PrewarmContext { env, metrics, saved_cache, .. } = ctx;
+        let hash = env.hash;
 
         // Perform all cache operations atomically under the lock
-        self.execution_cache.update_with_guard(|cached| {
-            let new_cache = SavedCache::new(hash, caches, metrics);
+        execution_cache.update_with_guard(|cached| {
+            let (caches, cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
             // Insert state into cache while holding the lock
             if new_cache.cache().insert_state(&state).is_err() {
@@ -174,7 +175,7 @@ where
             *cached = Some(new_cache);
         });
 
-        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
@@ -243,8 +244,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: StateExecutionCache,
-    pub(super) cache_metrics: CachedStateMetrics,
+    pub(super) saved_cache: SavedCache,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -266,8 +266,7 @@ where
         let Self {
             env,
             evm_config,
-            cache: caches,
-            cache_metrics,
+            saved_cache,
             provider,
             metrics,
             terminate_execution,
@@ -288,6 +287,8 @@ where
         };
 
         // Use the caches to create a new provider with caching
+        let caches = saved_cache.cache().clone();
+        let cache_metrics = saved_cache.metrics().clone();
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
