@@ -4,9 +4,11 @@ use crate::{OpEthApi, OpEthApiError, SequencerClient};
 use alloy_consensus::TxReceipt as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
+use futures::StreamExt;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{SignedTransaction, SignerRecoverable};
+use reth_primitives_traits::{BlockBody, SignedTransaction, SignerRecoverable};
 use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
     helpers::{
@@ -16,21 +18,17 @@ use reth_rpc_eth_api::{
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use futures::StreamExt;
-use tokio_stream::wrappers::WatchStream;
-use reth_chain_state::CanonStateSubscriptions;
-use reth_primitives_traits::BlockBody;
-use reth_rpc_eth_types::EthApiError;
 use std::{
     fmt::{Debug, Formatter},
     future::Future,
     time::Duration,
 };
+use tokio_stream::wrappers::WatchStream;
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
@@ -85,7 +83,8 @@ where
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
-    /// And awaits the receipt, checking both canonical blocks and flashblocks for faster confirmation.
+    /// And awaits the receipt, checking both canonical blocks and flashblocks for faster
+    /// confirmation.
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
@@ -94,17 +93,17 @@ where
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
+        let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut canonical_stream = this.provider().canonical_state_stream();
             let flashblock_rx = this.pending_block_rx();
             let mut flashblock_stream = flashblock_rx.map(WatchStream::new);
-            const TIMEOUT_DURATION: Duration = Duration::from_secs(30);
 
-            tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::time::timeout(timeout_duration, async {
                 loop {
                     tokio::select! {
-                        // Branch 1: Listen for canonical block updates
+                        // Listen for regular canonical block updates for inclusion
                         canonical_notification = canonical_stream.next() => {
                             if let Some(notification) = canonical_notification {
                                 let chain = notification.committed();
@@ -120,7 +119,7 @@ where
                                 break;
                             }
                         }
-                        // Branch 2: Listen for flashblock updates
+                        // check if the tx was preconfirmed in a new flashblock
                         _flashblock_update = async {
                             if let Some(ref mut stream) = flashblock_stream {
                                 stream.next().await
@@ -142,14 +141,14 @@ where
                 }
                 Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
             .await
             .unwrap_or_else(|_elapsed| {
                 Err(Self::Error::from_eth_err(EthApiError::TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
         }
