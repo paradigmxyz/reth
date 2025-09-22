@@ -114,6 +114,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.cfg_env.disable_nonce_check = true;
                         evm_env.cfg_env.disable_base_fee = true;
+                        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.basefee = 0;
                     }
 
@@ -396,6 +397,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // See:
             // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
             evm_env.cfg_env.disable_base_fee = true;
+
+            // Disable EIP-7825 transaction gas limit to support larger transactions
+            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
@@ -775,6 +779,9 @@ pub trait Call:
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
+
+        // Disable EIP-7825 transaction gas limit to support larger transactions
+        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();

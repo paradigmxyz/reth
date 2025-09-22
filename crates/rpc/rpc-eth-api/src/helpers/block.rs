@@ -15,7 +15,7 @@ use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, Tra
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
@@ -125,7 +125,7 @@ pub trait EthBlocks:
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(receipts.iter())
+                    .zip(Arc::unwrap_or_clone(receipts))
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -138,22 +138,28 @@ pub trait EthBlocks:
                             timestamp,
                         };
 
+                        let cumulative_gas_used = receipt.cumulative_gas_used();
+                        let logs_len = receipt.logs().len();
+
                         let input = ConvertReceiptInput {
-                            receipt: Cow::Borrowed(receipt),
                             tx,
-                            gas_used: receipt.cumulative_gas_used() - gas_used,
+                            gas_used: cumulative_gas_used - gas_used,
                             next_log_index,
                             meta,
+                            receipt,
                         };
 
-                        gas_used = receipt.cumulative_gas_used();
-                        next_log_index += receipt.logs().len();
+                        gas_used = cumulative_gas_used;
+                        next_log_index += logs_len;
 
                         input
                     })
                     .collect::<Vec<_>>();
 
-                return self.tx_resp_builder().convert_receipts(inputs).map(Some);
+                return self
+                    .tx_resp_builder()
+                    .convert_receipts_with_block(inputs, block.sealed_block())
+                    .map(Some)
             }
 
             Ok(None)
@@ -183,8 +189,8 @@ pub trait EthBlocks:
                 }
 
                 // If no pending block from provider, build the pending block locally.
-                if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block, receipts)));
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some((pending.block, pending.receipts)));
                 }
             }
 
@@ -294,7 +300,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(block)),
+                    Some(pending) => Ok(Some(pending.block)),
                     None => Ok(None),
                 };
             }

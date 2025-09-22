@@ -14,22 +14,24 @@ use alloy_rpc_types_eth::{
     Transaction, TransactionInfo,
 };
 use core::error;
+use dyn_clone::DynClone;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
     ConfigureEvm, SpecFor, TxEnvFor,
 };
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
+    BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
+    TxTy,
 };
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
 pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
     /// Primitive receipt.
-    pub receipt: Cow<'a, N::Receipt>,
+    pub receipt: N::Receipt,
     /// Transaction the receipt corresponds to.
     pub tx: Recovered<&'a N::SignedTx>,
     /// Gas used by the transaction.
@@ -54,6 +56,16 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from `block`.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+        _block: &SealedBlock<N::Block>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
+        self.convert_receipts(receipts)
+    }
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
@@ -93,7 +105,8 @@ impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -154,6 +167,16 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    ///
+    /// Also accepts the corresponding block in case the receipt requires additional metadata.
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
     /// Converts a primitive header to an RPC header.
     fn convert_header(
         &self,
@@ -161,6 +184,11 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
+
+dyn_clone::clone_trait_object!(
+    <Primitives, Network, Error, TxEnv, Spec>
+    RpcConvert<Primitives = Primitives, Network = Network, Error = Error, TxEnv = TxEnv, Spec = Spec>
+);
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
 ///
@@ -782,6 +810,25 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
             tx_env_converter,
         }
     }
+
+    /// Converts `self` into a boxed converter.
+    #[expect(clippy::type_complexity)]
+    pub fn erased(
+        self,
+    ) -> Box<
+        dyn RpcConvert<
+            Primitives = <Self as RpcConvert>::Primitives,
+            Network = <Self as RpcConvert>::Network,
+            Error = <Self as RpcConvert>::Error,
+            TxEnv = <Self as RpcConvert>::TxEnv,
+            Spec = <Self as RpcConvert>::Spec,
+        >,
+    >
+    where
+        Self: RpcConvert,
+    {
+        Box::new(self)
+    }
 }
 
 impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv> Default
@@ -904,6 +951,14 @@ where
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts(receipts)
+    }
+
+    fn convert_receipts_with_block(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+        block: &SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts_with_block(receipts, block)
     }
 
     fn convert_header(

@@ -1354,7 +1354,7 @@ mod tests {
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
-            .write_individual_storage_trie_updates(hashed_address, &storage_updates)
+            .write_storage_trie_updates(core::iter::once((&hashed_address, &storage_updates)))
             .unwrap();
 
         // destroy the storage and re-create with new slots

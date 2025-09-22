@@ -30,7 +30,7 @@ use tokio::sync::{
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, trace, warn};
 
-type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send + Sync>>;
+type PayloadFuture<P> = Pin<Box<dyn Future<Output = Result<P, PayloadBuilderError>> + Send>>;
 
 /// A communication channel to the [`PayloadBuilderService`] that can retrieve payloads.
 ///
@@ -356,8 +356,10 @@ where
 {
     /// Returns the payload timestamp for the given payload.
     fn payload_timestamp(&self, id: PayloadId) -> Option<Result<u64, PayloadBuilderError>> {
-        if let Some((_, timestamp, _)) = *self.cached_payload_rx.borrow() {
-            return Some(Ok(timestamp));
+        if let Some((cached_id, timestamp, _)) = *self.cached_payload_rx.borrow() {
+            if cached_id == id {
+                return Some(Ok(timestamp));
+            }
         }
 
         let timestamp = self

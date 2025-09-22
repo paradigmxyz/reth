@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vocs dev",
-    "build": "bash scripts/build-cargo-docs.sh && vocs build && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts",
+    "build": "bash scripts/build-cargo-docs.sh && vocs build && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts && bun scripts/fix-search-index.ts",
     "preview": "vocs preview",
     "check-links": "bun scripts/check-links.ts",
     "generate-redirects": "bun scripts/generate-redirects.ts",

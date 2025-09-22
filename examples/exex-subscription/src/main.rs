@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a
+//! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
 #[allow(dead_code)]
 use alloy_primitives::{Address, U256};
@@ -12,7 +12,7 @@ use jsonrpsee::{
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
-    node::{api::FullNodeComponents, EthereumNode},
+    node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
 };
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
@@ -178,7 +178,7 @@ fn main() -> eyre::Result<()> {
 
         let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());
 
-        let handle = builder
+        let handle: NodeHandleFor<EthereumNode> = builder
             .node(EthereumNode::default())
             .extend_rpc_modules(move |ctx| {
                 ctx.modules.merge_configured(StorageWatcherApiServer::into_rpc(rpc))?;

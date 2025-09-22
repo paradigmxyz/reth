@@ -30,7 +30,7 @@ pub trait Value: Compress + Decompress + Serialize {}
 
 ```
 
-The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. The `Encode` trait is responsible for transforming data into bytes so it can be stored in the database, while the `Decode` trait transforms the bytes back into its original form. Similarly, the `Compress` and `Decompress` traits transform the data to and from a compressed format when storing or reading data from the database.
+The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. The `Encode` trait is responsible for transforming data into bytes so it can be stored in the database, while the `Decode` trait transforms the bytes back into their original form. Similarly, the `Compress` and `Decompress` traits transform the data to and from a compressed format when storing or reading data from the database.
 
 There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db/src/tables/mod.rs#L274-L414) if you would like to see the table definitions for any of the tables below.
 
@@ -196,7 +196,7 @@ pub trait DbTxMut: Send + Sync {
         + Send
         + Sync;
 
-    /// Put value to database
+    /// Put value in database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
     /// Delete value from database
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>)
@@ -267,7 +267,7 @@ let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
 let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 ```
 
-Let's look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
+Let's look at an example of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
 [File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
 
@@ -306,7 +306,7 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
             requests_cursor.delete_current()?;
         }
 
-        // Delete all transaction to block values.
+        // Delete all transactions to block values.
         if !block_meta.is_empty() &&
             tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
         {

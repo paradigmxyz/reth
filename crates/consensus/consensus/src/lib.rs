@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, string::String, vec::Vec};
+use alloc::{boxed::Box, fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
 use reth_execution_types::BlockExecutionResult;
@@ -403,6 +403,9 @@ pub enum ConsensusError {
         /// The maximum allowed RLP length.
         max_rlp_length: usize,
     },
+    /// EIP-7825: Transaction gas limit exceeds maximum allowed
+    #[error(transparent)]
+    TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),
@@ -421,7 +424,25 @@ impl From<InvalidTransactionError> for ConsensusError {
     }
 }
 
+impl From<TxGasLimitTooHighErr> for ConsensusError {
+    fn from(value: TxGasLimitTooHighErr) -> Self {
+        Self::TransactionGasLimitTooHigh(Box::new(value))
+    }
+}
+
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
 #[derive(thiserror::Error, Debug)]
 #[error("Consensus error: {0}, Invalid header: {1:?}")]
 pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);
+
+/// EIP-7825: Transaction gas limit exceeds maximum allowed
+#[derive(thiserror::Error, Debug, Eq, PartialEq, Clone)]
+#[error("transaction gas limit ({gas_limit}) is greater than the cap ({max_allowed})")]
+pub struct TxGasLimitTooHighErr {
+    /// Hash of the transaction that violates the rule
+    pub tx_hash: B256,
+    /// The gas limit of the transaction
+    pub gas_limit: u64,
+    /// The maximum allowed gas limit
+    pub max_allowed: u64,
+}

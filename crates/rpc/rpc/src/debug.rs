@@ -270,8 +270,9 @@ where
         opts: GethDebugTracingCallOptions,
     ) -> Result<GethTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
-        let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
-            opts;
+        let GethDebugTracingCallOptions {
+            tracing_options, state_overrides, block_overrides, ..
+        } = opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
@@ -671,7 +672,6 @@ where
         };
 
         let range = smallest..block_number;
-        // TODO: Check if headers_range errors when one of the headers in the range is missing
         exec_witness.headers = self
             .provider()
             .headers_range(range)

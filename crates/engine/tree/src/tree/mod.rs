@@ -508,7 +508,8 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
-        let validation_start = Instant::now();
+        // start timing for the new payload process
+        let start = Instant::now();
 
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
@@ -536,10 +537,6 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-
-        self.metrics
-            .block_validation
-            .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         let num_hash = payload.num_hash();
         let engine_event = ConsensusEngineEvent::BlockReceived(num_hash);
@@ -569,6 +566,8 @@ where
             let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
             return Ok(TreeOutcome::new(status))
         }
+        // record pre-execution phase duration
+        self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
@@ -625,6 +624,9 @@ where
             }
         }
 
+        // record total newPayload duration
+        self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
+
         Ok(outcome)
     }
 
@@ -663,7 +665,7 @@ where
                 warn!(target: "engine::tree", current_hash=?current_hash, "Sidechain block not found in TreeState");
                 // This should never happen as we're walking back a chain that should connect to
                 // the canonical chain
-                return Ok(None);
+                return Ok(None)
             }
         }
 
@@ -673,7 +675,7 @@ where
             new_chain.reverse();
 
             // Simple extension of the current chain
-            return Ok(Some(NewCanonicalChain::Commit { new: new_chain }));
+            return Ok(Some(NewCanonicalChain::Commit { new: new_chain }))
         }
 
         // We have a reorg. Walk back both chains to find the fork point.
@@ -690,7 +692,7 @@ where
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
                 warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
         }
 
@@ -706,7 +708,7 @@ where
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
                 warn!(target: "engine::tree", current_hash=?old_hash, "Canonical block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
 
             if let Some(block) = self.state.tree_state.executed_block_by_hash(current_hash).cloned()
@@ -716,7 +718,7 @@ where
             } else {
                 // This shouldn't happen as we've already walked this path
                 warn!(target: "engine::tree", invalid_hash=?current_hash, "New chain block not found in TreeState");
-                return Ok(None);
+                return Ok(None)
             }
         }
         new_chain.reverse();
@@ -1076,7 +1078,9 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
-                self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                if self.config.unwind_canonical_header() {
+                    self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
+                }
             }
 
             // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
@@ -2522,6 +2526,7 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(ConsensusEngineEvent::InvalidBlock(
             Box::new(block),
         )));
+
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
