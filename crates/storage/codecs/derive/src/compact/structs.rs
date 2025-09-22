@@ -67,7 +67,7 @@ impl<'a> StructHandler<'a> {
                 })
             }
 
-            return
+            return;
         }
 
         let name = format_ident!("{name}");
@@ -98,7 +98,8 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `from_compact` code for a struct field.
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
-        let StructFieldDescriptor { name, ftype, is_compact: _, use_alt_impl, .. } = field_descriptor;
+        let StructFieldDescriptor { name, ftype, is_compact: _, use_alt_impl, .. } =
+            field_descriptor;
 
         let (name, len) = if name.is_empty() {
             self.is_wrapper = true;
