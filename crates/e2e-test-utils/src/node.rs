@@ -1,5 +1,5 @@
 use crate::{network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext};
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -14,7 +14,7 @@ use reth_node_api::{
     PrimitivesTy,
 };
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
-use reth_node_core::primitives::SignedTransaction;
+
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotificationStream, CanonStateSubscriptions,
