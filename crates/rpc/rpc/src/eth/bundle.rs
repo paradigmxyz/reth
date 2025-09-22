@@ -119,7 +119,7 @@ where
                     EthBundleError::Eip4844BlobGasExceeded(blob_params.max_blob_gas_per_block())
                         .to_string(),
                 )
-                .into());
+                .into())
             }
         }
 
