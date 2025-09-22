@@ -1145,3 +1145,78 @@ fn test_on_new_payload_malformed_payload() {
         );
     }
 }
+
+/// Test suite for the check_invalid_ancestors method
+#[cfg(test)]
+mod check_invalid_ancestors_tests {
+    use super::*;
+
+    /// Test that check_invalid_ancestors returns None when no invalid ancestors exist
+    #[test]
+    fn test_check_invalid_ancestors_no_invalid() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a valid block payload
+        let s = include_str!("../../test-data/holesky/1.rlp");
+        let data = Bytes::from_str(s).unwrap();
+        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let sealed = block.seal_slow();
+        let payload = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block())
+                .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Check for invalid ancestors - should return None since none are marked invalid
+        let result = test_harness.tree.check_invalid_ancestors(&payload).unwrap();
+        assert!(result.is_none(), "Should return None when no invalid ancestors exist");
+    }
+
+    /// Test that check_invalid_ancestors detects an invalid parent
+    #[test]
+    fn test_check_invalid_ancestors_with_invalid_parent() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Read block 1
+        let s1 = include_str!("../../test-data/holesky/1.rlp");
+        let data1 = Bytes::from_str(s1).unwrap();
+        let block1 = Block::decode(&mut data1.as_ref()).unwrap();
+        let sealed1 = block1.seal_slow();
+        let parent1 = sealed1.parent_hash();
+
+        // Mark block 1 as invalid
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
+
+        // Read block 2 which has block 1 as parent
+        let s2 = include_str!("../../test-data/holesky/2.rlp");
+        let data2 = Bytes::from_str(s2).unwrap();
+        let block2 = Block::decode(&mut data2.as_ref()).unwrap();
+        let sealed2 = block2.seal_slow();
+
+        // Create payload for block 2
+        let payload2 = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                sealed2.hash(),
+                &sealed2.into_block(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Check for invalid ancestors - should detect invalid parent
+        let result = test_harness.tree.check_invalid_ancestors(&payload2).unwrap();
+        assert!(
+            result.is_some(),
+            "Should return Some(PayloadStatus) when invalid parent is detected"
+        );
+        assert!(result.unwrap().is_invalid(), "Status should be invalid when parent is invalid");
+    }
+}
