@@ -155,7 +155,9 @@ impl<'a> StructHandler<'a> {
                     let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
                 });
             } else {
-                todo!()
+                self.lines.push(quote! {
+                    let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
+                });
             }
             self.lines.push(quote! {
                 buf = new_buf;
