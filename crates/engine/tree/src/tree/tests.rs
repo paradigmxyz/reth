@@ -1146,12 +1146,12 @@ fn test_on_new_payload_malformed_payload() {
     }
 }
 
-/// Test suite for the check_invalid_ancestors method
+/// Test suite for the `check_invalid_ancestors` method
 #[cfg(test)]
 mod check_invalid_ancestors_tests {
     use super::*;
 
-    /// Test that find_invalid_ancestor returns None when no invalid ancestors exist
+    /// Test that `find_invalid_ancestor` returns None when no invalid ancestors exist
     #[test]
     fn test_find_invalid_ancestor_no_invalid() {
         reth_tracing::init_test_tracing();
@@ -1174,7 +1174,7 @@ mod check_invalid_ancestors_tests {
         assert!(result.is_none(), "Should return None when no invalid ancestors exist");
     }
 
-    /// Test that find_invalid_ancestor detects an invalid parent
+    /// Test that `find_invalid_ancestor` detects an invalid parent
     #[test]
     fn test_find_invalid_ancestor_with_invalid_parent() {
         reth_tracing::init_test_tracing();
@@ -1224,7 +1224,7 @@ mod check_invalid_ancestors_tests {
         assert!(status.is_invalid(), "Status should be invalid when parent is invalid");
     }
 
-    /// Test genesis block handling (parent_hash = `B256::ZERO`)
+    /// Test genesis block handling (`parent_hash` = `B256::ZERO`)
     #[test]
     fn test_genesis_block_handling() {
         reth_tracing::init_test_tracing();
