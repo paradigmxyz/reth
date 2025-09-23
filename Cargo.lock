@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#a4065709cd790ab44fad73ed6fa03b4fabfd8673"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#ca0fe6614d5442e20163736eb84e455cd551fa58"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#a4065709cd790ab44fad73ed6fa03b4fabfd8673"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#ca0fe6614d5442e20163736eb84e455cd551fa58"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5703,20 +5703,19 @@ dependencies = [
 
 [[package]]
 name = "moka"
-version = "0.12.10"
+version = "0.12.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9321642ca94a4282428e6ea4af8cc2ca4eac48ac7a6a4ea8f33f76d0ce70926"
+checksum = "8261cd88c312e0004c1d51baad2980c66528dfdb2bee62003e643a4d8f86b077"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-epoch",
  "crossbeam-utils",
- "loom",
+ "equivalent",
  "parking_lot",
  "portable-atomic",
  "rustc_version 0.4.1",
  "smallvec",
  "tagptr",
- "thiserror 1.0.69",
  "uuid",
 ]
 
