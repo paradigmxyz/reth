@@ -219,9 +219,14 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => {
+                // Creates a new block from the payload - no extra cloning
                 self.validator.ensure_well_formed_payload(payload.clone())
             }
-            BlockOrPayload::Block(block) => Ok(block.clone()),
+            BlockOrPayload::Block(block) => {
+                // Clone is necessary as we need the block for error handling
+                // throughout the validation process
+                Ok(block.clone())
+            }
         }
     }
 
@@ -336,11 +341,15 @@ where
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
+        // Convert input to block early for error handling.
+        // The block is needed for the error paths in ensure_ok! macro.
+        // Note: The original input is still needed for evm_env_for and tx_iterator_for
+        // which differentiate between Payload and Block cases.
         let block = self.convert_to_block(&input)?;
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()), block)
+            ensure_ok!(self, &input, self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
@@ -350,11 +359,11 @@ where
             .into())
         };
 
-        let state_provider = ensure_ok!(provider_builder.build(), block);
+        let state_provider = ensure_ok!(self, &input, provider_builder.build());
 
         // fetch parent block
         let Some(parent_block) =
-            ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()), block)
+            ensure_ok!(self, &input, self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
@@ -408,8 +417,11 @@ where
         let txs = self.tx_iterator_for(&input)?;
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
-            let consistent_view =
-                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()), block);
+            let consistent_view = ensure_ok!(
+                self,
+                &input,
+                ConsistentDbView::new_with_latest_tip(self.provider.clone())
+            );
 
             // get allocated trie input if it exists
             let allocated_trie_input = self.payload_processor.take_trie_input();
@@ -417,14 +429,15 @@ where
             // Compute trie input
             let trie_input_start = Instant::now();
             let trie_input = ensure_ok!(
+                self,
+                &input,
                 self.compute_trie_input(
                     persisting_kind,
-                    ensure_ok!(consistent_view.provider_ro(), block),
+                    ensure_ok!(self, &input, consistent_view.provider_ro()),
                     parent_hash,
                     ctx.state(),
                     allocated_trie_input,
-                ),
-                block
+                )
             );
 
             self.metrics
