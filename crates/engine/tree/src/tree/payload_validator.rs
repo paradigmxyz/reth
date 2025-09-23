@@ -341,17 +341,13 @@ where
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
-        // Convert input to block early for error handling.
-        // The block is needed for the error paths in ensure_ok! macro.
-        // Note: The original input is still needed for evm_env_for and tx_iterator_for
-        // which differentiate between Payload and Block cases.
-        let block = self.convert_to_block(&input)?;
-
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
             ensure_ok!(self, &input, self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
+            // Lazy conversion - only convert when error occurs
+            let block = self.convert_to_block(&input)?;
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
@@ -365,6 +361,8 @@ where
         let Some(parent_block) =
             ensure_ok!(self, &input, self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
+            // Lazy conversion - only convert when error occurs
+            let block = self.convert_to_block(&input)?;
             return Err(InsertBlockError::new(
                 block.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
@@ -514,10 +512,15 @@ where
         // Build hashed state for validation
         let hashed_state = self.provider.hashed_post_state(&output.state);
 
-        // Perform post-execution validation
-        self.validate_post_execution(&block, &output, &parent_block, &hashed_state, &mut ctx)?;
+        // Convert to block once for all validation and result building
+        // This is the only place we convert, avoiding multiple clones
+        let block = self.convert_to_block(&input)?;
 
-        // Compute and validate state root
+        // Perform post-execution validation with the converted block
+        self.validate_post_execution::<T>(&block, &output, &parent_block, &hashed_state, &mut ctx)
+            .map_err(InsertPayloadError::Block)?;
+
+        // Compute and validate state root with the converted block
         let (_state_root, trie_output) = self.compute_and_validate_state_root(
             &block,
             &output,
@@ -530,8 +533,6 @@ where
             use_state_root_task,
             &mut ctx,
         )?;
-
-        // Build final execution result
         self.build_execution_result(
             block,
             output,
