@@ -1533,6 +1533,18 @@ Post-merge hard forks (timestamp based):
                         next: hoodi::HOODI_OSAKA_TIMESTAMP,
                     },
                 ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 0,
+                        timestamp: hoodi::HOODI_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe7e0e7ff")),
+                        next: hoodi::HOODI_BPO1_TIMESTAMP,
+                    },
+                ),
             ],
         )
     }
@@ -1582,6 +1594,18 @@ Post-merge hard forks (timestamp based):
                     ForkId {
                         hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]),
                         next: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 123,
+                        timestamp: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x783def52")),
+                        next: holesky::HOLESKY_BPO1_TIMESTAMP,
                     },
                 ),
             ],
@@ -1635,6 +1659,18 @@ Post-merge hard forks (timestamp based):
                     ForkId {
                         hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]),
                         next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe2ae4999")),
+                        next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
                     },
                 ),
             ],
@@ -2455,7 +2491,26 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_eth_mainnet_fork_id() {
+        // BPO2
         assert_eq!(ForkId { hash: ForkHash(hex!("0xfd414558")), next: 0 }, MAINNET.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_hoodi_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 }, HOODI.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_holesky_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x9bc6cb31")), next: 0 }, HOLESKY.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_sepolia_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]
