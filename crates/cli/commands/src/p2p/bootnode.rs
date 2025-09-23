@@ -10,7 +10,7 @@ use reth_net_nat::NatResolver;
 use reth_network_peers::NodeRecord;
 use reth_node_core::{
     args::DatadirArgs,
-    dirs::{ChainPath, DataDirPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
 };
 use secp256k1::SecretKey;
 use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -25,9 +25,15 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long, default_value = "0.0.0.0:30301")]
     pub addr: SocketAddr,
 
-    /// All datadir related arguments
-    #[command(flatten)]
-    pub datadir: DatadirArgs,
+    /// The path to the data dir for all reth files and subdirectories.
+    ///
+    /// Defaults to the OS-specific data directory:
+    ///
+    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
+    /// - macOS: `$HOME/Library/Application Support/reth/`
+    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
+    pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -147,8 +153,9 @@ where
     }
 
     fn datadir(&self) -> ChainPath<DataDirPath> {
+        let datadir = DatadirArgs { datadir: self.datadir.clone(), static_files_path: None };
         let chain = self.chain.chain();
-        self.datadir.clone().resolve_datadir(chain)
+        datadir.resolve_datadir(chain)
     }
 }
 
