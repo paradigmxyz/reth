@@ -679,10 +679,6 @@ async fn test_rpc_compatibility() -> eyre::Result<()> {
 
 4. **Multi-Node Coordination**: Use `SelectActiveNode` to control which node performs operations, and `CompareNodeChainTips` to verify synchronization.
 
-5. **Error Handling**: Actions will return errors if expectations are not met, making tests fail fast with clear error messages.
-
-6. **Timeout Configuration**: For operations that might take time (like `WaitForSync`), configure appropriate timeouts.
-
 ## Related Documentation
 
 - [E2E Test Suite Framework](crates/e2e-test-utils/src/testsuite/README.md)
