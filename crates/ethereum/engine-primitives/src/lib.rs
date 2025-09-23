@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg_attr(not(feature = "std"), allow(unused_imports))]
+use rand as _;
+
 mod payload;
 pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 
