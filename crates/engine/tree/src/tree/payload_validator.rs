@@ -336,7 +336,6 @@ where
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
-        // Pre-convert input to block for efficient error handling - must be available in all scopes
         let block = self.convert_to_block(&input)?;
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
