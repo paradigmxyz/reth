@@ -757,6 +757,9 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
+        // track whether the request has a gas limit set
+        let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
@@ -784,6 +787,11 @@ pub trait Call:
         // Disable EIP-7825 transaction gas limit to support larger transactions
         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
+        // Disable additional fee charges, e.g. opstack operator fee charge
+        // See:
+        // <https://github.com/paradigmxyz/reth/issues/18470>
+        evm_env.cfg_env.disable_fee_charge = true;
+
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
@@ -795,7 +803,6 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
-        let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
@@ -803,7 +810,7 @@ pub trait Call:
             evm_env.block_env.basefee = 0;
         }
 
-        if request_gas.is_none() {
+        if !request_has_gas_limit {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
