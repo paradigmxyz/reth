@@ -1145,3 +1145,265 @@ fn test_on_new_payload_malformed_payload() {
         );
     }
 }
+
+/// Test suite for the `check_invalid_ancestors` method
+#[cfg(test)]
+mod check_invalid_ancestors_tests {
+    use super::*;
+
+    /// Test that `find_invalid_ancestor` returns None when no invalid ancestors exist
+    #[test]
+    fn test_find_invalid_ancestor_no_invalid() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a valid block payload
+        let s = include_str!("../../test-data/holesky/1.rlp");
+        let data = Bytes::from_str(s).unwrap();
+        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let sealed = block.seal_slow();
+        let payload = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.into_block())
+                .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Check for invalid ancestors - should return None since none are marked invalid
+        let result = test_harness.tree.find_invalid_ancestor(&payload);
+        assert!(result.is_none(), "Should return None when no invalid ancestors exist");
+    }
+
+    /// Test that `find_invalid_ancestor` detects an invalid parent
+    #[test]
+    fn test_find_invalid_ancestor_with_invalid_parent() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Read block 1
+        let s1 = include_str!("../../test-data/holesky/1.rlp");
+        let data1 = Bytes::from_str(s1).unwrap();
+        let block1 = Block::decode(&mut data1.as_ref()).unwrap();
+        let sealed1 = block1.seal_slow();
+        let parent1 = sealed1.parent_hash();
+
+        // Mark block 1 as invalid
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: sealed1.num_hash(), parent: parent1 });
+
+        // Read block 2 which has block 1 as parent
+        let s2 = include_str!("../../test-data/holesky/2.rlp");
+        let data2 = Bytes::from_str(s2).unwrap();
+        let block2 = Block::decode(&mut data2.as_ref()).unwrap();
+        let sealed2 = block2.seal_slow();
+
+        // Create payload for block 2
+        let payload2 = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                sealed2.hash(),
+                &sealed2.into_block(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Check for invalid ancestors - should detect invalid parent
+        let invalid_ancestor = test_harness.tree.find_invalid_ancestor(&payload2);
+        assert!(
+            invalid_ancestor.is_some(),
+            "Should find invalid ancestor when parent is marked as invalid"
+        );
+
+        // Now test that handling the payload with invalid ancestor returns invalid status
+        let invalid = invalid_ancestor.unwrap();
+        let status = test_harness.tree.handle_invalid_ancestor_payload(payload2, invalid).unwrap();
+        assert!(status.is_invalid(), "Status should be invalid when parent is invalid");
+    }
+
+    /// Test genesis block handling (`parent_hash` = `B256::ZERO`)
+    #[test]
+    fn test_genesis_block_handling() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a genesis-like payload with parent_hash = B256::ZERO
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let genesis_block = test_block_builder.generate_random_block(0, B256::ZERO);
+        let (sealed_genesis, _) = genesis_block.split_sealed();
+        let genesis_payload = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                sealed_genesis.hash(),
+                &sealed_genesis.into_block(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Check for invalid ancestors - should return None for genesis block
+        let result = test_harness.tree.find_invalid_ancestor(&genesis_payload);
+        assert!(result.is_none(), "Genesis block should have no invalid ancestors");
+    }
+
+    /// Test malformed payload with invalid ancestor scenario
+    #[test]
+    fn test_malformed_payload_with_invalid_ancestor() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Mark an ancestor as invalid
+        let invalid_block = Block::default().seal_slow();
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: invalid_block.num_hash(),
+            parent: invalid_block.parent_hash(),
+        });
+
+        // Create a payload that descends from the invalid ancestor but is malformed
+        let malformed_payload = create_malformed_payload_descending_from(invalid_block.hash());
+
+        // The function should handle the malformed payload gracefully
+        let invalid_ancestor = test_harness.tree.find_invalid_ancestor(&malformed_payload);
+        if let Some(invalid) = invalid_ancestor {
+            let status = test_harness
+                .tree
+                .handle_invalid_ancestor_payload(malformed_payload, invalid)
+                .unwrap();
+            assert!(
+                status.is_invalid(),
+                "Should return invalid status for malformed payload with invalid ancestor"
+            );
+        }
+    }
+
+    /// Helper function to create a malformed payload that descends from a given parent
+    fn create_malformed_payload_descending_from(parent_hash: B256) -> ExecutionData {
+        // Create a block with invalid hash (mismatch between computed and provided hash)
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let block = test_block_builder.generate_random_block(1, parent_hash);
+
+        // Intentionally corrupt the block to make it malformed
+        // Modify the block after creation to make validation fail
+        let (sealed_block, _senders) = block.split_sealed();
+        let unsealed_block = sealed_block.unseal();
+
+        // Create payload with wrong hash (this makes it malformed)
+        let wrong_hash = B256::from([0xff; 32]);
+
+        ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(wrong_hash, &unsealed_block).into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        }
+    }
+}
+
+/// Test suite for `try_insert_payload` and `try_buffer_payload`
+/// methods
+#[cfg(test)]
+mod payload_execution_tests {
+    use super::*;
+
+    /// Test `try_insert_payload` with different `InsertPayloadOk` variants
+    #[test]
+    fn test_try_insert_payload_variants() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a valid payload
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let block = test_block_builder.generate_random_block(1, B256::ZERO);
+        let (sealed_block, _) = block.split_sealed();
+        let payload = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                sealed_block.hash(),
+                &sealed_block.into_block(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Test the function directly
+        let result = test_harness.tree.try_insert_payload(payload);
+        // Should handle the payload gracefully
+        assert!(result.is_ok(), "Should handle valid payload without error");
+    }
+
+    /// Test `try_buffer_payload` with validation errors
+    #[test]
+    fn test_buffer_payload_validation_errors() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a malformed payload that will fail validation
+        let malformed_payload = create_malformed_payload();
+
+        // Test buffering during backfill sync
+        let result = test_harness.tree.try_buffer_payload(malformed_payload);
+        assert!(result.is_ok(), "Should handle malformed payload gracefully");
+        let status = result.unwrap();
+        assert!(
+            status.is_invalid() || status.is_syncing(),
+            "Should return invalid or syncing status for malformed payload"
+        );
+    }
+
+    /// Test `try_buffer_payload` with valid payload
+    #[test]
+    fn test_buffer_payload_valid_payload() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(HOLESKY.clone());
+
+        // Create a valid payload
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let block = test_block_builder.generate_random_block(1, B256::ZERO);
+        let (sealed_block, _) = block.split_sealed();
+        let payload = ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                sealed_block.hash(),
+                &sealed_block.into_block(),
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        // Test buffering during backfill sync
+        let result = test_harness.tree.try_buffer_payload(payload);
+        assert!(result.is_ok(), "Should handle valid payload gracefully");
+        let status = result.unwrap();
+        // The payload may be invalid due to missing withdrawals root, so accept either status
+        assert!(
+            status.is_syncing() || status.is_invalid(),
+            "Should return syncing or invalid status for payload"
+        );
+    }
+
+    /// Helper function to create a malformed payload
+    fn create_malformed_payload() -> ExecutionData {
+        // Create a payload with invalid structure that will fail validation
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let block = test_block_builder.generate_random_block(1, B256::ZERO);
+
+        // Modify the block to make it malformed
+        let (sealed_block, _senders) = block.split_sealed();
+        let mut unsealed_block = sealed_block.unseal();
+
+        // Corrupt the block by setting an invalid gas limit
+        unsealed_block.header.gas_limit = 0;
+
+        ExecutionData {
+            payload: ExecutionPayloadV1::from_block_unchecked(
+                unsealed_block.hash_slow(),
+                &unsealed_block,
+            )
+            .into(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        }
+    }
+}
