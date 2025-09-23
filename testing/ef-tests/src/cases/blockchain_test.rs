@@ -17,7 +17,7 @@ use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter,
+    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{validation::stateless_validation, ExecutionWitness};
@@ -204,6 +204,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     provider.insert_block(genesis_block.clone()).map_err(|err| Error::block_failed(0, err))?;
 
+    // Increment block number for receipts static file
+    provider
+        .static_file_provider()
+        .latest_writer(StaticFileSegment::Receipts)
+        .and_then(|mut writer| writer.increment_block(0))
+        .map_err(|err| Error::block_failed(0, err))?;
+
     let genesis_state = case.pre.clone().into_genesis_state();
     insert_genesis_state(&provider, genesis_state.iter())
         .map_err(|err| Error::block_failed(0, err))?;
@@ -226,6 +233,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Insert the block into the database
         provider
             .insert_block(block.clone())
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        // Commit static files, so we can query the headers for stateless execution below
+        provider
+            .static_file_provider()
+            .commit()
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks before block execution
