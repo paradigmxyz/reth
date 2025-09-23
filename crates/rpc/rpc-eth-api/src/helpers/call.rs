@@ -787,11 +787,6 @@ pub trait Call:
         // Disable EIP-7825 transaction gas limit to support larger transactions
         evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
-        // Disable additional fee charges, e.g. opstack operator fee charge
-        // See:
-        // <https://github.com/paradigmxyz/reth/issues/18470>
-        evm_env.cfg_env.disable_fee_charge = true;
-
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
