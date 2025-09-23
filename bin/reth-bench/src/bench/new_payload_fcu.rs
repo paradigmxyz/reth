@@ -81,15 +81,14 @@ impl Command {
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
-                // Handle safe and finalized block lookups gracefully - they may not exist for early blocks
                 let safe_block_hash = match safe {
                     Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash, // Fallback to head for early blocks or on error
+                    Ok(None) | Err(_) => head_block_hash,
                 };
-                
+
                 let finalized_block_hash = match finalized {
                     Ok(Some(block)) => block.header.hash,
-                    Ok(None) | Err(_) => head_block_hash, // Fallback to head for early blocks or on error
+                    Ok(None) | Err(_) => head_block_hash,
                 };
 
                 next_block += 1;
