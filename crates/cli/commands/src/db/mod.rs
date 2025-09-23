@@ -13,6 +13,7 @@ mod clear;
 mod diff;
 mod get;
 mod list;
+mod repair_trie;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -48,6 +49,8 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
+    /// Verifies trie consistency and outputs any inconsistencies
+    RepairTrie(repair_trie::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
@@ -133,6 +136,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Clear(command) => {
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
+                command.execute(provider_factory)?;
+            }
+            Subcommands::RepairTrie(command) => {
+                let access_rights =
+                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
+                let Environment { provider_factory, .. } = self.env.init::<N>(access_rights)?;
                 command.execute(provider_factory)?;
             }
             Subcommands::Version => {

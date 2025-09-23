@@ -103,7 +103,7 @@ impl<B: Block> RecoveredBlock<B> {
         Self { block, senders }
     }
 
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
@@ -216,7 +216,7 @@ impl<B: Block> RecoveredBlock<B> {
         Ok(Self::new(block, senders, hash))
     }
 
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new_sealed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
@@ -230,7 +230,7 @@ impl<B: Block> RecoveredBlock<B> {
         Self::try_new(block, senders, hash)
     }
 
-    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
+    /// A safer variant of [`Self::new_sealed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
@@ -616,6 +616,12 @@ impl<'a, B: Block> IndexedTx<'a, B> {
         self.tx
     }
 
+    /// Returns the recovered transaction with the sender.
+    pub fn recovered_tx(&self) -> Recovered<&<B::Body as BlockBody>::Transaction> {
+        let sender = self.block.senders[self.index];
+        Recovered::new_unchecked(self.tx, sender)
+    }
+
     /// Returns the transaction hash.
     pub fn tx_hash(&self) -> TxHash {
         self.tx.trie_hash()
@@ -653,7 +659,8 @@ mod rpc_compat {
     use crate::{block::error::BlockRecoveryError, SealedHeader};
     use alloc::vec::Vec;
     use alloy_consensus::{
-        transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
+        transaction::{Recovered, TxHashRef},
+        Block as CBlock, BlockBody, BlockHeader, Sealable,
     };
     use alloy_rpc_types_eth::{Block, BlockTransactions, BlockTransactionsKind, TransactionInfo};
 

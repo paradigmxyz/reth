@@ -992,7 +992,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
     /// Configures validation rules based on the head block's timestamp.
     ///
-    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch, or max blob
+    /// counts.
     pub fn with_head_timestamp(mut self, timestamp: u64) -> Self
     where
         Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -1067,14 +1068,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_tx_input_bytes,
             max_tx_gas_limit,
             disable_balance_check,
-            ..
+            max_blob_count,
+            additional_tasks: _,
         } = self;
-
-        let max_blob_count = if prague {
-            BlobParams::prague().max_blobs_per_tx
-        } else {
-            BlobParams::cancun().max_blobs_per_tx
-        };
 
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),

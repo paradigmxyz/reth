@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
-use alloy_consensus::{BlockHeader, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::{Bytes, Encodable};
@@ -628,10 +628,11 @@ where
             tx_backups
                 .into_iter()
                 .filter_map(|backup| {
-                    let tx_signed = <P::Transaction as PoolTransaction>::Consensus::decode_2718(
-                        &mut backup.rlp.as_ref(),
-                    )
-                    .ok()?;
+                    let tx_signed =
+                        <P::Transaction as PoolTransaction>::Consensus::decode_2718_exact(
+                            backup.rlp.as_ref(),
+                        )
+                        .ok()?;
                     let recovered = tx_signed.try_into_recovered().ok()?;
                     let pool_tx =
                         <P::Transaction as PoolTransaction>::try_from_consensus(recovered).ok()?;

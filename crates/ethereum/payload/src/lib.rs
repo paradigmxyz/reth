@@ -271,7 +271,7 @@ where
                     break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
                 };
 
-                if chain_spec.is_osaka_active_at_timestamp(attributes.timestamp) {
+                if is_osaka {
                     if sidecar.is_eip7594() {
                         Ok(sidecar)
                     } else {
@@ -359,7 +359,7 @@ where
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
-    if sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
+    if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
         return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
             rlp_length: sealed_block.rlp_length(),
             max_rlp_length: MAX_RLP_BLOCK_SIZE,

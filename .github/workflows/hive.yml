@@ -34,7 +34,7 @@ jobs:
           repository: ethereum/hive
           path: hivetests
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
       - run: go version
@@ -48,7 +48,7 @@ jobs:
           name: hive_assets
           path: ./hive_assets
   test:
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +113,8 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
+            limit: .*tests/osaka.*
+          - sim: ethereum/eest/consume-engine
             limit: .*tests/prague.*
           - sim: ethereum/eest/consume-engine
             limit: .*tests/cancun.*
@@ -128,6 +130,8 @@ jobs:
             limit: .*tests/frontier.*
 
           # consume-rlp
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/osaka.*
           - sim: ethereum/eest/consume-rlp
             limit: .*tests/prague.*
           - sim: ethereum/eest/consume-rlp

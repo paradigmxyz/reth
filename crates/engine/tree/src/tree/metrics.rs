@@ -1,4 +1,5 @@
 use crate::tree::MeteredStateHook;
+use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
@@ -11,9 +12,11 @@ use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use std::time::Instant;
+use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -62,7 +65,7 @@ impl EngineApiMetrics {
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
         DB: alloy_evm::Database,
-        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>>,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are globally registered so that the data recorded in the hook will
@@ -74,7 +77,12 @@ impl EngineApiMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx?)?;
+                let tx = tx?;
+                let span =
+                    debug_span!(target: "engine::tree", "execute_tx", tx_hash=?tx.tx().tx_hash());
+                let _enter = span.enter();
+                trace!(target: "engine::tree", "Executing transaction");
+                executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -156,16 +164,22 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_storage_tries_updated_total: Counter,
     /// Total number of times the parallel state root computation fell back to regular.
     pub(crate) state_root_parallel_fallback_total: Counter,
-    /// Histogram of state root duration, ie the time spent blocked waiting for the state root.
-    pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration, ie the time spent blocked waiting for the state root.
     pub(crate) state_root_duration: Gauge,
+    /// Histogram for state root duration ie the time spent blocked waiting for the state root
+    pub(crate) state_root_histogram: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency
     pub(crate) payload_validation_duration: Gauge,
     /// Histogram of payload validation latency
     pub(crate) payload_validation_histogram: Histogram,
+    /// Payload processor spawning duration
+    pub(crate) spawn_payload_processor: Histogram,
+    /// Post-execution validation duration
+    pub(crate) post_execution_validation_duration: Histogram,
+    /// Total duration of the new payload call
+    pub(crate) total_duration: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -197,7 +211,7 @@ pub(crate) struct BlockBufferMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
-    use alloy_evm::block::{CommitChanges, StateChangeSource};
+    use alloy_evm::block::StateChangeSource;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::{Receipt, TransactionSigned};
@@ -205,13 +219,14 @@ mod tests {
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
-        context::result::ExecutionResult,
+        context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
         state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot},
         Context, MainBuilder, MainContext,
     };
+    use revm_primitives::Bytes;
     use std::sync::mpsc;
 
     /// A simple mock executor for testing that doesn't require complex EVM setup
@@ -238,16 +253,33 @@ mod tests {
             Ok(())
         }
 
-        fn execute_transaction_with_commit_condition(
+        fn execute_transaction_without_commit(
             &mut self,
-            _tx: impl alloy_evm::block::ExecutableTx<Self>,
-            _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
-        ) -> Result<Option<u64>, BlockExecutionError> {
+            _tx: impl ExecutableTx<Self>,
+        ) -> Result<ResultAndState<<Self::Evm as Evm>::HaltReason>, BlockExecutionError> {
             // Call hook with our mock state for each transaction
             if let Some(hook) = self.hook.as_mut() {
                 hook.on_state(StateChangeSource::Transaction(0), &self.state);
             }
-            Ok(Some(1000)) // Mock gas used
+
+            Ok(ResultAndState::new(
+                ExecutionResult::Success {
+                    reason: SuccessReason::Return,
+                    gas_used: 1000, // Mock gas used
+                    gas_refunded: 0,
+                    logs: vec![],
+                    output: Output::Call(Bytes::from(vec![])),
+                },
+                Default::default(),
+            ))
+        }
+
+        fn commit_transaction(
+            &mut self,
+            _output: ResultAndState<<Self::Evm as Evm>::HaltReason>,
+            _tx: impl ExecutableTx<Self>,
+        ) -> Result<u64, BlockExecutionError> {
+            Ok(1000)
         }
 
         fn finish(

@@ -82,6 +82,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             } else {
                 info!(target: "reth::cli", ?target, "Executing a pipeline unwind.");
             }
+            info!(target: "reth::cli", prune_config=?config.prune, "Using prune settings");
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
             let mut pipeline =
