@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
+revm-context = { workspace = true, features = ["optional_fee_charge"] }
 reth-chain-state.workspace = true
 revm-inspectors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rpc-compat"] }
