@@ -1,7 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
@@ -154,6 +154,7 @@ where
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
+        send_raw_transaction_sync_timeout: Duration,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -171,6 +172,7 @@ where
             max_batch_size,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
+            send_raw_transaction_sync_timeout,
         );
 
         Self { inner: Arc::new(inner) }
@@ -310,6 +312,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Configuration for pending block construction.
     pending_block_kind: PendingBlockKind,
+
+    /// Timeout duration for `send_raw_transaction_sync` RPC method.
+    send_raw_transaction_sync_timeout: Duration,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -335,6 +340,7 @@ where
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
+        send_raw_transaction_sync_timeout: Duration,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -375,6 +381,7 @@ where
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
             pending_block_kind,
+            send_raw_transaction_sync_timeout,
         }
     }
 }
@@ -539,6 +546,12 @@ where
     #[inline]
     pub const fn raw_tx_forwarder(&self) -> Option<&RpcClient> {
         self.raw_tx_forwarder.as_ref()
+    }
+
+    /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.
+    #[inline]
+    pub const fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.send_raw_transaction_sync_timeout
     }
 }
 

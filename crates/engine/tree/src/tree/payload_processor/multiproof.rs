@@ -1074,10 +1074,8 @@ where
                 Err(_) => {
                     // this means our internal message channel is closed, which shouldn't happen
                     // in normal operation since we hold both ends
-                    error!(
-                        target: "engine::root",
-                        "Internal message channel closed unexpectedly"
-                    );
+                    error!(target: "engine::root", "Internal message channel closed unexpectedly");
+                    return
                 }
             }
         }

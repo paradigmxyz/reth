@@ -19,7 +19,7 @@ use crate::{
     TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
+    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Header, TxReceipt,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
@@ -47,7 +47,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedHeader, SignedTransaction, StorageEntry,
+    SealedHeader, StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
@@ -2336,7 +2336,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             }
         }
 
-        num_entries += self.write_storage_trie_updates(trie_updates.storage_tries_ref())?;
+        num_entries += self.write_storage_trie_updates(trie_updates.storage_tries_ref().iter())?;
 
         Ok(num_entries)
     }
@@ -2345,12 +2345,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
     /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
     /// updates by the hashed address, writing in sorted order.
-    fn write_storage_trie_updates(
+    fn write_storage_trie_updates<'a>(
         &self,
-        storage_tries: &B256Map<StorageTrieUpdates>,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
-        let mut storage_tries = Vec::from_iter(storage_tries);
+        let mut storage_tries = storage_tries.collect::<Vec<_>>();
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
@@ -2362,20 +2362,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         }
 
         Ok(num_entries)
-    }
-
-    fn write_individual_storage_trie_updates(
-        &self,
-        hashed_address: B256,
-        updates: &StorageTrieUpdates,
-    ) -> ProviderResult<usize> {
-        if updates.is_empty() {
-            return Ok(0)
-        }
-
-        let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
-        let mut trie_db_cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
-        Ok(trie_db_cursor.write_storage_trie_updates(updates)?)
     }
 }
 
@@ -2525,82 +2511,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         })?;
 
         Ok(hashed_storage_keys)
-    }
-
-    fn insert_hashes(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-        end_block_hash: B256,
-        expected_state_root: B256,
-    ) -> ProviderResult<()> {
-        // Initialize prefix sets.
-        let mut account_prefix_set = PrefixSetMut::default();
-        let mut storage_prefix_sets: HashMap<B256, PrefixSetMut> = HashMap::default();
-        let mut destroyed_accounts = HashSet::default();
-
-        let mut durations_recorder = metrics::DurationsRecorder::default();
-
-        // storage hashing stage
-        {
-            let lists = self.changed_storages_with_range(range.clone())?;
-            let storages = self.plain_state_storages(lists)?;
-            let storage_entries = self.insert_storage_for_hashing(storages)?;
-            for (hashed_address, hashed_slots) in storage_entries {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                for slot in hashed_slots {
-                    storage_prefix_sets
-                        .entry(hashed_address)
-                        .or_default()
-                        .insert(Nibbles::unpack(slot));
-                }
-            }
-        }
-        durations_recorder.record_relative(metrics::Action::InsertStorageHashing);
-
-        // account hashing stage
-        {
-            let lists = self.changed_accounts_with_range(range.clone())?;
-            let accounts = self.basic_accounts(lists)?;
-            let hashed_addresses = self.insert_account_for_hashing(accounts)?;
-            for (hashed_address, account) in hashed_addresses {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
-                if account.is_none() {
-                    destroyed_accounts.insert(hashed_address);
-                }
-            }
-        }
-        durations_recorder.record_relative(metrics::Action::InsertAccountHashing);
-
-        // merkle tree
-        {
-            // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
-            // are pre-loaded.
-            let prefix_sets = TriePrefixSets {
-                account_prefix_set: account_prefix_set.freeze(),
-                storage_prefix_sets: storage_prefix_sets
-                    .into_iter()
-                    .map(|(k, v)| (k, v.freeze()))
-                    .collect(),
-                destroyed_accounts,
-            };
-            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
-                .with_prefix_sets(prefix_sets)
-                .root_with_updates()
-                .map_err(reth_db_api::DatabaseError::from)?;
-            if state_root != expected_state_root {
-                return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
-                    root: GotExpected { got: state_root, expected: expected_state_root },
-                    block_number: *range.end(),
-                    block_hash: end_block_hash,
-                })))
-            }
-            self.write_trie_updates(&trie_updates)?;
-        }
-        durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
-
-        debug!(target: "providers::db", ?range, actions = ?durations_recorder.actions, "Inserted hashes");
-
-        Ok(())
     }
 }
 
@@ -3048,7 +2958,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         blocks: Vec<RecoveredBlock<Self::Block>>,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
-        trie_updates: TrieUpdates,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
@@ -3076,7 +2985,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // insert hashes and intermediate merkle nodes
         self.write_hashed_state(&hashed_state)?;
-        self.write_trie_updates(&trie_updates)?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
         self.update_history_indices(first_number..=last_block_number)?;

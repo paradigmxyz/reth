@@ -7,7 +7,7 @@ use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocki
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
@@ -24,7 +24,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{Recovered, SignedTransaction};
+use reth_primitives_traits::Recovered;
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -398,9 +398,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
             evm_env.cfg_env.disable_base_fee = true;
 
-            // Disable EIP-7825 transaction gas limit to support larger transactions
-            evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
             // Disabled because eth_createAccessList is sometimes used with non-eoa senders
             evm_env.cfg_env.disable_eip3607 = true;
 
@@ -766,10 +763,14 @@ pub trait Call:
                 warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
+        } else {
+            // cap request's gas limit to call gas limit
+            request.as_mut().set_gas_limit(self.call_gas_limit());
         }
 
-        // apply configured gas cap
-        evm_env.block_env.gas_limit = self.call_gas_limit();
+        // Disable block gas limit check to allow executing transactions with higher gas limit (call
+        // gas limit): https://github.com/paradigmxyz/reth/issues/18577
+        evm_env.cfg_env.disable_block_gas_limit = true;
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>

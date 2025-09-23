@@ -58,7 +58,7 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
 /// This function supports both Opstack Eth API and ethereum Eth API.
 ///
 /// The received handle gives access to the `EthApi` has full access to all eth api functionality
-/// [`FullEthApi`]. And also gives access to additional eth related rpc method handlers, such as eth
+/// [`FullEthApi`]. And also gives access to additional eth-related rpc method handlers, such as eth
 /// filter.
 async fn ethapi_exex<Node, EthApi>(
     mut ctx: ExExContext<Node>,

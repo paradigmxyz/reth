@@ -33,6 +33,7 @@ use pin_project as _;
 use tower as _;
 
 mod admin;
+mod aliases;
 mod debug;
 mod engine;
 pub mod eth;
@@ -47,6 +48,7 @@ mod validation;
 mod web3;
 
 pub use admin::AdminApi;
+pub use aliases::*;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{helpers::SyncListener, EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub};

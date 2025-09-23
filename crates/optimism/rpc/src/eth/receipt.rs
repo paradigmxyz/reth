@@ -1,18 +1,17 @@
 //! Loads and formats OP receipt RPC response.
 
 use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
+use alloy_consensus::{BlockHeader, Receipt, TxReceipt};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
-use op_alloy_consensus::{
-    OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope, OpTransaction,
-};
+use op_alloy_consensus::{OpReceiptEnvelope, OpTransaction};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpReceipt;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::SealedBlock;
 use reth_rpc_eth_api::{
     helpers::LoadReceipt,
     transaction::{ConvertReceiptInput, ReceiptConverter},
@@ -45,7 +44,8 @@ impl<Provider> OpReceiptConverter<Provider> {
 impl<Provider, N> ReceiptConverter<N> for OpReceiptConverter<Provider>
 where
     N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
-    Provider: BlockReader + ChainSpecProvider<ChainSpec: OpHardforks> + Debug + 'static,
+    Provider:
+        BlockReader<Block = N::Block> + ChainSpecProvider<ChainSpec: OpHardforks> + Debug + 'static,
 {
     type RpcReceipt = OpTransactionReceipt;
     type Error = OpEthApiError;
@@ -63,12 +63,20 @@ where
             .block_by_number(block_number)?
             .ok_or(EthApiError::HeaderNotFound(block_number.into()))?;
 
+        self.convert_receipts_with_block(inputs, &SealedBlock::new_unhashed(block))
+    }
+
+    fn convert_receipts_with_block(
+        &self,
+        inputs: Vec<ConvertReceiptInput<'_, N>>,
+        block: &SealedBlock<N::Block>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
             Ok(l1_block_info) => l1_block_info,
             Err(err) => {
-                // If it is the genesis block (i.e block number is 0), there is no L1 info, so
+                // If it is the genesis block (i.e. block number is 0), there is no L1 info, so
                 // we return an empty l1_block_info.
-                if block_number == 0 {
+                if block.header().number() == 0 {
                     return Ok(vec![]);
                 }
                 return Err(err.into());
@@ -270,23 +278,30 @@ impl OpReceiptBuilder {
         let timestamp = input.meta.timestamp;
         let block_number = input.meta.block_number;
         let tx_signed = *input.tx.inner();
-        let core_receipt =
-            build_receipt(&input, None, |receipt_with_bloom| match input.receipt.as_ref() {
-                OpReceipt::Legacy(_) => OpReceiptEnvelope::Legacy(receipt_with_bloom),
-                OpReceipt::Eip2930(_) => OpReceiptEnvelope::Eip2930(receipt_with_bloom),
-                OpReceipt::Eip1559(_) => OpReceiptEnvelope::Eip1559(receipt_with_bloom),
-                OpReceipt::Eip7702(_) => OpReceiptEnvelope::Eip7702(receipt_with_bloom),
-                OpReceipt::Deposit(receipt) => {
-                    OpReceiptEnvelope::Deposit(OpDepositReceiptWithBloom {
-                        receipt: OpDepositReceipt {
-                            inner: receipt_with_bloom.receipt,
-                            deposit_nonce: receipt.deposit_nonce,
-                            deposit_receipt_version: receipt.deposit_receipt_version,
-                        },
-                        logs_bloom: receipt_with_bloom.logs_bloom,
-                    })
+        let core_receipt = build_receipt(input, None, |receipt, next_log_index, meta| {
+            let map_logs = move |receipt: alloy_consensus::Receipt| {
+                let Receipt { status, cumulative_gas_used, logs } = receipt;
+                let logs = Log::collect_for_receipt(next_log_index, meta, logs);
+                Receipt { status, cumulative_gas_used, logs }
+            };
+            match receipt {
+                OpReceipt::Legacy(receipt) => {
+                    OpReceiptEnvelope::Legacy(map_logs(receipt).into_with_bloom())
                 }
-            });
+                OpReceipt::Eip2930(receipt) => {
+                    OpReceiptEnvelope::Eip2930(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Eip1559(receipt) => {
+                    OpReceiptEnvelope::Eip1559(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Eip7702(receipt) => {
+                    OpReceiptEnvelope::Eip7702(map_logs(receipt).into_with_bloom())
+                }
+                OpReceipt::Deposit(receipt) => {
+                    OpReceiptEnvelope::Deposit(receipt.map_inner(map_logs).into_with_bloom())
+                }
+            }
+        });
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
             .l1_block_info(chain_spec, tx_signed, l1_block_info)?
