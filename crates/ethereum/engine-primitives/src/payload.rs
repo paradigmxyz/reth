@@ -403,12 +403,33 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     }
 }
 
+se sha2::Digest as _; // for finalize
+use std::sync::OnceLock;
+
+#[cfg(test)]
+fn payload_id_secret() -> &'static [u8; 32] {
+    // Deterministic secret for tests to keep reproducible results.
+    static PAYLOAD_ID_SECRET: OnceLock<[u8; 32]> = OnceLock::new();
+    PAYLOAD_ID_SECRET.get_or_init(|| [0u8; 32])
+}
+
+#[cfg(not(test))]
+fn payload_id_secret() -> &'static [u8; 32] {
+    // Process-scoped random secret to make 8-byte PayloadId resilient to targeted collisions.
+    // This secret is generated once per process and never exposed.
+    static PAYLOAD_ID_SECRET: OnceLock<[u8; 32]> = OnceLock::new();
+    PAYLOAD_ID_SECRET.get_or_init(|| rand::random())
+}
+
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
 pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
+    // Key the hash with a process-local secret to mitigate intentional collisions against a 64-bit id.
+    // The Engine API treats PayloadId as an opaque identifier local to the process, so this remains compliant.
+    hasher.update(payload_id_secret());
     hasher.update(parent.as_slice());
     hasher.update(&attributes.timestamp.to_be_bytes()[..]);
     hasher.update(attributes.prev_randao.as_slice());
@@ -460,11 +481,16 @@ mod tests {
             parent_beacon_block_root: None,
         };
 
-        // Verify that the generated payload ID matches the expected value
-        assert_eq!(
-            payload_id(&parent, &attributes),
-            PayloadId(B64::from_str("0xa247243752eb10b4").unwrap())
-        );
+        // The id must be stable for identical inputs
+        let id1 = payload_id(&parent, &attributes);
+        let id2 = payload_id(&parent, &attributes);
+        assert_eq!(id1, id2);
+
+        // Changing any field must change the id
+        let mut changed = attributes.clone();
+        changed.timestamp += 1;
+        let id_changed = payload_id(&parent, &changed);
+        assert_ne!(id1, id_changed);
     }
 
     #[test]
@@ -497,11 +523,19 @@ mod tests {
             parent_beacon_block_root: None,
         };
 
-        // Verify that the generated payload ID matches the expected value
-        assert_eq!(
-            payload_id(&parent, &attributes),
-            PayloadId(B64::from_str("0xedddc2f84ba59865").unwrap())
-        );
+        let id = payload_id(&parent, &attributes);
+        // Changing withdrawals should change the id
+        let mut attributes2 = attributes.clone();
+        if let Some(w) = &mut attributes2.withdrawals {
+            w.push(Withdrawal {
+                index: 3,
+                validator_index: 789,
+                address: Address::from([0xCC; 20]),
+                amount: 30,
+            });
+        }
+        let id2 = payload_id(&parent, &attributes2);
+        assert_ne!(id, id2);
     }
 
     #[test]
@@ -529,10 +563,12 @@ mod tests {
             ),
         };
 
-        // Verify that the generated payload ID matches the expected value
-        assert_eq!(
-            payload_id(&parent, &attributes),
-            PayloadId(B64::from_str("0x0fc49cd532094cce").unwrap())
-        );
+        let id_with = payload_id(&parent, &attributes);
+
+        // Removing the beacon root should change the id
+        let mut without = attributes.clone();
+        without.parent_beacon_block_root = None;
+        let id_without = payload_id(&parent, &without);
+        assert_ne!(id_with, id_without);
     }
 }
