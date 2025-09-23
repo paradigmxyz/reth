@@ -1,16 +1,19 @@
 //! Types and traits for validating blocks and payloads.
 
-use crate::tree::{
-    cached_state::CachedStateProvider,
-    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    executor::WorkloadExecutor,
-    instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
-    persistence_state::CurrentPersistenceAction,
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+use crate::{
+    ensure_ok,
+    tree::{
+        cached_state::CachedStateProvider,
+        error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+        executor::WorkloadExecutor,
+        instrumented_state::InstrumentedStateProvider,
+        payload_processor::PayloadProcessor,
+        persistence_state::CurrentPersistenceAction,
+        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+        sparse_trie::StateRootComputeOutcome,
+        ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+        PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    },
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
@@ -209,14 +212,16 @@ where
     /// Converts a [`BlockOrPayload`] to a recovered block.
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
-        input: BlockOrPayload<T>,
+        input: &BlockOrPayload<T>,
     ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.ensure_well_formed_payload(payload),
-            BlockOrPayload::Block(block) => Ok(block),
+            BlockOrPayload::Payload(payload) => {
+                self.validator.ensure_well_formed_payload(payload.clone())
+            }
+            BlockOrPayload::Block(block) => Ok(block.clone()),
         }
     }
 
@@ -292,7 +297,7 @@ where
 
         // If execution failed, we should first check if there are any header validation
         // errors that take precedence over the execution error
-        let block = self.convert_to_block(input)?;
+        let block = self.convert_to_block(&input)?;
 
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block) {
@@ -312,14 +317,14 @@ where
         Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
     }
 
-    /// Validates a block that has already been converted from a payload.
+    /// Executes and validates a block or payload.
     ///
     /// This method performs:
+    /// - Block execution with prewarming
     /// - Consensus validation
-    /// - Block execution
-    /// - State root computation
+    /// - State root computation and validation
     /// - Fork detection
-    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
+    pub fn execute_and_validate_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
@@ -328,43 +333,32 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        /// A helper macro that returns the block in case there was an error
-        macro_rules! ensure_ok {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(val) => val,
-                    Err(e) => {
-                        let block = self.convert_to_block(input)?;
-                        return Err(
-                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
-                        )
-                    }
-                }
-            };
-        }
-
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
+        // Pre-convert input to block for efficient error handling - must be available in all scopes
+        let block = self.convert_to_block(&input)?;
+
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
+            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()), block)
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                block.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
         };
 
-        let state_provider = ensure_ok!(provider_builder.build());
+        let state_provider = ensure_ok!(provider_builder.build(), block);
 
         // fetch parent block
-        let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
+        let Some(parent_block) =
+            ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()), block)
         else {
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                block.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -416,20 +410,23 @@ where
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
-                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
+                ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()), block);
 
             // get allocated trie input if it exists
             let allocated_trie_input = self.payload_processor.take_trie_input();
 
             // Compute trie input
             let trie_input_start = Instant::now();
-            let trie_input = ensure_ok!(self.compute_trie_input(
-                persisting_kind,
-                ensure_ok!(consistent_view.provider_ro()),
-                parent_hash,
-                ctx.state(),
-                allocated_trie_input,
-            ));
+            let trie_input = ensure_ok!(
+                self.compute_trie_input(
+                    persisting_kind,
+                    ensure_ok!(consistent_view.provider_ro(), block),
+                    parent_hash,
+                    ctx.state(),
+                    allocated_trie_input,
+                ),
+                block
+            );
 
             self.metrics
                 .block_validation
@@ -492,51 +489,111 @@ where
             self.execute_block(&state_provider, env, &input, &mut handle)
         } {
             Ok(output) => output,
-            Err(err) => return self.handle_execution_error(input, err, &parent_block),
+            Err(err) => {
+                // Ensure prewarming handle is properly terminated on error
+                handle.terminate_caching(None);
+                return self.handle_execution_error(input, err, &parent_block)
+            }
         };
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
 
-        let block = self.convert_to_block(input)?;
+        // Build hashed state for validation
+        let hashed_state = self.provider.hashed_post_state(&output.state);
 
-        // A helper macro that returns the block in case there was an error
-        macro_rules! ensure_ok {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(val) => val,
-                    Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
-                }
-            };
+        // Perform post-execution validation
+        self.validate_post_execution(&block, &output, &parent_block, &hashed_state, &mut ctx)?;
+
+        // Compute and validate state root
+        let (_state_root, trie_output) = self.compute_and_validate_state_root(
+            &block,
+            &output,
+            &hashed_state,
+            &parent_block,
+            &mut handle,
+            &state_provider,
+            persisting_kind,
+            run_parallel_state_root,
+            use_state_root_task,
+            &mut ctx,
+        )?;
+
+        // Build final execution result
+        self.build_execution_result(
+            block,
+            output,
+            hashed_state,
+            trie_output,
+            has_ancestors_with_missing_trie_updates,
+            &mut handle,
+            ctx,
+        )
+    }
+
+    /// Return sealed block header from database or in-memory state by hash.
+    fn sealed_header_by_hash(
+        &self,
+        hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
+        // check memory first
+        let header = state.tree_state.sealed_header_by_hash(&hash);
+
+        if header.is_some() {
+            Ok(header)
+        } else {
+            self.provider.sealed_header_by_hash(hash)
         }
+    }
 
+    /// Performs post-execution validation of the block.
+    ///
+    /// This includes:
+    /// - Basic block consensus validation
+    /// - Validation against parent block
+    /// - Post-execution consensus checks
+    /// - Network-specific validation with hashed state
+    fn validate_post_execution<T: PayloadTypes>(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        parent_block: &SealedHeader<N::BlockHeader>,
+        hashed_state: &HashedPostState,
+        ctx: &mut TreeCtx<'_, N>,
+    ) -> Result<(), InsertBlockError<N::Block>>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
         let post_execution_start = Instant::now();
+        let block_num_hash = block.num_hash();
+
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
+
         // validate block consensus rules
-        ensure_ok!(self.validate_block_inner(&block));
+        self.validate_block_inner(block)
+            .map_err(|e| InsertBlockError::new(block.clone().into_sealed_block(), e.into()))?;
 
         // now validate against the parent
         if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+            self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+            return Err(InsertBlockError::new(block.clone().into_sealed_block(), e.into()))
         }
 
-        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
+        if let Err(err) = self.consensus.validate_block_post_execution(block, output) {
             // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            return Err(InsertBlockError::new(block.clone().into_sealed_block(), err.into()))
         }
-
-        let hashed_state = self.provider.hashed_post_state(&output.state);
 
         if let Err(err) =
-            self.validator.validate_block_post_execution_with_hashed_state(&hashed_state, &block)
+            self.validator.validate_block_post_execution_with_hashed_state(hashed_state, block)
         {
             // call post-block hook
-            self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-            return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
+            return Err(InsertBlockError::new(block.clone().into_sealed_block(), err.into()))
         }
 
         // record post-execution validation duration
@@ -545,10 +602,35 @@ where
             .post_execution_validation_duration
             .record(post_execution_start.elapsed().as_secs_f64());
 
+        Ok(())
+    }
+
+    /// Computes and validates the state root for the block.
+    ///
+    /// This function attempts parallel state root calculation if enabled,
+    /// falls back to synchronous calculation if necessary, and validates
+    /// the computed state root against the block header.
+    #[allow(clippy::too_many_arguments)]
+    fn compute_and_validate_state_root<Sp: StateRootProvider>(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        hashed_state: &HashedPostState,
+        parent_block: &SealedHeader<N::BlockHeader>,
+        handle: &mut PayloadHandle<
+            impl ExecutableTxFor<Evm>,
+            impl core::error::Error + Send + Sync,
+        >,
+        state_provider: &Sp,
+        persisting_kind: PersistingKind,
+        run_parallel_state_root: bool,
+        use_state_root_task: bool,
+        ctx: &mut TreeCtx<'_, N>,
+    ) -> Result<(B256, TrieUpdates), InsertBlockError<N::Block>> {
+        let block_num_hash = block.num_hash();
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
         let root_time = Instant::now();
-
         let mut maybe_state_root = None;
 
         if run_parallel_state_root {
@@ -581,7 +663,7 @@ where
                 match self.compute_state_root_parallel(
                     persisting_kind,
                     block.parent_hash(),
-                    &hashed_state,
+                    hashed_state,
                     ctx.state(),
                 ) {
                     Ok(result) => {
@@ -613,8 +695,9 @@ where
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
-            let (root, updates) =
-                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
+            let (root, updates) = state_provider
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(|e| InsertBlockError::new(block.clone().into_sealed_block(), e.into()))?;
             (root, updates, root_time.elapsed())
         };
 
@@ -625,22 +708,46 @@ where
         if state_root != block.header().state_root() {
             // call post-block hook
             self.on_invalid_block(
-                &parent_block,
-                &block,
-                &output,
+                parent_block,
+                block,
+                output,
                 Some((&trie_output, state_root)),
                 ctx.state_mut(),
             );
             let block_state_root = block.header().state_root();
             return Err(InsertBlockError::new(
-                block.into_sealed_block(),
+                block.clone().into_sealed_block(),
                 ConsensusError::BodyStateRootDiff(
                     GotExpected { got: state_root, expected: block_state_root }.into(),
                 )
                 .into(),
-            )
-            .into())
+            ))
         }
+
+        Ok((state_root, trie_output))
+    }
+
+    /// Builds the final execution result.
+    ///
+    /// This function:
+    /// - Terminates the prewarming cache with the final state
+    /// - Determines whether trie updates should be persisted
+    /// - Constructs the final `ExecutedBlockWithTrieUpdates`
+    #[allow(clippy::too_many_arguments)]
+    fn build_execution_result(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        output: BlockExecutionOutput<N::Receipt>,
+        hashed_state: HashedPostState,
+        trie_output: TrieUpdates,
+        has_ancestors_with_missing_trie_updates: bool,
+        handle: &mut PayloadHandle<
+            impl ExecutableTxFor<Evm>,
+            impl core::error::Error + Send + Sync,
+        >,
+        ctx: TreeCtx<'_, N>,
+    ) -> Result<ExecutedBlockWithTrieUpdates<N>, InsertPayloadError<N::Block>> {
+        let block_num_hash = block.num_hash();
 
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
@@ -653,9 +760,15 @@ where
         //
         // Instead, they will be recomputed on persistence.
         let connects_to_last_persisted =
-            ensure_ok!(self.block_connects_to_last_persisted(ctx, &block));
+            self.block_connects_to_last_persisted(ctx, &block).map_err(|e| {
+                InsertPayloadError::Block(InsertBlockError::new(
+                    block.clone().into_sealed_block(),
+                    e.into(),
+                ))
+            })?;
         let should_discard_trie_updates =
             !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
+
         debug!(
             target: "engine::tree",
             block = ?block_num_hash,
@@ -664,6 +777,7 @@ where
             should_discard_trie_updates,
             "Checking if should discard trie updates"
         );
+
         let trie_updates = if should_discard_trie_updates {
             ExecutedTrieUpdates::Missing
         } else {
@@ -678,22 +792,6 @@ where
             },
             trie: trie_updates,
         })
-    }
-
-    /// Return sealed block header from database or in-memory state by hash.
-    fn sealed_header_by_hash(
-        &self,
-        hash: B256,
-        state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
-        // check memory first
-        let header = state.tree_state.sealed_header_by_hash(&hash);
-
-        if header.is_some() {
-            Ok(header)
-        } else {
-            self.provider.sealed_header_by_hash(hash)
-        }
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
@@ -1110,7 +1208,7 @@ where
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
+        self.execute_and_validate_block(BlockOrPayload::Payload(payload), ctx)
     }
 
     fn validate_block(
@@ -1118,7 +1216,7 @@ where
         block: RecoveredBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
+        self.execute_and_validate_block(BlockOrPayload::Block(block), ctx)
     }
 }
 

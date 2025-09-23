@@ -70,6 +70,8 @@ mod tests;
 // TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
+#[macro_use]
+mod macros;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
