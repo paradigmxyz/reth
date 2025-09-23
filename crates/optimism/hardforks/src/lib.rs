@@ -22,7 +22,7 @@ extern crate alloc;
 use alloy_op_hardforks::EthereumHardforks;
 pub use alloy_op_hardforks::{OpChainHardforks, OpHardfork, OpHardforks};
 
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 use alloy_primitives::U256;
 use once_cell::sync::Lazy as LazyLock;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
