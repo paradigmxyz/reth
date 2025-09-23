@@ -172,7 +172,7 @@ pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
         .thread_name_fn(|| {
             static IDX: AtomicUsize = AtomicUsize::new(0);
             let id = IDX.fetch_add(1, Ordering::Relaxed);
-            format!("reth-tokio-{id}")
+            format!("reth-cli-tokio-{id}")
         })
         .build()
 }
