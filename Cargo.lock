@@ -10175,7 +10175,6 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",
- "revm-context",
  "revm-inspectors",
  "tokio",
  "tracing",
