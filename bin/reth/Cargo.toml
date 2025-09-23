@@ -16,10 +16,10 @@ section = "network"
 priority = "optional"
 maintainer-scripts = "debian/"
 assets = [
-  "$auto",
-  ["../../README.md", "usr/share/doc/reth/", "644"],
-  ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
-  ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
+    "$auto",
+    ["../../README.md", "usr/share/doc/reth/", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
+    ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth" }
 
