@@ -66,21 +66,40 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
 /// Helper function to initialize Reth's `ChainHardforks` from Alloy's `OpChainHardforks` init
 /// functions.
 pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
+    // Separate timestamp-activated forks in order to sort them
     let mut forks = Vec::new();
+    let mut ts_forks = Vec::new();
     for ethereum_hardfork in EthereumHardfork::VARIANTS {
         let fork_condition = op_hardforks.ethereum_fork_activation(*ethereum_hardfork);
         // Add Ethereum hardforks that are activated on the chain.
         if fork_condition != ForkCondition::Never {
-            forks.push((ethereum_hardfork.boxed(), fork_condition));
+            match fork_condition {
+                ForkCondition::Timestamp(ts) => {
+                    ts_forks.push((ethereum_hardfork.boxed(), ts));
+                }
+                _ => forks.push((ethereum_hardfork.boxed(), fork_condition)),
+            }
         }
     }
     for op_hardfork in OpHardfork::VARIANTS {
         let fork_condition = op_hardforks.op_fork_activation(*op_hardfork);
         // Add OP hardforks that are activated on the chain.
         if fork_condition != ForkCondition::Never {
-            forks.push((op_hardfork.boxed(), fork_condition));
+            match fork_condition {
+                ForkCondition::Timestamp(ts) => {
+                    ts_forks.push((op_hardfork.boxed(), ts));
+                }
+                _ => forks.push((op_hardfork.boxed(), fork_condition)),
+            }
         }
     }
+    // Sort timestamp forks by ascending timestamp.
+    ts_forks.sort_by_key(|(_, ts)| *ts);
+
+    // Stitch the final list: all non-timestamp forks in their original order, followed by the
+    // timestamp forks ordered by timestamp.
+    forks.extend(ts_forks.into_iter().map(|(hf, ts)| (hf, ForkCondition::Timestamp(ts))));
+
     ChainHardforks::new(forks)
 }
 
@@ -111,16 +130,16 @@ mod tests {
                     total_difficulty: U256::ZERO,
                 },
             ),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
             (OpHardfork::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
             (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
             (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
             (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
+            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
             (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1746806401)),
             // (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(u64::MAX)), /* TODO: Update
             // timestamp when Jovian is planned */
@@ -151,16 +170,16 @@ mod tests {
                     total_difficulty: U256::ZERO,
                 },
             ),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
             (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
             (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
             (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
             (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
             (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
+            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
             (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1744905600)),
             // (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(u64::MAX)), /* TODO: Update
             // timestamp when Jovian is planned */
@@ -191,16 +210,16 @@ mod tests {
                     total_difficulty: U256::ZERO,
                 },
             ),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
-            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
             (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
             (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
             (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
             (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
             (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
+            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
             (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1746806401)),
             // (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(u64::MAX)), /* TODO: Update
             // timestamp when Jovian is planned */
@@ -231,16 +250,16 @@ mod tests {
                     total_difficulty: U256::ZERO,
                 },
             ),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
-            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
-            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
             (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
             (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
             (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
             (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
             (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
             (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
             (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
+            (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
             (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1744905600)),
             // (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(u64::MAX)), /* TODO: Update
             // timestamp when Jovian is planned */
