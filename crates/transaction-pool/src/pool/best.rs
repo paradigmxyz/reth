@@ -2,7 +2,7 @@ use crate::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PoolTransaction, Priority, TransactionOrdering, ValidPoolTransaction,
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
@@ -96,15 +96,19 @@ pub struct BestTransactions<T: TransactionOrdering> {
     /// These new pending transactions are inserted into this iterator's pool before yielding the
     /// next value
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
-    /// The priority value of most recently yielded transaction.
-    ///
-    /// This is required if we new pending transactions are fed in while it yields new values.
-    pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
+    /// Flag to control whether new transactions can be added to the iterator.
+    /// Set to false after the first transaction is popped to ensure a consistent set.
+    pub(crate) accepting_new_txs: bool,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
+    /// Reset the iterator for a new block, allowing new transactions again
+    pub fn reset_for_new_block(&mut self) {
+        self.accepting_new_txs = true;
+    }
+
     /// Mark the transaction and it's descendants as invalid.
     pub(crate) fn mark_invalid(
         &mut self,
@@ -127,13 +131,6 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority {
-                        if &tx.priority > last_priority {
-                            // we skip transactions if we already yielded a transaction with lower
-                            // priority
-                            return None
-                        }
-                    }
                     return Some(tx)
                 }
                 // note TryRecvError::Lagged can be returned here, which is an error that attempts
@@ -164,6 +161,11 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
+        // Don't accept new transactions if we've already started popping
+        if !self.accepting_new_txs {
+            return;
+        }
+
         while let Some(pending_tx) = self.try_recv() {
             //  same logic as PendingPool::add_transaction/PendingPool::best_with_unlocked
             let tx_id = *pending_tx.transaction.id();
@@ -182,7 +184,6 @@ impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransaction
 
     fn no_updates(&mut self) {
         self.new_transaction_receiver.take();
-        self.last_priority.take();
     }
 
     fn skip_blobs(&mut self) {
@@ -229,9 +230,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
-                if self.new_transaction_receiver.is_some() {
-                    self.last_priority = Some(best.priority.clone())
-                }
+                // Stop accepting new transactions after we've returned the first one
+                self.accepting_new_txs = false;
                 return Some(best.transaction)
             }
         }
@@ -945,6 +945,140 @@ mod tests {
 
         // Ensure receiver is cleared
         assert!(best.new_transaction_receiver.is_none());
+    }
+
+    #[test]
+    fn test_priority_value_comparison() {
+        use crate::ordering::Priority;
+
+        let p5 = Priority::Value(5);
+        let p10 = Priority::Value(10);
+        let p50 = Priority::Value(50);
+
+        println!("Priority comparisons:");
+        println!("  p5 > p10: {}", p5 > p10);
+        println!("  p50 > p10: {}", p50 > p10);
+        println!("  p5 < p10: {}", p5 < p10);
+        println!("  p50 < p10: {}", p50 < p10);
+
+        assert!(p5 < p10);
+        assert!(p50 > p10);
+    }
+
+    #[test]
+    fn test_no_new_transactions_after_first_pop() {
+        // This test verifies that new transactions are not accepted after the first pop,
+        // preventing priority inversion issues.
+
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add exactly 2 initial transactions to the pool:
+        // - High priority (100)
+        // - Low priority (10)
+        let high_priority_tx = MockTransaction::eip1559()
+            .with_max_fee(200)
+            .with_priority_fee(100)
+            .with_nonce(0)
+            .rng_hash();
+        pool.add_transaction(Arc::new(f.validated(high_priority_tx)), 0);
+
+        let low_priority_tx = MockTransaction::eip1559()
+            .with_max_fee(20)
+            .with_priority_fee(10)
+            .with_nonce(0)
+            .rng_hash();
+        pool.add_transaction(Arc::new(f.validated(low_priority_tx)), 0);
+
+        // Create a BestTransactions iterator
+        let mut best = pool.best();
+
+        // Set up a channel for new transactions
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        let mut block1 = Vec::new();
+
+        // Pop and execute the first transaction (priority 100)
+        let tx1 = best.next().unwrap();
+        assert_eq!(tx1.transaction.max_priority_fee_per_gas(), Some(100));
+        block1.push(100);
+        println!("Popped tx with priority 100");
+
+        // After first pop, accepting_new_txs should be false
+        assert!(!best.accepting_new_txs, "Should not accept new txs after first pop");
+
+        // Pop and execute the second transaction (priority 10)
+        let tx2 = best.next().unwrap();
+        assert_eq!(tx2.transaction.max_priority_fee_per_gas(), Some(10));
+        block1.push(10);
+        println!("Popped tx with priority 10");
+
+        // Now new transactions arrive AFTER we've started popping
+        let mid_priority_tx = MockTransaction::eip1559()
+            .with_max_fee(100)
+            .with_priority_fee(50)
+            .with_nonce(0)
+            .rng_hash();
+        let valid_mid_tx = f.validated(mid_priority_tx);
+        let pending_mid_tx = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_mid_tx),
+            priority: Priority::Value(50),
+        };
+        tx_sender.send(pending_mid_tx.clone()).unwrap();
+        println!("Priority 50 tx sent to channel");
+
+        let very_low_priority_tx = MockTransaction::eip1559()
+            .with_max_fee(10)
+            .with_priority_fee(5)
+            .with_nonce(0)
+            .rng_hash();
+        let valid_very_low_tx = f.validated(very_low_priority_tx);
+        let pending_very_low_tx = PendingTransaction {
+            submission_id: 11,
+            transaction: Arc::new(valid_very_low_tx),
+            priority: Priority::Value(5),
+        };
+        tx_sender.send(pending_very_low_tx.clone()).unwrap();
+        println!("Priority 5 tx sent to channel");
+
+        // Try to pop more - should get nothing because new txs are blocked
+        println!("\nAttempting 3rd pop...");
+        assert!(best.next().is_none(), "No more transactions should be available");
+        println!("Correctly returned None - new transactions were blocked");
+
+        // Verify the transactions are still in the channel (not consumed)
+        println!("\nVerifying transactions still in channel for next block...");
+
+        // Move to next block - reset the flag
+        best.reset_for_new_block();
+        assert!(best.accepting_new_txs, "Should accept new txs after reset_for_new_block()");
+
+        let mut block2 = Vec::new();
+
+        // Now transactions should be accepted and processed in order
+        if let Some(tx3) = best.next() {
+            println!("Got tx with priority: {}", tx3.transaction.max_priority_fee_per_gas().unwrap());
+            block2.push(tx3.transaction.max_priority_fee_per_gas().unwrap() as u64);
+        }
+
+        if let Some(tx4) = best.next() {
+            println!("Got tx with priority: {}", tx4.transaction.max_priority_fee_per_gas().unwrap());
+            block2.push(tx4.transaction.max_priority_fee_per_gas().unwrap() as u64);
+        }
+
+        println!("\nBlock 1: {:?}", block1);
+        println!("Block 2: {:?}", block2);
+
+        // Block 1 should only have the initial 2 transactions
+        assert_eq!(block1, vec![100, 10], "Block 1 should only have initial txs");
+        // Block 2 should have the new transactions in priority order
+        assert_eq!(block2, vec![50, 5], "Block 2 should have new txs in order");
+
+        println!("\n*** SUCCESS ***");
+        println!("Priority inversion prevented! New transactions blocked after first pop.");
     }
 
     #[test]
