@@ -553,9 +553,9 @@ where
         self.metrics.block_validation.record_payload_validation(start.elapsed().as_secs_f64());
 
         let status = if self.backfill_sync_state.is_idle() {
-            self.execute_payload_during_normal_sync(payload)?
+            self.try_insert_payload(payload)?
         } else {
-            self.buffer_payload_for_backfill_sync(payload)?
+            self.try_buffer_payload(payload)?
         };
 
         let mut outcome = TreeOutcome::new(status);
@@ -577,9 +577,16 @@ where
 
     /// Executes and validates a payload during normal sync operations.
     ///
-    /// Inserts the payload into the tree, handles validation results, and returns
-    /// appropriate status. Called when not in backfill sync mode.
-    fn execute_payload_during_normal_sync(
+    /// Attempts to insert the payload into the tree during normal sync operation.
+    ///
+    /// Returns:
+    /// - `PayloadStatus::Valid` - When the payload is successfully inserted and validated
+    /// - `PayloadStatus::Syncing` - When the payload cannot be fully validated because its parent
+    ///   is missing (block is buffered for later processing)
+    /// - Error statuses for invalid payloads
+    ///
+    /// This function is called when the node is not performing backfill sync.
+    fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
@@ -618,11 +625,22 @@ where
         }
     }
 
-    /// Validates and buffers a payload for later processing during backfill sync.
+    /// Attempts to buffer a payload for later processing during backfill sync.
     ///
-    /// If the payload is well-formed, it is buffered for processing once sync completes.
-    /// Returns SYNCING status on success, or handles validation errors appropriately.
-    fn buffer_payload_for_backfill_sync(
+    /// "Buffer" in this context means to temporarily store the payload in memory for deferred
+    /// processing. This is necessary because during backfill sync, the node is still downloading
+    /// historical blocks and doesn't yet have the complete state required to validate the
+    /// payload's execution.
+    ///
+    /// Returns:
+    /// - `PayloadStatus::Syncing` - When the payload is successfully validated and buffered for
+    ///   later processing once the backfill sync completes
+    /// - Error statuses for malformed or invalid payloads
+    ///
+    /// This function is called when the node is performing backfill sync and cannot
+    /// immediately validate the payload's execution. The buffered payloads will be processed
+    /// when the sync catches up to their parent blocks.
+    fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {

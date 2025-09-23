@@ -1301,15 +1301,15 @@ mod check_invalid_ancestors_tests {
     }
 }
 
-/// Test suite for `execute_payload_during_normal_sync` and `buffer_payload_for_backfill_sync`
+/// Test suite for `try_insert_payload` and `try_buffer_payload`
 /// methods
 #[cfg(test)]
 mod payload_execution_tests {
     use super::*;
 
-    /// Test `execute_payload_during_normal_sync` with different `InsertPayloadOk` variants
+    /// Test `try_insert_payload` with different `InsertPayloadOk` variants
     #[test]
-    fn test_execute_payload_during_normal_sync_variants() {
+    fn test_try_insert_payload_variants() {
         reth_tracing::init_test_tracing();
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
@@ -1328,12 +1328,12 @@ mod payload_execution_tests {
         };
 
         // Test the function directly
-        let result = test_harness.tree.execute_payload_during_normal_sync(payload);
+        let result = test_harness.tree.try_insert_payload(payload);
         // Should handle the payload gracefully
         assert!(result.is_ok(), "Should handle valid payload without error");
     }
 
-    /// Test `buffer_payload_for_backfill_sync` with validation errors
+    /// Test `try_buffer_payload` with validation errors
     #[test]
     fn test_buffer_payload_validation_errors() {
         reth_tracing::init_test_tracing();
@@ -1344,7 +1344,7 @@ mod payload_execution_tests {
         let malformed_payload = create_malformed_payload();
 
         // Test buffering during backfill sync
-        let result = test_harness.tree.buffer_payload_for_backfill_sync(malformed_payload);
+        let result = test_harness.tree.try_buffer_payload(malformed_payload);
         assert!(result.is_ok(), "Should handle malformed payload gracefully");
         let status = result.unwrap();
         assert!(
@@ -1353,7 +1353,7 @@ mod payload_execution_tests {
         );
     }
 
-    /// Test `buffer_payload_for_backfill_sync` with valid payload
+    /// Test `try_buffer_payload` with valid payload
     #[test]
     fn test_buffer_payload_valid_payload() {
         reth_tracing::init_test_tracing();
@@ -1374,7 +1374,7 @@ mod payload_execution_tests {
         };
 
         // Test buffering during backfill sync
-        let result = test_harness.tree.buffer_payload_for_backfill_sync(payload);
+        let result = test_harness.tree.try_buffer_payload(payload);
         assert!(result.is_ok(), "Should handle valid payload gracefully");
         let status = result.unwrap();
         // The payload may be invalid due to missing withdrawals root, so accept either status
