@@ -306,7 +306,7 @@ where
         self.inner.auth_server_handle().clone()
     }
 
-    /// Creates a [`NodeClient`] from this test context.
+    /// Creates a [`crate::testsuite::NodeClient`] from this test context.
     ///
     /// This helper method extracts the necessary handles and creates a client
     /// that can interact with both the regular RPC and Engine API endpoints.
