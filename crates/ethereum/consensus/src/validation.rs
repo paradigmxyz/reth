@@ -73,11 +73,21 @@ where
             let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
             if let Some(body_bal) = block.body().block_access_list() {
                 if bal != body_bal {
+                    tracing::debug!(
+                        ?bal,
+                        ?body_bal,
+                        "block access list in body does not match the provided block access list"
+                    );
                     return Err(ConsensusError::BlockAccessListMismatch)
                 }
             }
 
             if bal_hash != header_block_access_list_hash {
+                tracing::debug!(
+                    ?bal_hash,
+                    ?header_block_access_list_hash,
+                    "block access list hash mismatch"
+                );
                 return Err(ConsensusError::BodyBlockAccessListHashDiff(
                     GotExpected::new(bal_hash, header_block_access_list_hash).into(),
                 ))
