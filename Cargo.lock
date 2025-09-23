@@ -7852,6 +7852,7 @@ dependencies = [
  "reth-db",
  "reth-db-common",
  "reth-engine-local",
+ "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-network-api",
  "reth-network-p2p",
