@@ -642,6 +642,13 @@ c-kzg = "2.1.4"
 # config
 toml = "0.8"
 
+# otlp obs
+opentelemetry_sdk = "0.30"
+opentelemetry = "0.30"
+opentelemetry-otlp = "0.30"
+opentelemetry-semantic-conventions = "0.30"
+tracing-opentelemetry = "0.31"
+
 # misc-testing
 arbitrary = "1.3"
 assert_matches = "1.5.0"
