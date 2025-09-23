@@ -27,6 +27,7 @@ alloy-rlp.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -45,4 +46,5 @@ std = [
     "thiserror/std",
     "reth-engine-primitives/std",
     "reth-primitives-traits/std",
+    "rand/std",
 ]
