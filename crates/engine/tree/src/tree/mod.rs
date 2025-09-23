@@ -575,17 +575,12 @@ where
         Ok(outcome)
     }
 
-    /// Executes and validates a payload during normal sync operations.
-    ///
-    /// Attempts to insert the payload into the tree during normal sync operation.
+    /// Processes a payload during normal sync operation.
     ///
     /// Returns:
-    /// - `PayloadStatus::Valid` - When the payload is successfully inserted and validated
-    /// - `PayloadStatus::Syncing` - When the payload cannot be fully validated because its parent
-    ///   is missing (block is buffered for later processing)
-    /// - Error statuses for invalid payloads
-    ///
-    /// This function is called when the node is not performing backfill sync.
+    /// - `Valid`: Payload successfully validated and inserted
+    /// - `Syncing`: Parent missing, payload buffered for later
+    /// - Error status: Payload is invalid
     fn try_insert_payload(
         &mut self,
         payload: T::ExecutionData,
@@ -625,21 +620,14 @@ where
         }
     }
 
-    /// Attempts to buffer a payload for later processing during backfill sync.
+    /// Stores a payload for later processing during backfill sync.
     ///
-    /// "Buffer" in this context means to temporarily store the payload in memory for deferred
-    /// processing. This is necessary because during backfill sync, the node is still downloading
-    /// historical blocks and doesn't yet have the complete state required to validate the
-    /// payload's execution.
+    /// During backfill, the node lacks the state needed to validate payloads,
+    /// so they are buffered (stored in memory) until their parent blocks are synced.
     ///
     /// Returns:
-    /// - `PayloadStatus::Syncing` - When the payload is successfully validated and buffered for
-    ///   later processing once the backfill sync completes
-    /// - Error statuses for malformed or invalid payloads
-    ///
-    /// This function is called when the node is performing backfill sync and cannot
-    /// immediately validate the payload's execution. The buffered payloads will be processed
-    /// when the sync catches up to their parent blocks.
+    /// - `Syncing`: Payload successfully buffered
+    /// - Error status: Payload is malformed or invalid
     fn try_buffer_payload(
         &mut self,
         payload: T::ExecutionData,
