@@ -238,15 +238,29 @@ where
 
             let encoded = valid_tx.transaction().encoded_2718();
 
-            let cost_addition = match l1_block_info.l1_tx_data_fee(
-                self.chain_spec(),
-                self.block_timestamp(),
-                &encoded,
-                false,
-            ) {
-                Ok(cost) => cost,
-                Err(err) => {
+            let cost_addition = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                l1_block_info.l1_tx_data_fee(
+                    self.chain_spec(),
+                    self.block_timestamp(),
+                    &encoded,
+                    false,
+                )
+            })) {
+                Ok(Ok(cost)) => cost,
+                Ok(Err(err)) => {
                     return TransactionValidationOutcome::Error(*valid_tx.hash(), Box::new(err))
+                }
+                Err(panic_info) => {
+                    // Log the panic and use zero cost as fallback
+                    tracing::warn!(
+                        "l1_tx_data_fee panicked for tx {} (likely due to missing operator fee scalar for Isthmus L1 Block), using zero cost as fallback: {:?}",
+                        valid_tx.hash(),
+                        panic_info.downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_info.downcast_ref::<&str>().copied())
+                            .unwrap_or("Unknown panic")
+                    );
+                    alloy_primitives::U256::ZERO
                 }
             };
             let cost = valid_tx.transaction().cost().saturating_add(cost_addition);
