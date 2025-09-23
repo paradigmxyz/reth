@@ -328,7 +328,6 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        // Convert to block once, taking ownership to avoid cloning
         let block = self.convert_to_block(input)?;
         let parent_hash = block.parent_hash();
         let block_num_hash = block.num_hash();
