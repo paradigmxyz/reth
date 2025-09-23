@@ -11,7 +11,15 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
+use std::{
+    future::Future,
+    pin::pin,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
+    time::Duration,
+};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -159,7 +167,14 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name_fn(|| {
+            static IDX: AtomicUsize = AtomicUsize::new(0);
+            let id = IDX.fetch_add(1, Ordering::Relaxed);
+            format!("tokio-{id}")
+        })
+        .build()
 }
 
 /// Runs the given future to completion or until a critical task panicked.
