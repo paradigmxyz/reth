@@ -7,7 +7,7 @@ use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::BlockNumberAddress,
     table::TableImporter,
@@ -151,11 +151,30 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
         let mut source_cursor = unwind_inner_tx.cursor_dup_read::<tables::StorageChangeSets>()?;
         let mut target_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
 
+        // For DupSort tables, we need to iterate through each primary key in the range
+        // and then get all duplicate entries for each key
         let range = BlockNumberAddress::range(from..=to);
-        for row in source_cursor.walk_range(range)? {
-            let (key, value) = row?;
-            target_cursor.append_dup(key, value)?;
+
+        if let Some((key, _)) = source_cursor.seek(range.start)? {
+            if key < range.end {
+                for dup_row in source_cursor.walk_dup(Some(key), None)? {
+                    let (k, v) = dup_row?;
+                    target_cursor.append_dup(k, v)?;
+                }
+
+                while let Some((key, _)) = source_cursor.next_no_dup()? {
+                    if key >= range.end {
+                        break;
+                    }
+
+                    for dup_row in source_cursor.walk_dup(Some(key), None)? {
+                        let (k, v) = dup_row?;
+                        target_cursor.append_dup(k, v)?;
+                    }
+                }
+            }
         }
+
         Ok::<(), reth_db::DatabaseError>(())
     })??;
 
