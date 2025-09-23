@@ -237,19 +237,7 @@ where
             Ok((nodes, executor, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
-                    let rpc = node
-                        .rpc_client()
-                        .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let auth = node.auth_server_handle();
-                    let url = node.rpc_url();
-                    let beacon_handle = node.inner.add_ons_handle.beacon_engine_handle.clone();
-
-                    node_clients.push(crate::testsuite::NodeClient::new_with_beacon_engine(
-                        rpc,
-                        auth,
-                        url,
-                        beacon_handle,
-                    ));
+                    node_clients.push(node.to_node_client()?);
                 }
 
                 // spawn a separate task just to handle the shutdown
