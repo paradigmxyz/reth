@@ -8923,7 +8923,6 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
- "reth-tracing-otlp",
  "reth-transaction-pool",
  "secp256k1 0.30.0",
  "serde_json",
@@ -10533,11 +10532,13 @@ version = "1.8.1"
 dependencies = [
  "clap",
  "eyre",
+ "reth-tracing-otlp",
  "rolling-file",
  "tracing",
  "tracing-appender",
  "tracing-journald",
  "tracing-logfmt",
+ "tracing-opentelemetry",
  "tracing-subscriber 0.3.20",
 ]
 

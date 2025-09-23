@@ -81,7 +81,6 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use reth_tracing_otlp::init_metrics_tracing;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, thread::available_parallelism};
 use tokio::sync::{
@@ -618,28 +617,6 @@ where
             MetricServer::new(config).serve().await?;
         }
 
-        Ok(())
-    }
-
-    /// This export to an OTLP-collector endpoint.
-    ///
-    /// Convenience function to [`Self::start_otlp_export`]
-    pub async fn with_otlp_collector(self) -> eyre::Result<Self> {
-        self.start_otlp_export().await?;
-        Ok(self)
-    }
-
-    /// Start to export metrics to the OTLP exporter.
-    pub async fn start_otlp_export(&self) -> eyre::Result<()> {
-        if let Some(listen_addr) = self.node_config().metrics.otlp {
-            info!(target: "reth::cli", "Starting metrics OTLP export to {}", listen_addr);
-
-            let exporter_url = format!("http://{listen_addr}");
-            // Start registry with metrics exporting
-            //TODO: check how much it interferes with the current tracing registry,
-            //ideally it should be merged with the current tracing registry
-            init_metrics_tracing("reth", exporter_url)?;
-        }
         Ok(())
     }
 

@@ -1,13 +1,13 @@
+use crate::formatter::LogFormat;
+use reth_tracing_otlp::create_metrics_provider;
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
     path::{Path, PathBuf},
 };
-
-use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_opentelemetry::MetricsLayer;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-
-use crate::formatter::LogFormat;
 
 /// A worker guard returned by the file layer.
 ///
@@ -122,6 +122,21 @@ impl Layers {
         let layer = format.apply(file_filter, None, Some(writer));
         self.add_layer(layer);
         Ok(guard)
+    }
+
+    /// Add OTLP metrics layer to the layer collection
+    pub fn with_metrics_layer(&mut self, service_name: String, endpoint: &str) -> eyre::Result<()> {
+        // Create the metrics provider
+        let meter_provider = create_metrics_provider(service_name, endpoint).map_err(|e| {
+            eyre::eyre!("Failed to build OTLP metric exporter for endpoint '{}': {}", endpoint, e)
+        })?;
+
+        // Create the metrics layer
+        let metrics_layer = MetricsLayer::new(meter_provider);
+
+        self.add_layer(metrics_layer);
+
+        Ok(())
     }
 }
 

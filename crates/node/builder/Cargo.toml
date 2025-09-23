@@ -57,7 +57,6 @@ reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-node-ethstats.workspace = true
-reth-tracing-otlp.workspace = true
 
 ## ethereum
 alloy-consensus.workspace = true

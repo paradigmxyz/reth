@@ -14,10 +14,8 @@ use opentelemetry_sdk::{
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
 use std::time::Duration;
 use tracing::Subscriber;
-use tracing_opentelemetry::{MetricsLayer, OpenTelemetryLayer};
-use tracing_subscriber::{
-    prelude::__tracing_subscriber_SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
-};
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::registry::LookupSpan;
 
 // Reads every 30 second-interval the metrics
 const DEFAULT_METRICS_READER_INTERVAL: Duration = Duration::from_secs(30);
@@ -46,31 +44,18 @@ where
 /// Creates an `OpenTelemetry` metrics provider that exports metrics to a default OTLP endpoint.
 pub fn create_metrics_provider(
     service_name: impl Into<Value>,
-    endpoint: String,
-) -> SdkMeterProvider {
+    endpoint: &str,
+) -> eyre::Result<SdkMeterProvider> {
     let resource = build_resource(service_name);
 
-    // Metrics will be sent to the OTLP endpoint through http (and not grpc, and no tls)
-    let metric_exporter =
-        MetricExporter::builder().with_http().with_endpoint(endpoint).build().unwrap();
+    // Metrics will be sent to the OTLP endpoint through http (and not grpc, and  with no tls)
+    let metric_exporter = MetricExporter::builder().with_http().with_endpoint(endpoint).build()?;
 
     let metrics_reader = PeriodicReader::builder(metric_exporter)
         .with_interval(DEFAULT_METRICS_READER_INTERVAL)
         .build();
 
-    SdkMeterProvider::builder().with_resource(resource).with_reader(metrics_reader).build()
-}
-
-/// Inits metrics tracing with an OTLP metrics exporter.
-pub fn init_metrics_tracing(service_name: impl Into<Value>, endpoint: String) -> eyre::Result<()> {
-    let meter_provider = create_metrics_provider(service_name, endpoint);
-
-    tracing_subscriber::registry()
-        .with(MetricsLayer::new(meter_provider))
-        .try_init()
-        .map_err(|e| eyre::eyre!("Failed to initialize metrics tracing: {}", e))?;
-
-    Ok(())
+    Ok(SdkMeterProvider::builder().with_resource(resource).with_reader(metrics_reader).build())
 }
 
 // Builds OTLP resource with service information.
