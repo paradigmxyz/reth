@@ -296,7 +296,7 @@ fn get_runtime_handle() -> Handle {
                 .thread_keep_alive(Duration::from_secs(15))
                 .thread_name_fn(|| {
                     let id = THREAD_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    format!("trie-tokio{}", id)
+                    format!("tokio-trie-{id}")
                 })
                 .build()
                 .expect("Failed to create tokio runtime")
