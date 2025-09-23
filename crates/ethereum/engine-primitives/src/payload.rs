@@ -403,7 +403,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     }
 }
 
-se sha2::Digest as _; // for finalize
+#[cfg(feature = "std")]
 use std::sync::OnceLock;
 
 #[cfg(test)]
@@ -413,12 +413,21 @@ fn payload_id_secret() -> &'static [u8; 32] {
     PAYLOAD_ID_SECRET.get_or_init(|| [0u8; 32])
 }
 
-#[cfg(not(test))]
+#[cfg(all(not(test), feature = "std"))]
 fn payload_id_secret() -> &'static [u8; 32] {
     // Process-scoped random secret to make 8-byte PayloadId resilient to targeted collisions.
     // This secret is generated once per process and never exposed.
     static PAYLOAD_ID_SECRET: OnceLock<[u8; 32]> = OnceLock::new();
     PAYLOAD_ID_SECRET.get_or_init(|| rand::random())
+}
+
+#[cfg(all(not(test), not(feature = "std")))]
+fn payload_id_secret() -> &'static [u8; 32] {
+    // no_std fallback: use a fixed zero secret. This preserves determinism without std RNG.
+    // In no_std contexts PayloadId is still process-local, and collision resistance is not
+    // strengthened without RNG, but this keeps the API usable.
+    static SECRET: [u8; 32] = [0u8; 32];
+    &SECRET
 }
 
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
@@ -452,7 +461,6 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
 mod tests {
     use super::*;
     use alloy_eips::eip4895::Withdrawal;
-    use alloy_primitives::B64;
     use core::str::FromStr;
 
     #[test]
