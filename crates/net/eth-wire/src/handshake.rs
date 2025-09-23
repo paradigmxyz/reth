@@ -178,8 +178,8 @@ where
                     .into());
                 }
 
-                // Ensure total difficulty is reasonable
-                if let StatusMessage::Legacy(s) = status {
+                // Ensure peer's total difficulty is reasonable
+                if let StatusMessage::Legacy(s) = their_status_message {
                     if s.total_difficulty.bit_len() > 160 {
                         unauth
                             .disconnect(DisconnectReason::ProtocolBreach)

@@ -108,13 +108,13 @@ pub fn version_metadata() -> &'static RethCliVersionConsts {
 pub fn default_reth_version_metadata() -> RethCliVersionConsts {
     RethCliVersionConsts {
         name_client: Cow::Borrowed("Reth"),
-        cargo_pkg_version: Cow::Owned(env!("CARGO_PKG_VERSION").to_string()),
-        vergen_git_sha_long: Cow::Owned(env!("VERGEN_GIT_SHA").to_string()),
-        vergen_git_sha: Cow::Owned(env!("VERGEN_GIT_SHA_SHORT").to_string()),
-        vergen_build_timestamp: Cow::Owned(env!("VERGEN_BUILD_TIMESTAMP").to_string()),
-        vergen_cargo_target_triple: Cow::Owned(env!("VERGEN_CARGO_TARGET_TRIPLE").to_string()),
-        vergen_cargo_features: Cow::Owned(env!("VERGEN_CARGO_FEATURES").to_string()),
-        short_version: Cow::Owned(env!("RETH_SHORT_VERSION").to_string()),
+        cargo_pkg_version: Cow::Borrowed(env!("CARGO_PKG_VERSION")),
+        vergen_git_sha_long: Cow::Borrowed(env!("VERGEN_GIT_SHA")),
+        vergen_git_sha: Cow::Borrowed(env!("VERGEN_GIT_SHA_SHORT")),
+        vergen_build_timestamp: Cow::Borrowed(env!("VERGEN_BUILD_TIMESTAMP")),
+        vergen_cargo_target_triple: Cow::Borrowed(env!("VERGEN_CARGO_TARGET_TRIPLE")),
+        vergen_cargo_features: Cow::Borrowed(env!("VERGEN_CARGO_FEATURES")),
+        short_version: Cow::Borrowed(env!("RETH_SHORT_VERSION")),
         long_version: Cow::Owned(format!(
             "{}\n{}\n{}\n{}\n{}",
             env!("RETH_LONG_VERSION_0"),
@@ -124,8 +124,8 @@ pub fn default_reth_version_metadata() -> RethCliVersionConsts {
             env!("RETH_LONG_VERSION_4"),
         )),
 
-        build_profile_name: Cow::Owned(env!("RETH_BUILD_PROFILE").to_string()),
-        p2p_client_version: Cow::Owned(env!("RETH_P2P_CLIENT_VERSION").to_string()),
+        build_profile_name: Cow::Borrowed(env!("RETH_BUILD_PROFILE")),
+        p2p_client_version: Cow::Borrowed(env!("RETH_P2P_CLIENT_VERSION")),
         extra_data: Cow::Owned(default_extra_data()),
     }
 }

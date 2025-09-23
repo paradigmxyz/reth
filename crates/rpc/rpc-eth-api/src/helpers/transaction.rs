@@ -8,7 +8,7 @@ use crate::{
     RpcTransaction,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
+    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -32,7 +32,7 @@ use reth_storage_api::{
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -62,6 +62,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Signer access in default (L1) trait method implementations.
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes>;
 
+    /// Returns the timeout duration for `send_raw_transaction_sync` RPC method.
+    fn send_raw_transaction_sync_timeout(&self) -> Duration;
+
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
@@ -81,11 +84,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadReceipt + 'static,
     {
         let this = self.clone();
+        let timeout_duration = self.send_raw_transaction_sync_timeout();
         async move {
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut stream = this.provider().canonical_state_stream();
-            const TIMEOUT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(30);
-            tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::time::timeout(timeout_duration, async {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     for block in chain.blocks_iter() {
@@ -98,14 +101,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
                 Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
             .await
             .unwrap_or_else(|_elapsed| {
                 Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
-                    duration: TIMEOUT_DURATION,
+                    duration: timeout_duration,
                 }))
             })
         }
