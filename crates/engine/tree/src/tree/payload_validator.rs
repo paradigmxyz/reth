@@ -317,7 +317,7 @@ where
         Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
     }
 
-    /// Executes and validates a block or payload.
+    /// Executes and validates a block that has been converted from a payload.
     ///
     /// This method performs:
     /// - Block execution with prewarming
