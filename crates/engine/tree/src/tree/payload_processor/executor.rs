@@ -88,7 +88,7 @@ impl WorkloadExecutorInner {
                         .thread_keep_alive(Duration::from_secs(15))
                         .thread_name_fn(|| {
                             let id = THREAD_COUNTER.fetch_add(1, Ordering::Relaxed);
-                            format!("reth-wkpool-tokio-{}", id)
+                            format!("wkp-tokio{}", id)
                         })
                         .build()
                         .unwrap()
