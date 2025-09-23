@@ -5,7 +5,7 @@ use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
-    receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
+    receipt::gas_spent_by_transactions, Block, BlockBody, GotExpected, Receipt, RecoveredBlock,
 };
 
 /// Validate a block with regard to execution results:
@@ -17,7 +17,7 @@ pub fn validate_block_post_execution<B, R, ChainSpec>(
     chain_spec: &ChainSpec,
     receipts: &[R],
     requests: &Requests,
-    _block_access_list: &Option<BlockAccessList>,
+    block_access_list: &Option<BlockAccessList>,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -65,20 +65,25 @@ where
     }
 
     // Validate bal hash matches the calculated hash
-    // if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
-    //     let Some(header_block_access_list_hash) = block.header().block_access_list_hash() else {
-    //         return Err(ConsensusError::BlockAccessListHashMissing)
-    //     };
-    //     if let Some(bal) = block_access_list {
-    //         let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        let Some(header_block_access_list_hash) = block.header().block_access_list_hash() else {
+            return Err(ConsensusError::BlockAccessListHashMissing)
+        };
+        if let Some(bal) = block_access_list {
+            let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+            if let Some(body_bal) = block.body().block_access_list() {
+                if bal != body_bal {
+                    return Err(ConsensusError::BlockAccessListMismatch)
+                }
+            }
 
-    //         if bal_hash != header_block_access_list_hash {
-    //             return Err(ConsensusError::BodyBlockAccessListHashDiff(
-    //                 GotExpected::new(bal_hash, header_block_access_list_hash).into(),
-    //             ))
-    //         }
-    //     }
-    // }
+            if bal_hash != header_block_access_list_hash {
+                return Err(ConsensusError::BodyBlockAccessListHashDiff(
+                    GotExpected::new(bal_hash, header_block_access_list_hash).into(),
+                ))
+            }
+        }
+    }
 
     Ok(())
 }

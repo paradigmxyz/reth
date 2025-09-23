@@ -8262,6 +8262,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
