@@ -35,15 +35,7 @@ where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + 'static,
+        >,
 {
 }
 
@@ -54,15 +46,7 @@ impl<T> FullNodePrimitives for T where
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
             Receipt: FullReceipt,
-        > + Send
-        + Sync
-        + Unpin
-        + Clone
-        + Default
-        + fmt::Debug
-        + PartialEq
-        + Eq
-        + 'static
+        >
 {
 }
 
