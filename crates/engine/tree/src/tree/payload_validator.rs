@@ -215,14 +215,8 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => {
-                // Creates a new block from the payload - no cloning needed
-                self.validator.ensure_well_formed_payload(payload)
-            }
-            BlockOrPayload::Block(block) => {
-                // Return the block directly - no clone!
-                Ok(block)
-            }
+            BlockOrPayload::Payload(payload) => self.validator.ensure_well_formed_payload(payload),
+            BlockOrPayload::Block(block) => Ok(block),
         }
     }
 
@@ -822,7 +816,7 @@ where
         })
     }
 
-    /// Executes a block directly without BlockOrPayload wrapper.
+    /// Executes a block directly without `BlockOrPayload` wrapper.
     fn execute_block_directly<S, Err>(
         &mut self,
         state_provider: S,
