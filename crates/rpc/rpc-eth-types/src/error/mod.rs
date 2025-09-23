@@ -776,6 +776,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip7873MissingTarget => {
                 Self::other(internal_rpc_err(err.to_string()))
             }
+            InvalidTransaction::Str(_) => todo!(),
         }
     }
 }
