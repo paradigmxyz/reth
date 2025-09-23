@@ -206,7 +206,7 @@ where
         }
     }
 
-    /// Converts a [`BlockOrPayload`] to a recovered block by taking ownership.
+    /// Converts a [`BlockOrPayload`] to a recovered block.
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: BlockOrPayload<T>,
