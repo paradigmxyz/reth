@@ -460,18 +460,18 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "29.0.0", default-features = false }
+revm = { version = "29.0.1", default-features = false }
 revm-bytecode = { version = "6.2.2", default-features = false }
 revm-database = { version = "7.0.5", default-features = false }
 revm-state = { version = "7.0.5", default-features = false }
 revm-primitives = { version = "20.2.1", default-features = false }
-revm-interpreter = { version = "25.0.2", default-features = false }
-revm-inspector = { version = "10.0.0", default-features = false }
-revm-context = { version = "9.0.2", default-features = false }
-revm-context-interface = { version = "10.1.0", default-features = false }
+revm-interpreter = { version = "25.0.3", default-features = false }
+revm-inspector = { version = "10.0.1", default-features = false }
+revm-context = { version = "9.1.0", default-features = false }
+revm-context-interface = { version = "10.2.0", default-features = false }
 revm-database-interface = { version = "7.0.5", default-features = false }
-op-revm = { version = "10.0.0", default-features = false }
-revm-inspectors = "0.29.0"
+op-revm = { version = "10.1.0", default-features = false }
+revm-inspectors = "0.29.2"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
@@ -636,7 +636,7 @@ secp256k1 = { version = "0.30", default-features = false, features = ["global-co
 rand_08 = { package = "rand", version = "0.8" }
 
 # for eip-4844
-c-kzg = "2.1.1"
+c-kzg = "2.1.4"
 
 # config
 toml = "0.8"
