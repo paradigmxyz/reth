@@ -201,7 +201,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         } else {
             self.user_header().tx_len().unwrap_or_default()
         };
-        let pruned_rows = expected_rows - self.writer.rows() as u64;
+        let actual_rows = self.writer.rows() as u64;
+        let pruned_rows = expected_rows.saturating_sub(actual_rows);
         if pruned_rows > 0 {
             self.user_header_mut().prune(pruned_rows);
         }
