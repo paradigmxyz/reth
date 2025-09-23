@@ -66,39 +66,34 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
 /// Helper function to initialize Reth's `ChainHardforks` from Alloy's `OpChainHardforks` init
 /// functions.
 pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
-    // Separate timestamp-activated forks in order to sort them
     let mut forks = Vec::new();
-    let mut ts_forks = Vec::new();
+
     for ethereum_hardfork in EthereumHardfork::VARIANTS {
         let fork_condition = op_hardforks.ethereum_fork_activation(*ethereum_hardfork);
         // Add Ethereum hardforks that are activated on the chain.
         if fork_condition != ForkCondition::Never {
-            match fork_condition {
-                ForkCondition::Timestamp(ts) => {
-                    ts_forks.push((ethereum_hardfork.boxed(), ts));
-                }
-                _ => forks.push((ethereum_hardfork.boxed(), fork_condition)),
-            }
+            forks.push((ethereum_hardfork.boxed(), fork_condition));
         }
     }
+
     for op_hardfork in OpHardfork::VARIANTS {
         let fork_condition = op_hardforks.op_fork_activation(*op_hardfork);
         // Add OP hardforks that are activated on the chain.
         if fork_condition != ForkCondition::Never {
-            match fork_condition {
-                ForkCondition::Timestamp(ts) => {
-                    ts_forks.push((op_hardfork.boxed(), ts));
-                }
-                _ => forks.push((op_hardfork.boxed(), fork_condition)),
-            }
+            forks.push((op_hardfork.boxed(), fork_condition));
         }
     }
-    // Sort timestamp forks by ascending timestamp.
-    ts_forks.sort_by_key(|(_, ts)| *ts);
 
-    // Stitch the final list: all non-timestamp forks in their original order, followed by the
-    // timestamp forks ordered by timestamp.
-    forks.extend(ts_forks.into_iter().map(|(hf, ts)| (hf, ForkCondition::Timestamp(ts))));
+    // Sort timestamp forks by ascending timestamp, bubbling them to the end of the list. It allows
+    // us to keep the original order of non-timestamp forks while ensuring that timestamp forks are
+    // applied in the correct order, crucial as L2 hardforks that correspond to L1 hardforks are
+    // maintained in sync through their respective timestamps.
+    forks.sort_by(|a, b| match (a.1, b.1) {
+        (ForkCondition::Timestamp(ts_a), ForkCondition::Timestamp(ts_b)) => ts_a.cmp(&ts_b),
+        (ForkCondition::Timestamp(_), _) => std::cmp::Ordering::Greater,
+        (_, ForkCondition::Timestamp(_)) => std::cmp::Ordering::Less,
+        _ => std::cmp::Ordering::Equal,
+    });
 
     ChainHardforks::new(forks)
 }
