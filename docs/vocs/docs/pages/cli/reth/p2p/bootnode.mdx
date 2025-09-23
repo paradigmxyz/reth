@@ -9,36 +9,15 @@ $ reth p2p bootnode --help
 Usage: reth p2p bootnode [OPTIONS]
 
 Options:
-Options:
       --addr <ADDR>
           Listen address for the bootnode (default: "0.0.0.0:30301")
           
           [default: 0.0.0.0:30301]
 
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-          
-          Defaults to the OS-specific data directory:
-          
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-          
-          [default: default]
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-          
-          Built-in chains:
-              mainnet, sepolia, holesky, hoodi, dev
-          
-          [default: mainnet]
-
       --p2p-secret-key <PATH>
-          Secret key to use for this node.
+          Secret key to use for the bootnode.
           
-          This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
+          This will also deterministically set the peer ID. If a path is provided but no key exists at that path, a new random secret will be generated and stored there. If no path is specified, a new ephemeral random secret will be used.
 
       --nat <NAT>
           NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
