@@ -496,7 +496,7 @@ mod tests {
         assert_eq!(id1, id2);
 
         // Changing any field must change the id
-        let mut changed = attributes.clone();
+        let mut changed = attributes;
         changed.timestamp += 1;
         let id_changed = payload_id(&parent, &changed);
         assert_ne!(id1, id_changed);
@@ -534,7 +534,7 @@ mod tests {
 
         let id = payload_id(&parent, &attributes);
         // Changing withdrawals should change the id
-        let mut attributes2 = attributes.clone();
+        let mut attributes2 = attributes;
         if let Some(w) = &mut attributes2.withdrawals {
             w.push(Withdrawal {
                 index: 3,
@@ -575,7 +575,7 @@ mod tests {
         let id_with = payload_id(&parent, &attributes);
 
         // Removing the beacon root should change the id
-        let mut without = attributes.clone();
+        let mut without = attributes;
         without.parent_beacon_block_root = None;
         let id_without = payload_id(&parent, &without);
         assert_ne!(id_with, id_without);
