@@ -1508,7 +1508,7 @@ Post-merge hard forks (timestamp based):
                         ..Default::default()
                     },
                     ForkId {
-                        hash: ForkHash(hex!("5167e2a6")),
+                        hash: ForkHash(hex!("0x5167e2a6")),
                         next: mainnet::MAINNET_BPO1_TIMESTAMP,
                     },
                 ),
