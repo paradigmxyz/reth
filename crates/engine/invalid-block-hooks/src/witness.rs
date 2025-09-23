@@ -62,7 +62,7 @@ pub(crate) trait WitnessGeneratorTrait {
 }
 
 /// Parameters for validation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ValidationParams<'a> {
     pub original_bundle_state: &'a BundleState,
     pub re_executed_bundle_state: &'a BundleState,
@@ -1520,5 +1520,222 @@ mod tests {
         let _witness_generator = WitnessGenerator::new();
         let _witness_validator = WitnessValidator::new();
         let _witness_persister = WitnessPersister::new(std::path::PathBuf::from("/tmp"), None);
+    }
+
+    /// Test bundle state validation with different scenarios
+    #[test]
+    fn test_bundle_state_validation_scenarios() {
+        let validator = WitnessValidator::new();
+
+        // Test identical bundle states
+        let bundle1 = BundleState::default();
+        let bundle2 = BundleState::default();
+        assert!(validator.validate_bundle_state(&bundle1, &bundle2));
+
+        // Test different bundle states
+        let mut bundle3 = BundleState::default();
+        let account = BundleAccount {
+            info: Some(AccountInfo::default()),
+            original_info: Some(AccountInfo::default()),
+            storage: Default::default(),
+            status: AccountStatus::Loaded,
+        };
+        bundle3.state.insert(Address::random(), account);
+        assert!(!validator.validate_bundle_state(&bundle1, &bundle3));
+    }
+
+    /// Test state root validation edge cases
+    #[test]
+    fn test_state_root_validation_edge_cases() {
+        let validator = WitnessValidator::new();
+
+        // Test identical roots
+        let root1 = B256::random();
+        let root2 = root1;
+        assert!(validator.validate_state_root(root1, root2));
+
+        // Test different roots
+        let root3 = B256::random();
+        assert!(!validator.validate_state_root(root1, root3));
+
+        // Test zero roots
+        assert!(validator.validate_state_root(B256::ZERO, B256::ZERO));
+        assert!(!validator.validate_state_root(B256::ZERO, root1));
+    }
+
+    /// Test trie updates validation
+    #[test]
+    fn test_trie_updates_validation() {
+        let validator = WitnessValidator::new();
+
+        // Test identical trie updates
+        let updates1 = TrieUpdates::default();
+        let updates2 = TrieUpdates::default();
+        assert!(validator.validate_trie_updates(&updates1, &updates2));
+
+        // Note: Creating different TrieUpdates for testing would require
+        // more complex setup with actual trie data, which is beyond the scope
+        // of unit tests. Integration tests would be more appropriate for that.
+    }
+
+    /// Test `ValidationParams` with optional fields
+    #[test]
+    fn test_validation_params_optional_fields() {
+        let validator = WitnessValidator::new();
+        let bundle_state = BundleState::default();
+        let trie_updates = TrieUpdates::default();
+
+        // Test with None original_root and original_trie_updates
+        let params = ValidationParams {
+            original_bundle_state: &bundle_state,
+            re_executed_bundle_state: &bundle_state,
+            original_root: None,
+            re_executed_root: B256::random(),
+            header_state_root: B256::random(),
+            original_trie_updates: None,
+            re_executed_trie_updates: &trie_updates,
+        };
+
+        let result = validator.validate_all::<()>(params);
+        assert!(result.bundle_state_valid);
+        assert!(result.state_root_valid); // Should be true when original_root is None
+        assert!(result.trie_updates_valid); // Should be true when original_trie_updates is None
+    }
+
+    /// Test `ValidationResult` with all combinations
+    #[test]
+    fn test_validation_result_combinations() {
+        // Test all possible combinations of validation results
+        let result1 = ValidationResult {
+            bundle_state_valid: true,
+            state_root_valid: true,
+            header_state_root_valid: true,
+            trie_updates_valid: true,
+        };
+
+        let result2 = ValidationResult {
+            bundle_state_valid: false,
+            state_root_valid: false,
+            header_state_root_valid: false,
+            trie_updates_valid: false,
+        };
+
+        // Verify that results can be cloned and compared
+        let result1_clone = result1.clone();
+        assert_eq!(result1.bundle_state_valid, result1_clone.bundle_state_valid);
+        assert_eq!(result1.state_root_valid, result1_clone.state_root_valid);
+        assert_eq!(result1.header_state_root_valid, result1_clone.header_state_root_valid);
+        assert_eq!(result1.trie_updates_valid, result1_clone.trie_updates_valid);
+
+        // Verify different results are different
+        assert_ne!(result1.bundle_state_valid, result2.bundle_state_valid);
+    }
+
+    /// Test `StateCollector` with various data sizes
+    #[test]
+    fn test_state_collector_data_handling() {
+        // Test with empty data
+        let collector1 = StateCollector::new(HashedPostState::default(), vec![], vec![]);
+        assert!(collector1.codes.is_empty());
+        assert!(collector1.state_preimages.is_empty());
+
+        // Test with single items
+        let collector2 = StateCollector::new(
+            HashedPostState::default(),
+            vec![Bytes::from("single_code")],
+            vec![Bytes::from("single_preimage")],
+        );
+        assert_eq!(collector2.codes.len(), 1);
+        assert_eq!(collector2.state_preimages.len(), 1);
+
+        // Test with multiple items
+        let codes = vec![Bytes::from("code1"), Bytes::from("code2"), Bytes::from("code3")];
+        let preimages = vec![Bytes::from("preimage1"), Bytes::from("preimage2")];
+        let collector3 =
+            StateCollector::new(HashedPostState::default(), codes.clone(), preimages.clone());
+        assert_eq!(collector3.codes, codes);
+        assert_eq!(collector3.state_preimages, preimages);
+    }
+
+    /// Test error handling scenarios (mock-based)
+    #[test]
+    fn test_error_handling_scenarios() {
+        // Test that mock objects handle error scenarios gracefully
+        let mock_validator_pass = MockWitnessValidator::new(true);
+        let mock_validator_fail = MockWitnessValidator::new(false);
+
+        let params = ValidationParams {
+            original_bundle_state: &BundleState::default(),
+            re_executed_bundle_state: &BundleState::default(),
+            original_root: Some(B256::random()),
+            re_executed_root: B256::random(),
+            header_state_root: B256::random(),
+            original_trie_updates: Some(&TrieUpdates::default()),
+            re_executed_trie_updates: &TrieUpdates::default(),
+        };
+
+        // Test consistent behavior across multiple calls
+        let result1 = mock_validator_pass.validate_all::<()>(params.clone());
+        let result2 = mock_validator_pass.validate_all::<()>(params.clone());
+        assert_eq!(result1.bundle_state_valid, result2.bundle_state_valid);
+
+        let result3 = mock_validator_fail.validate_all::<()>(params.clone());
+        let result4 = mock_validator_fail.validate_all::<()>(params);
+        assert_eq!(result3.bundle_state_valid, result4.bundle_state_valid);
+    }
+
+    /// Test `BundleStateSorted` conversion with complex data
+    #[test]
+    fn test_bundle_state_sorted_complex_conversion() {
+        let mut bundle_state = BundleState::default();
+
+        // Add multiple accounts with different statuses
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+
+        let account1 = BundleAccount {
+            info: Some(AccountInfo {
+                balance: U256::from(100),
+                nonce: 1,
+                code_hash: B256::random(),
+                code: Some(Bytecode::new()),
+            }),
+            original_info: None,
+            storage: Default::default(),
+            status: AccountStatus::Loaded,
+        };
+
+        let account2 = BundleAccount {
+            info: Some(AccountInfo {
+                balance: U256::from(200),
+                nonce: 2,
+                code_hash: B256::random(),
+                code: Some(Bytecode::new()),
+            }),
+            original_info: Some(AccountInfo {
+                balance: U256::from(150),
+                nonce: 1,
+                code_hash: B256::random(),
+                code: Some(Bytecode::new()),
+            }),
+            storage: Default::default(),
+            status: AccountStatus::Changed,
+        };
+
+        bundle_state.state.insert(addr1, account1);
+        bundle_state.state.insert(addr2, account2);
+
+        let sorted = BundleStateSorted::from_bundle_state(&bundle_state);
+
+        // Verify the conversion maintains data integrity
+        assert_eq!(sorted.state.len(), 2);
+        assert!(sorted.state.contains_key(&addr1));
+        assert!(sorted.state.contains_key(&addr2));
+
+        // Verify accounts are properly sorted by address
+        let addresses: Vec<_> = sorted.state.keys().collect();
+        let mut expected_addresses = vec![&addr1, &addr2];
+        expected_addresses.sort();
+        assert_eq!(addresses, expected_addresses);
     }
 }
