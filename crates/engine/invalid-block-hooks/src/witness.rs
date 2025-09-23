@@ -36,30 +36,6 @@ pub(crate) trait StateCollectorTrait {
     ) -> Result<StateCollector>;
 }
 
-/// Trait for generating execution witnesses
-pub(crate) trait WitnessGeneratorTrait {
-    /// Generates an execution witness from collected state data
-    fn generate_execution_witness<SP>(
-        &self,
-        state_provider: Arc<SP>,
-        collected_state: &StateCollector,
-    ) -> Result<ExecutionWitness>
-    where
-        SP: StateProvider;
-
-    /// Executes a block and returns the bundle state and state
-    fn execute_block<P, E, N>(
-        &self,
-        evm_config: &E,
-        provider: &P,
-        parent_header: &SealedHeader<N::BlockHeader>,
-        block: &RecoveredBlock<N::Block>,
-    ) -> Result<ExecutionResult>
-    where
-        P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
-        E: ConfigureEvm<Primitives = N> + 'static,
-        N: NodePrimitives;
-}
 
 /// Parameters for validation
 #[derive(Debug, Clone)]
@@ -73,11 +49,7 @@ pub(crate) struct ValidationParams<'a> {
     pub re_executed_trie_updates: &'a TrieUpdates,
 }
 
-/// Trait for witness validation
-pub(crate) trait WitnessValidatorTrait {
-    /// Validates all aspects of witness generation
-    fn validate_all<N>(&self, params: ValidationParams<'_>) -> ValidationResult;
-}
+
 
 /// Trait for persisting witness data and validation results
 pub(crate) trait WitnessPersisterTrait {
@@ -143,16 +115,6 @@ pub(crate) struct StateCollector {
 }
 
 impl StateCollector {
-    /// Creates a new state collector with collected data
-    #[cfg(test)]
-    pub(crate) const fn new(
-        hashed_state: HashedPostState,
-        codes: Vec<Bytes>,
-        state_preimages: Vec<Bytes>,
-    ) -> Self {
-        Self { hashed_state, codes, state_preimages }
-    }
-
     /// Collects contract bytecodes from the state and bundle state
     fn collect_contract_codes(
         state: &State<StateProviderDatabase<Box<dyn StateProvider>>>,
@@ -250,17 +212,10 @@ impl StateCollectorTrait for StateCollector {
 #[derive(Debug, Default)]
 pub(crate) struct WitnessGenerator;
 
-impl WitnessGenerator {
-    /// Creates a new witness generator
-    pub(crate) const fn new() -> Self {
-        Self
-    }
-}
-
 /// Implementation of `WitnessGeneratorTrait` for `WitnessGenerator`
-impl WitnessGeneratorTrait for WitnessGenerator {
+impl WitnessGenerator {
     /// Generates an execution witness from collected state data
-    fn generate_execution_witness<SP>(
+    pub(crate) fn generate_execution_witness<SP>(
         &self,
         state_provider: Arc<SP>,
         collected_state: &StateCollector,
@@ -295,7 +250,7 @@ impl WitnessGeneratorTrait for WitnessGenerator {
     }
 
     /// Executes a block and returns the bundle state and state
-    fn execute_block<P, E, N>(
+    pub(crate) fn execute_block<P, E, N>(
         &self,
         evm_config: &E,
         provider: &P,
@@ -354,10 +309,6 @@ pub(crate) struct ValidationResult {
 pub(crate) struct WitnessValidator;
 
 impl WitnessValidator {
-    /// Creates a new witness validator
-    pub(crate) const fn new() -> Self {
-        Self
-    }
 
     /// Validates bundle state consistency between original and re-executed
     fn validate_bundle_state(&self, original: &BundleState, re_executed: &BundleState) -> bool {
@@ -391,9 +342,9 @@ impl WitnessValidator {
 }
 
 /// Implementation of `WitnessValidatorTrait` for `WitnessValidator`
-impl WitnessValidatorTrait for WitnessValidator {
+impl WitnessValidator {
     /// Performs comprehensive validation of all components
-    fn validate_all<N>(&self, params: ValidationParams<'_>) -> ValidationResult {
+    pub(crate) fn validate_all(&self, params: ValidationParams<'_>) -> ValidationResult {
         let bundle_state_valid = self
             .validate_bundle_state(params.original_bundle_state, params.re_executed_bundle_state);
 
@@ -951,16 +902,15 @@ where
         info!("Starting invalid block witness generation for block {}", block.number());
 
         // Initialize components using trait implementations
-        let witness_generator = WitnessGenerator::new();
-        let witness_validator = WitnessValidator::new();
+        let witness_generator = WitnessGenerator::default();
+        let witness_validator = WitnessValidator::default();
         let witness_persister =
             WitnessPersister::new(self.output_directory.clone(), self.healthy_node_client.clone());
 
         debug!("Initialized witness generation components");
 
-        // Execute block and collect state data using trait methods
-        let (bundle_state, state) = WitnessGeneratorTrait::execute_block(
-            &witness_generator,
+        // Execute block and collect state data using direct methods
+        let (bundle_state, state) = witness_generator.execute_block(
             &self.evm_config,
             &self.provider,
             parent_header,
@@ -989,9 +939,8 @@ where
                 e
             })?;
 
-        // Generate execution witness from collected state using trait method
-        let execution_witness = WitnessGeneratorTrait::generate_execution_witness(
-            &witness_generator,
+        // Generate execution witness from collected state using direct method
+        let execution_witness = witness_generator.generate_execution_witness(
             state_provider.clone(),
             &collected_state,
         )
@@ -1040,8 +989,7 @@ where
             original_trie_updates,
             re_executed_trie_updates: &re_executed_trie_updates,
         };
-        let validation_result =
-            WitnessValidatorTrait::validate_all::<N>(&witness_validator, validation_params);
+        let validation_result = witness_validator.validate_all(validation_params);
 
         // Handle validation failures using trait methods
         if !validation_result.bundle_state_valid {
@@ -1166,7 +1114,11 @@ mod tests {
         let codes_clone = codes.clone();
         let state_preimages_clone = state_preimages.clone();
 
-        let collector = StateCollector::new(hashed_state, codes, state_preimages);
+        let collector = StateCollector {
+            hashed_state,
+            codes,
+            state_preimages,
+        };
 
         assert_eq!(collector.hashed_state, hashed_state_clone);
         assert_eq!(collector.codes, codes_clone);
@@ -1176,7 +1128,7 @@ mod tests {
     /// Test that `WitnessGenerator` can be created and has proper default behavior
     #[test]
     fn test_witness_generator_creation() {
-        let generator = WitnessGenerator::new();
+        let generator = WitnessGenerator::default();
         let default_generator = WitnessGenerator;
 
         // Both should be equivalent (both are unit structs)
@@ -1187,7 +1139,7 @@ mod tests {
     /// Test that `WitnessValidator` can be created and has proper default behavior
     #[test]
     fn test_witness_validator_creation() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
         let default_validator = WitnessValidator;
 
         // Both should be equivalent (both are unit structs)
@@ -1257,13 +1209,17 @@ mod tests {
     #[test]
     fn test_component_separation() {
         // StateCollector should only handle state collection
-        let collector = StateCollector::new(HashedPostState::default(), vec![], vec![]);
+        let collector = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: vec![],
+            state_preimages: vec![],
+        };
 
         // WitnessGenerator should only handle witness generation
-        let generator = WitnessGenerator::new();
+        let generator = WitnessGenerator::default();
 
         // WitnessValidator should only handle validation
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
 
         // WitnessPersister should only handle persistence
         let persister = WitnessPersister::new(std::path::PathBuf::from("/tmp"), None);
@@ -1278,7 +1234,7 @@ mod tests {
     /// Test that validation methods return proper boolean results
     #[test]
     fn test_validator_boolean_methods() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
 
         // Test state root validation with same roots
         let root = B256::random();
@@ -1306,8 +1262,8 @@ mod tests {
         }
     }
 
-    impl WitnessValidatorTrait for MockWitnessValidator {
-        fn validate_all<N>(&self, _params: ValidationParams<'_>) -> ValidationResult {
+    impl MockWitnessValidator {
+        fn validate_all(&self, _params: ValidationParams<'_>) -> ValidationResult {
             // Return controlled validation results for testing
             ValidationResult {
                 bundle_state_valid: self.should_pass,
@@ -1413,7 +1369,7 @@ mod tests {
             original_trie_updates: None,
             re_executed_trie_updates: &TrieUpdates::default(),
         };
-        let result = passing_validator.validate_all::<()>(params);
+        let result = passing_validator.validate_all(params);
 
         assert!(result.bundle_state_valid);
         assert!(result.state_root_valid);
@@ -1431,7 +1387,7 @@ mod tests {
             original_trie_updates: None,
             re_executed_trie_updates: &TrieUpdates::default(),
         };
-        let result = failing_validator.validate_all::<()>(params);
+        let result = failing_validator.validate_all(params);
 
         assert!(!result.bundle_state_valid);
         assert!(!result.state_root_valid);
@@ -1499,7 +1455,11 @@ mod tests {
         let codes = vec![Bytes::from("test")];
         let state_preimages = vec![Bytes::from("preimage")];
 
-        let collector = StateCollector::new(hashed_state, codes, state_preimages);
+        let collector = StateCollector {
+            hashed_state,
+            codes,
+            state_preimages,
+        };
 
         let collected = StateCollector {
             hashed_state: collector.hashed_state.clone(),
@@ -1515,17 +1475,21 @@ mod tests {
     /// Test that the refactored code maintains the same interface
     #[test]
     fn test_interface_consistency() {
-        let _state_collector = StateCollector::new(HashedPostState::default(), vec![], vec![]);
+        let _state_collector = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: vec![],
+            state_preimages: vec![],
+        };
 
-        let _witness_generator = WitnessGenerator::new();
-        let _witness_validator = WitnessValidator::new();
+        let _witness_generator = WitnessGenerator::default();
+        let _witness_validator = WitnessValidator::default();
         let _witness_persister = WitnessPersister::new(std::path::PathBuf::from("/tmp"), None);
     }
 
     /// Test bundle state validation with different scenarios
     #[test]
     fn test_bundle_state_validation_scenarios() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
 
         // Test identical bundle states
         let bundle1 = BundleState::default();
@@ -1555,11 +1519,11 @@ mod tests {
             Bytes::from("contract_code_3"),
         ];
         
-        let collector = StateCollector::new(
-            HashedPostState::default(),
-            codes.clone(),
-            vec![],
-        );
+        let collector = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: codes.clone(),
+            state_preimages: vec![],
+        };
         
         assert_eq!(collector.codes.len(), 3);
         assert_eq!(collector.codes, codes);
@@ -1581,11 +1545,11 @@ mod tests {
             Bytes::from("storage_preimage"),
         ];
         
-        let collector = StateCollector::new(
-            hashed_state.clone(),
-            vec![],
-            state_preimages.clone(),
-        );
+        let collector = StateCollector {
+            hashed_state: hashed_state.clone(),
+            codes: vec![],
+            state_preimages: state_preimages.clone(),
+        };
         
         assert_eq!(collector.hashed_state.accounts.len(), 1);
         assert!(collector.hashed_state.accounts.contains_key(&hashed_address));
@@ -1596,12 +1560,12 @@ mod tests {
     /// Test WitnessGenerator execution witness generation interface
     #[test]
     fn test_witness_generator_interface() {
-        let generator = WitnessGenerator::new();
-        let collector = StateCollector::new(
-            HashedPostState::default(),
-            vec![Bytes::from("test_code")],
-            vec![Bytes::from("test_preimage")],
-        );
+        let generator = WitnessGenerator::default();
+        let collector = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: vec![Bytes::from("test_code")],
+            state_preimages: vec![Bytes::from("test_preimage")],
+        };
         
         // Test that generator and collector have expected structure
         assert_eq!(collector.codes.len(), 1);
@@ -1617,7 +1581,7 @@ mod tests {
     /// Test state root validation edge cases
     #[test]
     fn test_state_root_validation_edge_cases() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
 
         // Test identical roots
         let root1 = B256::random();
@@ -1636,7 +1600,7 @@ mod tests {
     /// Test trie updates validation
     #[test]
     fn test_trie_updates_validation() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
 
         // Test identical trie updates
         let updates1 = TrieUpdates::default();
@@ -1651,7 +1615,7 @@ mod tests {
     /// Test `ValidationParams` with optional fields
     #[test]
     fn test_validation_params_optional_fields() {
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
         let bundle_state = BundleState::default();
         let trie_updates = TrieUpdates::default();
 
@@ -1666,7 +1630,7 @@ mod tests {
             re_executed_trie_updates: &trie_updates,
         };
 
-        let result = validator.validate_all::<()>(params);
+        let result = validator.validate_all(params);
         assert!(result.bundle_state_valid);
         assert!(result.state_root_valid); // Should be true when original_root is None
         assert!(result.trie_updates_valid); // Should be true when original_trie_updates is None
@@ -1705,24 +1669,31 @@ mod tests {
     #[test]
     fn test_state_collector_data_handling() {
         // Test with empty data
-        let collector1 = StateCollector::new(HashedPostState::default(), vec![], vec![]);
+        let collector1 = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: vec![],
+            state_preimages: vec![],
+        };
         assert!(collector1.codes.is_empty());
         assert!(collector1.state_preimages.is_empty());
 
         // Test with single items
-        let collector2 = StateCollector::new(
-            HashedPostState::default(),
-            vec![Bytes::from("single_code")],
-            vec![Bytes::from("single_preimage")],
-        );
+        let collector2 = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: vec![Bytes::from("single_code")],
+            state_preimages: vec![Bytes::from("single_preimage")],
+        };
         assert_eq!(collector2.codes.len(), 1);
         assert_eq!(collector2.state_preimages.len(), 1);
 
         // Test with multiple items
         let codes = vec![Bytes::from("code1"), Bytes::from("code2"), Bytes::from("code3")];
         let preimages = vec![Bytes::from("preimage1"), Bytes::from("preimage2")];
-        let collector3 =
-            StateCollector::new(HashedPostState::default(), codes.clone(), preimages.clone());
+        let collector3 = StateCollector {
+            hashed_state: HashedPostState::default(),
+            codes: codes.clone(),
+            state_preimages: preimages.clone(),
+        };
         assert_eq!(collector3.codes, codes);
         assert_eq!(collector3.state_preimages, preimages);
     }
@@ -1801,12 +1772,12 @@ mod tests {
         };
 
         // Test consistent behavior across multiple calls
-        let result1 = mock_validator_pass.validate_all::<()>(params.clone());
-        let result2 = mock_validator_pass.validate_all::<()>(params.clone());
+        let result1 = mock_validator_pass.validate_all(params.clone());
+        let result2 = mock_validator_pass.validate_all(params.clone());
         assert_eq!(result1.bundle_state_valid, result2.bundle_state_valid);
 
-        let result3 = mock_validator_fail.validate_all::<()>(params.clone());
-        let result4 = mock_validator_fail.validate_all::<()>(params);
+        let result3 = mock_validator_fail.validate_all(params.clone());
+        let result4 = mock_validator_fail.validate_all(params);
         assert_eq!(result3.bundle_state_valid, result4.bundle_state_valid);
     }
 
@@ -1894,11 +1865,11 @@ mod tests {
         // This test verifies the component initialization logic
         
         // Create witness generator
-        let witness_generator = WitnessGenerator::new();
+        let witness_generator = WitnessGenerator::default();
         assert!(std::ptr::eq(&witness_generator, &witness_generator));
         
         // Create witness validator
-        let witness_validator = WitnessValidator::new();
+        let witness_validator = WitnessValidator::default();
         assert!(std::ptr::eq(&witness_validator, &witness_validator));
         
         // Create witness persister
@@ -1956,8 +1927,8 @@ mod tests {
         // This test verifies that all components work together correctly
         
         // Create all components
-        let witness_generator = WitnessGenerator::new();
-        let witness_validator = WitnessValidator::new();
+        let witness_generator = WitnessGenerator::default();
+        let witness_validator = WitnessValidator::default();
         let witness_persister = WitnessPersister::new(PathBuf::from("/tmp"), None);
         
         // Create mock data for validation
@@ -1976,7 +1947,7 @@ mod tests {
         };
         
         // Test validation workflow
-        let validation_result = witness_validator.validate_all::<()>(validation_params);
+        let validation_result = witness_validator.validate_all(validation_params);
         
         // Verify validation results structure
         assert!(validation_result.bundle_state_valid);
@@ -1993,7 +1964,7 @@ mod tests {
     #[test]
     fn test_witness_validator_individual_methods() {
         // Test individual validation methods for better coverage
-        let validator = WitnessValidator::new();
+        let validator = WitnessValidator::default();
         
         // Test bundle state validation with different states
         let bundle_state1 = BundleState::default();
@@ -2064,8 +2035,8 @@ mod tests {
             re_executed_trie_updates: &trie_updates,
         };
         
-        let validator = WitnessValidator::new();
-        let result = validator.validate_all::<()>(params_none_root);
+        let validator = WitnessValidator::default();
+        let result = validator.validate_all(params_none_root);
         assert!(result.bundle_state_valid);
         assert!(result.state_root_valid);
         
@@ -2080,7 +2051,7 @@ mod tests {
             re_executed_trie_updates: &trie_updates,
         };
         
-        let result_with_root = validator.validate_all::<()>(params_some_root);
+        let result_with_root = validator.validate_all(params_some_root);
         assert!(result_with_root.bundle_state_valid);
         assert!(result_with_root.trie_updates_valid);
     }
