@@ -1,19 +1,16 @@
 //! Types and traits for validating blocks and payloads.
 
-use crate::{
-    ensure_ok,
-    tree::{
-        cached_state::CachedStateProvider,
-        error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-        executor::WorkloadExecutor,
-        instrumented_state::InstrumentedStateProvider,
-        payload_processor::PayloadProcessor,
-        persistence_state::CurrentPersistenceAction,
-        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-        sparse_trie::StateRootComputeOutcome,
-        ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-        PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
-    },
+use crate::tree::{
+    cached_state::CachedStateProvider,
+    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+    executor::WorkloadExecutor,
+    instrumented_state::InstrumentedStateProvider,
+    payload_processor::PayloadProcessor,
+    persistence_state::CurrentPersistenceAction,
+    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    sparse_trie::StateRootComputeOutcome,
+    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
@@ -209,23 +206,22 @@ where
         }
     }
 
-    /// Converts a [`BlockOrPayload`] to a recovered block.
+    /// Converts a [`BlockOrPayload`] to a recovered block by taking ownership.
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
-        input: &BlockOrPayload<T>,
+        input: BlockOrPayload<T>,
     ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
             BlockOrPayload::Payload(payload) => {
-                // Creates a new block from the payload - no extra cloning
-                self.validator.ensure_well_formed_payload(payload.clone())
+                // Creates a new block from the payload - no cloning needed
+                self.validator.ensure_well_formed_payload(payload)
             }
             BlockOrPayload::Block(block) => {
-                // Clone is necessary as we need the block for error handling
-                // throughout the validation process
-                Ok(block.clone())
+                // Return the block directly - no clone!
+                Ok(block)
             }
         }
     }
@@ -302,7 +298,7 @@ where
 
         // If execution failed, we should first check if there are any header validation
         // errors that take precedence over the execution error
-        let block = self.convert_to_block(&input)?;
+        let block = self.convert_to_block(input)?;
 
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block) {
@@ -338,41 +334,47 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
-        let parent_hash = input.parent_hash();
-        let block_num_hash = input.num_hash();
+        // Convert to block once, taking ownership to avoid cloning
+        let block = self.convert_to_block(input)?;
+        let parent_hash = block.parent_hash();
+        let block_num_hash = block.num_hash();
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
-        let Some(provider_builder) =
-            ensure_ok!(self, &input, self.state_provider_builder(parent_hash, ctx.state()))
-        else {
-            // this is pre-validated in the tree
-            // Lazy conversion - only convert when error occurs
-            let block = self.convert_to_block(&input)?;
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                ProviderError::HeaderNotFound(parent_hash.into()).into(),
-            )
-            .into())
+
+        // Setup state provider
+        let provider_builder = match self.state_provider_builder(parent_hash, ctx.state()) {
+            Ok(Some(builder)) => builder,
+            Ok(None) => {
+                return Err(InsertBlockError::new(
+                    block.into_sealed_block(),
+                    ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                )
+                .into())
+            }
+            Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
         };
 
-        let state_provider = ensure_ok!(self, &input, provider_builder.build());
+        let state_provider = match provider_builder.build() {
+            Ok(provider) => provider,
+            Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
+        };
 
         // fetch parent block
-        let Some(parent_block) =
-            ensure_ok!(self, &input, self.sealed_header_by_hash(parent_hash, ctx.state()))
-        else {
-            // Lazy conversion - only convert when error occurs
-            let block = self.convert_to_block(&input)?;
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                ProviderError::HeaderNotFound(parent_hash.into()).into(),
-            )
-            .into())
+        let parent_block = match self.sealed_header_by_hash(parent_hash, ctx.state()) {
+            Ok(Some(header)) => header,
+            Ok(None) => {
+                return Err(InsertBlockError::new(
+                    block.into_sealed_block(),
+                    ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                )
+                .into())
+            }
+            Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
         };
 
-        let evm_env = self.evm_env_for(&input);
-
-        let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
+        // Create EVM environment directly from block
+        let evm_env = self.evm_config.evm_env(block.header());
+        let env = ExecutionEnv { evm_env, hash: block.hash(), parent_hash };
 
         // We only run the parallel state root if we are not currently persisting any blocks or
         // persisting blocks that are all ancestors of the one we are executing.
@@ -383,7 +385,9 @@ where
         // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let persisting_kind = ctx.persisting_kind_for(input.block_with_parent());
+        let block_with_parent =
+            BlockWithParent { block: block.num_hash(), parent: block.parent_hash() };
+        let persisting_kind = ctx.persisting_kind_for(block_with_parent);
         // don't run parallel if state root fallback is set
         let run_parallel_state_root =
             persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
@@ -396,7 +400,7 @@ where
         //    It's cheaper to run a parallel state root that does one walk over trie tables while
         //    accounting for the prefix sets.
         let has_ancestors_with_missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
+            self.has_ancestors_with_missing_trie_updates(block_with_parent, ctx.state());
         let mut use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
             !has_ancestors_with_missing_trie_updates;
@@ -411,32 +415,45 @@ where
             "Deciding which state root algorithm to run"
         );
 
-        // use prewarming background task
-        let txs = self.tx_iterator_for(&input)?;
+        // Create a BlockOrPayload wrapper for transaction iteration
+        // This is needed because the executor expects the iterator from tx_iterator_for
+        let wrapped = BlockOrPayload::Block(block.clone());
+        let txs = self.tx_iterator_for(&wrapped)?;
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
-            let consistent_view = ensure_ok!(
-                self,
-                &input,
-                ConsistentDbView::new_with_latest_tip(self.provider.clone())
-            );
+            let consistent_view = match ConsistentDbView::new_with_latest_tip(self.provider.clone())
+            {
+                Ok(view) => view,
+                Err(e) => {
+                    return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+                }
+            };
 
             // get allocated trie input if it exists
             let allocated_trie_input = self.payload_processor.take_trie_input();
 
             // Compute trie input
             let trie_input_start = Instant::now();
-            let trie_input = ensure_ok!(
-                self,
-                &input,
-                self.compute_trie_input(
-                    persisting_kind,
-                    ensure_ok!(self, &input, consistent_view.provider_ro()),
-                    parent_hash,
-                    ctx.state(),
-                    allocated_trie_input,
-                )
-            );
+
+            let provider_ro = match consistent_view.provider_ro() {
+                Ok(provider) => provider,
+                Err(e) => {
+                    return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+                }
+            };
+
+            let trie_input = match self.compute_trie_input(
+                persisting_kind,
+                provider_ro,
+                parent_hash,
+                ctx.state(),
+                allocated_trie_input,
+            ) {
+                Ok(input) => input,
+                Err(e) => {
+                    return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into())
+                }
+            };
 
             self.metrics
                 .block_validation
@@ -492,17 +509,17 @@ where
         // Execute the block and handle any execution errors
         let output = match if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let result = self.execute_block(&state_provider, env, &input, &mut handle);
+            let result = self.execute_block_directly(&state_provider, env, &block, &mut handle);
             state_provider.record_total_latency();
             result
         } else {
-            self.execute_block(&state_provider, env, &input, &mut handle)
+            self.execute_block_directly(&state_provider, env, &block, &mut handle)
         } {
             Ok(output) => output,
             Err(err) => {
                 // Ensure prewarming handle is properly terminated on error
                 handle.terminate_caching(None);
-                return self.handle_execution_error(input, err, &parent_block)
+                return Err(InsertBlockError::new(block.into_sealed_block(), err).into())
             }
         };
 
@@ -512,15 +529,11 @@ where
         // Build hashed state for validation
         let hashed_state = self.provider.hashed_post_state(&output.state);
 
-        // Convert to block once for all validation and result building
-        // This is the only place we convert, avoiding multiple clones
-        let block = self.convert_to_block(&input)?;
-
-        // Perform post-execution validation with the converted block
+        // Perform post-execution validation with the block we already have
         self.validate_post_execution::<T>(&block, &output, &parent_block, &hashed_state, &mut ctx)
             .map_err(InsertPayloadError::Block)?;
 
-        // Compute and validate state root with the converted block
+        // Compute and validate state root with the block
         let (_state_root, trie_output) = self.compute_and_validate_state_root(
             &block,
             &output,
@@ -533,6 +546,8 @@ where
             use_state_root_task,
             &mut ctx,
         )?;
+
+        // Build execution result - pass ownership of block
         self.build_execution_result(
             block,
             output,
@@ -805,6 +820,65 @@ where
             },
             trie: trie_updates,
         })
+    }
+
+    /// Executes a block directly without BlockOrPayload wrapper.
+    fn execute_block_directly<S, Err>(
+        &mut self,
+        state_provider: S,
+        env: ExecutionEnv<Evm>,
+        block: &RecoveredBlock<N::Block>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
+    where
+        S: StateProvider,
+        Err: core::error::Error + Send + Sync + 'static,
+    {
+        let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
+
+        let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
+        let _enter = span.enter();
+        debug!(target: "engine::tree", "Executing block");
+
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
+
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        // Create execution context directly from block
+        let ctx = self.evm_config.context_for_block(block);
+        let mut executor = self.evm_config.create_executor(evm, ctx);
+
+        if !self.config.precompile_cache_disabled() {
+            // Only cache pure precompiles to avoid issues with stateful precompiles
+            executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
+                let metrics = self
+                    .precompile_cache_metrics
+                    .entry(*address)
+                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                    .clone();
+                CachedPrecompile::wrap(
+                    precompile,
+                    self.precompile_cache_map.cache_for_address(*address),
+                    *env.evm_env.spec_id(),
+                    Some(metrics),
+                )
+            });
+        }
+
+        let execution_start = Instant::now();
+        let state_hook = Box::new(handle.state_hook());
+        let output = self.metrics.execute_metered(
+            executor,
+            handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            state_hook,
+        )?;
+        let execution_finish = Instant::now();
+        let execution_time = execution_finish.duration_since(execution_start);
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        Ok(output)
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
