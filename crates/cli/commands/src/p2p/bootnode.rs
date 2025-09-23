@@ -1,29 +1,54 @@
 //! Standalone bootnode command
 
 use clap::Parser;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_util::get_secret_key;
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network_peers::NodeRecord;
-use std::net::SocketAddr;
+use reth_node_core::{
+    args::DatadirArgs,
+    dirs::{ChainPath, DataDirPath},
+};
+use secp256k1::SecretKey;
+use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
 
 /// Start a discovery only bootnode.
 #[derive(Parser, Debug)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     /// Listen address for the bootnode (default: "0.0.0.0:30301").
     #[arg(long, default_value = "0.0.0.0:30301")]
     pub addr: SocketAddr,
 
-    /// Generate a new node key and save it to the specified file.
-    #[arg(long, default_value = "")]
-    pub gen_key: String,
+    /// All datadir related arguments
+    #[command(flatten)]
+    pub datadir: DatadirArgs,
 
-    /// Private key filename for the node.
-    #[arg(long, default_value = "")]
-    pub node_key: String,
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        long_help = C::help_message(),
+        default_value = C::SUPPORTED_CHAINS[0],
+        default_value_if("dev", "true", "dev"),
+        value_parser = C::parser(),
+        required = false,
+    )]
+    pub chain: Arc<C::ChainSpec>,
+
+    /// Secret key to use for this node.
+    ///
+    /// This will also deterministically set the peer ID. If not specified, it will be set in the
+    /// data dir for the chain being used.
+    #[arg(long, value_name = "PATH")]
+    pub p2p_secret_key: Option<PathBuf>,
 
     /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
     #[arg(long, default_value = "any")]
@@ -34,11 +59,16 @@ pub struct Command {
     pub v5: bool,
 }
 
-impl Command {
+impl<C> Command<C>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec + EthereumHardforks,
+{
     /// Execute the bootnode command.
     pub async fn execute(self) -> eyre::Result<()> {
-        info!("Bootnode started with config: {:?}", self);
-        let sk = reth_network::config::rng_secret_key();
+        info!("Bootnode started with config: {self}");
+
+        let sk = self.network_secret()?;
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk);
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
@@ -101,5 +131,41 @@ impl Command {
         }
 
         Ok(())
+    }
+
+    /// Get the network secret from the given data dir. If the secret is not provided, it will be
+    /// generated and stored in the data dir.
+    fn network_secret(&self) -> eyre::Result<SecretKey> {
+        let path = self.secret_key_path();
+        let secret_key = get_secret_key(&path)?;
+        Ok(secret_key)
+    }
+
+    fn secret_key_path(&self) -> PathBuf {
+        let default_path = self.datadir().p2p_secret();
+        self.p2p_secret_key.clone().unwrap_or(default_path)
+    }
+
+    fn datadir(&self) -> ChainPath<DataDirPath> {
+        let chain = self.chain.chain();
+        self.datadir.clone().resolve_datadir(chain)
+    }
+}
+
+impl<C> fmt::Display for Command<C>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec + EthereumHardforks,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "addr: {:?}, chain: {:?}, secret_key_path: {:?}, nat: {:?}, v5: {:?}",
+            self.addr,
+            self.chain.chain(),
+            self.secret_key_path(),
+            self.nat,
+            self.v5
+        )
     }
 }

@@ -213,6 +213,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
         Some(&self.chain)
     }
 }
+
 /// No Additional arguments
 #[derive(Debug, Clone, Copy, Default, Args)]
 #[non_exhaustive]

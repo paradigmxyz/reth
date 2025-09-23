@@ -125,7 +125,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     // RLPx utilities
     Rlpx(rlpx::Command),
     /// Bootnode command
-    Bootnode(bootnode::Command),
+    Bootnode(bootnode::Command<C>),
 }
 
 #[derive(Debug, Clone, Parser)]
