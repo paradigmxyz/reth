@@ -18,6 +18,8 @@
 
 extern crate alloc;
 
+use core::cmp::Ordering;
+
 // Re-export alloy-op-hardforks types.
 use alloy_op_hardforks::EthereumHardforks;
 pub use alloy_op_hardforks::{OpChainHardforks, OpHardfork, OpHardforks};
@@ -84,15 +86,15 @@ pub fn chain_hardforks(op_hardforks: OpChainHardforks) -> ChainHardforks {
         }
     }
 
-    // Sort timestamp forks by ascending timestamp, bubbling them to the end of the list. It allows
-    // us to keep the original order of non-timestamp forks while ensuring that timestamp forks are
-    // applied in the correct order, crucial as L2 hardforks that correspond to L1 hardforks are
-    // maintained in sync through their respective timestamps.
+    // Sort timestamp forks by ascending timestamp. It allows us to keep the original order of
+    // non-timestamp forks while ensuring that timestamp forks are applied in the correct order,
+    // crucial as L2 hardforks that correspond to L1 hardforks are maintained in sync through their
+    // respective timestamps.
     forks.sort_by(|a, b| match (a.1, b.1) {
         (ForkCondition::Timestamp(ts_a), ForkCondition::Timestamp(ts_b)) => ts_a.cmp(&ts_b),
-        (ForkCondition::Timestamp(_), _) => std::cmp::Ordering::Greater,
-        (_, ForkCondition::Timestamp(_)) => std::cmp::Ordering::Less,
-        _ => std::cmp::Ordering::Equal,
+        (ForkCondition::Timestamp(_), _) => Ordering::Greater,
+        (_, ForkCondition::Timestamp(_)) => Ordering::Less,
+        _ => Ordering::Equal,
     });
 
     ChainHardforks::new(forks)
