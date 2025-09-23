@@ -436,8 +436,9 @@ fn payload_id_secret() -> &'static [u8; 32] {
 pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
-    // Key the hash with a process-local secret to mitigate intentional collisions against a 64-bit id.
-    // The Engine API treats PayloadId as an opaque identifier local to the process, so this remains compliant.
+    // Key the hash with a process-local secret to mitigate intentional collisions against a 64-bit
+    // id. The Engine API treats PayloadId as an opaque identifier local to the process, so this
+    // remains compliant.
     hasher.update(payload_id_secret());
     hasher.update(parent.as_slice());
     hasher.update(&attributes.timestamp.to_be_bytes()[..]);
