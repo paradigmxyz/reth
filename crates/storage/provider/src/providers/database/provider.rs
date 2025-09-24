@@ -9,6 +9,7 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
+    writer::UnifiedStorageWriter,
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
@@ -114,8 +115,8 @@ impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut,
 
 impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
-    pub fn commit(self) -> ProviderResult<bool> {
-        self.0.commit()
+    pub fn commit(self) -> ProviderResult<()> {
+        UnifiedStorageWriter::commit(self.0)
     }
 
     /// Consume `DbTx` or `DbTxMut`.
