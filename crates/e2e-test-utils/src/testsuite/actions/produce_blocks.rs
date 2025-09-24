@@ -256,8 +256,8 @@ where
                 debug!("No payload ID returned, generating fresh payload attributes for forking");
 
                 let fresh_payload_attributes = PayloadAttributes {
-                    timestamp: env.active_node_state()?.latest_header_time +
-                        env.block_timestamp_increment,
+                    timestamp: env.active_node_state()?.latest_header_time
+                        + env.block_timestamp_increment,
                     prev_randao: B256::random(),
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),

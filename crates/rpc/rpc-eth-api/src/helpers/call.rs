@@ -74,7 +74,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
             }
 
             let block = block.unwrap_or_default();
@@ -87,7 +87,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
             }
 
             let base_block =
@@ -123,12 +123,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
                         if let Some(gas_limit_override) = block_overrides.gas_limit {
-                            if gas_limit_override > evm_env.block_env.gas_limit &&
-                                gas_limit_override > this.call_gas_limit()
+                            if gas_limit_override > evm_env.block_env.gas_limit
+                                && gas_limit_override > this.call_gas_limit()
                             {
                                 return Err(
                                     EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                )
+                                );
                             }
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
@@ -151,7 +151,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into())
+                            .into());
                         }
 
                         if txs_without_gas_limit > 0 {
@@ -424,7 +424,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         access_list,
                         gas_used: U256::from(gas_used),
                         error,
-                    })
+                    });
                 }
                 ExecutionResult::Revert { output, gas_used } => {
                     let error = Some(RevertError::new(output).to_string());
@@ -432,7 +432,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         access_list,
                         gas_used: U256::from(gas_used),
                         error,
-                    })
+                    });
                 }
                 ExecutionResult::Success { .. } => {}
             };
@@ -701,7 +701,7 @@ pub trait Call:
         for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break
+                break;
             }
 
             let tx_env = self.evm_config().tx_env(tx);

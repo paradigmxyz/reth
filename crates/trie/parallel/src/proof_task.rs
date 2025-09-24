@@ -153,7 +153,7 @@ where
         let Some(proof_task_tx) = self.get_or_create_tx()? else {
             // if there are no txs available, requeue the proof task
             self.pending_tasks.push_front(task);
-            return Ok(())
+            return Ok(());
         };
 
         let tx_sender = self.tx_sender.clone();
@@ -200,7 +200,7 @@ where
                         // Record metrics before terminating
                         #[cfg(feature = "metrics")]
                         self.metrics.record();
-                        return Ok(())
+                        return Ok(());
                     }
                 },
                 // All senders are disconnected, so we can terminate

@@ -135,9 +135,9 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         let now = Instant::now();
 
         // Is the pending block not expired and latest is its parent?
-        if pending.evm_env.block_env.number == U256::from(pending_block.block().number()) &&
-            parent.hash() == pending_block.block().parent_hash() &&
-            now <= pending_block.expires_at
+        if pending.evm_env.block_env.number == U256::from(pending_block.block().number())
+            && parent.hash() == pending_block.block().parent_hash()
+            && now <= pending_block.expires_at
         {
             return Ok(Some(pending_block.clone()));
         }

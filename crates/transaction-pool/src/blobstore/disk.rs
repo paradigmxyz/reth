@@ -62,7 +62,7 @@ impl BlobStore for DiskFileBlobStore {
         txs: Vec<(B256, BlobTransactionSidecarVariant)>,
     ) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         self.inner.insert_many(txs)
     }
@@ -118,7 +118,7 @@ impl BlobStore for DiskFileBlobStore {
         txs: Vec<B256>,
     ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
         self.inner.get_all(txs)
     }
@@ -128,7 +128,7 @@ impl BlobStore for DiskFileBlobStore {
         txs: Vec<B256>,
     ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         if txs.is_empty() {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
         self.inner.get_exact(txs)
     }
@@ -213,7 +213,7 @@ impl BlobStore for DiskFileBlobStore {
             // return early if all blobs are found.
             if result.iter().all(|blob| blob.is_some()) {
                 // got all blobs, can return early
-                return Ok(Some(result.into_iter().map(Option::unwrap).collect()))
+                return Ok(Some(result.into_iter().map(Option::unwrap).collect()));
             }
         }
 
@@ -393,7 +393,7 @@ impl DiskFileBlobStoreInner {
     /// Returns true if the blob for the given transaction hash is in the blob cache or on disk.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
         if self.blob_cache.lock().get(&tx).is_some() {
-            return Ok(true)
+            return Ok(true);
         }
         // we only check if the file exists and assume it's valid
         Ok(self.blob_disk_file(tx).is_file())
@@ -422,13 +422,13 @@ impl DiskFileBlobStoreInner {
         tx: B256,
     ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         if let Some(blob) = self.blob_cache.lock().get(&tx) {
-            return Ok(Some(blob.clone()))
+            return Ok(Some(blob.clone()));
         }
 
         if let Some(blob) = self.read_one(tx)? {
             let blob_arc = Arc::new(blob);
             self.blob_cache.lock().insert(tx, blob_arc.clone());
-            return Ok(Some(blob_arc))
+            return Ok(Some(blob_arc));
         }
 
         Ok(None)
@@ -535,11 +535,11 @@ impl DiskFileBlobStoreInner {
             }
         }
         if cache_miss.is_empty() {
-            return Ok(res)
+            return Ok(res);
         }
         let from_disk = self.read_many_decoded(cache_miss);
         if from_disk.is_empty() {
-            return Ok(res)
+            return Ok(res);
         }
         let from_disk = from_disk
             .into_iter()

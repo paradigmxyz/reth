@@ -42,7 +42,7 @@ where
         let this = self.get_mut();
         loop {
             let Some(cmd) = ready!(this.command_rx.poll_next_unpin(cx)) else {
-                return Poll::Ready(())
+                return Poll::Ready(());
             };
             match cmd {
                 PayloadServiceCommand::BuildNewPayload(attr, tx) => {

@@ -510,7 +510,7 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
     ) -> Result<TxEnv, Self::Err> {
         // Ensure that if versioned hashes are set, they're not empty
         if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into())
+            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into());
         }
 
         let tx_type = self.minimal_tx_type() as u8;

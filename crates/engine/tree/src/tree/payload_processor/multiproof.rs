@@ -164,7 +164,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -388,7 +388,7 @@ where
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
-            return
+            return;
         }
 
         if self.inflight >= self.max_concurrent {
@@ -780,7 +780,7 @@ where
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
-                continue
+                continue;
             };
 
             let prev_target_storage_len = target_storage.len();
@@ -995,7 +995,7 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::EmptyProof { sequence_number, state } => {
@@ -1020,7 +1020,7 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
@@ -1059,7 +1059,7 @@ where
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation");
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {
@@ -1068,14 +1068,14 @@ where
                             ?err,
                             "proof calculation error"
                         );
-                        return
+                        return;
                     }
                 },
                 Err(_) => {
                     // this means our internal message channel is closed, which shouldn't happen
                     // in normal operation since we hold both ends
                     error!(target: "engine::root", "Internal message channel closed unexpectedly");
-                    return
+                    return;
                 }
             }
         }
@@ -1129,8 +1129,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 

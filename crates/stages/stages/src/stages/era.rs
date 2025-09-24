@@ -446,8 +446,8 @@ mod tests {
                             .header_td_by_number(initial_checkpoint.saturating_sub(1))?
                             .unwrap_or_default();
 
-                        for block_num in initial_checkpoint..
-                            output
+                        for block_num in initial_checkpoint
+                            ..output
                                 .checkpoint
                                 .block_number
                                 .min(self.responses.as_ref().map(|v| v.len()).unwrap_or_default()

@@ -169,7 +169,7 @@ pub trait Block:
         } else {
             // Fall back to recovery if lengths don't match
             let Ok(senders) = self.body().recover_signers_unchecked() else {
-                return Err(BlockRecoveryError::new(self))
+                return Err(BlockRecoveryError::new(self));
             };
             senders
         };
@@ -192,7 +192,7 @@ pub trait Block:
     /// Returns the block as error if a signature is invalid.
     fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>> {
         let Ok(signers) = self.body().recover_signers() else {
-            return Err(BlockRecoveryError::new(self))
+            return Err(BlockRecoveryError::new(self));
         };
         Ok(RecoveredBlock::new_unhashed(self, signers))
     }

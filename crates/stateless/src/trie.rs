@@ -71,7 +71,7 @@ impl StatelessSparseTrie {
 
         if let Some(bytes) = self.inner.get_account_value(&hashed_address) {
             let account = TrieAccount::decode(&mut bytes.as_slice())?;
-            return Ok(Some(account))
+            return Ok(Some(account));
         }
 
         if !self.inner.check_valid_account_witness(hashed_address) {
@@ -92,7 +92,7 @@ impl StatelessSparseTrie {
         let hashed_slot = keccak256(B256::from(slot));
 
         if let Some(raw) = self.inner.get_storage_slot_value(&hashed_address, &hashed_slot) {
-            return Ok(U256::decode(&mut raw.as_slice())?)
+            return Ok(U256::decode(&mut raw.as_slice())?);
         }
 
         // Storage slot value is not present in the trie, validate that the witness is complete.
@@ -101,8 +101,8 @@ impl StatelessSparseTrie {
             // ...check that its storage is either empty or the storage trie was sufficiently
             // revealed...
             let account = TrieAccount::decode(&mut bytes.as_slice())?;
-            if account.storage_root != EMPTY_ROOT_HASH &&
-                !self.inner.check_valid_storage_witness(hashed_address, hashed_slot)
+            if account.storage_root != EMPTY_ROOT_HASH
+                && !self.inner.check_valid_storage_witness(hashed_address, hashed_slot)
             {
                 return Err(ProviderError::TrieWitnessError(format!(
                     "incomplete storage witness: prover must supply exclusion proof for slot {hashed_slot:?} in account {hashed_address:?}"

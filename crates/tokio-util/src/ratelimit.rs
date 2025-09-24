@@ -38,7 +38,7 @@ impl RateLimit {
             State::Ready { .. } => return Poll::Ready(()),
             State::Limited => {
                 if Pin::new(&mut self.sleep).poll(cx).is_pending() {
-                    return Poll::Pending
+                    return Poll::Pending;
                 }
             }
         }

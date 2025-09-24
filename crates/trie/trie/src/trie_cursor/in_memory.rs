@@ -91,7 +91,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
                 }
                 (_, Some((db_key, node))) if db_key == key => Some((key, node)),
                 _ => None,
-            })
+            });
         }
 
         loop {
@@ -115,7 +115,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
                     // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
+                    return Ok(Some((mem_key, node)));
                 }
                 // All other cases:
                 // - mem_key > db_key

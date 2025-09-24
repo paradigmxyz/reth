@@ -61,14 +61,14 @@ pub trait EthFees:
     ) -> impl Future<Output = Result<FeeHistory, Self::Error>> + Send {
         async move {
             if block_count == 0 {
-                return Ok(FeeHistory::default())
+                return Ok(FeeHistory::default());
             }
 
             // ensure the given reward percentiles aren't excessive
-            if reward_percentiles.as_ref().map(|perc| perc.len() as u64) >
-                Some(self.gas_oracle().config().max_reward_percentile_count)
+            if reward_percentiles.as_ref().map(|perc| perc.len() as u64)
+                > Some(self.gas_oracle().config().max_reward_percentile_count)
             {
-                return Err(EthApiError::InvalidRewardPercentiles.into())
+                return Err(EthApiError::InvalidRewardPercentiles.into());
             }
 
             // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
@@ -111,7 +111,7 @@ pub trait EthFees:
             // Note: The types used ensure that the percentiles are never < 0
             if let Some(percentiles) = &reward_percentiles {
                 if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                    return Err(EthApiError::InvalidRewardPercentiles.into())
+                    return Err(EthApiError::InvalidRewardPercentiles.into());
                 }
             }
 
@@ -136,7 +136,7 @@ pub trait EthFees:
 
             if let Some(fee_entries) = fee_entries {
                 if fee_entries.len() != block_count as usize {
-                    return Err(EthApiError::InvalidBlockRange.into())
+                    return Err(EthApiError::InvalidBlockRange.into());
                 }
 
                 for entry in &fee_entries {
@@ -168,11 +168,12 @@ pub trait EthFees:
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
                 // read the requested header range
-                let headers = self.provider()
+                let headers = self
+                    .provider()
                     .sealed_headers_range(start_block..=end_block)
                     .map_err(Self::Error::from_eth_err)?;
                 if headers.len() != block_count as usize {
-                    return Err(EthApiError::InvalidBlockRange.into())
+                    return Err(EthApiError::InvalidBlockRange.into());
                 }
 
                 let chain_spec = self.provider().chain_spec();
@@ -185,16 +186,15 @@ pub trait EthFees:
                         .unwrap_or_else(BlobParams::cancun);
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
-                    blob_gas_used_ratio.push(
-                        checked_blob_gas_used_ratio(
-                            header.blob_gas_used().unwrap_or_default(),
-                            blob_params.max_blob_gas_per_block(),
-                        )
-                    );
+                    blob_gas_used_ratio.push(checked_blob_gas_used_ratio(
+                        header.blob_gas_used().unwrap_or_default(),
+                        blob_params.max_blob_gas_per_block(),
+                    ));
 
                     // Percentiles were specified, so we need to collect reward percentile info
                     if let Some(percentiles) = &reward_percentiles {
-                        let (block, receipts) = self.cache()
+                        let (block, receipts) = self
+                            .cache()
                             .get_block_and_receipts(header.hash())
                             .await
                             .map_err(Self::Error::from_eth_err)?
@@ -227,9 +227,10 @@ pub trait EthFees:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
                 base_fee_per_blob_gas.push(
                     last_header
-                    .maybe_next_block_blob_fee(
-                        chain_spec.blob_params_at_timestamp(last_header.timestamp())
-                    ).unwrap_or_default()
+                        .maybe_next_block_blob_fee(
+                            chain_spec.blob_params_at_timestamp(last_header.timestamp()),
+                        )
+                        .unwrap_or_default(),
                 );
             };
 

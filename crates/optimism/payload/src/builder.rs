@@ -355,13 +355,13 @@ impl<Txs> OpBuilder<'_, Txs> {
         if !ctx.attributes().no_tx_pool() {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
             if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
+                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees });
             }
         }
 
@@ -615,7 +615,7 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
@@ -633,11 +633,11 @@ where
                     ..
                 })) => {
                     trace!(target: "payload_builder", %error, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 
@@ -679,13 +679,13 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // We skip invalid cross chain txs, they would be removed on the next block update in
@@ -693,12 +693,12 @@ where
             if let Some(interop) = interop {
                 if !is_valid_interop(interop, self.config.attributes.timestamp()) {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
-                    continue
+                    continue;
                 }
             }
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(()))
+                return Ok(Some(()));
             }
 
             let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -716,11 +716,11 @@ where
                         trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                         best_txs.mark_invalid(tx.signer(), tx.nonce());
                     }
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 

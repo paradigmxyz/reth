@@ -36,17 +36,17 @@ impl HttpClient for StubClient {
             "https://mainnet.era1.nimbus.team/" => Bytes::from_static(NIMBUS),
             "https://era1.ethportal.net/" => Bytes::from_static(ETH_PORTAL),
             "https://era.ithaca.xyz/era1/index.html" => Bytes::from_static(ITHACA),
-            "https://mainnet.era1.nimbus.team/checksums.txt" |
-            "https://era1.ethportal.net/checksums.txt" |
-            "https://era.ithaca.xyz/era1/checksums.txt" => Bytes::from_static(CHECKSUMS),
-            "https://era1.ethportal.net/mainnet-00000-5ec1ffb8.era1" |
-            "https://mainnet.era1.nimbus.team/mainnet-00000-5ec1ffb8.era1" |
-            "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
+            "https://mainnet.era1.nimbus.team/checksums.txt"
+            | "https://era1.ethportal.net/checksums.txt"
+            | "https://era.ithaca.xyz/era1/checksums.txt" => Bytes::from_static(CHECKSUMS),
+            "https://era1.ethportal.net/mainnet-00000-5ec1ffb8.era1"
+            | "https://mainnet.era1.nimbus.team/mainnet-00000-5ec1ffb8.era1"
+            | "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
                 Bytes::from_static(MAINNET_0)
             }
-            "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1" |
-            "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" |
-            "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
+            "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1"
+            | "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1"
+            | "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
                 Bytes::from_static(MAINNET_1)
             }
             v => unimplemented!("Unexpected URL \"{v}\""),

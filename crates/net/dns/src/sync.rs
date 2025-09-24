@@ -73,27 +73,27 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         match self.sync_state {
             SyncState::Pending => {
                 self.sync_state = SyncState::Enr;
-                return Some(SyncAction::Link(self.root.link_root.clone()))
+                return Some(SyncAction::Link(self.root.link_root.clone()));
             }
             SyncState::Enr => {
                 self.sync_state = SyncState::Active;
-                return Some(SyncAction::Enr(self.root.enr_root.clone()))
+                return Some(SyncAction::Enr(self.root.enr_root.clone()));
             }
             SyncState::Link => {
                 self.sync_state = SyncState::Active;
-                return Some(SyncAction::Link(self.root.link_root.clone()))
+                return Some(SyncAction::Link(self.root.link_root.clone()));
             }
             SyncState::Active => {
                 if now > self.root_updated + update_timeout {
                     self.sync_state = SyncState::RootUpdate;
-                    return Some(SyncAction::UpdateRoot)
+                    return Some(SyncAction::UpdateRoot);
                 }
             }
             SyncState::RootUpdate => return None,
         }
 
         if let Some(link) = self.unresolved_links.pop_front() {
-            return Some(SyncAction::Link(link))
+            return Some(SyncAction::Link(link));
         }
 
         let enr = self.unresolved_nodes.pop_front()?;
@@ -124,7 +124,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
             }
             _ => {
                 // unchanged
-                return
+                return;
             }
         };
         self.sync_state = state;

@@ -465,7 +465,7 @@ where
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -494,7 +494,7 @@ where
                             // check if block is cached
                             if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(receipts)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -519,13 +519,13 @@ where
                             // check if the header is cached
                             if let Some(header) = this.headers_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(header));
-                                continue
+                                continue;
                             }
 
                             // it's possible we have the entire block cached
                             if let Some(block) = this.full_block_cache.get(&block_hash) {
                                 let _ = response_tx.send(Ok(block.clone_header()));
-                                continue
+                                continue;
                             }
 
                             // header is not in the cache, request it if this is the first

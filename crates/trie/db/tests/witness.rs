@@ -89,16 +89,12 @@ fn includes_nodes_for_destroyed_storage_nodes() {
         )]))
         .unwrap();
 
-    let witness =
-        TrieWitness::from_tx(provider.tx_ref())
-            .compute(HashedPostState {
-                accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    HashedStorage::from_iter(true, []),
-                )]), // destroyed
-            })
-            .unwrap();
+    let witness = TrieWitness::from_tx(provider.tx_ref())
+        .compute(HashedPostState {
+            accounts: HashMap::from_iter([(hashed_address, Some(Account::default()))]),
+            storages: HashMap::from_iter([(hashed_address, HashedStorage::from_iter(true, []))]), // destroyed
+        })
+        .unwrap();
     assert!(witness.contains_key(&state_root));
     for node in multiproof.account_subtree.values() {
         assert_eq!(witness.get(&keccak256(node)), Some(node));

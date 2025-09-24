@@ -108,7 +108,7 @@ where
                         %err,
                         "Failed to fetch a block from Etherscan",
                     );
-                    continue
+                    continue;
                 }
             };
             let block_number = block.header().number();

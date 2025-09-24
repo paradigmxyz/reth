@@ -235,20 +235,20 @@ mod tests {
 
         // Verify the combined state
         assert!(
-            primary.accounts.len() == 2 &&
-                primary.contracts.len() == 2 &&
-                primary.block_hashes.len() == 2,
+            primary.accounts.len() == 2
+                && primary.contracts.len() == 2
+                && primary.block_hashes.len() == 2,
             "All maps should contain 2 entries"
         );
 
         // Verify specific entries
         assert!(
-            primary.accounts.contains_key(&address1) &&
-                primary.accounts.contains_key(&address2) &&
-                primary.contracts.contains_key(&hash1) &&
-                primary.contracts.contains_key(&hash2) &&
-                primary.block_hashes.get(&1) == Some(&hash1) &&
-                primary.block_hashes.get(&2) == Some(&hash2),
+            primary.accounts.contains_key(&address1)
+                && primary.accounts.contains_key(&address2)
+                && primary.contracts.contains_key(&hash1)
+                && primary.contracts.contains_key(&hash2)
+                && primary.block_hashes.get(&1) == Some(&hash1)
+                && primary.block_hashes.get(&2) == Some(&hash2),
             "All expected entries should be present"
         );
     }

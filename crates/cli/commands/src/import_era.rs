@@ -77,8 +77,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
         let next_block = provider_factory
             .static_file_provider()
             .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default() +
-            1;
+            .unwrap_or_default()
+            + 1;
 
         if let Some(path) = self.import.path {
             let stream = read_dir(path, next_block)?;

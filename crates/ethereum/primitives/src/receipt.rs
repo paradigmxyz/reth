@@ -88,10 +88,10 @@ impl<T> Receipt<T> {
 impl<T: TxTy> Receipt<T> {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
-        self.success.length() +
-            self.cumulative_gas_used.length() +
-            bloom.length() +
-            self.logs.length()
+        self.success.length()
+            + self.cumulative_gas_used.length()
+            + bloom.length()
+            + self.logs.length()
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
@@ -225,7 +225,7 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, T::try_from(0)?)
+            return Self::rlp_decode_inner(buf, T::try_from(0)?);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt
@@ -245,8 +245,8 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
 
 impl<T: TxTy> Encodable2718 for Receipt<T> {
     fn encode_2718_len(&self) -> usize {
-        (!self.tx_type.is_legacy() as usize) +
-            self.rlp_header_inner_without_bloom().length_with_payload()
+        (!self.tx_type.is_legacy() as usize)
+            + self.rlp_header_inner_without_bloom().length_with_payload()
     }
 
     // encode the header
@@ -331,10 +331,10 @@ impl<T: TxTy> IsTyped2718 for Receipt<T> {
 
 impl<T: TxTy> InMemorySize for Receipt<T> {
     fn size(&self) -> usize {
-        self.tx_type.size() +
-            core::mem::size_of::<bool>() +
-            core::mem::size_of::<u64>() +
-            self.logs.capacity() * core::mem::size_of::<Log>()
+        self.tx_type.size()
+            + core::mem::size_of::<bool>()
+            + core::mem::size_of::<u64>()
+            + self.logs.capacity() * core::mem::size_of::<Log>()
     }
 }
 

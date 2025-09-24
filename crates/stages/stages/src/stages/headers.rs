@@ -130,7 +130,7 @@ where
 
             let (header, header_hash) = sealed_header.split_ref();
             if header.number() == 0 {
-                continue
+                continue;
             }
             last_header_number = header.number();
 
@@ -206,7 +206,7 @@ where
 
         // Return if stage has already completed the gap on the ETL files
         if self.is_etl_ready {
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // Lookup the head and tip of the sync range
@@ -225,7 +225,7 @@ where
             );
             self.is_etl_ready = true;
             self.sync_gap = Some(gap);
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -260,7 +260,7 @@ where
                         // filled the gap.
                         if header_number == local_head_number + 1 {
                             self.is_etl_ready = true;
-                            return Poll::Ready(Ok(()))
+                            return Poll::Ready(Ok(()));
                         }
                     }
                 }
@@ -271,11 +271,11 @@ where
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
                         error,
-                    }))
+                    }));
                 }
                 None => {
                     self.sync_gap = None;
-                    return Poll::Ready(Err(StageError::ChannelClosed))
+                    return Poll::Ready(Err(StageError::ChannelClosed));
                 }
             }
         }
@@ -288,12 +288,12 @@ where
 
         if self.sync_gap.take().ok_or(StageError::MissingSyncGap)?.is_closed() {
             self.is_etl_ready = false;
-            return Ok(ExecOutput::done(current_checkpoint))
+            return Ok(ExecOutput::done(current_checkpoint));
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
         if !self.is_etl_ready {
-            return Err(StageError::MissingDownloadBuffer)
+            return Err(StageError::MissingDownloadBuffer);
         }
 
         // Reset flag
@@ -480,7 +480,7 @@ mod tests {
                 let end = input.target.unwrap_or_default() + 1;
 
                 if start + 1 >= end {
-                    return Ok(Vec::default())
+                    return Ok(Vec::default());
                 }
 
                 let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

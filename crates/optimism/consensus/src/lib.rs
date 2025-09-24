@@ -94,12 +94,12 @@ where
                     expected: block.ommers_hash(),
                 }
                 .into(),
-            ))
+            ));
         }
 
         // Check transaction root
         if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
         }
 
         // Check empty shanghai-withdrawals
@@ -108,7 +108,7 @@ where
                 ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
         } else {
-            return Ok(())
+            return Ok(());
         }
 
         if self.chain_spec.is_ecotone_active_at_timestamp(block.timestamp()) {
@@ -144,11 +144,11 @@ where
         );
 
         if header.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero)
+            return Err(ConsensusError::TheMergeNonceIsNotZero);
         }
 
         if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
         }
 
         // Post-merge, the consensus layer is expected to perform checks such that the block

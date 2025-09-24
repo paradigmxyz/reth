@@ -291,10 +291,10 @@ impl Command {
                         .add_cell(Cell::new(human_bytes(segment_config_size as f64)));
                 }
                 row.add_cell(Cell::new(human_bytes(
-                    (segment_data_size +
-                        segment_index_size +
-                        segment_offsets_size +
-                        segment_config_size) as f64,
+                    (segment_data_size
+                        + segment_index_size
+                        + segment_offsets_size
+                        + segment_config_size) as f64,
                 )));
                 table.add_row(row);
             }

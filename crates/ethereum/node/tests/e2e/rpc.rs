@@ -64,9 +64,9 @@ async fn test_fee_history() -> eyre::Result<()> {
     let fee_history = provider.get_fee_history(10, 0_u64.into(), &[]).await?;
 
     let genesis_base_fee = chain_spec.initial_base_fee().unwrap() as u128;
-    let expected_first_base_fee = genesis_base_fee -
-        genesis_base_fee /
-            chain_spec
+    let expected_first_base_fee = genesis_base_fee
+        - genesis_base_fee
+            / chain_spec
                 .base_fee_params_at_timestamp(chain_spec.genesis_timestamp())
                 .max_change_denominator;
     assert_eq!(fee_history.base_fee_per_gas[0], genesis_base_fee);

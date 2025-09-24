@@ -19,8 +19,8 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) &&
-        !chain_spec.is_canyon_active_at_timestamp(timestamp)
+    if chain_spec.is_regolith_active_at_timestamp(timestamp)
+        && !chain_spec.is_canyon_active_at_timestamp(timestamp)
     {
         let receipts = receipts
             .iter()
@@ -33,7 +33,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
             })
             .collect::<Vec<_>>();
 
-        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf))
+        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf));
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf))
@@ -52,8 +52,8 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_regolith_active_at_timestamp(timestamp) &&
-        !chain_spec.is_canyon_active_at_timestamp(timestamp)
+    if chain_spec.is_regolith_active_at_timestamp(timestamp)
+        && !chain_spec.is_canyon_active_at_timestamp(timestamp)
     {
         let receipts = receipts
             .iter()
@@ -68,7 +68,7 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
 
         return ordered_trie_root_with_encoder(&receipts, |r, buf| {
             r.with_bloom_ref().encode_2718(buf);
-        })
+        });
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| {

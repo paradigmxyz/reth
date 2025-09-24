@@ -159,7 +159,7 @@ pub trait EthBlocks:
                 return self
                     .tx_resp_builder()
                     .convert_receipts_with_block(inputs, block.sealed_block())
-                    .map(Some)
+                    .map(Some);
             }
 
             Ok(None)

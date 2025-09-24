@@ -24,11 +24,11 @@ pub trait RessProtocolProvider: Send + Sync {
             block_hash = header.parent_hash;
             total_bytes += header.length();
             headers.push(header);
-            if headers.len() >= request.limit as usize ||
-                headers.len() >= MAX_HEADERS_SERVE ||
-                total_bytes > SOFT_RESPONSE_LIMIT
+            if headers.len() >= request.limit as usize
+                || headers.len() >= MAX_HEADERS_SERVE
+                || total_bytes > SOFT_RESPONSE_LIMIT
             {
-                break
+                break;
             }
         }
         Ok(headers)
@@ -46,10 +46,10 @@ pub trait RessProtocolProvider: Send + Sync {
                 total_bytes += body.length();
                 bodies.push(body);
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
         Ok(bodies)

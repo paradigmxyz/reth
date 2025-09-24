@@ -140,7 +140,7 @@ where
                 // FIXME: we don't necessarily have access to the parent block here because the
                 // parent block isn't necessarily part of the canonical chain yet. Instead this
                 // function should receive the list of in memory blocks as input
-                return Ok(())
+                return Ok(());
             };
             let predeploy_storage_updates = state_updates
                 .storages
@@ -278,10 +278,10 @@ pub fn validate_withdrawals_presence(
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));
             }
         }
-        EngineApiMessageVersion::V2 |
-        EngineApiMessageVersion::V3 |
-        EngineApiMessageVersion::V4 |
-        EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V2
+        | EngineApiMessageVersion::V3
+        | EngineApiMessageVersion::V4
+        | EngineApiMessageVersion::V5 => {
             if is_shanghai && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));

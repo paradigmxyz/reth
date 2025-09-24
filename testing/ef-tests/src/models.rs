@@ -243,12 +243,12 @@ impl Account {
                 } else {
                     return Err(Error::Assertion(format!(
                         "Slot {slot:?} is missing from the database. Expected {value:?}"
-                    )))
+                    )));
                 }
             } else {
                 return Err(Error::Assertion(format!(
                     "Slot {slot:?} is missing from the database. Expected {value:?}"
-                )))
+                )));
             }
         }
 
@@ -355,10 +355,10 @@ impl From<ForkSpec> for ChainSpec {
                 .berlin_activated()
                 .with_fork(EthereumHardfork::London, ForkCondition::Block(5)),
             ForkSpec::London => spec_builder.london_activated(),
-            ForkSpec::Merge |
-            ForkSpec::MergeEOF |
-            ForkSpec::MergeMeterInitCode |
-            ForkSpec::MergePush0 => spec_builder.paris_activated(),
+            ForkSpec::Merge
+            | ForkSpec::MergeEOF
+            | ForkSpec::MergeMeterInitCode
+            | ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::ParisToShanghaiAtTime15k => spec_builder
                 .paris_activated()
                 .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(15_000)),

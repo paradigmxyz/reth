@@ -92,13 +92,13 @@ impl TxPayment {
 impl RlpEcdsaEncodableTx for TxPayment {
     /// Outputs the length of the transaction's fields, without a RLP header.
     fn rlp_encoded_fields_length(&self) -> usize {
-        self.chain_id.length() +
-            self.nonce.length() +
-            self.max_priority_fee_per_gas.length() +
-            self.max_fee_per_gas.length() +
-            self.gas_limit.length() +
-            self.to.length() +
-            self.value.length()
+        self.chain_id.length()
+            + self.nonce.length()
+            + self.max_priority_fee_per_gas.length()
+            + self.max_fee_per_gas.length()
+            + self.gas_limit.length()
+            + self.to.length()
+            + self.value.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without

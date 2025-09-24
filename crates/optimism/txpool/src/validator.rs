@@ -187,7 +187,7 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            )
+            );
         }
 
         // Interop cross tx validation
@@ -199,7 +199,7 @@ where
                     }
                     err => InvalidPoolTransactionError::Other(Box::new(err)),
                 };
-                return TransactionValidationOutcome::Invalid(transaction, err)
+                return TransactionValidationOutcome::Invalid(transaction, err);
             }
             Some(Ok(_)) => {
                 // valid interop tx
@@ -222,7 +222,7 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
-            return outcome
+            return outcome;
         }
         // ensure that the account has enough balance to cover the L1 gas cost
         if let TransactionValidationOutcome::Valid {
@@ -259,7 +259,7 @@ where
                         GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
-                )
+                );
             }
 
             return TransactionValidationOutcome::Valid {
@@ -269,7 +269,7 @@ where
                 propagate,
                 bytecode_hash,
                 authorities,
-            }
+            };
         }
         outcome
     }

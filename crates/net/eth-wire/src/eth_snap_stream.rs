@@ -236,9 +236,9 @@ where
                     Err(EthSnapStreamError::InvalidMessage(self.eth_version, err.to_string()))
                 }
             }
-        } else if message_id > EthMessageID::max(self.eth_version) &&
-            message_id <=
-                EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
+        } else if message_id > EthMessageID::max(self.eth_version)
+            && message_id
+                <= EthMessageID::message_count(self.eth_version) + SnapMessageId::TrieNodes as u8
         {
             // Checks for multiplexed snap message IDs :
             // - message_id > EthMessageID::max() : ensures it's not an eth message
@@ -405,8 +405,8 @@ mod tests {
         // This should be decoded as eth message
         let eth_boundary_result = inner.decode_message(eth_boundary_bytes);
         assert!(
-            eth_boundary_result.is_err() ||
-                matches!(eth_boundary_result, Ok(EthSnapMessage::Eth(_)))
+            eth_boundary_result.is_err()
+                || matches!(eth_boundary_result, Ok(EthSnapMessage::Eth(_)))
         );
 
         // Create a bytes buffer with message ID just above eth max, it should be snap min

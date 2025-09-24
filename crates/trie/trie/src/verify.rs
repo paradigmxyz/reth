@@ -76,7 +76,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
             if let Some((account, storage_updates)) = self.curr_storage.as_mut() {
                 if let Some((path, node)) = storage_updates.pop() {
                     let node = BranchNode::Storage(*account, path, node);
-                    return Some(Ok(node))
+                    return Some(Ok(node));
                 }
             }
 
@@ -91,14 +91,14 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 
             // `storage_updates` is empty, check if there are account updates.
             if let Some((path, node)) = self.account_nodes.pop() {
-                return Some(Ok(BranchNode::Account(path, node)))
+                return Some(Ok(BranchNode::Account(path, node)));
             }
 
             // All data from any previous runs of the `StateRoot` has been produced, run the next
             // partial computation, unless `StateRootProgress::Complete` has been returned in which
             // case iteration is over.
             if self.complete {
-                return None
+                return None;
             }
 
             let state_root =
@@ -246,7 +246,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
             // found must be considered missing.
             if self.curr.is_none() {
                 outputs.push(self.output_missing(path, node));
-                return Ok(())
+                return Ok(());
             }
 
             let (curr_path, curr_node) = self.curr.as_ref().expect("not None");
@@ -258,7 +258,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     // If the given path comes before the cursor's current path in depth-first
                     // order, then the given path was not produced by the cursor.
                     outputs.push(self.output_missing(path, node));
-                    return Ok(())
+                    return Ok(());
                 }
                 Ordering::Equal => {
                     // If the the current path matches the given one (happy path) but the nodes
@@ -268,7 +268,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                         outputs.push(self.output_wrong(path, node, curr_node.clone()))
                     }
                     self.curr = self.trie_iter.next().transpose()?;
-                    return Ok(())
+                    return Ok(());
                 }
                 Ordering::Greater => {
                     // If the given path comes after the current path in depth-first order,
@@ -291,7 +291,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                 outputs.push(self.output_extra(curr_path, curr_node));
                 self.curr = self.trie_iter.next().transpose()?;
             } else {
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -366,7 +366,7 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                 account_seeked = true;
                 account_cursor.seek(last_account)?
             }) else {
-                return Ok(())
+                return Ok(());
             };
 
             if curr_account < next_account || (end_inclusive && curr_account == next_account) {
@@ -384,7 +384,7 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<T, H> {
                     self.outputs.push(Output::StorageExtra(curr_account, path, node));
                 }
             } else {
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -451,15 +451,15 @@ impl<T: TrieCursorFactory, H: HashedCursorFactory + Clone> Iterator for Verifier
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(output) = self.outputs.pop() {
-                return Some(Ok(output))
+                return Some(Ok(output));
             }
 
             if self.complete {
-                return None
+                return None;
             }
 
             if let Err(err) = self.try_next() {
-                return Some(Err(err))
+                return Some(Err(err));
             }
         }
     }

@@ -123,15 +123,15 @@ impl StageError {
     pub const fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Self::Database(_) |
-                Self::Download(_) |
-                Self::DatabaseIntegrity(_) |
-                Self::StageCheckpoint(_) |
-                Self::MissingDownloadBuffer |
-                Self::MissingSyncGap |
-                Self::ChannelClosed |
-                Self::Internal(_) |
-                Self::Fatal(_)
+            Self::Database(_)
+                | Self::Download(_)
+                | Self::DatabaseIntegrity(_)
+                | Self::StageCheckpoint(_)
+                | Self::MissingDownloadBuffer
+                | Self::MissingSyncGap
+                | Self::ChannelClosed
+                | Self::Internal(_)
+                | Self::Fatal(_)
         )
     }
 }

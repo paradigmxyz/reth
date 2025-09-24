@@ -75,7 +75,7 @@ where
         if args.base.parent_hash != latest_hash {
             trace!(flashblock_parent = ?args.base.parent_hash, local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
             // doesn't attach to the latest block
-            return Ok(None)
+            return Ok(None);
         }
 
         let state_provider = self.provider.history_by_block_hash(latest.hash())?;

@@ -124,14 +124,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                                     ?tx_hash,
                                     "Invalid receipt"
                                 );
-                                let expected_gas_used = correct_receipt.cumulative_gas_used() -
-                                    if i == 0 {
+                                let expected_gas_used = correct_receipt.cumulative_gas_used()
+                                    - if i == 0 {
                                         0
                                     } else {
                                         correct_receipts[i - 1].cumulative_gas_used()
                                     };
-                                let got_gas_used = receipt.cumulative_gas_used() -
-                                    if i == 0 {
+                                let got_gas_used = receipt.cumulative_gas_used()
+                                    - if i == 0 {
                                         0
                                     } else {
                                         result.receipts[i - 1].cumulative_gas_used()
