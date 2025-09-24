@@ -26,7 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
@@ -73,7 +73,7 @@ impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
     EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + BlockReaderIdExt + StateProviderFactory + 'static,
     PayloadT: PayloadTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<PayloadT>,
@@ -287,7 +287,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + BlockReaderIdExt + StateProviderFactory + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
@@ -755,17 +755,17 @@ where
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
         // Check if Osaka fork is active - if so, return unsupported fork error
         // as per the engine API spec requirement
-        let best_block_number = self
+        let header = self
             .inner
             .provider
-            .best_block_number()
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-        if let Ok(Some(header)) = self.inner.provider.header_by_number(best_block_number) {
-            if self.inner.chain_spec.is_osaka_active_at_timestamp(header.timestamp()) {
-                return Err(EngineApiError::EngineObjectValidationError(
-                    reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-                ));
-            }
+            .latest_header()
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?
+            .ok_or_else(|| EngineApiError::Internal("No latest header available".into()))?;
+
+        if self.inner.chain_spec.is_osaka_active_at_timestamp(header.timestamp()) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
@@ -855,7 +855,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    Provider: HeaderProvider + BlockReader + BlockReaderIdExt + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EngineT>,
