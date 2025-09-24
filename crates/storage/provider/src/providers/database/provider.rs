@@ -32,7 +32,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_db::static_file::TransactionMask;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -543,6 +542,23 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    fn transactions_by_tx_range_with_cursor<C>(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+        cursor: &mut C,
+    ) -> ProviderResult<Vec<TxTy<N>>>
+    where
+        C: DbCursorRO<tables::Transactions<TxTy<N>>>,
+    {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::Transactions,
+            to_range(range),
+            |static_file, range, _| static_file.transactions_by_tx_range(range),
+            |range, _| self.cursor_collect(cursor, range),
+            |_| true,
+        )
+    }
+
     fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
@@ -612,6 +628,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
 
         // If the body indices are not found, this means that the transactions either do
         // not exist in the database yet, or they do exit but are
@@ -630,7 +647,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                self.transactions_by_tx_range(tx_range.clone())?
+                self.transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
             };
 
             inputs.push((header.as_ref(), transactions));
@@ -780,7 +797,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Commit database transaction.
+    /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<()> {
         UnifiedStorageWriter::commit(self)
     }
@@ -1439,13 +1456,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
+
         if let Some(block_number) = self.convert_hash_or_number(id)? {
             if let Some(body) = self.block_body_indices(block_number)? {
                 let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
-                    Ok(Some(self.transactions_by_tx_range(tx_range)?))
+                    Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
                 }
             }
         }
@@ -1457,6 +1476,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         let range = to_range(range);
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
 
         self.block_body_indices_range(range.start..=range.end.saturating_sub(1))?
             .into_iter()
@@ -1465,7 +1485,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                 if tx_num_range.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    self.transactions_by_tx_range(tx_num_range)
+                    Ok(self
+                        .transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
+                        .into_iter()
+                        .collect())
                 }
             })
             .collect()
@@ -1475,11 +1498,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.static_file_provider.fetch_range_with_predicate(
-            StaticFileSegment::Transactions,
-            to_range(range),
-            |cursor, number| cursor.get_one::<TransactionMask<Self::Transaction>>(number.into()),
-            |_| true,
+        self.transactions_by_tx_range_with_cursor(
+            range,
+            &mut self.tx.cursor_read::<tables::Transactions<_>>()?,
         )
     }
 

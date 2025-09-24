@@ -272,7 +272,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         let smallest = lowest_block_number.unwrap_or_else(|| {
             // Return only the parent header, if there were no calls to the
-            // BLOCKH
+            // BLOCKHASH opcode.
             block_number.saturating_sub(1)
         });
 
