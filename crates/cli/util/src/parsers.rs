@@ -109,7 +109,7 @@ pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
     if s.starts_with('-') {
         return Err(eyre::eyre!("Ether value cannot be negative"))
     }
-    
+
     let (int_part_raw, frac_part_raw) = match s.split_once('.') {
         Some((i, f)) => (i, f),
         None => (s, ""),
