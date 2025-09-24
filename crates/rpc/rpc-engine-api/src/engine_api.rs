@@ -753,10 +753,6 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
-        }
-
         // Check if Osaka fork is active - if so, return unsupported fork error
         // as per the engine API spec requirement
         let best_block_number = self
@@ -770,6 +766,10 @@ where
                     reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
                 ));
             }
+        }
+
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
 
         self.inner
