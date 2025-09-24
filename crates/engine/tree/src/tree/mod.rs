@@ -555,9 +555,10 @@ where
             //    remember it as invalid
             // 2. the block is not well formed (i.e block hash is incorrect), and we should just
             //    return an error and forget it
-            let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+            let block = match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
                 Ok(block) => block,
                 Err(error) => {
+                    tracing::debug!("payload in new payload l 561 {:?}", payload.clone());
                     let status = self.on_new_payload_error(error, parent_hash)?;
                     return Ok(TreeOutcome::new(status))
                 }
@@ -571,7 +572,7 @@ where
 
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
-            match self.insert_payload(payload) {
+            match self.insert_payload(payload.clone()) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -595,12 +596,13 @@ where
                 Err(error) => match error {
                     InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
                     InsertPayloadError::Payload(error) => {
+                        tracing::debug!("payload in new payload l 599 {:?}", payload.clone());
                         self.on_new_payload_error(error, parent_hash)?
                     }
                 },
             }
         } else {
-            match self.payload_validator.ensure_well_formed_payload(payload) {
+            match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
                 // if the block is well-formed, buffer it for later
                 Ok(block) => {
                     if let Err(error) = self.buffer_block(block) {
@@ -609,7 +611,10 @@ where
                         PayloadStatus::from_status(PayloadStatusEnum::Syncing)
                     }
                 }
-                Err(error) => self.on_new_payload_error(error, parent_hash)?,
+                Err(error) => {
+                    tracing::debug!("payload in new payload l 614 {:?}", payload.clone());
+                    self.on_new_payload_error(error, parent_hash)?
+                }
             }
         };
 

@@ -209,7 +209,7 @@ where
                 EngineApiMessageVersion::default(),
             )
             .await?;
-
+        tracing::debug!(target: "engine::local", "FCU result: {res:?}");
         if !res.is_valid() {
             eyre::bail!("Invalid payload status")
         }
