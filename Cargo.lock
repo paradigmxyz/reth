@@ -7797,6 +7797,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
+ "async-compression",
  "futures",
  "futures-util",
  "itertools 0.14.0",
