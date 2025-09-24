@@ -7986,7 +7986,6 @@ dependencies = [
  "reth-prune",
  "reth-stages-api",
  "reth-tasks",
- "thiserror 2.0.16",
  "tokio",
  "tokio-stream",
 ]
