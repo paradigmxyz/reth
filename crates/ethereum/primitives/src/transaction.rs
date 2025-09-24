@@ -3,7 +3,7 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
     TxLegacy, TxType, Typed2718,
 };
@@ -658,11 +658,13 @@ impl SignerRecoverable for TransactionSigned {
     }
 }
 
-impl SignedTransaction for TransactionSigned {
+impl TxHashRef for TransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 }
+
+impl SignedTransaction for TransactionSigned {}
 
 #[cfg(test)]
 mod tests {
