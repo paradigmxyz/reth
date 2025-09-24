@@ -43,7 +43,6 @@ use jsonrpsee::{
 };
 
 /// Custom RPC namespace: `txpoolExt`
-/// This defines an additional namespace where all methods are configured as trait functions.
 #[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
 #[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
 pub trait TxpoolExtApi {
@@ -219,73 +218,6 @@ cast rpc txpoolExt_subscribeTransactionCount
 4. **CLI Integration**: Extend the default Reth CLI with your own arguments to control custom functionality.
 
 5. **Error Handling**: Use `RpcResult<T>` for methods that can fail and handle errors appropriately.
-
-### Advanced Usage
-
-#### Adding Multiple RPC Namespaces
-
-You can add multiple custom RPC namespaces by calling `extend_rpc_modules` multiple times or by creating multiple extension structs:
-
-```rust
-builder
-    .extend_rpc_modules(|ctx| {
-        // Add first namespace
-        let ext1 = MyFirstExtension { /* ... */ };
-        ctx.modules.merge_configured(ext1.into_rpc())?;
-        Ok(())
-    })
-    .extend_rpc_modules(|ctx| {
-        // Add second namespace
-        let ext2 = MySecondExtension { /* ... */ };
-        ctx.modules.merge_configured(ext2.into_rpc())?;
-        Ok(())
-    })
-```
-
-#### Accessing Other Node Components
-
-The node context provides access to various components:
-
-```rust
-.extend_rpc_modules(|ctx| {
-    let pool = ctx.pool().clone();           // Transaction pool
-    let provider = ctx.provider().clone();   // Database provider
-    let network = ctx.network().clone();     // P2P network
-    let consensus = ctx.consensus().clone(); // Consensus engine
-
-    // Use these components in your RPC implementation
-    Ok(())
-})
-```
-
-#### Custom Error Types
-
-Define custom error types for better error handling:
-
-```rust
-use jsonrpsee::types::error::ErrorCode;
-
-#[derive(Debug, thiserror::Error)]
-pub enum TxpoolExtError {
-    #[error("Pool is locked")]
-    PoolLocked,
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
-}
-
-impl From<TxpoolExtError> for jsonrpsee::core::Error {
-    fn from(err: TxpoolExtError) -> Self {
-        match err {
-            TxpoolExtError::PoolLocked => {
-                jsonrpsee::core::Error::Custom("Pool is currently locked".to_string())
-            }
-            TxpoolExtError::InvalidParameter(msg) => {
-                jsonrpsee::core::Error::InvalidParams(msg)
-            }
-        }
-    }
-}
-```
 
 ## Next Steps
 
