@@ -486,8 +486,7 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 => "engine_newPayloadV5",
-            Self::V6 => "engine_newPayloadV6",
+            Self::V5 | Self::V6 => "engine_newPayloadV5",
         }
     }
 }
