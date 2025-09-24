@@ -138,11 +138,6 @@ where
     }
 }
 
-/// Potential error returned by `EngineService`.
-#[derive(Debug, thiserror::Error)]
-#[error("Engine service error.")]
-pub struct EngineServiceError {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
