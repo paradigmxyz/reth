@@ -14,15 +14,10 @@ Options:
 
           [default: 0.0.0.0:30301]
 
-      --gen-key <GEN_KEY>
-          Generate a new node key and save it to the specified file
+      --p2p-secret-key <PATH>
+          Secret key to use for the bootnode.
 
-          [default: ]
-
-      --node-key <NODE_KEY>
-          Private key filename for the node
-
-          [default: ]
+          This will also deterministically set the peer ID. If a path is provided but no key exists at that path, a new random secret will be generated and stored there. If no path is specified, a new ephemeral random secret will be used.
 
       --nat <NAT>
           NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
