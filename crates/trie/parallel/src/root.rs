@@ -20,10 +20,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     collections::HashMap,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, OnceLock,
-    },
+    sync::{mpsc, Arc, OnceLock},
     time::Duration,
 };
 use thiserror::Error;
@@ -286,7 +283,6 @@ fn get_runtime_handle() -> Handle {
     Handle::try_current().unwrap_or_else(|_| {
         // Create a new runtime if no runtime is available
         static RT: OnceLock<Runtime> = OnceLock::new();
-        static THREAD_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
         let rt = RT.get_or_init(|| {
             Builder::new_multi_thread()
@@ -294,10 +290,6 @@ fn get_runtime_handle() -> Handle {
                 // This prevents the costly process of spawning new threads on every
                 // new block, and instead reuses the existing threads.
                 .thread_keep_alive(Duration::from_secs(15))
-                .thread_name_fn(|| {
-                    let id = THREAD_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    format!("tokio-trie-{id}")
-                })
                 .build()
                 .expect("Failed to create tokio runtime")
         });
