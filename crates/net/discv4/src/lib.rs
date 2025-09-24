@@ -217,7 +217,7 @@ impl Discv4 {
     /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
-    /// # async fn t() -> io::Result<()> {
+    /// # async fn t() -> std:: io::Result<()> {
     ///
     /// // generate a (random) keypair
     /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand_08::thread_rng());
