@@ -73,6 +73,8 @@ where
 {
     let ExecutionData { payload, sidecar } = payload;
 
+    tracing::debug!(target: "payload::validator ", "Validating payload: {:?}", payload);
+
     let expected_hash = payload.block_hash();
 
     // First parse the block

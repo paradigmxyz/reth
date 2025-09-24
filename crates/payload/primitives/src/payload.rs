@@ -3,7 +3,7 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests, BlockNumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
@@ -40,6 +40,11 @@ pub trait ExecutionPayload:
     /// Returns `None` for pre-Shanghai blocks.
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
 
+    /// Returns the access list included in this payload.
+    ///
+    /// Returns `None` for pre-Amsterdam blocks.
+    fn block_access_list(&self) -> Option<&Bytes>;
+
     /// Returns the beacon block root associated with this payload.
     ///
     /// Returns `None` for pre-merge payloads.
@@ -67,6 +72,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         self.payload.withdrawals()
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        self.payload.block_access_list()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -116,6 +125,14 @@ where
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
             Self::PayloadAttributes(attributes) => attributes.withdrawals(),
+        }
+    }
+
+    /// Returns block_access_list from  payload.
+    pub fn block_access_list(&self) -> Option<&Bytes> {
+        match self {
+            Self::ExecutionPayload(payload) => payload.block_access_list(),
+            Self::PayloadAttributes(_attributes) => None,
         }
     }
 
@@ -170,6 +187,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         self.payload.as_v2().map(|p| &p.withdrawals)
+    }
+
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
