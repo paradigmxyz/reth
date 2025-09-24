@@ -37,8 +37,6 @@ struct NodeState {
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
     latest_block: Option<BlockNumber>,
-    /// The time of the latest block seen by the pipeline
-    latest_block_time: Option<u64>,
     /// Hash of the head block last set by fork choice update
     head_block_hash: Option<B256>,
     /// Hash of the safe block last set by fork choice update
@@ -58,7 +56,6 @@ impl NodeState {
             peers_info,
             current_stage: None,
             latest_block,
-            latest_block_time: None,
             head_block_hash: None,
             safe_block_hash: None,
             finalized_block_hash: None,
@@ -270,8 +267,6 @@ impl NodeState {
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
                 self.latest_block = Some(head.number());
-                self.latest_block_time = Some(head.timestamp());
-
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
