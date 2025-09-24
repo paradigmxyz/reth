@@ -102,9 +102,7 @@ reth-bench new-payload-fcu --advance 10 --jwt-secret <jwt_file_path> --rpc-url <
 
 # Benchmark the next 50 blocks with a different subcommand
 reth-bench new-payload-only --advance 50 --jwt-secret <jwt_file_path> --rpc-url <rpc-url>
-
-
-
+```
 
 ### Observe Outputs
 

@@ -3,19 +3,20 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    EthChainSpec,
+    holesky, hoodi, mainnet, sepolia, EthChainSpec,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
-        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH, MAINNET_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
+    eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -107,7 +108,10 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -136,7 +140,10 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -163,7 +170,10 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -192,7 +202,10 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -208,13 +221,10 @@ pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let hardforks = DEV_HARDFORKS.clone();
     ChainSpec {
         chain: Chain::dev(),
-        genesis_header: SealedHeader::new(
-            make_genesis_header(&genesis, &hardforks),
-            DEV_GENESIS_HASH,
-        ),
+        genesis_header: SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks)),
         genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: DEV_HARDFORKS.clone(),
+        hardforks,
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
         ..Default::default()
@@ -790,6 +800,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Resets any existing hardforks from the builder.
+    pub fn reset(mut self) -> Self {
+        self.hardforks = ChainHardforks::default();
+        self
+    }
+
     /// Set the genesis block.
     pub fn genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
@@ -1085,7 +1101,10 @@ Merge hard forks:
 Post-merge hard forks (timestamp based):
 - Shanghai                         @1681338455
 - Cancun                           @1710338135
-- Prague                           @1746612311"
+- Prague                           @1746612311
+- Osaka                            @1764798551
+- Bpo1                             @1765978199
+- Bpo2                             @1767747671"
         );
     }
 
@@ -1329,7 +1348,10 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1394,7 +1416,10 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]),
+                        next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1470,12 +1495,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 20000002, timestamp: 1746612311, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
                 ),
-                // Future Prague block
+                // Osaka block
                 (
-                    Head { number: 20000002, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    Head {
+                        number: 20000002,
+                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x5167e2a6")),
+                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1493,7 +1528,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 0, timestamp: 1742999833, ..Default::default() },
-                    ForkId { hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]),
+                        next: hoodi::HOODI_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 0,
+                        timestamp: hoodi::HOODI_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe7e0e7ff")),
+                        next: hoodi::HOODI_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         )
@@ -1541,7 +1591,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 123, timestamp: 1740434112, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]),
+                        next: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 123,
+                        timestamp: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x783def52")),
+                        next: holesky::HOLESKY_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         )
@@ -1591,7 +1656,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 1735377, timestamp: 1741159776, ..Default::default() },
-                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]),
+                        next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe2ae4999")),
+                        next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1603,7 +1683,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+                ForkId { hash: ForkHash([0x0b, 0x1a, 0x4e, 0xf7]), next: 0 },
             )],
         )
     }
@@ -1739,11 +1819,22 @@ Post-merge hard forks (timestamp based):
                 ), // First Prague block
                 (
                     Head { number: 20000004, timestamp: 1746612311, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
-                ), // Future Prague block
+                    ForkId {
+                        hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]),
+                        next: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // Osaka block
                 (
-                    Head { number: 20000004, timestamp: 2000000000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
+                    Head {
+                        number: 20000004,
+                        timestamp: mainnet::MAINNET_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x5167e2a6")),
+                        next: mainnet::MAINNET_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -2400,10 +2491,26 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn latest_eth_mainnet_fork_id() {
-        assert_eq!(
-            ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
-            MAINNET.latest_fork_id()
-        )
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0xfd414558")), next: 0 }, MAINNET.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_hoodi_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 }, HOODI.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_holesky_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x9bc6cb31")), next: 0 }, HOLESKY.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_sepolia_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]

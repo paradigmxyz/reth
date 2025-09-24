@@ -82,6 +82,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             } else {
                 info!(target: "reth::cli", ?target, "Executing a pipeline unwind.");
             }
+            info!(target: "reth::cli", prune_config=?config.prune, "Using prune settings");
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
             let mut pipeline =
@@ -219,9 +220,9 @@ impl Subcommands {
 
 #[cfg(test)]
 mod tests {
-    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-
     use super::*;
+    use reth_chainspec::SEPOLIA;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     #[test]
     fn parse_unwind() {
@@ -242,5 +243,14 @@ mod tests {
             "100",
         ]);
         assert_eq!(cmd.command, Subcommands::NumBlocks { amount: 100 });
+    }
+
+    #[test]
+    fn parse_unwind_chain() {
+        let cmd = Command::<EthereumChainSpecParser>::parse_from([
+            "reth", "--chain", "sepolia", "to-block", "100",
+        ]);
+        assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
+        assert_eq!(cmd.env.chain.chain_id(), SEPOLIA.chain_id());
     }
 }

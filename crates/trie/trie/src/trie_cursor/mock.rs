@@ -93,7 +93,8 @@ pub struct MockTrieCursor {
 }
 
 impl MockTrieCursor {
-    fn new(
+    /// Creates a new mock trie cursor with the given trie nodes and key tracking.
+    pub fn new(
         trie_nodes: Arc<BTreeMap<Nibbles, BranchNodeCompact>>,
         visited_keys: Arc<Mutex<Vec<KeyVisit<Nibbles>>>>,
     ) -> Self {

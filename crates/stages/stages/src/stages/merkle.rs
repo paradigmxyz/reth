@@ -196,10 +196,11 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(to_block.into()))?;
         let target_block_root = target_block.state_root();
 
-        let mut checkpoint = self.get_execution_checkpoint(provider)?;
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
         } else if to_block - from_block > threshold || from_block == 1 {
+            let mut checkpoint = self.get_execution_checkpoint(provider)?;
+
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut entities_checkpoint = if let Some(checkpoint) =
                 checkpoint.as_ref().filter(|c| c.target_block == to_block)
@@ -401,10 +402,19 @@ where
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
 
-            // TODO(alexey): update entities checkpoint
+            // Update entities checkpoint to reflect the unwind operation
+            // Since we're unwinding, we need to recalculate the total entities at the target block
+            let accounts = tx.entries::<tables::HashedAccounts>()?;
+            let storages = tx.entries::<tables::HashedStorages>()?;
+            let total = (accounts + storages) as u64;
+            entities_checkpoint.total = total;
+            entities_checkpoint.processed = total;
         }
 
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+        })
     }
 }
 

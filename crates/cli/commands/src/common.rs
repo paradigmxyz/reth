@@ -5,7 +5,7 @@ use clap::Parser;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
-use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -48,7 +48,7 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
+        default_value = C::default_value(),
         value_parser = C::parser(),
         global = true
     )]
@@ -229,7 +229,7 @@ impl CliHeader for alloy_consensus::Header {
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.
-pub trait CliNodeTypes: NodeTypesForProvider {
+pub trait CliNodeTypes: Node<FullTypesAdapter<Self>> + NodeTypesForProvider {
     type Evm: ConfigureEvm<Primitives = Self::Primitives>;
     type NetworkPrimitives: NetPrimitivesFor<Self::Primitives>;
 }
@@ -242,32 +242,29 @@ where
     type NetworkPrimitives = <<<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Network as NetworkEventListenerProvider>::Primitives;
 }
 
+type EvmFor<N> = <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+    FullTypesAdapter<N>,
+>>::Components as NodeComponents<FullTypesAdapter<N>>>::Evm;
+
+type ConsensusFor<N> =
+    <<<N as Node<FullTypesAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+        FullTypesAdapter<N>,
+    >>::Components as NodeComponents<FullTypesAdapter<N>>>::Consensus;
+
 /// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes>: Send + Sync + 'static {
-    /// Evm to use.
-    type Evm: ConfigureEvm<Primitives = N::Primitives> + 'static;
-    /// Consensus implementation.
-    type Consensus: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static;
-
     /// Returns the configured EVM.
-    fn evm_config(&self) -> &Self::Evm;
+    fn evm_config(&self) -> &EvmFor<N>;
     /// Returns the consensus implementation.
-    fn consensus(&self) -> &Self::Consensus;
+    fn consensus(&self) -> &ConsensusFor<N>;
 }
 
-impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
-where
-    E: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    C: FullConsensus<N::Primitives, Error = ConsensusError> + Clone + 'static,
-{
-    type Evm = E;
-    type Consensus = C;
-
-    fn evm_config(&self) -> &Self::Evm {
+impl<N: CliNodeTypes> CliNodeComponents<N> for (EvmFor<N>, ConsensusFor<N>) {
+    fn evm_config(&self) -> &EvmFor<N> {
         &self.0
     }
 
-    fn consensus(&self) -> &Self::Consensus {
+    fn consensus(&self) -> &ConsensusFor<N> {
         &self.1
     }
 }

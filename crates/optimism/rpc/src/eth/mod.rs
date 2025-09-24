@@ -18,24 +18,25 @@ use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
+use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    launch_wss_flashblocks_service, ExecutionPayloadBaseV1, FlashBlockRx,
+    ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService, PendingBlockRx,
+    WsFlashBlockStream,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee,
+        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{
-    pending_block::PendingBlockAndReceipts, EthStateCache, FeeHistoryCache, GasPriceOracle,
-    PendingBlockEnvOrigin,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{ProviderHeader, ProviderTx};
 use reth_tasks::{
@@ -43,6 +44,8 @@ use reth_tasks::{
     TaskSpawner,
 };
 use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc, time::Instant};
+use tokio::sync::watch;
+use tracing::info;
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
@@ -74,13 +77,15 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         eth_api: EthApiNodeBackend<N, Rpc>,
         sequencer_client: Option<SequencerClient>,
         min_suggested_priority_fee: U256,
-        flashblocks_rx: Option<FlashBlockRx<N::Primitives>>,
+        pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
+        flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
     ) -> Self {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
             sequencer_client,
             min_suggested_priority_fee,
-            flashblocks_rx,
+            pending_block_rx,
+            flashblock_rx,
         });
         Self { inner }
     }
@@ -94,9 +99,14 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.sequencer_client()
     }
 
-    /// Returns a cloned Flashblocks receiver, if any.
-    pub fn flashblocks_rx(&self) -> Option<FlashBlockRx<N::Primitives>> {
-        self.inner.flashblocks_rx.clone()
+    /// Returns a cloned pending block receiver, if any.
+    pub fn pending_block_rx(&self) -> Option<PendingBlockRx<N::Primitives>> {
+        self.inner.pending_block_rx.clone()
+    }
+
+    /// Returns a flashblock receiver, if any, by resubscribing to it.
+    pub fn flashblock_rx(&self) -> Option<FlashBlockCompleteSequenceRx> {
+        self.inner.flashblock_rx.as_ref().map(|rx| rx.resubscribe())
     }
 
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
@@ -104,12 +114,13 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         OpEthApiBuilder::new()
     }
 
-    /// Returns a [`PendingBlockAndReceipts`] that is built out of flashblocks.
+    /// Returns a [`PendingBlock`] that is built out of flashblocks.
     ///
     /// If flashblocks receiver is not set, then it always returns `None`.
-    pub fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlockAndReceipts<N::Primitives>>>
+    pub fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlock<N::Primitives>>>
     where
-        Self: LoadPendingBlock,
+        OpEthApiError: FromEvmError<N::Evm>,
+        Rpc: RpcConvert<Primitives = N::Primitives>,
     {
         let pending = self.pending_block_env_and_cfg()?;
         let parent = match pending.origin {
@@ -117,7 +128,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
         };
 
-        let Some(rx) = self.inner.flashblocks_rx.as_ref() else { return Ok(None) };
+        let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
         let pending_block = rx.borrow();
         let Some(pending_block) = pending_block.as_ref() else { return Ok(None) };
 
@@ -128,7 +139,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             parent.hash() == pending_block.block().parent_hash() &&
             now <= pending_block.expires_at
         {
-            return Ok(Some(pending_block.to_block_and_receipts()));
+            return Ok(Some(pending_block.clone()));
         }
 
         Ok(None)
@@ -197,17 +208,9 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-    type Transaction = ProviderTx<Self::Provider>;
-    type Rpc = Rpc::Network;
-
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.eth_api.starting_block()
-    }
-
-    #[inline]
-    fn signers(&self) -> &SignersForApi<Self> {
-        self.inner.eth_api.signers()
     }
 }
 
@@ -319,10 +322,14 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     ///
     /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
     min_suggested_priority_fee: U256,
-    /// Flashblocks receiver.
+    /// Pending block receiver.
     ///
     /// If set, then it provides current pending block based on received Flashblocks.
-    flashblocks_rx: Option<FlashBlockRx<N::Primitives>>,
+    pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
+    /// Flashblocks receiver.
+    ///
+    /// If set, then it provides sequences of flashblock built.
+    flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApiInner<N, Rpc> {
@@ -427,6 +434,7 @@ where
                                  + From<ExecutionPayloadBaseV1>
                                  + Unpin,
         >,
+        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
@@ -457,13 +465,24 @@ where
             None
         };
 
-        let flashblocks_rx = flashblocks_url.map(|ws_url| {
-            launch_wss_flashblocks_service(
-                ws_url,
+        let rxs = if let Some(ws_url) = flashblocks_url {
+            info!(target: "reth:cli", %ws_url,  "Launching flashblocks service");
+            let (tx, pending_block_rx) = watch::channel(None);
+            let stream = WsFlashBlockStream::new(ws_url);
+            let service = FlashBlockService::new(
+                stream,
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
-            )
-        });
+                ctx.components.task_executor().clone(),
+            );
+            let flashblock_rx = service.subscribe_block_sequence();
+            ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
+            Some((pending_block_rx, flashblock_rx))
+        } else {
+            None
+        };
+
+        let (pending_block_rx, flashblock_rx) = rxs.unzip();
 
         let eth_api = ctx.eth_api_builder().with_rpc_converter(rpc_converter).build_inner();
 
@@ -471,7 +490,8 @@ where
             eth_api,
             sequencer_client,
             U256::from(min_suggested_priority_fee),
-            flashblocks_rx,
+            pending_block_rx,
+            flashblock_rx,
         ))
     }
 }

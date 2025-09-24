@@ -408,7 +408,7 @@ mod tests {
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
-    use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+    use reth_trie::HashedPostStateSorted;
     use std::sync::Arc;
     use test_runner::HeadersTestRunner;
 
@@ -651,7 +651,6 @@ mod tests {
                 sealed_blocks,
                 &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
-                TrieUpdates::default(),
             )
             .unwrap();
         provider.commit().unwrap();

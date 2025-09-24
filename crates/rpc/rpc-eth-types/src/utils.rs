@@ -9,14 +9,17 @@ use std::future::Future;
 /// This is a helper function that returns the appropriate RPC-specific error if the input data is
 /// malformed.
 ///
-/// See [`alloy_eips::eip2718::Decodable2718::decode_2718`]
-pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<Recovered<T>> {
+/// This function uses [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`] to ensure
+/// that the entire input buffer is consumed and no trailing bytes are allowed.
+///
+/// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
+pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
     let transaction =
-        T::decode_2718(&mut data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+        T::decode_2718_exact(data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     SignedTransaction::try_into_recovered(transaction)
         .or(Err(EthApiError::InvalidTransactionSignature))
