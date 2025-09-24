@@ -481,4 +481,34 @@ mod tests {
             _ => panic!("Expected Stage command"),
         };
     }
+
+    #[test]
+    fn parse_empty_supported_chains() {
+        #[derive(Debug, Clone, Default)]
+        struct FileChainSpecParser;
+
+        impl ChainSpecParser for FileChainSpecParser {
+            type ChainSpec = ChainSpec;
+
+            const SUPPORTED_CHAINS: &'static [&'static str] = &[];
+
+            fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+                EthereumChainSpecParser::parse(s)
+            }
+        }
+
+        let cli = Cli::<FileChainSpecParser>::try_parse_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
+    }
 }
