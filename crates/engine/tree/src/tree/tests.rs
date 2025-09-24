@@ -49,12 +49,10 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         let sealed = block.seal_slow();
 
         let header = sealed.header();
-        if header.number >= 1 {
-            if header.withdrawals_root.is_none() && header.number >= 1681338455 {
-                return Err(reth_payload_primitives::NewPayloadError::Other(
-                    "missing withdrawals root".into(),
-                ));
-            }
+        if header.number >= 1 && header.withdrawals_root.is_none() && header.number >= 1681338455 {
+            return Err(reth_payload_primitives::NewPayloadError::Other(
+                "missing withdrawals root".into(),
+            ));
         }
 
         sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
@@ -1831,7 +1829,7 @@ mod on_forkchoice_updated_tests {
         assert!(result.is_err(), "Invalid safe/finalized blocks should result in error");
     }
 
-    /// Test OpStack specific behavior with canonical head
+    /// Test `OpStack` specific behavior with canonical head
     #[tokio::test]
     async fn test_fcu_opstack_canonical_head() {
         reth_tracing::init_test_tracing();
