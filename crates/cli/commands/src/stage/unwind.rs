@@ -221,7 +221,6 @@ impl Subcommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_chainspec::SEPOLIA;
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 
     #[test]
@@ -243,14 +242,5 @@ mod tests {
             "100",
         ]);
         assert_eq!(cmd.command, Subcommands::NumBlocks { amount: 100 });
-    }
-
-    #[test]
-    fn parse_unwind_chain() {
-        let cmd = Command::<EthereumChainSpecParser>::parse_from([
-            "reth", "--chain", "sepolia", "to-block", "100",
-        ]);
-        assert_eq!(cmd.command, Subcommands::ToBlock { target: BlockHashOrNumber::Number(100) });
-        assert_eq!(cmd.env.chain.chain_id(), SEPOLIA.chain_id());
     }
 }

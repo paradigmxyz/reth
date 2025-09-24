@@ -466,8 +466,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_unwind_chain() {
-        let cli = Cli::try_parse_args_from([
+    fn parse_empty_supported_chains() {
+        #[derive(Debug, Clone, Default)]
+        struct FileChainSpecParser;
+
+        impl ChainSpecParser for FileChainSpecParser {
+            type ChainSpec = ChainSpec;
+
+            const SUPPORTED_CHAINS: &'static [&'static str] = &[];
+
+            fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+                EthereumChainSpecParser::parse(s)
+            }
+        }
+
+        let cli = Cli::<FileChainSpecParser>::try_parse_from([
             "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
         ])
         .unwrap();
