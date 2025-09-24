@@ -173,13 +173,13 @@ pub trait IndexEntry: Sized {
     fn entry_type() -> [u8; 2];
 
     /// Create a new instance with starting number and offsets
-    fn new(starting_number: u64, offsets: Vec<u64>) -> Self;
+    fn new(starting_number: u64, offsets: Vec<i64>) -> Self;
 
     /// Get the starting number - can be starting slot or block number for example
     fn starting_number(&self) -> u64;
 
     /// Get the offsets vector
-    fn offsets(&self) -> &[u64];
+    fn offsets(&self) -> &[i64];
 
     /// Convert to an [`Entry`] for storage in an e2store file
     /// Format: starting-number | offset1 | offset2 | ... | count
@@ -193,7 +193,7 @@ pub trait IndexEntry: Sized {
         data.extend(self.offsets().iter().flat_map(|offset| offset.to_le_bytes()));
 
         // Encode count - 8 bytes again
-        let count = self.offsets().len() as u64;
+        let count = self.offsets().len() as i64;
         data.extend_from_slice(&count.to_le_bytes());
 
         Entry::new(Self::entry_type(), data)
@@ -219,7 +219,7 @@ pub trait IndexEntry: Sized {
 
         // Extract count from last 8 bytes
         let count_bytes = &entry.data[entry.data.len() - 8..];
-        let count = u64::from_le_bytes(
+        let count = i64::from_le_bytes(
             count_bytes
                 .try_into()
                 .map_err(|_| E2sError::Ssz("Failed to read count bytes".to_string()))?,
@@ -247,7 +247,7 @@ pub trait IndexEntry: Sized {
             let start = 8 + i * 8;
             let end = start + 8;
             let offset_bytes = &entry.data[start..end];
-            let offset = u64::from_le_bytes(
+            let offset = i64::from_le_bytes(
                 offset_bytes
                     .try_into()
                     .map_err(|_| E2sError::Ssz(format!("Failed to read offset {i} bytes")))?,

@@ -111,7 +111,7 @@ impl PruningArgs {
     where
         ChainSpec: EthereumHardforks,
     {
-        // Initialise with a default prune configuration.
+        // Initialize with a default prune configuration.
         let mut config = PruneConfig::default();
 
         // If --full is set, use full node defaults.

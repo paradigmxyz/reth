@@ -57,12 +57,12 @@ pub struct BlockIndex {
     starting_number: BlockNumber,
 
     /// Offsets to data at each block number
-    offsets: Vec<u64>,
+    offsets: Vec<i64>,
 }
 
 impl BlockIndex {
     /// Get the offset for a specific block number
-    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<u64> {
+    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<i64> {
         if block_number < self.starting_number {
             return None;
         }
@@ -73,7 +73,7 @@ impl BlockIndex {
 }
 
 impl IndexEntry for BlockIndex {
-    fn new(starting_number: u64, offsets: Vec<u64>) -> Self {
+    fn new(starting_number: u64, offsets: Vec<i64>) -> Self {
         Self { starting_number, offsets }
     }
 
@@ -85,7 +85,7 @@ impl IndexEntry for BlockIndex {
         self.starting_number
     }
 
-    fn offsets(&self) -> &[u64] {
+    fn offsets(&self) -> &[i64] {
         &self.offsets
     }
 }

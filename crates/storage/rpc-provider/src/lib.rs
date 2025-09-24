@@ -803,6 +803,10 @@ where
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn maybe_pending(&self) -> Result<Option<StateProviderBox>, ProviderError> {
+        Ok(None)
+    }
 }
 
 impl<P, Node, N> DatabaseProviderFactory for RpcBlockchainProvider<P, Node, N>
@@ -812,8 +816,8 @@ where
     Node: NodeTypes,
 {
     type DB = DatabaseMock;
-    type ProviderRW = RpcBlockchainStateProvider<P, Node, N>;
     type Provider = RpcBlockchainStateProvider<P, Node, N>;
+    type ProviderRW = RpcBlockchainStateProvider<P, Node, N>;
 
     fn database_provider_ro(&self) -> Result<Self::Provider, ProviderError> {
         // RPC provider returns a new state provider
@@ -1363,13 +1367,13 @@ where
         TxMock::default()
     }
 
-    fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
-        unimplemented!("prune modes not supported for RPC provider")
-    }
-
     fn disable_long_read_transaction_safety(self) -> Self {
         // No-op for RPC provider
         self
+    }
+
+    fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
+        unimplemented!("prune modes not supported for RPC provider")
     }
 }
 
@@ -1816,6 +1820,10 @@ where
     ) -> Result<Option<StateProviderBox>, ProviderError> {
         // RPC provider doesn't support pending state by hash
         Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn maybe_pending(&self) -> ProviderResult<Option<StateProviderBox>> {
+        Ok(None)
     }
 }
 

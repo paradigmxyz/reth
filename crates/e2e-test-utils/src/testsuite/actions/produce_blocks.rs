@@ -590,12 +590,21 @@ where
                 // at least one client passes all the check, save the header in Env
                 if !accepted_check {
                     accepted_check = true;
-                    // save the header in Env
-                    env.active_node_state_mut()?.latest_header_time = next_new_payload.timestamp;
+                    // save the current block info in Env
+                    env.set_current_block_info(BlockInfo {
+                        hash: rpc_latest_header.hash,
+                        number: rpc_latest_header.inner.number,
+                        timestamp: rpc_latest_header.inner.timestamp,
+                    })?;
 
-                    // add it to header history
+                    // align latest header time and forkchoice state with the accepted canonical
+                    // head
+                    env.active_node_state_mut()?.latest_header_time =
+                        rpc_latest_header.inner.timestamp;
                     env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
                         rpc_latest_header.hash;
+
+                    // update local copy for any further usage in this scope
                     latest_block.hash = rpc_latest_header.hash;
                     latest_block.number = rpc_latest_header.inner.number;
                 }

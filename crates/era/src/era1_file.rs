@@ -447,7 +447,7 @@ mod tests {
 
         let mut offsets = Vec::with_capacity(block_count);
         for i in 0..block_count {
-            offsets.push(i as u64 * 100);
+            offsets.push(i as i64 * 100);
         }
         let block_index = BlockIndex::new(start_block, offsets);
         let group = Era1Group::new(blocks, accumulator, block_index);

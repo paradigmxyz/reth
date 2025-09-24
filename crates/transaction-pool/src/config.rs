@@ -31,6 +31,9 @@ pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 /// Default maximum new transactions for broadcasting.
 pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
 
+/// Default maximum allowed in flight delegated transactions per account.
+pub const DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS: usize = 1;
+
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -65,9 +68,38 @@ pub struct PoolConfig {
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
     pub max_queued_lifetime: Duration,
+    /// The maximum allowed inflight transactions a delegated sender can have.
+    ///
+    /// This restricts how many executable transaction a delegated sender can stack.
+    pub max_inflight_delegated_slot_limit: usize,
 }
 
 impl PoolConfig {
+    /// Sets the minimal protocol base fee to 0, effectively disabling checks that enforce that a
+    /// transaction's fee must be higher than the [`MIN_PROTOCOL_BASE_FEE`] which is the lowest
+    /// value the ethereum EIP-1559 base fee can reach.
+    pub const fn with_disabled_protocol_base_fee(self) -> Self {
+        self.with_protocol_base_fee(0)
+    }
+
+    /// Configures the minimal protocol base fee that should be enforced.
+    ///
+    /// Ethereum's EIP-1559 base fee can't drop below [`MIN_PROTOCOL_BASE_FEE`] hence this is
+    /// enforced by default in the pool.
+    pub const fn with_protocol_base_fee(mut self, protocol_base_fee: u64) -> Self {
+        self.minimal_protocol_basefee = protocol_base_fee;
+        self
+    }
+
+    /// Configures how many slots are available for a delegated sender.
+    pub const fn with_max_inflight_delegated_slots(
+        mut self,
+        max_inflight_delegation_limit: usize,
+    ) -> Self {
+        self.max_inflight_delegated_slot_limit = max_inflight_delegation_limit;
+        self
+    }
+
     /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
@@ -96,6 +128,7 @@ impl Default for PoolConfig {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
         }
     }
 }

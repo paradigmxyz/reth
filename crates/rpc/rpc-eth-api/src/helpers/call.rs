@@ -7,12 +7,9 @@ use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocki
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::eip2930::AccessListResult;
-use alloy_evm::{
-    call::caller_gas_allowance,
-    overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
-};
+use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -27,7 +24,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{Recovered, SignedTransaction};
+use reth_primitives_traits::Recovered;
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -117,6 +114,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
                         evm_env.cfg_env.disable_nonce_check = true;
                         evm_env.cfg_env.disable_base_fee = true;
+                        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
                         evm_env.block_env.basefee = 0;
                     }
 
@@ -404,8 +402,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             evm_env.cfg_env.disable_eip3607 = true;
 
             if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
-                let cap =
-                    caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
+                let cap = this.caller_gas_allowance(&mut db, &evm_env, &tx_env)?;
                 // no gas limit was provided in the request, so we need to cap the request's gas
                 // limit
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
@@ -465,7 +462,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Spec = SpecFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
@@ -478,6 +475,16 @@ pub trait Call:
 
     /// Returns the maximum number of blocks accepted for `eth_simulateV1`.
     fn max_simulate_blocks(&self) -> u64;
+
+    /// Returns the max gas limit that the caller can afford given a transaction environment.
+    fn caller_gas_allowance(
+        &self,
+        mut db: impl Database<Error: Into<EthApiError>>,
+        _evm_env: &EvmEnvFor<Self::Evm>,
+        tx_env: &TxEnvFor<Self::Evm>,
+    ) -> Result<u64, Self::Error> {
+        alloy_evm::call::caller_gas_allowance(&mut db, tx_env).map_err(Self::Error::from_eth_err)
+    }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, R>(
@@ -750,16 +757,23 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
+        // track whether the request has a gas limit set
+        let request_has_gas_limit = request.as_ref().gas_limit().is_some();
+
         if let Some(requested_gas) = request.as_ref().gas_limit() {
             let global_gas_cap = self.call_gas_limit();
             if global_gas_cap != 0 && global_gas_cap < requested_gas {
                 warn!(target: "rpc::eth::call", ?request, ?global_gas_cap, "Capping gas limit to global gas cap");
                 request.as_mut().set_gas_limit(global_gas_cap);
             }
+        } else {
+            // cap request's gas limit to call gas limit
+            request.as_mut().set_gas_limit(self.call_gas_limit());
         }
 
-        // apply configured gas cap
-        evm_env.block_env.gas_limit = self.call_gas_limit();
+        // Disable block gas limit check to allow executing transactions with higher gas limit (call
+        // gas limit): https://github.com/paradigmxyz/reth/issues/18577
+        evm_env.cfg_env.disable_block_gas_limit = true;
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -769,6 +783,9 @@ pub trait Call:
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
+
+        // Disable EIP-7825 transaction gas limit to support larger transactions
+        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
@@ -781,7 +798,6 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
-        let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
@@ -789,12 +805,12 @@ pub trait Call:
             evm_env.block_env.basefee = 0;
         }
 
-        if request_gas.is_none() {
+        if !request_has_gas_limit {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &tx_env).map_err(EthApiError::from_call_err)?;
+                let cap = self.caller_gas_allowance(db, &evm_env, &tx_env)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }

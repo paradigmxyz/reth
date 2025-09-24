@@ -1,6 +1,7 @@
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{Address, Bloom, Bytes, B256, U256};
 use alloy_rpc_types_engine::PayloadId;
+use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_primitives::OpReceipt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -26,6 +27,18 @@ pub struct FlashBlock {
     pub metadata: Metadata,
 }
 
+impl FlashBlock {
+    /// Returns the block number of this flashblock.
+    pub const fn block_number(&self) -> u64 {
+        self.metadata.block_number
+    }
+
+    /// Returns the first parent hash of this flashblock.
+    pub fn parent_hash(&self) -> Option<B256> {
+        Some(self.base.as_ref()?.parent_hash)
+    }
+}
+
 /// Provides metadata about the block that may be useful for indexing or analysis.
 #[derive(Default, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Metadata {
@@ -36,7 +49,7 @@ pub struct Metadata {
     pub new_account_balances: BTreeMap<Address, U256>,
     /// Execution receipts for all transactions in the block.
     /// Contains logs, gas usage, and other EVM-level metadata.
-    pub receipts: BTreeMap<B256, BTreeMap<String, OpReceipt>>,
+    pub receipts: BTreeMap<B256, OpReceipt>,
 }
 
 /// Represents the base configuration of an execution payload that remains constant
@@ -92,4 +105,17 @@ pub struct ExecutionPayloadFlashblockDeltaV1 {
     pub withdrawals: Vec<Withdrawal>,
     /// The withdrawals root of the block.
     pub withdrawals_root: B256,
+}
+
+impl From<ExecutionPayloadBaseV1> for OpNextBlockEnvAttributes {
+    fn from(value: ExecutionPayloadBaseV1) -> Self {
+        Self {
+            timestamp: value.timestamp,
+            suggested_fee_recipient: value.fee_recipient,
+            prev_randao: value.prev_randao,
+            gas_limit: value.gas_limit,
+            parent_beacon_block_root: Some(value.parent_beacon_block_root),
+            extra_data: value.extra_data,
+        }
+    }
 }

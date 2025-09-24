@@ -22,10 +22,11 @@ reth-chain-state.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
-op-alloy-rpc-types-engine = { workspace = true, optional = true }
+op-alloy-rpc-types-engine = { workspace = true, optional = true, features = ["serde"] }
 
 # misc
 auto_impl.workspace = true
+either.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
@@ -44,6 +45,7 @@ std = [
     "serde/std",
     "thiserror/std",
     "reth-primitives-traits/std",
+    "either/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",

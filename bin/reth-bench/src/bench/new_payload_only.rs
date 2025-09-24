@@ -13,6 +13,7 @@ use crate::{
 use alloy_provider::Provider;
 use clap::Parser;
 use csv::Writer;
+use eyre::Context;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
@@ -43,7 +44,11 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
+                let block_res = block_provider
+                    .get_block_by_number(next_block.into())
+                    .full()
+                    .await
+                    .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
                 let block = block_res.unwrap().unwrap();
                 let header = block.header.clone();
 
@@ -118,7 +123,7 @@ impl Command {
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(gas_output_results);
+        let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

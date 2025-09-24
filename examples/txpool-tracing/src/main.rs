@@ -68,7 +68,7 @@ fn main() {
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, Default, clap::Args)]
 struct RethCliTxpoolExt {
-    /// recipients addresses that we want to trace
+    /// recipients' addresses that we want to trace
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
 }

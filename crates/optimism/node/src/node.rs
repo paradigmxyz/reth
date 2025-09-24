@@ -66,6 +66,7 @@ use reth_transaction_pool::{
 use reth_trie_common::KeccakKeyHasher;
 use serde::de::DeserializeOwned;
 use std::{marker::PhantomData, sync::Arc};
+use url::Url;
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
 pub trait OpNodeTypes:
@@ -175,6 +176,7 @@ impl OpNode {
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
+            .with_flashblocks(self.args.flashblocks_url.clone())
     }
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
@@ -620,11 +622,11 @@ where
     }
 }
 
-impl<N, NetworkT, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
+    for OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -660,6 +662,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     rpc_middleware: RpcMiddleware,
     /// Optional tokio runtime to use for the RPC server.
     tokio_runtime: Option<tokio::runtime::Handle>,
+    /// A URL pointing to a secure websocket service that streams out flashblocks.
+    flashblocks_url: Option<Url>,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -674,6 +678,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
             tokio_runtime: None,
+            flashblocks_url: None,
         }
     }
 }
@@ -734,6 +739,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             min_suggested_priority_fee,
             tokio_runtime,
             _nt,
+            flashblocks_url,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -746,7 +752,14 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             _nt,
             rpc_middleware,
             tokio_runtime,
+            flashblocks_url,
         }
+    }
+
+    /// With a URL pointing to a flashblocks secure websocket subscription.
+    pub fn with_flashblocks(mut self, flashblocks_url: Option<Url>) -> Self {
+        self.flashblocks_url = flashblocks_url;
+        self
     }
 }
 
@@ -771,6 +784,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             historical_rpc,
             rpc_middleware,
             tokio_runtime,
+            flashblocks_url,
             ..
         } = self;
 
@@ -779,7 +793,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                 OpEthApiBuilder::default()
                     .with_sequencer(sequencer_url.clone())
                     .with_sequencer_headers(sequencer_headers.clone())
-                    .with_min_suggested_priority_fee(min_suggested_priority_fee),
+                    .with_min_suggested_priority_fee(min_suggested_priority_fee)
+                    .with_flashblocks(flashblocks_url),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),
@@ -942,9 +957,7 @@ where
         debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
         // The Op txpool maintenance task is only spawned when interop is active
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
-            self.supervisor_http == DEFAULT_SUPERVISOR_URL
-        {
+        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) {
             // spawn the Op txpool maintenance task
             let chain_events = ctx.provider().canonical_state_stream();
             ctx.task_executor().spawn_critical(
@@ -1186,7 +1199,12 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node> PayloadValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Node: FullNodeComponents<Types: OpNodeTypes>,
+    Node: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Payload: PayloadTypes<ExecutionData = OpExecutionData>,
+        >,
+    >,
 {
     type Validator = OpEngineValidator<
         Node::Provider,

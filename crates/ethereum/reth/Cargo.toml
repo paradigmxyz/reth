@@ -124,6 +124,7 @@ node = [
     "provider",
     "consensus",
     "evm",
+    "network",
     "node-api",
     "dep:reth-node-ethereum",
     "dep:reth-node-builder",

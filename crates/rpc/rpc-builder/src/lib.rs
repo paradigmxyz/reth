@@ -20,7 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_network::Ethereum;
+use alloy_network::{Ethereum, IntoWallet};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -310,7 +310,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
@@ -453,7 +453,7 @@ pub struct RpcModuleConfigBuilder {
 
 impl RpcModuleConfigBuilder {
     /// Configures a custom eth namespace config
-    pub const fn eth(mut self, eth: EthConfig) -> Self {
+    pub fn eth(mut self, eth: EthConfig) -> Self {
         self.eth = Some(eth);
         self
     }
@@ -547,7 +547,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
+        let eth = EthHandlers::bootstrap(config.eth.clone(), executor.clone(), eth_api);
 
         Self {
             provider,
@@ -619,11 +619,12 @@ where
     EvmConfig: ConfigureEvm,
 {
     /// Instantiates `AdminApi`
-    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec>
+    pub fn admin_api(&self) -> AdminApi<Network, Provider::ChainSpec, Pool>
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
-        AdminApi::new(self.network.clone(), self.provider.chain_spec())
+        AdminApi::new(self.network.clone(), self.provider.chain_spec(), self.pool.clone())
     }
 
     /// Instantiates `Web3Api`
@@ -635,6 +636,7 @@ where
     pub fn register_admin(&mut self) -> &mut Self
     where
         Network: Peers,
+        Pool: TransactionPool + Clone + 'static,
     {
         let adminapi = self.admin_api();
         self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
@@ -786,7 +788,11 @@ where
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn trace_api(&self) -> TraceApi<EthApi> {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
+        TraceApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.eth_config.clone(),
+        )
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -838,7 +844,7 @@ where
         + CanonStateSubscriptions<Primitives = N>
         + AccountReader
         + ChangeSetReader,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
@@ -915,16 +921,17 @@ where
         let namespaces: Vec<_> = namespaces.collect();
         namespaces
             .iter()
-            .copied()
             .map(|namespace| {
                 self.modules
-                    .entry(namespace)
-                    .or_insert_with(|| match namespace {
-                        RethRpcModule::Admin => {
-                            AdminApi::new(self.network.clone(), self.provider.chain_spec())
-                                .into_rpc()
-                                .into()
-                        }
+                    .entry(namespace.clone())
+                    .or_insert_with(|| match namespace.clone() {
+                        RethRpcModule::Admin => AdminApi::new(
+                            self.network.clone(),
+                            self.provider.chain_spec(),
+                            self.pool.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Debug => {
                             DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
@@ -953,14 +960,14 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            self.eth_config,
+                            self.eth_config.clone(),
                         )
                         .into_rpc()
                         .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            self.eth.api.tx_resp_builder().clone(),
+                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
                         )
                         .into_rpc()
                         .into(),
@@ -981,7 +988,9 @@ where
                         // only relevant for Ethereum and configured in `EthereumAddOns`
                         // implementation
                         // TODO: can we get rid of this here?
-                        RethRpcModule::Flashbots => Default::default(),
+                        // Custom modules are not handled here - they should be registered via
+                        // extend_rpc_modules
+                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
@@ -1570,9 +1579,9 @@ impl TransportRpcModuleConfig {
             let ws_modules =
                 self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
 
-            let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
-            let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
-            let overlap = http_modules.intersection(&ws_modules).copied().collect();
+            let http_not_ws = http_modules.difference(&ws_modules).cloned().collect();
+            let ws_not_http = ws_modules.difference(&http_modules).cloned().collect();
+            let overlap = http_modules.intersection(&ws_modules).cloned().collect();
 
             Err(WsHttpSamePortError::ConflictingModules(Box::new(ConflictingModules {
                 overlap,
@@ -1708,7 +1717,7 @@ impl TransportRpcModules {
     /// Returns all unique endpoints installed for the given module.
     ///
     /// Note: In case of duplicate method names this only record the first occurrence.
-    pub fn methods_by_module<F>(&self, module: RethRpcModule) -> Methods {
+    pub fn methods_by_module(&self, module: RethRpcModule) -> Methods {
         self.methods_by(|name| name.starts_with(module.as_str()))
     }
 
@@ -2089,6 +2098,21 @@ impl RpcServerHandle {
         self.new_http_provider_for()
     }
 
+    /// Returns a new [`alloy_network::Ethereum`] http provider with its recommended fillers and
+    /// installed wallet.
+    pub fn eth_http_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.http_url()?;
+        let provider =
+            ProviderBuilder::new().wallet(wallet).connect_http(rpc_url.parse().expect("valid url"));
+        Some(provider)
+    }
+
     /// Returns an http provider from the rpc server handle for the
     /// specified [`alloy_network::Network`].
     ///
@@ -2109,6 +2133,24 @@ impl RpcServerHandle {
         &self,
     ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
         self.new_ws_provider_for().await
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] ws provider with its recommended fillers and
+    /// installed wallet.
+    pub async fn eth_ws_provider_with_wallet<W>(
+        &self,
+        wallet: W,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static>
+    where
+        W: IntoWallet<alloy_network::Ethereum, NetworkWallet: Clone + Unpin + 'static>,
+    {
+        let rpc_url = self.ws_url()?;
+        let provider = ProviderBuilder::new()
+            .wallet(wallet)
+            .connect(&rpc_url)
+            .await
+            .expect("failed to create ws client");
+        Some(provider)
     }
 
     /// Returns an ws provider from the rpc server handle for the

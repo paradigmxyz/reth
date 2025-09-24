@@ -90,7 +90,7 @@ pub enum ConsensusEngineLiveSyncProgress {
     DownloadingBlocks {
         /// The number of blocks remaining to download.
         remaining_blocks: u64,
-        /// The target block hash and number to download.
+        /// The target block hash to download.
         target: B256,
     },
 }

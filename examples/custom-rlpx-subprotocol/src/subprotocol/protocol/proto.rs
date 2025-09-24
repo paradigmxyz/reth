@@ -1,4 +1,4 @@
-//! Simple RLPx Ping Pong protocol that also support sending messages,
+//! Simple RLPx Ping Pong protocol that also supports sending messages,
 //! following [RLPx specs](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
 use alloy_primitives::bytes::{Buf, BufMut, BytesMut};

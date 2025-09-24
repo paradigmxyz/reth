@@ -2,7 +2,7 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
-use alloy_evm::{call::caller_gas_allowance, overrides::apply_state_overrides};
+use alloy_evm::overrides::apply_state_overrides;
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
@@ -60,19 +60,22 @@ pub trait EstimateCall: Call {
         let tx_request_gas_limit = request.as_ref().gas_limit();
         let tx_request_gas_price = request.as_ref().gas_price();
         // the gas limit of the corresponding block
-        let block_env_gas_limit = evm_env.block_env.gas_limit;
+        let max_gas_limit = evm_env
+            .cfg_env
+            .tx_gas_limit_cap
+            .map_or(evm_env.block_env.gas_limit, |cap| cap.min(evm_env.block_env.gas_limit));
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
         let mut highest_gas_limit = tx_request_gas_limit
             .map(|mut tx_gas_limit| {
-                if block_env_gas_limit < tx_gas_limit {
+                if max_gas_limit < tx_gas_limit {
                     // requested gas limit is higher than the allowed gas limit, capping
-                    tx_gas_limit = block_env_gas_limit;
+                    tx_gas_limit = max_gas_limit;
                 }
                 tx_gas_limit
             })
-            .unwrap_or(block_env_gas_limit);
+            .unwrap_or(max_gas_limit);
 
         // Configure the evm env
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -99,8 +102,8 @@ pub trait EstimateCall: Call {
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
         if tx_env.gas_price() > 0 {
             // cap the highest gas limit by max gas caller can afford with given gas price
-            highest_gas_limit = highest_gas_limit
-                .min(caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?);
+            highest_gas_limit =
+                highest_gas_limit.min(self.caller_gas_allowance(&mut db, &evm_env, &tx_env)?);
         }
 
         // If the provided gas limit is less than computed cap, use that
@@ -139,7 +142,7 @@ pub trait EstimateCall: Call {
                 if err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
-                return Self::map_out_of_gas_err(&mut evm, tx_env, block_env_gas_limit);
+                return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -166,7 +169,7 @@ pub trait EstimateCall: Call {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
-                    Self::map_out_of_gas_err(&mut evm, tx_env, block_env_gas_limit)
+                    Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit)
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
@@ -295,14 +298,14 @@ pub trait EstimateCall: Call {
     fn map_out_of_gas_err<DB>(
         evm: &mut EvmFor<Self::Evm, DB>,
         mut tx_env: TxEnvFor<Self::Evm>,
-        higher_gas_limit: u64,
+        max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
         DB: Database<Error = ProviderError>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
-        tx_env.set_gas_limit(higher_gas_limit);
+        tx_env.set_gas_limit(max_gas_limit);
 
         let retry_res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 

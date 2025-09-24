@@ -4437,14 +4437,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "Storage {{quantile}} percentile",
+          "legendFormat": "Account {{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
       ],
-      "title": "Redundant multiproof storage nodes",
+      "title": "Total multiproof account nodes",
       "type": "timeseries"
     },
     {
@@ -4536,14 +4536,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "Account {{quantile}} percentile",
+          "legendFormat": "Storage {{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
       ],
-      "title": "Redundant multiproof account nodes",
+      "title": "Total multiproof storage nodes",
       "type": "timeseries"
     },
     {
@@ -4635,7 +4635,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Account {{quantile}} percentile",
@@ -4643,7 +4643,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total multiproof account nodes",
+      "title": "Redundant multiproof account nodes",
       "type": "timeseries"
     },
     {
@@ -4735,14 +4735,14 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "Storage {{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
         }
       ],
-      "title": "Total multiproof storage nodes",
+      "title": "Redundant multiproof storage nodes",
       "type": "timeseries"
     },
     {
@@ -4851,7 +4851,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Histogram for state root latency, the duration between finishing execution and receiving the state root",
+      "description": "Histogram for state root latency, the time spent blocked waiting for the state root.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -4906,32 +4906,7 @@
           },
           "unit": "s"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "State Root Duration p0.95"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -4962,7 +4937,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_sync_block_validation_state_root_histogram{\"$instance_label\"=\"$instance\"}",
+          "expr": "reth_sync_block_validation_state_root_histogram{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -11957,6 +11932,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
