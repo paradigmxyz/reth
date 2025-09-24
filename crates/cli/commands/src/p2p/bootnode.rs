@@ -1,5 +1,4 @@
 //! Standalone bootnode command
-//!
 
 use clap::Parser;
 use reth_cli_util::{get_secret_key, load_secret_key::rng_secret_key};
