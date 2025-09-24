@@ -47,6 +47,16 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
         let sealed = block.seal_slow();
+
+        let header = sealed.header();
+        if header.number >= 1 {
+            if header.withdrawals_root.is_none() && header.number >= 1681338455 {
+                return Err(reth_payload_primitives::NewPayloadError::Other(
+                    "missing withdrawals root".into(),
+                ));
+            }
+        }
+
         sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
     }
 }
@@ -1405,5 +1415,486 @@ mod payload_execution_tests {
             .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         }
+    }
+}
+
+#[cfg(test)]
+mod on_forkchoice_updated_tests {
+    use alloy_rpc_types_engine::ForkchoiceUpdateError;
+
+    use super::*;
+
+    /// Test that FCU with zero head block hash returns invalid state
+    #[tokio::test]
+    async fn test_fcu_zero_head_block_hash() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks);
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: B256::ZERO, // Zero head block hash
+                        safe_block_hash: B256::random(),
+                        finalized_block_hash: B256::random(),
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap();
+        assert!(response.is_ok(), "Should handle zero head block hash gracefully");
+
+        let result = response.unwrap().await;
+        assert!(result.is_err(), "Zero head block hash should result in error");
+
+        if let Err(err) = result {
+            assert!(
+                matches!(err, ForkchoiceUpdateError::InvalidState),
+                "Should return InvalidState for zero head block hash"
+            );
+        }
+    }
+
+    /// Test that FCU with already canonical head returns valid status
+    #[tokio::test]
+    async fn test_fcu_already_canonical_head() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let canonical_head = blocks.last().unwrap().recovered_block().hash();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: canonical_head,
+                        safe_block_hash: canonical_head,
+                        finalized_block_hash: canonical_head,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid(), "FCU with canonical head should be valid");
+        assert_eq!(
+            response.payload_status.latest_valid_hash,
+            Some(canonical_head),
+            "Latest valid hash should be the canonical head"
+        );
+    }
+
+    /// Test that FCU with missing head block returns syncing status
+    #[tokio::test]
+    async fn test_fcu_missing_head_block() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks);
+
+        let missing_block_hash = B256::random();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: missing_block_hash,
+                        safe_block_hash: B256::ZERO,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_syncing(), "FCU with missing head should be syncing");
+    }
+
+    /// Test that FCU with invalid ancestor returns invalid status
+    #[tokio::test]
+    async fn test_fcu_invalid_ancestor() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        // Mark a block as invalid more explicitly
+        let invalid_block = blocks[1].recovered_block().clone();
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: invalid_block.num_hash(),
+            parent: invalid_block.parent_hash(),
+        });
+
+        // Create a descendant block that should be considered invalid
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let descendant_block = test_block_builder.generate_random_block(4, invalid_block.hash());
+        let descendant_hash = descendant_block.hash();
+
+        // Ensure the descendant block is added to the tree state but marked as invalid
+        test_harness.tree.state.invalid_headers.insert(BlockWithParent {
+            block: descendant_block.num_hash(),
+            parent: invalid_block.hash(),
+        });
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: descendant_hash,
+                        safe_block_hash: B256::ZERO,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(
+            response.payload_status.is_invalid(),
+            "FCU with invalid ancestor should be invalid. Status: {:?}",
+            response.payload_status.status
+        );
+    }
+
+    /// Test that FCU during backfill sync returns syncing status
+    #[tokio::test]
+    async fn test_fcu_during_backfill_sync() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness =
+            TestHarness::new(MAINNET.clone()).with_backfill_state(BackfillSyncState::Active);
+
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let target_hash = blocks.last().unwrap().recovered_block().hash();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: target_hash,
+                        safe_block_hash: B256::ZERO,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_syncing(), "FCU during backfill should be syncing");
+    }
+
+    /// Test that FCU with chain extension updates canonical chain
+    #[tokio::test]
+    async fn test_fcu_chain_extension() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let mut test_block_builder = TestBlockBuilder::eth();
+
+        // Create initial chain
+        let base_chain: Vec<_> = test_block_builder.get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(base_chain.clone());
+
+        // Create extension blocks
+        let extension_blocks =
+            test_block_builder.create_fork(base_chain.last().unwrap().recovered_block(), 2);
+
+        // Add extension blocks to tree state but don't make them canonical yet
+        for block in &extension_blocks {
+            test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
+                block: ExecutedBlock {
+                    recovered_block: Arc::new(block.clone()),
+                    execution_output: Arc::new(ExecutionOutcome::default()),
+                    hashed_state: Arc::new(HashedPostState::default()),
+                },
+                trie: ExecutedTrieUpdates::empty(),
+            });
+        }
+
+        let new_head = extension_blocks.last().unwrap().hash();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: new_head,
+                        safe_block_hash: new_head,
+                        finalized_block_hash: new_head,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid(), "FCU with chain extension should be valid");
+
+        // Verify canonical head was updated
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_block_hash(),
+            new_head,
+            "Canonical head should be updated to new head"
+        );
+    }
+
+    /// Test that FCU with reorg updates canonical chain correctly
+    #[tokio::test]
+    async fn test_fcu_reorg() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let mut test_block_builder = TestBlockBuilder::eth();
+
+        // Create main chain
+        let main_chain: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(main_chain.clone());
+
+        // Create fork from block 2
+        let fork_point = main_chain[1].recovered_block().clone();
+        let fork_chain = test_block_builder.create_fork(&fork_point, 3);
+
+        // Add fork chain to tree state
+        for block in &fork_chain {
+            test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
+                block: ExecutedBlock {
+                    recovered_block: Arc::new(block.clone()),
+                    execution_output: Arc::new(ExecutionOutcome::default()),
+                    hashed_state: Arc::new(HashedPostState::default()),
+                },
+                trie: ExecutedTrieUpdates::empty(),
+            });
+        }
+
+        let fork_head = fork_chain.last().unwrap().hash();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: fork_head,
+                        safe_block_hash: fork_head,
+                        finalized_block_hash: fork_head,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(response.payload_status.is_valid(), "FCU with reorg should be valid");
+
+        // Verify canonical head was updated to fork head
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_block_hash(),
+            fork_head,
+            "Canonical head should be updated to fork head after reorg"
+        );
+    }
+
+    /// Test that FCU updates safe and finalized blocks correctly
+    #[tokio::test]
+    async fn test_fcu_safe_finalized_blocks() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let head_block = blocks.last().unwrap().recovered_block().hash();
+        let safe_block = blocks[2].recovered_block().hash();
+        let finalized_block = blocks[1].recovered_block().hash();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: head_block,
+                        safe_block_hash: safe_block,
+                        finalized_block_hash: finalized_block,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(
+            response.payload_status.is_valid(),
+            "FCU with safe/finalized blocks should be valid"
+        );
+
+        // Verify safe and finalized blocks were updated
+        let in_memory_state = &test_harness.tree.canonical_in_memory_state;
+        assert_eq!(
+            in_memory_state.get_safe_num_hash(),
+            Some(blocks[2].recovered_block().num_hash()),
+            "Safe block should be updated"
+        );
+        assert_eq!(
+            in_memory_state.get_finalized_num_hash(),
+            Some(blocks[1].recovered_block().num_hash()),
+            "Finalized block should be updated"
+        );
+    }
+
+    /// Test that FCU with invalid safe/finalized blocks returns error
+    #[tokio::test]
+    async fn test_fcu_invalid_safe_finalized_blocks() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..3).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let head_block = blocks.last().unwrap().recovered_block().hash();
+        let invalid_safe_block = B256::random();
+        let invalid_finalized_block = B256::random();
+
+        let (tx, rx) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: head_block,
+                        safe_block_hash: invalid_safe_block,
+                        finalized_block_hash: invalid_finalized_block,
+                    },
+                    payload_attrs: None,
+                    tx,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response = rx.await.unwrap();
+        assert!(response.is_ok(), "Should handle invalid safe/finalized blocks gracefully");
+
+        let result = response.unwrap().await;
+        assert!(result.is_err(), "Invalid safe/finalized blocks should result in error");
+    }
+
+    /// Test OpStack specific behavior with canonical head
+    #[tokio::test]
+    async fn test_fcu_opstack_canonical_head() {
+        reth_tracing::init_test_tracing();
+
+        let mut test_harness = TestHarness::new(MAINNET.clone());
+        test_harness.tree.engine_kind = EngineApiKind::OpStack;
+        test_harness.tree.config =
+            test_harness.tree.config.clone().with_unwind_canonical_header(true);
+
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..5).collect();
+        test_harness = test_harness.with_blocks(blocks.clone());
+
+        let canonical_head = blocks.last().unwrap().recovered_block().hash();
+        let ancestor_block = blocks[2].recovered_block().hash();
+
+        // First FCU to set canonical head
+        let (tx1, rx1) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: canonical_head,
+                        safe_block_hash: canonical_head,
+                        finalized_block_hash: canonical_head,
+                    },
+                    payload_attrs: None,
+                    tx: tx1,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response1 = rx1.await.unwrap().unwrap().await.unwrap();
+        assert!(response1.payload_status.is_valid(), "First FCU should be valid");
+
+        let (tx2, rx2) = oneshot::channel();
+        test_harness
+            .tree
+            .on_engine_message(FromEngine::Request(
+                BeaconEngineMessage::ForkchoiceUpdated {
+                    state: ForkchoiceState {
+                        head_block_hash: ancestor_block,
+                        safe_block_hash: ancestor_block,
+                        finalized_block_hash: ancestor_block,
+                    },
+                    payload_attrs: None,
+                    tx: tx2,
+                    version: EngineApiMessageVersion::default(),
+                }
+                .into(),
+            ))
+            .unwrap();
+
+        let response2 = rx2.await.unwrap().unwrap().await.unwrap();
+        assert!(response2.payload_status.is_valid(), "OpStack FCU to ancestor should be valid");
+
+        // Verify canonical head was updated to ancestor
+        assert_eq!(
+            test_harness.tree.state.tree_state.canonical_block_hash(),
+            ancestor_block,
+            "OpStack should allow reorg to canonical ancestor"
+        );
     }
 }
