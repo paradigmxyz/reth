@@ -297,6 +297,7 @@ mod tests {
     use super::*;
     use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
+    use reth_chainspec::SEPOLIA;
     use reth_node_core::args::ColorMode;
 
     #[test]
@@ -462,5 +463,22 @@ mod tests {
             "Error should mention the module name: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn parse_unwind_chain() {
+        let cli = Cli::try_parse_args_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
     }
 }
