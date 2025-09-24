@@ -62,7 +62,7 @@ impl ConfigureEvm for CustomEvmConfig {
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &CustomHeader) -> EvmEnv<OpSpecId> {
+    fn evm_env(&self, header: &CustomHeader) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         self.inner.evm_env(header)
     }
 

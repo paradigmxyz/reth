@@ -43,7 +43,7 @@ where
         self.inner().block_assembler()
     }
 
-    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> EvmEnvFor<Self> {
+    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner().evm_env(header)
     }
 

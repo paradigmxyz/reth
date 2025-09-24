@@ -219,7 +219,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     fn block_assembler(&self) -> &Self::BlockAssembler;
 
     /// Creates a new [`EvmEnv`] for the given header.
-    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> EvmEnvFor<Self>;
+    fn evm_env(&self, header: &HeaderTy<Self::Primitives>) -> Result<EvmEnvFor<Self>, Self::Error>;
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.
     ///
@@ -285,9 +285,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &self,
         db: DB,
         header: &HeaderTy<Self::Primitives>,
-    ) -> EvmFor<Self, DB> {
-        let evm_env = self.evm_env(header);
-        self.evm_with_env(db, evm_env)
+    ) -> Result<EvmFor<Self, DB>, Self::Error> {
+        let evm_env = self.evm_env(header)?;
+        Ok(self.evm_with_env(db, evm_env))
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -327,10 +327,10 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB> {
-        let evm = self.evm_for_block(db, block.header());
+    ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>, Self::Error> {
+        let evm = self.evm_for_block(db, block.header())?;
         let ctx = self.context_for_block(block);
-        self.create_executor(evm, ctx)
+        Ok(self.create_executor(evm, ctx))
     }
 
     /// Creates a [`BlockBuilder`]. Should be used when building a new block.

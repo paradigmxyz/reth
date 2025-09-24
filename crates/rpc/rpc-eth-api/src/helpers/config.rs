@@ -94,8 +94,9 @@ where
             return Err(RethError::msg("cancun has not been activated"))
         }
 
-        let current_precompiles =
-            evm_to_precompiles_map(self.evm_config.evm_for_block(EmptyDB::default(), &latest));
+        let current_precompiles = evm_to_precompiles_map(
+            self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
+        );
 
         let mut fork_timestamps =
             chain_spec.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
@@ -123,7 +124,9 @@ where
                     header
                 };
                 let last_precompiles = evm_to_precompiles_map(
-                    self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+                    self.evm_config
+                        .evm_for_block(EmptyDB::default(), &fake_header)
+                        .map_err(RethError::other)?,
                 );
 
                 config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
@@ -137,7 +140,9 @@ where
                 header
             };
             let next_precompiles = evm_to_precompiles_map(
-                self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+                self.evm_config
+                    .evm_for_block(EmptyDB::default(), &fake_header)
+                    .map_err(RethError::other)?,
             );
 
             config.next = self.build_fork_config_at(next_fork_timestamp, next_precompiles);
