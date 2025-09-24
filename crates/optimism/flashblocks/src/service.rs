@@ -142,7 +142,8 @@ where
         for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
             if let Some(info) = acc.info.clone() {
                 // Pre-cache existing accounts and their storage (only changed accounts/storage)
-                let storage = acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                let storage = 
+                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
                 cached.insert_account(addr, info, storage);
             }
         }
