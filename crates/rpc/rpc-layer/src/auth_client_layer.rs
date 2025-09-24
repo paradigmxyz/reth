@@ -62,17 +62,8 @@ where
 /// <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims>.
 /// The token is valid for 60 seconds.
 pub fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
-    format!(
-        "Bearer {}",
-        secret
-            .encode(&Claims {
-                iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                    Duration::from_secs(60))
-                .as_secs(),
-                exp: None,
-            })
-            .unwrap()
-    )
-    .parse()
-    .unwrap()
+    // Use correct JWT timing semantics: iat = now, exp = now + 60 seconds
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let claims = Claims { iat: now, exp: Some(now + 60) };
+    format!("Bearer {}", secret.encode(&claims).unwrap()).parse().unwrap()
 }
