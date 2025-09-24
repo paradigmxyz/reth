@@ -851,6 +851,8 @@ where
                         trie_input,
                         &self.config,
                     )
+                // if prefix sets are not empty, we spawn a task that exclusively handles cache
+                // prewarming for transaction execution
                 } else {
                     debug!(
                         target: "engine::tree",
@@ -858,7 +860,7 @@ where
                         "Disabling state root task due to non-empty prefix sets"
                     );
                     *strategy = StateRootStrategy::Parallel;
-                    self.payload_processor.spawn_execution_only(env, txs, provider_builder)
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder)
                 };
 
                 // record prewarming initialization duration
