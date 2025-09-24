@@ -391,75 +391,18 @@ where
 
         // use prewarming background task
         let txs = self.tx_iterator_for(&input)?;
-        let mut handle = match strategy {
-            StateRootStrategy::StateRootTask => {
-                // use background tasks for state root calc
-                let consistent_view =
-                    ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
-                // get allocated trie input if it exists
-                let allocated_trie_input = self.payload_processor.take_trie_input();
-
-                // Compute trie input
-                let trie_input_start = Instant::now();
-                let trie_input = ensure_ok!(self.compute_trie_input(
-                    persisting_kind,
-                    ensure_ok!(consistent_view.provider_ro()),
-                    parent_hash,
-                    ctx.state(),
-                    allocated_trie_input,
-                ));
-
-                self.metrics
-                    .block_validation
-                    .trie_input_duration
-                    .record(trie_input_start.elapsed().as_secs_f64());
-
-                // Use state root task only if prefix sets are empty, otherwise proof generation is
-                // too expensive because it requires walking all paths in every proof.
-                let spawn_payload_processor_start = Instant::now();
-                let handle = if trie_input.prefix_sets.is_empty() {
-                    self.payload_processor.spawn(
-                        env.clone(),
-                        txs,
-                        provider_builder,
-                        consistent_view,
-                        trie_input,
-                        &self.config,
-                    )
-                } else {
-                    debug!(
-                        target: "engine::tree",
-                        block=?block_num_hash,
-                        "Disabling state root task due to non-empty prefix sets"
-                    );
-                    strategy = StateRootStrategy::Parallel;
-                    self.payload_processor.spawn_cache_exclusive(env.clone(), txs, provider_builder)
-                };
-
-                // record prewarming initialization duration
-                self.metrics
-                    .block_validation
-                    .spawn_payload_processor
-                    .record(spawn_payload_processor_start.elapsed().as_secs_f64());
-                handle
-            }
-            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
-                let prewarming_start = Instant::now();
-                let handle = self.payload_processor.spawn_cache_exclusive(
-                    env.clone(),
-                    txs,
-                    provider_builder,
-                );
-
-                // Record prewarming initialization duration
-                self.metrics
-                    .block_validation
-                    .spawn_payload_processor
-                    .record(prewarming_start.elapsed().as_secs_f64());
-                handle
-            }
-        };
+        // Spawn the appropriate processor based on strategy
+        let mut handle = ensure_ok!(self.spawn_payload_processor(
+            env.clone(),
+            txs,
+            provider_builder,
+            persisting_kind,
+            parent_hash,
+            ctx.state(),
+            block_num_hash,
+            &mut strategy,
+        ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
@@ -856,6 +799,90 @@ where
             .record(start.elapsed().as_secs_f64());
 
         Ok(hashed_state)
+    }
+
+    /// Spawns a payload processor task based on the state root strategy.
+    fn spawn_payload_processor(
+        &mut self,
+        env: ExecutionEnv<Evm>,
+        txs: impl ExecutableTxIterator<Evm>,
+        provider_builder: StateProviderBuilder<N, P>,
+        persisting_kind: PersistingKind,
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+        block_num_hash: NumHash,
+        strategy: &mut StateRootStrategy,
+    ) -> Result<
+        PayloadHandle<impl ExecutableTxFor<Evm>, impl core::error::Error + Send + Sync + 'static>,
+        InsertBlockErrorKind,
+    > {
+        match strategy {
+            StateRootStrategy::StateRootTask => {
+                // use background tasks for state root calc
+                let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+
+                // get allocated trie input if it exists
+                let allocated_trie_input = self.payload_processor.take_trie_input();
+
+                // Compute trie input
+                let trie_input_start = Instant::now();
+                let trie_input = self.compute_trie_input(
+                    persisting_kind,
+                    consistent_view.provider_ro()?,
+                    parent_hash,
+                    state,
+                    allocated_trie_input,
+                )?;
+
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .record(trie_input_start.elapsed().as_secs_f64());
+
+                // Use state root task only if prefix sets are empty, otherwise proof generation is
+                // too expensive because it requires walking all paths in every proof.
+                let spawn_start = Instant::now();
+                let handle = if trie_input.prefix_sets.is_empty() {
+                    self.payload_processor.spawn(
+                        env,
+                        txs,
+                        provider_builder,
+                        consistent_view,
+                        trie_input,
+                        &self.config,
+                    )
+                } else {
+                    debug!(
+                        target: "engine::tree",
+                        block=?block_num_hash,
+                        "Disabling state root task due to non-empty prefix sets"
+                    );
+                    *strategy = StateRootStrategy::Parallel;
+                    self.payload_processor.spawn_execution_only(env, txs, provider_builder)
+                };
+
+                // record prewarming initialization duration
+                self.metrics
+                    .block_validation
+                    .spawn_payload_processor
+                    .record(spawn_start.elapsed().as_secs_f64());
+
+                Ok(handle)
+            }
+            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
+                let start = Instant::now();
+                let handle =
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+
+                // Record prewarming initialization duration
+                self.metrics
+                    .block_validation
+                    .spawn_payload_processor
+                    .record(start.elapsed().as_secs_f64());
+
+                Ok(handle)
+            }
+        }
     }
 
     /// Check if the given block has any ancestors with missing trie updates.
