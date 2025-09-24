@@ -13,8 +13,8 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockWriter as _, ExecutionOutcome,
-    LatestStateProviderRef, ProviderFactory,
+    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
+    ProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;

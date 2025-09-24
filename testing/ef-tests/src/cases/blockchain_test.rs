@@ -235,6 +235,8 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .insert_block(block.clone())
             .map_err(|err| Error::block_failed(block_number, err))?;
         // Commit static files, so we can query the headers for stateless execution below
+        //
+        // TODO: it should be possible to query the uncommitted data inside the same provider
         provider
             .static_file_provider()
             .commit()
@@ -270,7 +272,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         let smallest = lowest_block_number.unwrap_or_else(|| {
             // Return only the parent header, if there were no calls to the
-            // BLOCKHASH opcode.
+            // BLOCKH
             block_number.saturating_sub(1)
         });
 
