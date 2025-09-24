@@ -1019,22 +1019,22 @@ where
         // Record metrics
         self.record_forkchoice_metrics(&attrs);
 
-        // Step 1: Pre-validation of forkchoice state
+        // Pre-validation of forkchoice state
         if let Some(early_result) = self.validate_forkchoice_state(state)? {
             return Ok(TreeOutcome::new(early_result));
         }
 
-        // Step 2: Check if head is already canonical
+        // Check if head is already canonical
         if let Some(result) = self.handle_canonical_head(state, attrs.clone(), version)? {
             return Ok(result);
         }
 
-        // Step 3: Apply chain update if head is not canonical
+        // Apply chain update if head is not canonical
         if let Some(result) = self.apply_chain_update(state, attrs, version)? {
             return Ok(result);
         }
 
-        // Step 4: Handle missing block scenario
+        // Handle missing block scenario
         self.handle_missing_block(state)
     }
 
