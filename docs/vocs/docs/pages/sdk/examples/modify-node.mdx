@@ -31,158 +31,16 @@ reth-ethereum = { path = "../../crates/ethereum" }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
-#### Defining the RPC Interface
+#### Implementation
 
-Create a trait that defines your custom RPC methods using the `jsonrpsee` proc macros:
+The complete implementation can be found in the [node-custom-rpc example](https://github.com/paradigmxyz/reth/tree/main/examples/node-custom-rpc). Here's a summary of the key components:
 
-```rust
-use jsonrpsee::{
-    core::{RpcResult, SubscriptionResult},
-    proc_macros::rpc,
-    PendingSubscriptionSink, SubscriptionMessage,
-};
+1. **RPC Interface**: Define your custom RPC methods using `jsonrpsee` proc macros with a custom namespace
+2. **RPC Handler**: Implement the trait with access to node components like the transaction pool
+3. **CLI Extension**: Add custom CLI arguments to control your extensions
+4. **Node Integration**: Use `extend_rpc_modules` to integrate your custom functionality
 
-/// Custom RPC namespace: `txpoolExt`
-#[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
-#[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
-pub trait TxpoolExtApi {
-    /// Returns the number of transactions in the pool.
-    #[method(name = "transactionCount")]
-    fn transaction_count(&self) -> RpcResult<usize>;
-
-    /// Clears the transaction pool.
-    #[method(name = "clearTxpool")]
-    fn clear_txpool(&self) -> RpcResult<()>;
-
-    /// Creates a subscription that returns the number of transactions in the pool every 10s.
-    #[subscription(name = "subscribeTransactionCount", item = usize)]
-    fn subscribe_transaction_count(
-        &self,
-        #[argument(rename = "delay")] delay: Option<u64>,
-    ) -> SubscriptionResult;
-}
-```
-
-#### Implementing the RPC Handler
-
-Create a struct that implements your RPC interface:
-
-```rust
-use reth_ethereum::pool::TransactionPool;
-use std::time::Duration;
-use tokio::time::sleep;
-
-/// The type that implements the `txpoolExt` rpc namespace trait
-pub struct TxpoolExt<Pool> {
-    pool: Pool,
-}
-
-impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
-where
-    Pool: TransactionPool + Clone + 'static,
-{
-    fn transaction_count(&self) -> RpcResult<usize> {
-        Ok(self.pool.pool_size().total)
-    }
-
-    fn clear_txpool(&self) -> RpcResult<()> {
-        let all_tx_hashes = self.pool.all_transaction_hashes();
-        self.pool.remove_transactions(all_tx_hashes);
-        Ok(())
-    }
-
-    fn subscribe_transaction_count(
-        &self,
-        pending_subscription_sink: PendingSubscriptionSink,
-        delay: Option<u64>,
-    ) -> SubscriptionResult {
-        let pool = self.pool.clone();
-        let delay = delay.unwrap_or(10);
-        tokio::spawn(async move {
-            let sink = match pending_subscription_sink.accept().await {
-                Ok(sink) => sink,
-                Err(e) => {
-                    println!("failed to accept subscription: {e}");
-                    return;
-                }
-            };
-
-            loop {
-                sleep(Duration::from_secs(delay)).await;
-
-                let msg = SubscriptionMessage::from(
-                    serde_json::value::to_raw_value(&pool.pool_size().total).expect("serialize"),
-                );
-                let _ = sink.send(msg).await;
-            }
-        });
-
-        Ok(())
-    }
-}
-```
-
-#### Extending the CLI
-
-Create custom CLI arguments to control your extensions:
-
-```rust
-use clap::Parser;
-
-/// Custom CLI args extension that adds flags to reth default CLI.
-#[derive(Debug, Clone, Copy, Default, clap::Args)]
-struct RethCliTxpoolExt {
-    /// CLI flag to enable the txpool extension namespace
-    #[arg(long)]
-    pub enable_ext: bool,
-}
-```
-
-#### Building and Launching the Custom Node
-
-Use the Reth CLI builder to integrate your custom functionality:
-
-```rust
-use reth_ethereum::{
-    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    node::EthereumNode,
-};
-
-fn main() {
-    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
-        .run(|builder, args| async move {
-            let handle = builder
-                // configure default ethereum node
-                .node(EthereumNode::default())
-                // extend the rpc modules with our custom `TxpoolExt` endpoints
-                .extend_rpc_modules(move |ctx| {
-                    if !args.enable_ext {
-                        return Ok(())
-                    }
-
-                    // Get the configured pool from the node context
-                    let pool = ctx.pool().clone();
-
-                    let ext = TxpoolExt { pool };
-
-                    // Merge our extension namespace into all configured transports
-                    ctx.modules.merge_configured(ext.into_rpc())?;
-
-                    println!("txpool extension enabled");
-
-                    Ok(())
-                })
-                // launch the node with custom rpc
-                .launch()
-                .await?;
-
-            handle.wait_for_node_exit().await
-        })
-        .unwrap();
-}
-```
-
-### Running the Custom Node
+#### Running the Custom Node
 
 Build and run your custom node with the extension enabled:
 
@@ -192,7 +50,7 @@ cargo run -p node-custom-rpc -- node --http --ws --enable-ext
 
 This will start a Reth node with your custom RPC methods available on both HTTP and WebSocket transports.
 
-### Testing the Custom RPC Methods
+#### Testing the Custom RPC Methods
 
 You can test your custom RPC methods using tools like `cast` from the Foundry suite:
 
