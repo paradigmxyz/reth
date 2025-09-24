@@ -350,7 +350,9 @@ where
                 match $expr {
                     Ok(val) => val,
                     Err(e) => {
-                        return Err(InsertBlockError::new($block.into_sealed_block(), e.into()).into())
+                        return Err(
+                            InsertBlockError::new($block.into_sealed_block(), e.into()).into()
+                        )
                     }
                 }
             };
@@ -443,12 +445,10 @@ where
 
         let block = self.convert_to_block(input)?;
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
-        // validate block consensus rules
-        ensure_ok_post_block!(self.validate_block_inner(&block), block);
-
-        let hashed_state =
-            ensure_ok_post_block!(self.validate_post_execution(&block, &parent_block, &output, &mut ctx), block);
+        let hashed_state = ensure_ok_post_block!(
+            self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
+            block
+        );
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
@@ -505,6 +505,9 @@ where
             StateRootStrategy::Synchronous => {}
         }
 
+        // Determine the state root.
+        // If the state root was computed in parallel, we use it.
+        // Otherwise, we fall back to computing it synchronously.
         let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {
@@ -518,8 +521,10 @@ where
                 self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             }
 
-            let (root, updates) =
-                ensure_ok_post_block!(state_provider.state_root_with_updates(hashed_state.clone()), block);
+            let (root, updates) = ensure_ok_post_block!(
+                state_provider.state_root_with_updates(hashed_state.clone()),
+                block
+            );
             (root, updates, root_time.elapsed())
         };
 
@@ -770,6 +775,12 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         let start = Instant::now();
+
+        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
+        // validate block consensus rules
+        if let Err(e) = self.validate_block_inner(block) {
+            return Err(e.into())
+        }
 
         // now validate against the parent
         if let Err(e) =
