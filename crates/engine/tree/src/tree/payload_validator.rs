@@ -411,11 +411,11 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-                provider_builder,
-                persisting_kind,
-                parent_hash,
+            provider_builder,
+            persisting_kind,
+            parent_hash,
             ctx.state(),
-                block_num_hash,
+            block_num_hash,
             &mut strategy,
         ));
 
