@@ -24,7 +24,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, PayloadOrAttributes,
     PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -755,6 +755,21 @@ where
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        // Check if Osaka fork is active - if so, return unsupported fork error
+        // as per the engine API spec requirement
+        let best_block_number = self
+            .inner
+            .provider
+            .best_block_number()
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+        if let Ok(Some(header)) = self.inner.provider.header_by_number(best_block_number) {
+            if self.inner.chain_spec.is_osaka_active_at_timestamp(header.timestamp()) {
+                return Err(EngineApiError::EngineObjectValidationError(
+                    reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+                ));
+            }
         }
 
         self.inner
