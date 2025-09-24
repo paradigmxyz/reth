@@ -98,12 +98,59 @@ pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result
 /// - "1.05" -> 1.05 ETH = 1.05 * 10^18 wei
 /// - "2" -> 2 ETH = 2 * 10^18 wei
 pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
-    let eth = value.parse::<f64>()?;
-    if eth.is_sign_negative() {
+    // Parse ETH value as a decimal string with up to 18 fractional digits.
+    // This avoids floating point rounding issues and rejects NaN/inf implicitly.
+    const WEI_PER_ETH: u128 = 1_000_000_000_000_000_000;
+
+    let s = value.trim();
+    if s.is_empty() {
+        return Err(eyre::eyre!("Ether value cannot be empty"))
+    }
+    if s.starts_with('-') {
         return Err(eyre::eyre!("Ether value cannot be negative"))
     }
-    let wei = eth * 1e18;
-    Ok(wei as u128)
+    
+    let (int_part_raw, frac_part_raw) = match s.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (s, ""),
+    };
+
+    // Allow inputs like ".5" by treating empty integer part as 0.
+    let int_part = if int_part_raw.is_empty() { "0" } else { int_part_raw };
+
+    // Validate that integer and fractional parts contain only digits.
+    if !int_part.chars().all(|c| c.is_ascii_digit()) {
+        return Err(eyre::eyre!("Invalid characters in integer part"))
+    }
+    if !frac_part_raw.chars().all(|c| c.is_ascii_digit()) {
+        return Err(eyre::eyre!("Invalid characters in fractional part"))
+    }
+
+    if frac_part_raw.len() > 18 {
+        return Err(eyre::eyre!("Too many decimal places (max 18)"))
+    }
+
+    // Scale integer part to wei with overflow checks.
+    let int_wei = int_part
+        .parse::<u128>()?
+        .checked_mul(WEI_PER_ETH)
+        .ok_or_else(|| eyre::eyre!("Overflow while scaling integer part"))?;
+
+    // Right-pad fractional digits to 18 places and parse; empty -> 0.
+    let frac_wei = if frac_part_raw.is_empty() {
+        0
+    } else {
+        let mut frac = String::from(frac_part_raw);
+        while frac.len() < 18 {
+            frac.push('0');
+        }
+        // Safe due to validation and max length check above.
+        frac.parse::<u128>()?
+    };
+
+    int_wei
+        .checked_add(frac_wei)
+        .ok_or_else(|| eyre::eyre!("Overflow in result"))
 }
 
 #[cfg(test)]
