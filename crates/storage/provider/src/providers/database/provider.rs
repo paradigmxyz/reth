@@ -21,7 +21,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
-    BlockHeader, Header, TxReceipt,
+    BlockHeader, TxReceipt,
 };
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{
@@ -47,8 +47,8 @@ use reth_db_api::{
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedHeader, SignedTransaction, StorageEntry,
+    Account, Block as _, BlockBody as _, Bytecode, GotExpected, RecoveredBlock, SealedHeader,
+    SignedTransaction, StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
@@ -405,43 +405,6 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         }
 
         Ok(Box::new(state_provider))
-    }
-}
-
-impl<
-        Tx: DbTx + DbTxMut + 'static,
-        N: NodeTypesForProvider<Primitives: NodePrimitives<BlockHeader = Header>>,
-    > DatabaseProvider<Tx, N>
-{
-    /// Inserts an historical block. **Used for setting up test environments**
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn insert_historical_block(
-        &self,
-        block: RecoveredBlock<<Self as BlockWriter>::Block>,
-    ) -> ProviderResult<StoredBlockBodyIndices> {
-        let ttd = if block.number() == 0 {
-            block.header().difficulty()
-        } else {
-            let parent_block_number = block.number() - 1;
-            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            parent_ttd + block.header().difficulty()
-        };
-
-        let mut writer = self.static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-
-        // Backfill: some tests start at a forward block number, but static files require no gaps.
-        let segment_header = writer.user_header();
-        if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
-            for block_number in 0..block.number() {
-                let mut prev = block.clone_header();
-                prev.number = block_number;
-                writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
-            }
-        }
-
-        writer.append_header(block.header(), ttd, &block.hash())?;
-
-        self.insert_block(block)
     }
 }
 

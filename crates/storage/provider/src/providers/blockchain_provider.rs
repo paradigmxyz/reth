@@ -863,37 +863,15 @@ mod tests {
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let provider_rw = factory.database_provider_rw()?;
-        let static_file_provider = factory.static_file_provider();
-
-        // Write transactions to static files with the right `tx_num``
-        let mut tx_num = provider_rw
-            .block_body_indices(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
-            .map(|indices| indices.next_tx_num())
-            .unwrap_or_default();
 
         // Insert blocks into the database
         for (block, receipts) in database_blocks.iter().zip(&receipts) {
-            // TODO: this should be moved inside `insert_historical_block`: <https://github.com/paradigmxyz/reth/issues/11524>
-            let mut transactions_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-            transactions_writer.increment_block(block.number)?;
-            receipts_writer.increment_block(block.number)?;
-
-            for (tx, receipt) in block.body().transactions().zip(receipts) {
-                transactions_writer.append_transaction(tx_num, tx)?;
-                receipts_writer.append_receipt(tx_num, receipt)?;
-                tx_num += 1;
-            }
-
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
 
-        // Commit to both storages: database and static files
-        UnifiedStorageWriter::commit(provider_rw)?;
+        provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
 
@@ -1006,7 +984,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1110,7 +1088,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1348,7 +1326,7 @@ mod tests {
 
         // Insert and commit the block.
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_historical_block(block_1)?;
+        provider_rw.insert_block(block_1)?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;

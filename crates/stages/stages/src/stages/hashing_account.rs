@@ -71,7 +71,7 @@ impl AccountHashingStage {
     {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
-        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
+        use reth_provider::{BlockWriter, StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
@@ -86,7 +86,7 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
+            provider.insert_block(block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()
