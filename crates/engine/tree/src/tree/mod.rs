@@ -1039,7 +1039,7 @@ where
     }
 
     /// Records forkchoice metrics for the given payload attributes.
-    fn record_forkchoice_metrics(&mut self, attrs: &Option<T::PayloadAttributes>) {
+    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
         self.metrics.engine.forkchoice_updated_messages.increment(1);
         if attrs.is_some() {
             self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
@@ -1073,7 +1073,7 @@ where
 
     /// Handles the case where the forkchoice head is already canonical.
     fn handle_canonical_head(
-        &mut self,
+        &self,
         state: ForkchoiceState,
         attrs: Option<T::PayloadAttributes>,
         version: EngineApiMessageVersion,
@@ -1168,7 +1168,7 @@ where
 
     /// Handles the case where the head block is missing and needs to be downloaded.
     fn handle_missing_block(
-        &mut self,
+        &self,
         state: ForkchoiceState,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         let target = if self.state.forkchoice_state_tracker.is_empty() &&
@@ -2782,35 +2782,6 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
-    }
-
-    /// Pre-validate forkchoice update and check whether it can be processed.
-    ///
-    /// This method returns the update outcome if validation fails or
-    /// the node is syncing and the update cannot be processed at the moment.
-    fn pre_validate_forkchoice_update(
-        &mut self,
-        state: ForkchoiceState,
-    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
-        if state.head_block_hash.is_zero() {
-            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
-        }
-
-        // check if the new head hash is connected to any ancestor that we previously marked as
-        // invalid
-        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
-            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // We can only process new forkchoice updates if the pipeline is idle, since it requires
-            // exclusive access to the database
-            trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
-            return Ok(Some(OnForkChoiceUpdated::syncing()))
-        }
-
-        Ok(None)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
