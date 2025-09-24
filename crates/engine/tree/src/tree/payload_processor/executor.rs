@@ -2,10 +2,7 @@
 
 use rayon::ThreadPool as RayonPool;
 use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, OnceLock,
-    },
+    sync::{Arc, OnceLock},
     time::Duration,
 };
 use tokio::{
@@ -74,7 +71,6 @@ impl WorkloadExecutorInner {
             Handle::try_current().unwrap_or_else(|_| {
                 // Create a new runtime if no runtime is available
                 static RT: OnceLock<Runtime> = OnceLock::new();
-                static THREAD_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
                 let rt = RT.get_or_init(|| {
                     Builder::new_multi_thread()
@@ -86,10 +82,6 @@ impl WorkloadExecutorInner {
                         // new block, and instead reuse the existing
                         // threads.
                         .thread_keep_alive(Duration::from_secs(15))
-                        .thread_name_fn(|| {
-                            let id = THREAD_COUNTER.fetch_add(1, Ordering::Relaxed);
-                            format!("tokio-payload-{id}")
-                        })
                         .build()
                         .unwrap()
                 });
