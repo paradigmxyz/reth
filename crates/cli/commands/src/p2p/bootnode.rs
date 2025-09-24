@@ -1,4 +1,5 @@
 //! Standalone bootnode command
+//!
 
 use clap::Parser;
 use reth_cli_util::{get_secret_key, load_secret_key::rng_secret_key};
@@ -49,7 +50,7 @@ impl Command {
 
         let (_discv4, mut discv4_service) = Discv4::bind(self.addr, local_enr, sk, config).await?;
 
-        info!("Started discv4 at address:{:?}", self.addr);
+        info!("Started discv4 at address: {local_enr:?}");
 
         let mut discv4_updates = discv4_service.update_stream();
         discv4_service.spawn();
