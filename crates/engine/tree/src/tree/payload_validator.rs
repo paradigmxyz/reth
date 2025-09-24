@@ -358,7 +358,7 @@ where
             };
         }
 
-        /// A helper macro for errors after block conversion
+        /// A helper macro for handling errors after the input has been converted to a block
         macro_rules! ensure_ok_post_block {
             ($expr:expr, $block:expr) => {
                 match $expr {
