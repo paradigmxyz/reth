@@ -128,7 +128,7 @@ where
         }
     }
 
-    /// Returns block_access_list from  payload.
+    /// Returns `block_access_list` from  payload.
     pub fn block_access_list(&self) -> Option<&Bytes> {
         match self {
             Self::ExecutionPayload(payload) => payload.block_access_list(),
