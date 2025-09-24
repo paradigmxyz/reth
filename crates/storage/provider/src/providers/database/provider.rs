@@ -116,7 +116,7 @@ impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut,
 impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
     pub fn commit(self) -> ProviderResult<()> {
-        UnifiedStorageWriter::commit(self.0)
+        self.0.commit()
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -781,8 +781,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commit database transaction.
-    pub fn commit(self) -> ProviderResult<bool> {
-        Ok(self.tx.commit()?)
+    pub fn commit(self) -> ProviderResult<()> {
+        UnifiedStorageWriter::commit(self)
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or
