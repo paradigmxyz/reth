@@ -33,7 +33,8 @@ jobs:
       - name: Build the benchmark target(s)
         run: ./.github/scripts/codspeed-build.sh
       - name: Run the benchmarks
-        uses: CodSpeedHQ/action@v3
+        uses: CodSpeedHQ/action@v4
         with:
           run: cargo codspeed run --workspace
+          mode: instrumentation
           token: ${{ secrets.CODSPEED_TOKEN }}

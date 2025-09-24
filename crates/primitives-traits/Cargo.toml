@@ -70,7 +70,6 @@ rand_08.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
-modular-bitfield.workspace = true
 
 [features]
 default = ["std"]

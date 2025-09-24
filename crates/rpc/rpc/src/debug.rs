@@ -1,4 +1,7 @@
-use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{uint, Address, Bytes, B256};
@@ -16,9 +19,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
-use reth_primitives_traits::{
-    Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
-};
+use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -269,8 +270,9 @@ where
         opts: GethDebugTracingCallOptions,
     ) -> Result<GethTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
-        let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
-            opts;
+        let GethDebugTracingCallOptions {
+            tracing_options, state_overrides, block_overrides, ..
+        } = opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
@@ -670,7 +672,6 @@ where
         };
 
         let range = smallest..block_number;
-        // TODO: Check if headers_range errors when one of the headers in the range is missing
         exec_witness.headers = self
             .provider()
             .headers_range(range)

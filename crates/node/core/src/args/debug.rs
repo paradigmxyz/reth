@@ -32,19 +32,23 @@ pub struct DebugArgs {
         long = "debug.etherscan",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "rpc_consensus_ws",
+        conflicts_with = "rpc_consensus_url",
         value_name = "ETHERSCAN_API_URL"
     )]
     pub etherscan: Option<Option<String>>,
 
-    /// Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint.
+    /// Runs a fake consensus client using blocks fetched from an RPC endpoint.
+    /// Supports both HTTP and `WebSocket` endpoints - `WebSocket` endpoints will use
+    /// subscriptions, while HTTP endpoints will poll for new blocks.
     #[arg(
-        long = "debug.rpc-consensus-ws",
+        long = "debug.rpc-consensus-url",
+        alias = "debug.rpc-consensus-ws",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "etherscan"
+        conflicts_with = "etherscan",
+        value_name = "RPC_URL"
     )]
-    pub rpc_consensus_ws: Option<String>,
+    pub rpc_consensus_url: Option<String>,
 
     /// If provided, the engine will skip `n` consecutive FCUs.
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
@@ -106,7 +110,7 @@ impl Default for DebugArgs {
             tip: None,
             max_block: None,
             etherscan: None,
-            rpc_consensus_ws: None,
+            rpc_consensus_url: None,
             skip_fcu: None,
             skip_new_payload: None,
             reorg_frequency: None,

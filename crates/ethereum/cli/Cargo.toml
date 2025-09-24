@@ -21,6 +21,7 @@ reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-node-metrics.workspace = true
+reth-rpc-server-types.workspace = true
 reth-tracing.workspace = true
 reth-node-api.workspace = true
 

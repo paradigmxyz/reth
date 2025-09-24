@@ -42,201 +42,6 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-/// Validator for Ethereum transactions.
-/// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
-#[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client, T> {
-    /// The type that performs the actual validation.
-    inner: Arc<EthTransactionValidatorInner<Client, T>>,
-}
-
-impl<Client, Tx> EthTransactionValidator<Client, Tx> {
-    /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
-    where
-        Client: ChainSpecProvider,
-    {
-        self.client().chain_spec()
-    }
-
-    /// Returns the configured client
-    pub fn client(&self) -> &Client {
-        &self.inner.client
-    }
-
-    /// Returns the tracks activated forks relevant for transaction validation
-    pub fn fork_tracker(&self) -> &ForkTracker {
-        &self.inner.fork_tracker
-    }
-
-    /// Returns if there are EIP-2718 type transactions
-    pub fn eip2718(&self) -> bool {
-        self.inner.eip2718
-    }
-
-    /// Returns if there are EIP-1559 type transactions
-    pub fn eip1559(&self) -> bool {
-        self.inner.eip1559
-    }
-
-    /// Returns if there are EIP-4844 blob transactions
-    pub fn eip4844(&self) -> bool {
-        self.inner.eip4844
-    }
-
-    /// Returns if there are EIP-7702 type transactions
-    pub fn eip7702(&self) -> bool {
-        self.inner.eip7702
-    }
-
-    /// Returns the current tx fee cap limit in wei locally submitted into the pool
-    pub fn tx_fee_cap(&self) -> &Option<u128> {
-        &self.inner.tx_fee_cap
-    }
-
-    /// Returns the minimum priority fee to enforce for acceptance into the pool
-    pub fn minimum_priority_fee(&self) -> &Option<u128> {
-        &self.inner.minimum_priority_fee
-    }
-
-    /// Returns the setup and parameters needed for validating KZG proofs.
-    pub fn kzg_settings(&self) -> &EnvKzgSettings {
-        &self.inner.kzg_settings
-    }
-
-    /// Returns the config to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions..
-    pub fn local_transactions_config(&self) -> &LocalTransactionConfig {
-        &self.inner.local_transactions_config
-    }
-
-    /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
-    /// the pool.
-    pub fn max_tx_input_bytes(&self) -> usize {
-        self.inner.max_tx_input_bytes
-    }
-
-    /// Returns whether balance checks are disabled for this validator.
-    pub fn disable_balance_check(&self) -> bool {
-        self.inner.disable_balance_check
-    }
-}
-
-impl<Client, Tx> EthTransactionValidator<Client, Tx>
-where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
-    Tx: EthPoolTransaction,
-{
-    /// Returns the current max gas limit
-    pub fn block_gas_limit(&self) -> u64 {
-        self.inner.max_gas_limit()
-    }
-
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    pub fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one_with_provider(origin, transaction, &mut None)
-    }
-
-    /// Validates a single transaction with the provided state provider.
-    ///
-    /// This allows reusing the same provider across multiple transaction validations,
-    /// which can improve performance when validating many transactions.
-    ///
-    /// If `state` is `None`, a new state provider will be created.
-    pub fn validate_one_with_state(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates that the sender’s account has valid or no bytecode.
-    pub fn validate_sender_bytecode(
-        &self,
-        transaction: &Tx,
-        account: &Account,
-        state: &dyn AccountInfoReader,
-    ) -> Result<Result<(), InvalidPoolTransactionError>, TransactionValidationOutcome<Tx>> {
-        self.inner.validate_sender_bytecode(transaction, account, state)
-    }
-
-    /// Checks if the transaction nonce is valid.
-    pub fn validate_sender_nonce(
-        &self,
-        transaction: &Tx,
-        account: &Account,
-    ) -> Result<(), InvalidPoolTransactionError> {
-        self.inner.validate_sender_nonce(transaction, account)
-    }
-
-    /// Ensures the sender has sufficient account balance.
-    pub fn validate_sender_balance(
-        &self,
-        transaction: &Tx,
-        account: &Account,
-    ) -> Result<(), InvalidPoolTransactionError> {
-        self.inner.validate_sender_balance(transaction, account)
-    }
-
-    /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
-    pub fn validate_eip4844(
-        &self,
-        transaction: &mut Tx,
-    ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
-        self.inner.validate_eip4844(transaction)
-    }
-
-    /// Returns the recovered authorities for the given transaction
-    pub fn recover_authorities(&self, transaction: &Tx) -> std::option::Option<Vec<Address>> {
-        self.inner.recover_authorities(transaction)
-    }
-}
-
-impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
-where
-    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
-    Tx: EthPoolTransaction,
-{
-    type Transaction = Tx;
-
-    async fn validate_transaction(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
-    }
-
-    async fn validate_transactions(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.inner.validate_batch(transactions)
-    }
-
-    async fn validate_transactions_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.inner.validate_batch_with_origin(origin, transactions)
-    }
-
-    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
-    where
-        B: Block,
-    {
-        self.inner.on_new_head_block(new_tip_block.header())
-    }
-}
-
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
 ///
 /// It supports all known ethereum transaction types:
@@ -252,7 +57,7 @@ where
 ///
 /// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
-pub(crate) struct EthTransactionValidatorInner<Client, T> {
+pub struct EthTransactionValidator<Client, T> {
     /// This type fetches account info from the db
     client: Client,
     /// Blobstore used for fetching re-injected blob transactions.
@@ -289,23 +94,119 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     validation_metrics: TxPoolValidationMetrics,
 }
 
-// === impl EthTransactionValidatorInner ===
+impl<Client, Tx> EthTransactionValidator<Client, Tx> {
+    /// Returns the configured chain spec
+    pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
+    where
+        Client: ChainSpecProvider,
+    {
+        self.client().chain_spec()
+    }
 
-impl<Client: ChainSpecProvider, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
-    pub(crate) fn chain_id(&self) -> u64 {
-        self.client.chain_spec().chain().id()
+    pub fn chain_id(&self) -> u64
+    where
+        Client: ChainSpecProvider,
+    {
+        self.client().chain_spec().chain().id()
+    }
+
+    /// Returns the configured client
+    pub const fn client(&self) -> &Client {
+        &self.client
+    }
+
+    /// Returns the tracks activated forks relevant for transaction validation
+    pub const fn fork_tracker(&self) -> &ForkTracker {
+        &self.fork_tracker
+    }
+
+    /// Returns if there are EIP-2718 type transactions
+    pub const fn eip2718(&self) -> bool {
+        self.eip2718
+    }
+
+    /// Returns if there are EIP-1559 type transactions
+    pub const fn eip1559(&self) -> bool {
+        self.eip1559
+    }
+
+    /// Returns if there are EIP-4844 blob transactions
+    pub const fn eip4844(&self) -> bool {
+        self.eip4844
+    }
+
+    /// Returns if there are EIP-7702 type transactions
+    pub const fn eip7702(&self) -> bool {
+        self.eip7702
+    }
+
+    /// Returns the current tx fee cap limit in wei locally submitted into the pool
+    pub const fn tx_fee_cap(&self) -> &Option<u128> {
+        &self.tx_fee_cap
+    }
+
+    /// Returns the minimum priority fee to enforce for acceptance into the pool
+    pub const fn minimum_priority_fee(&self) -> &Option<u128> {
+        &self.minimum_priority_fee
+    }
+
+    /// Returns the setup and parameters needed for validating KZG proofs.
+    pub const fn kzg_settings(&self) -> &EnvKzgSettings {
+        &self.kzg_settings
+    }
+
+    /// Returns the config to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions..
+    pub const fn local_transactions_config(&self) -> &LocalTransactionConfig {
+        &self.local_transactions_config
+    }
+
+    /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
+    /// the pool.
+    pub const fn max_tx_input_bytes(&self) -> usize {
+        self.max_tx_input_bytes
+    }
+
+    /// Returns whether balance checks are disabled for this validator.
+    pub const fn disable_balance_check(&self) -> bool {
+        self.disable_balance_check
     }
 }
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
+impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Returns the configured chain spec
-    fn chain_spec(&self) -> Arc<Client::ChainSpec> {
-        self.client.chain_spec()
+    /// Returns the current max gas limit
+    pub fn block_gas_limit(&self) -> u64 {
+        self.max_gas_limit()
+    }
+
+    /// Validates a single transaction.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.validate_one_with_provider(origin, transaction, &mut None)
+    }
+
+    /// Validates a single transaction with the provided state provider.
+    ///
+    /// This allows reusing the same provider across multiple transaction validations,
+    /// which can improve performance when validating many transactions.
+    ///
+    /// If `state` is `None`, a new state provider will be created.
+    pub fn validate_one_with_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.validate_one_with_provider(origin, transaction, state)
     }
 
     /// Validates a single transaction using an optional cached state provider.
@@ -660,7 +561,7 @@ where
     }
 
     /// Validates that the sender’s account has valid or no bytecode.
-    fn validate_sender_bytecode(
+    pub fn validate_sender_bytecode(
         &self,
         transaction: &Tx,
         sender: &Account,
@@ -695,7 +596,7 @@ where
     }
 
     /// Checks if the transaction nonce is valid.
-    fn validate_sender_nonce(
+    pub fn validate_sender_nonce(
         &self,
         transaction: &Tx,
         sender: &Account,
@@ -713,7 +614,7 @@ where
     }
 
     /// Ensures the sender has sufficient account balance.
-    fn validate_sender_balance(
+    pub fn validate_sender_balance(
         &self,
         transaction: &Tx,
         sender: &Account,
@@ -731,7 +632,7 @@ where
     }
 
     /// Validates EIP-4844 blob sidecar data and returns the extracted sidecar, if any.
-    fn validate_eip4844(
+    pub fn validate_eip4844(
         &self,
         transaction: &mut Tx,
     ) -> Result<Option<BlobTransactionSidecarVariant>, InvalidPoolTransactionError> {
@@ -852,6 +753,44 @@ where
 
     fn max_gas_limit(&self) -> u64 {
         self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+where
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
+    Tx: EthPoolTransaction,
+{
+    type Transaction = Tx;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validate_one(origin, transaction)
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_batch(transactions)
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_batch_with_origin(origin, transactions)
+    }
+
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
+    where
+        B: Block,
+    {
+        self.on_new_head_block(new_tip_block.header())
     }
 }
 
@@ -1053,7 +992,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
     /// Configures validation rules based on the head block's timestamp.
     ///
-    /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
+    /// For example, whether the Shanghai and Cancun hardfork is activated at launch, or max blob
+    /// counts.
     pub fn with_head_timestamp(mut self, timestamp: u64) -> Self
     where
         Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
@@ -1128,14 +1068,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_tx_input_bytes,
             max_tx_gas_limit,
             disable_balance_check,
-            ..
+            max_blob_count,
+            additional_tasks: _,
         } = self;
-
-        let max_blob_count = if prague {
-            BlobParams::prague().max_blobs_per_tx
-        } else {
-            BlobParams::cancun().max_blobs_per_tx
-        };
 
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),
@@ -1145,7 +1080,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
-        let inner = EthTransactionValidatorInner {
+        EthTransactionValidator {
             client,
             eip2718,
             eip1559,
@@ -1163,9 +1098,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
-        };
-
-        EthTransactionValidator { inner: Arc::new(inner) }
+        }
     }
 
     /// Builds a [`EthTransactionValidator`] and spawns validation tasks via the
@@ -1207,7 +1140,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
         let to_validation_task = Arc::new(Mutex::new(tx));
 
-        TransactionValidationTaskExecutor { validator, to_validation_task }
+        TransactionValidationTaskExecutor { validator: Arc::new(validator), to_validation_task }
     }
 }
 

@@ -90,6 +90,11 @@ where
     // open file
     let mut reader = ChunkedFileReader::new(path, import_config.chunk_len).await?;
 
+    let provider = provider_factory.provider()?;
+    let init_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
+    let init_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+    drop(provider);
+
     let mut total_decoded_blocks = 0;
     let mut total_decoded_txns = 0;
 
@@ -125,10 +130,8 @@ where
         pipeline.set_tip(tip);
         debug!(target: "reth::import", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
-
         let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            provider_factory.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
 
         // Run pipeline
@@ -147,9 +150,9 @@ where
     }
 
     let provider = provider_factory.provider()?;
-
-    let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-    let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+    let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()? - init_blocks;
+    let total_imported_txns =
+        provider.tx_ref().entries::<tables::TransactionHashNumbers>()? - init_txns;
 
     let result = ImportResult {
         total_decoded_blocks,
@@ -170,7 +173,7 @@ where
         info!(target: "reth::import",
             total_imported_blocks,
             total_imported_txns,
-            "Chain file imported"
+            "Chain was fully imported"
         );
     }
 

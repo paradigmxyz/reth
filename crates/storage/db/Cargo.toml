@@ -46,6 +46,7 @@ strum = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+reth-prune-types.workspace = true
 
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-consensus.workspace = true
@@ -81,6 +82,7 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-prune-types/test-utils",
 ]
 bench = ["reth-db-api/bench"]
 arbitrary = [
@@ -88,6 +90,7 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
+    "reth-prune-types/arbitrary",
 ]
 op = [
     "reth-db-api/op",

@@ -140,3 +140,11 @@ pub struct TxPoolValidationMetrics {
     /// How long to successfully validate a blob
     pub(crate) blob_validation_duration: Histogram,
 }
+
+/// Transaction pool validator task metrics
+#[derive(Metrics)]
+#[metrics(scope = "transaction_pool")]
+pub struct TxPoolValidatorMetrics {
+    /// Number of in-flight validation job sends waiting for channel capacity
+    pub(crate) inflight_validation_jobs: Gauge,
+}

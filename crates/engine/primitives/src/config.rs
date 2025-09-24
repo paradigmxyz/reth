@@ -95,6 +95,8 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
+    /// Whether to unwind canonical header to ancestor during forkchoice updates.
+    allow_unwind_canonical_header: bool,
 }
 
 impl Default for TreeConfig {
@@ -117,6 +119,7 @@ impl Default for TreeConfig {
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            allow_unwind_canonical_header: false,
         }
     }
 }
@@ -142,6 +145,7 @@ impl TreeConfig {
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
+        allow_unwind_canonical_header: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -161,6 +165,7 @@ impl TreeConfig {
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
+            allow_unwind_canonical_header,
         }
     }
 
@@ -257,6 +262,11 @@ impl TreeConfig {
         self.always_process_payload_attributes_on_canonical_head
     }
 
+    /// Returns true if canonical header should be unwound to ancestor during forkchoice updates.
+    pub const fn unwind_canonical_header(&self) -> bool {
+        self.allow_unwind_canonical_header
+    }
+
     /// Setter for persistence threshold.
     pub const fn with_persistence_threshold(mut self, persistence_threshold: u64) -> Self {
         self.persistence_threshold = persistence_threshold;
@@ -339,7 +349,7 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for using the parallel sparse trie
+    /// Setter for whether to disable the parallel sparse trie
     pub const fn with_disable_parallel_sparse_trie(
         mut self,
         disable_parallel_sparse_trie: bool,
@@ -372,6 +382,12 @@ impl TreeConfig {
     /// Setter for whether to use state root fallback, useful for testing.
     pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
         self.state_root_fallback = state_root_fallback;
+        self
+    }
+
+    /// Setter for whether to unwind canonical header to ancestor during forkchoice updates.
+    pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
+        self.allow_unwind_canonical_header = unwind_canonical_header;
         self
     }
 

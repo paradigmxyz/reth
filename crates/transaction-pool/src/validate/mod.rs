@@ -335,12 +335,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the internal identifier for the sender of this transaction
-    pub(crate) const fn sender_id(&self) -> SenderId {
+    pub const fn sender_id(&self) -> SenderId {
         self.transaction_id.sender
     }
 
     /// Returns the internal identifier for this transaction.
-    pub(crate) const fn id(&self) -> &TransactionId {
+    pub const fn id(&self) -> &TransactionId {
         &self.transaction_id
     }
 

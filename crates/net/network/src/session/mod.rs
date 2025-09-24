@@ -1150,18 +1150,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
 
         (multiplex_stream.into(), their_status)
     };
