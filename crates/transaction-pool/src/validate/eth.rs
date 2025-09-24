@@ -32,6 +32,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use revm_primitives::U256;
 use std::{
     marker::PhantomData,
     sync::{
@@ -92,6 +93,8 @@ pub struct EthTransactionValidator<Client, T> {
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
     validation_metrics: TxPoolValidationMetrics,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
@@ -294,12 +297,14 @@ where
                 }
             }
 
-            _ => {
+            ty if !self.other_tx_types.bit(ty as usize) => {
                 return Err(TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidTransactionError::TxTypeNotSupported.into(),
                 ))
             }
+
+            _ => {}
         };
 
         // Reject transactions with a nonce equal to U64::max according to EIP-2681
@@ -843,6 +848,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     max_tx_gas_limit: Option<u64>,
     /// Disable balance checks during transaction validation
     disable_balance_check: bool,
+    /// Bitmap of custom transaction types that are allowed.
+    other_tx_types: U256,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
@@ -892,6 +899,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // balance checks are enabled by default
             disable_balance_check: false,
+
+            // no custom transaction types by default
+            other_tx_types: U256::ZERO,
         }
     }
 
@@ -1054,6 +1064,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Adds a custom transaction type to the validator.
+    pub fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
+        self.other_tx_types.set_bit(tx_type as usize, true);
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -1080,6 +1096,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             max_blob_count,
             additional_tasks: _,
+            other_tx_types,
         } = self;
 
         let fork_tracker = ForkTracker {
@@ -1109,6 +1126,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             disable_balance_check,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
+            other_tx_types,
         }
     }
 

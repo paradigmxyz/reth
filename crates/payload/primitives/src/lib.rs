@@ -585,7 +585,7 @@ mod tests {
         let mut requests_valid_reversed = valid_requests;
         requests_valid_reversed.reverse();
         assert_matches!(
-            validate_execution_requests(&requests_with_empty),
+            validate_execution_requests(&requests_valid_reversed),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
 

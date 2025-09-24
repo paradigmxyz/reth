@@ -43,5 +43,3 @@ pub use ext::L2EthApiExtClient;
 pub use filter::EthFilterApiClient;
 
 use reth_trie_common as _;
-// TODO: remove after https://github.com/bluealloy/revm/pull/3005 is released
-use revm_context as _;
