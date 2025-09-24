@@ -343,7 +343,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
-        /// This macro is used for early returns before we convert the input to a block
+        /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
             ($expr:expr) => {
                 match $expr {
