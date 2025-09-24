@@ -148,9 +148,7 @@ pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
         frac.parse::<u128>()?
     };
 
-    int_wei
-        .checked_add(frac_wei)
-        .ok_or_else(|| eyre::eyre!("Overflow in result"))
+    int_wei.checked_add(frac_wei).ok_or_else(|| eyre::eyre!("Overflow in result"))
 }
 
 #[cfg(test)]
