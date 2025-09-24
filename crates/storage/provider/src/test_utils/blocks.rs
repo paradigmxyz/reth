@@ -26,7 +26,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let h = B256::ZERO;
     let tx = provider;
 
-     // check if tables contain only the genesis block data
+    // check if tables contain only the genesis block data
     assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
