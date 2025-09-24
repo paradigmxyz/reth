@@ -48,8 +48,13 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         })?;
         let sealed = block.seal_slow();
 
+        const SHANGHAI_FORK_BLOCK: u64 = 1681338455;
+
         let header = sealed.header();
-        if header.number >= 1 && header.withdrawals_root.is_none() && header.number >= 1681338455 {
+        if header.number >= 1 &&
+            header.withdrawals_root.is_none() &&
+            header.number >= SHANGHAI_FORK_BLOCK
+        {
             return Err(reth_payload_primitives::NewPayloadError::Other(
                 "missing withdrawals root".into(),
             ));
