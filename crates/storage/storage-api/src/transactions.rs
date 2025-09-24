@@ -37,7 +37,7 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
 
     /// Get transaction by id without computing the hash.
     fn transaction_by_id_unhashed(&self, id: TxNumber)
-        -> ProviderResult<Option<Self::Transaction>>;
+    -> ProviderResult<Option<Self::Transaction>>;
 
     /// Get transaction by transaction hash.
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>>;

@@ -2,7 +2,7 @@
 
 use crate::RessProtocolProvider;
 use alloy_consensus::Header;
-use alloy_primitives::{map::B256HashMap, Bytes, B256};
+use alloy_primitives::{B256, Bytes, map::B256HashMap};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{

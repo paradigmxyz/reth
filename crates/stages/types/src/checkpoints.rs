@@ -1,8 +1,8 @@
 use super::StageId;
 use alloc::{format, string::String, vec::Vec};
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, U256};
 use core::ops::RangeInclusive;
-use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
+use reth_trie_common::{StoredSubNode, hash_builder::HashBuilderState};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]

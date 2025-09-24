@@ -20,7 +20,7 @@
 use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
-use mev_share_sse::{client::EventStream, EventClient};
+use mev_share_sse::{EventClient, client::EventStream};
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::EthereumNode,

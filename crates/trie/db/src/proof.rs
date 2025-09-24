@@ -1,13 +1,13 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{keccak256, map::HashMap, Address, B256};
+use alloy_primitives::{Address, B256, keccak256, map::HashMap};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
+    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    StorageMultiProof, TrieInput,
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    StorageMultiProof, TrieInput,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.

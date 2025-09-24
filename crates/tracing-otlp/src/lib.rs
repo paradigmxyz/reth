@@ -4,13 +4,13 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
-use opentelemetry::{trace::TracerProvider, KeyValue, Value};
+use opentelemetry::{KeyValue, Value, trace::TracerProvider};
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::{
-    trace::{SdkTracer, SdkTracerProvider},
     Resource,
+    trace::{SdkTracer, SdkTracerProvider},
 };
-use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
+use opentelemetry_semantic_conventions::{SCHEMA_URL, attribute::SERVICE_VERSION};
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;

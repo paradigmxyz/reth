@@ -2,14 +2,14 @@ use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 use alloy_rlp::Decodable;
 use futures::SinkExt;
 use reth_eth_wire::{
+    UnifiedStatus,
     errors::{EthHandshakeError, EthStreamError},
     handshake::{EthRlpxHandshake, EthereumEthHandshake, UnauthEth},
-    UnifiedStatus,
 };
 use reth_eth_wire_types::{DisconnectReason, EthVersion};
 use reth_ethereum_forks::ForkFilter;
 use std::{future::Future, pin::Pin};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tokio_stream::StreamExt;
 use tracing::debug;
 

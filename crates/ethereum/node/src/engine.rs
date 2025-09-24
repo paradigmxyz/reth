@@ -11,8 +11,8 @@ use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
 use reth_node_api::PayloadTypes;
 use reth_payload_primitives::{
-    validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
-    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
+    EngineApiMessageVersion, EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
+    validate_execution_requests, validate_version_specific_fields,
 };
 use reth_primitives_traits::RecoveredBlock;
 use std::sync::Arc;

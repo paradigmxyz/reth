@@ -1,7 +1,7 @@
 //! OP mainnet bedrock related data.
 
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-use alloy_primitives::{address, b256, bloom, bytes, B256, B64, U256};
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH, Header};
+use alloy_primitives::{B64, B256, U256, address, b256, bloom, bytes};
 
 /// Transaction 0x9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9 in block 985,
 /// replayed in blocks:

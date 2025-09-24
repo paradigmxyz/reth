@@ -204,11 +204,7 @@ where
                     },
                     cancel: args.cancel.clone(),
                     best_payload: args.best_payload.clone().and_then(|payload| {
-                        if let Either::Left(p) = payload {
-                            Some(p)
-                        } else {
-                            None
-                        }
+                        if let Either::Left(p) = payload { Some(p) } else { None }
                     }),
                 };
 
@@ -223,11 +219,7 @@ where
                     },
                     cancel: args.cancel.clone(),
                     best_payload: args.best_payload.clone().and_then(|payload| {
-                        if let Either::Right(p) = payload {
-                            Some(p)
-                        } else {
-                            None
-                        }
+                        if let Either::Right(p) = payload { Some(p) } else { None }
                     }),
                 };
 

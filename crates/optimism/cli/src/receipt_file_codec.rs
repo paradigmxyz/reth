@@ -2,8 +2,8 @@
 
 use alloy_consensus::Receipt;
 use alloy_primitives::{
+    Address, B256, Bloom, Bytes, Log,
     bytes::{Buf, BytesMut},
-    Address, Bloom, Bytes, Log, B256,
 };
 use alloy_rlp::{Decodable, RlpDecodable};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -121,7 +121,7 @@ impl TryFrom<OpGethReceipt> for OpReceipt {
 #[cfg(test)]
 pub(crate) mod test {
     use alloy_consensus::{Receipt, TxReceipt};
-    use alloy_primitives::{address, b256, hex, LogData};
+    use alloy_primitives::{LogData, address, b256, hex};
 
     use super::*;
 
@@ -149,7 +149,9 @@ pub(crate) mod test {
                 "00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000"
             )),
             logs: receipt.receipt.into_logs(),
-            tx_hash: b256!("0x5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a"), contract_address: Address::ZERO, gas_used: 202813,
+            tx_hash: b256!("0x5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a"),
+            contract_address: Address::ZERO,
+            gas_used: 202813,
             block_hash: b256!("0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453"),
             block_number: receipt.number,
             transaction_index: 0,

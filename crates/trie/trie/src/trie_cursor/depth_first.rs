@@ -154,7 +154,7 @@ impl<C: TrieCursor> Iterator for DepthFirstTrieIterator<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory};
+    use crate::trie_cursor::{TrieCursorFactory, mock::MockTrieCursorFactory};
     use alloy_trie::TrieMask;
     use std::{collections::BTreeMap, sync::Arc};
 

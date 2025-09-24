@@ -1,7 +1,7 @@
 use crate::{
-    error::{mdbx_result, Result},
-    transaction::TransactionKind,
     Environment, Transaction,
+    error::{Result, mdbx_result},
+    transaction::TransactionKind,
 };
 use ffi::MDBX_db_flags_t;
 use std::{ffi::CStr, ptr};

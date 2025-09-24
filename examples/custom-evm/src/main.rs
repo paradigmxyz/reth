@@ -3,40 +3,40 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_evm::{
+    EvmFactory,
     eth::EthEvmContext,
     precompiles::PrecompilesMap,
     revm::{
         handler::EthPrecompiles,
         precompile::{Precompile, PrecompileId},
     },
-    EvmFactory,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Bytes};
+use alloy_primitives::{Bytes, address};
 use reth_ethereum::{
+    EthPrimitives,
     chainspec::{Chain, ChainSpec},
     evm::{
+        EthEvm, EthEvmConfig,
         primitives::{Database, EvmEnv},
         revm::{
+            MainBuilder, MainContext,
             context::{Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::{PrecompileOutput, PrecompileResult, Precompiles},
             primitives::hardfork::SpecId,
-            MainBuilder, MainContext,
         },
-        EthEvm, EthEvmConfig,
     },
     node::{
+        EthereumNode,
         api::{FullNodeTypes, NodeTypes},
-        builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
+        builder::{BuilderContext, NodeBuilder, components::ExecutorBuilder},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::EthereumAddOns,
-        EthereumNode,
     },
     tasks::TaskManager,
-    EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::OnceLock;

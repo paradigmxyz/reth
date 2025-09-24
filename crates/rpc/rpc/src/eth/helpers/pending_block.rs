@@ -3,10 +3,10 @@
 use crate::EthApi;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEvmError, RpcNodeCore,
+    helpers::{LoadPendingBlock, pending_block::PendingEnvBuilder},
 };
-use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiError, PendingBlock};
+use reth_rpc_eth_types::{EthApiError, PendingBlock, builder::config::PendingBlockKind};
 
 impl<N, Rpc> LoadPendingBlock for EthApi<N, Rpc>
 where

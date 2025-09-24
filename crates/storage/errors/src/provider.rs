@@ -1,9 +1,9 @@
 use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, TxNumber};
 use derive_more::Display;
-use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
+use reth_primitives_traits::{GotExpected, transaction::signed::RecoveryError};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 use revm_database_interface::DBErrorMarker;

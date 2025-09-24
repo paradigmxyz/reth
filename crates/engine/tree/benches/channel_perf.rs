@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use revm_primitives::{Address, HashMap};

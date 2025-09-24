@@ -1,33 +1,33 @@
 use alloy_primitives::{BlockHash, BlockNumber, U256};
 use futures_util::{Stream, StreamExt};
 use reth_db_api::{
+    RawKey, RawTable, RawValue,
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable, RawValue,
 };
 use reth_era::{
-    e2s_types::E2sError,
-    era1_file::{BlockTupleIterator, Era1Reader},
-    era_file_ops::StreamReader,
-    execution_types::BlockTuple,
     DecodeCompressed,
+    e2s_types::E2sError,
+    era_file_ops::StreamReader,
+    era1_file::{BlockTupleIterator, Era1Reader},
+    execution_types::BlockTuple,
 };
 use reth_era_downloader::EraMeta;
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    BlockWriter, ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
 };
 use reth_storage_api::{
-    errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+    DBProvider, DatabaseProviderFactory, HeaderProvider, NodePrimitivesProvider,
+    StageCheckpointWriter, StorageLocation, errors::ProviderResult,
 };
 use std::{
     collections::Bound,
@@ -167,9 +167,9 @@ where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-        OmmerHeader = BH,
-    >,
+            Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+            OmmerHeader = BH,
+        >,
     Era: EraMeta + ?Sized,
     P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
@@ -278,9 +278,9 @@ where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-        OmmerHeader = BH,
-    >,
+            Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+            OmmerHeader = BH,
+        >,
     P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
@@ -339,9 +339,9 @@ where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-        OmmerHeader = BH,
-    >,
+            Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+            OmmerHeader = BH,
+        >,
     P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {

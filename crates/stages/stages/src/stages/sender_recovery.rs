@@ -3,11 +3,11 @@ use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::static_file::TransactionMask;
 use reth_db_api::{
+    DbTxUnwindExt, RawValue,
     cursor::DbCursorRW,
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawValue,
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
@@ -369,22 +369,22 @@ struct FailedSenderRecoveryError {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner, stage_test_suite_ext,
     };
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{B256, BlockNumber};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
     use reth_ethereum_primitives::{Block, TransactionSigned};
     use reth_primitives_traits::{SealedBlock, SignerRecoverable};
     use reth_provider::{
-        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
-        PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
+        BlockBodyIndicesProvider, DatabaseProviderFactory, PruneCheckpointWriter,
+        StaticFileProviderFactory, TransactionsProvider, providers::StaticFileWriter,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, BlockParams, BlockRangeParams,
+        self, BlockParams, BlockRangeParams, random_block, random_block_range,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);

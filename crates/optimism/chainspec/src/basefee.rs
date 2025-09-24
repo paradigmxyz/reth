@@ -1,7 +1,7 @@
 //! Base fee related utilities for Optimism chains.
 
 use alloy_consensus::BlockHeader;
-use op_alloy_consensus::{decode_holocene_extra_data, decode_jovian_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{EIP1559ParamError, decode_holocene_extra_data, decode_jovian_extra_data};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_optimism_forks::OpHardforks;
 

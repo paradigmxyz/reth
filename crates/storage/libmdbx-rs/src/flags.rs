@@ -44,9 +44,9 @@ pub enum SyncMode {
     /// (unfortunately) performance:
     /// - A system crash can't corrupt the database, but you will lose the last transactions;
     ///   because MDBX will rollback to last steady commit since it kept explicitly.
-    /// - The last steady transaction makes an effect similar to "long-lived" read transaction
-    ///   since prevents reuse of pages freed by newer write transactions, thus the any data
-    ///   changes will be placed in newly allocated pages.
+    /// - The last steady transaction makes an effect similar to "long-lived" read transaction since
+    ///   prevents reuse of pages freed by newer write transactions, thus the any data changes will
+    ///   be placed in newly allocated pages.
     /// - To avoid rapid database growth, the system will sync data and issue a steady commit-point
     ///   to resume reuse pages, each time there is insufficient space and before increasing the
     ///   size of the file on disk.
@@ -85,12 +85,12 @@ pub enum SyncMode {
     /// are used, you should expect the corrupted database after a system crash.
     ///
     /// So, most important thing about [`SyncMode::UtterlyNoSync`]:
-    /// - A system crash immediately after commit the write transaction high likely lead to
-    ///   database corruption.
-    /// - Successful completion of [`Environment::sync(force=true`)](crate::Environment::sync)
-    ///   after one or more committed transactions guarantees consistency and durability.
-    /// - BUT by committing two or more transactions you back database into a weak state, in which
-    ///   a system crash may lead to database corruption! In case single transaction after
+    /// - A system crash immediately after commit the write transaction high likely lead to database
+    ///   corruption.
+    /// - Successful completion of [`Environment::sync(force=true`)](crate::Environment::sync) after
+    ///   one or more committed transactions guarantees consistency and durability.
+    /// - BUT by committing two or more transactions you back database into a weak state, in which a
+    ///   system crash may lead to database corruption! In case single transaction after
     ///   [`Environment::sync()`](crate::Environment::sync), you may lose transaction itself, but
     ///   not a whole database.
     ///

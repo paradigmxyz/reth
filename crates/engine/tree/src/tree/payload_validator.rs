@@ -1,6 +1,8 @@
 //! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
+    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     executor::WorkloadExecutor,
@@ -9,11 +11,9 @@ use crate::tree::{
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
-    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
+use alloy_eips::{NumHash, eip1898::BlockWithParent};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
 use reth_chain_state::{
@@ -25,8 +25,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor, SpecFor, block::BlockExecutor,
+    execute::ExecutableTxFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -40,7 +40,7 @@ use reth_provider::{
     ProviderError, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
+use reth_trie::{HashedPostState, KeccakKeyHasher, TrieInput, updates::TrieUpdates};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -689,11 +689,7 @@ where
         // check memory first
         let header = state.tree_state.sealed_header_by_hash(&hash);
 
-        if header.is_some() {
-            Ok(header)
-        } else {
-            self.provider.sealed_header_by_hash(hash)
-        }
+        if header.is_some() { Ok(header) } else { self.provider.sealed_header_by_hash(hash) }
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header

@@ -1,7 +1,7 @@
 use crate::{
+    PruneLimiter, PrunerError,
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PruneLimiter, PrunerError,
 };
 use alloy_primitives::BlockNumber;
 use itertools::Itertools;
@@ -12,7 +12,7 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{providers::StaticFileProvider, DBProvider, StaticFileProviderFactory};
+use reth_provider::{DBProvider, StaticFileProviderFactory, providers::StaticFileProvider};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
@@ -213,10 +213,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
-        SegmentOutput,
+        PruneInput, PruneLimiter, Segment, SegmentOutput,
+        static_file::headers::HEADER_TABLES_TO_PRUNE,
     };
-    use alloy_primitives::{BlockNumber, B256, U256};
+    use alloy_primitives::{B256, BlockNumber, U256};
     use assert_matches::assert_matches;
     use reth_db_api::{tables, transaction::DbTx};
     use reth_provider::{

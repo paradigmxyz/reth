@@ -1,20 +1,20 @@
 use crate::LowerSparseSubtrie;
 use alloc::borrow::Cow;
 use alloy_primitives::{
-    map::{Entry, HashMap},
     B256,
+    map::{Entry, HashMap},
 };
 use alloy_rlp::Decodable;
-use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
+use alloy_trie::{BranchNodeCompact, EMPTY_ROOT_HASH, TrieMask};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
+    BranchNodeRef, CHILD_INDEX_RANGE, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieNode,
     prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
-    provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RevealedSparseNode, RlpNodeStackItem, SparseNode, SparseNodeType,
     SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    provider::{RevealedNode, TrieNodeProvider},
 };
 use smallvec::SmallVec;
 use std::{
@@ -599,7 +599,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
         // any required changes for that node, relative to the removed leaf.
-        if let (Some(branch_path), Some(SparseNode::Branch { mut state_mask, .. })) =
+        if let (&Some(ref branch_path), &Some(SparseNode::Branch { mut state_mask, .. })) =
             (&branch_parent_path, &branch_parent_node)
         {
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
@@ -879,7 +879,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
-                    panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
+                    panic!(
+                        "target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap"
+                    );
                 }
                 FindNextToLeafOutcome::ContinueFrom(next_path) => {
                     curr_path = next_path;
@@ -2537,14 +2539,13 @@ enum SparseTrieUpdatesAction {
 #[cfg(test)]
 mod tests {
     use super::{
-        path_subtrie_index_unchecked, LowerSparseSubtrie, ParallelSparseTrie, SparseSubtrie,
-        SparseSubtrieType,
+        LowerSparseSubtrie, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
+        path_subtrie_index_unchecked,
     };
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
-        b256, hex,
+        B256, U256, b256, hex,
         map::{B256Set, DefaultHashBuilder, HashMap},
-        B256, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
     use alloy_trie::{BranchNodeCompact, Nibbles};
@@ -2554,26 +2555,26 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
-    use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
+    use reth_provider::{TrieWriter, test_utils::create_test_provider_factory};
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
-        node_iter::{TrieElement, TrieNodeIter},
-        trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
-        walker::TrieWalker,
         HashedPostState,
+        hashed_cursor::{HashedPostStateAccountCursor, noop::NoopHashedAccountCursor},
+        node_iter::{TrieElement, TrieNodeIter},
+        trie_cursor::{TrieCursor, TrieCursorFactory, noop::NoopAccountTrieCursor},
+        walker::TrieWalker,
     };
     use reth_trie_common::{
+        BranchNode, EMPTY_ROOT_HASH, ExtensionNode, HashBuilder, LeafNode, RlpNode, TrieMask,
+        TrieNode,
         prefix_set::PrefixSetMut,
         proof::{ProofNodes, ProofRetainer},
         updates::TrieUpdates,
-        BranchNode, ExtensionNode, HashBuilder, LeafNode, RlpNode, TrieMask, TrieNode,
-        EMPTY_ROOT_HASH,
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
-        provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
         LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseNode,
         SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+        provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
     };
     use std::collections::{BTreeMap, BTreeSet};
 

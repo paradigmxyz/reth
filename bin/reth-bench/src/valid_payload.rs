@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_eips::eip7685::Requests;
-use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
+use alloy_provider::{Network, Provider, ext::EngineApi, network::AnyRpcBlock};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated,
     PayloadAttributes, PayloadStatus,

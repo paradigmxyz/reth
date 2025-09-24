@@ -36,14 +36,14 @@ pub use tokio_util::codec::{
 };
 
 pub use crate::{
+    Capability, ProtocolVersion,
     disconnect::CanDisconnect,
-    ethstream::{EthStream, EthStreamInner, UnauthedEthStream, MAX_MESSAGE_SIZE},
+    ethstream::{EthStream, EthStreamInner, MAX_MESSAGE_SIZE, UnauthedEthStream},
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
     p2pstream::{
-        DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
-        MAX_RESERVED_MESSAGE_ID,
+        DisconnectP2P, HANDSHAKE_TIMEOUT, MAX_RESERVED_MESSAGE_ID, P2PMessage, P2PMessageID,
+        P2PStream, UnauthedP2PStream,
     },
-    Capability, ProtocolVersion,
 };
 
 // Re-export wire types

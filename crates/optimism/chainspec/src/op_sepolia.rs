@@ -1,12 +1,12 @@
 //! Chain specification for the Optimism Sepolia testnet network.
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
+use crate::{LazyLock, OpChainSpec, make_op_genesis_header};
 use alloc::{sync::Arc, vec};
 use alloy_chains::{Chain, NamedChain};
-use alloy_primitives::{b256, U256};
+use alloy_primitives::{U256, b256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::{OpHardfork, OP_SEPOLIA_HARDFORKS};
+use reth_optimism_forks::{OP_SEPOLIA_HARDFORKS, OpHardfork};
 use reth_primitives_traits::SealedHeader;
 
 /// The OP Sepolia spec

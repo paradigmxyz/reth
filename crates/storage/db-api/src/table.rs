@@ -1,7 +1,7 @@
 use crate::{
+    DatabaseError,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
 
 use serde::{Deserialize, Serialize};

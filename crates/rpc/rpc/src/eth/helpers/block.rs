@@ -2,8 +2,8 @@
 
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
     FromEvmError, RpcNodeCore,
+    helpers::{EthBlocks, LoadBlock, LoadPendingBlock},
 };
 use reth_rpc_eth_types::EthApiError;
 

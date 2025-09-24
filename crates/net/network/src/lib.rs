@@ -47,7 +47,7 @@
 //! ```
 //! # async fn launch() {
 //! use reth_network::{
-//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+//!     EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key,
 //! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_storage_api::noop::NoopProvider;
@@ -76,7 +76,7 @@
 //!
 //! ```
 //! use reth_network::{
-//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+//!     EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key,
 //! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_storage_api::noop::NoopProvider;
@@ -147,10 +147,11 @@ mod swarm;
 mod trusted_peers_resolver;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_eth_wire_types::{primitives, EthNetworkPrimitives, NetworkPrimitives};
+pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives, primitives};
 pub use reth_network_api::{
-    events, BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
+    BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,
+    events,
 };
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};

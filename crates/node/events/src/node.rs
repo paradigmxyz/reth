@@ -1,15 +1,15 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_consensus::{BlockHeader, constants::GWEI_TO_WEI};
+use alloy_primitives::{B256, BlockNumber};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{
     ConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_network_api::PeersInfo;
-use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
+use reth_primitives_traits::{BlockBody, NodePrimitives, format_gas, format_gas_throughput};
 use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
@@ -353,11 +353,7 @@ struct OptionalField<T: Display>(Option<T>);
 
 impl<T: Display> Display for OptionalField<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(field) = &self.0 {
-            write!(f, "{field}")
-        } else {
-            write!(f, "None")
-        }
+        if let Some(field) = &self.0 { write!(f, "{field}") } else { write!(f, "None") }
     }
 }
 

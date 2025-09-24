@@ -6,13 +6,13 @@ use alloy_consensus::{Block, BlockHeader};
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, B64, B256, Bytes, U256, keccak256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
     ExecutionPayloadV3, PayloadId,
 };
-use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{EIP1559ParamError, encode_holocene_extra_data, encode_jovian_extra_data};
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
@@ -435,7 +435,7 @@ where
 mod tests {
     use super::*;
     use crate::OpPayloadAttributes;
-    use alloy_primitives::{address, b256, bytes, FixedBytes};
+    use alloy_primitives::{FixedBytes, address, b256, bytes};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_payload_primitives::EngineApiMessageVersion;

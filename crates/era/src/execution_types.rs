@@ -16,7 +16,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::Header;
-//! use reth_era::{execution_types::CompressedHeader, DecodeCompressed};
+//! use reth_era::{DecodeCompressed, execution_types::CompressedHeader};
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header: rlp encoding and Snappy compression
@@ -32,7 +32,7 @@
 //! ```rust
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::{execution_types::CompressedBody, DecodeCompressed};
+//! use reth_era::{DecodeCompressed, execution_types::CompressedBody};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -53,7 +53,7 @@
 //!
 //! ```rust
 //! use alloy_consensus::ReceiptWithBloom;
-//! use reth_era::{execution_types::CompressedReceipts, DecodeCompressed};
+//! use reth_era::{DecodeCompressed, execution_types::CompressedReceipts};
 //! use reth_ethereum_primitives::{Receipt, TxType};
 //!
 //! let receipt = Receipt {
@@ -72,8 +72,8 @@
 //! ``````
 
 use crate::{
-    e2s_types::{E2sError, Entry},
     DecodeCompressed,
+    e2s_types::{E2sError, Entry},
 };
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
@@ -371,8 +371,10 @@ impl CompressedReceipts {
         if entry.entry_type != COMPRESSED_RECEIPTS {
             return Err(E2sError::Ssz(format!(
                 "Invalid entry type for CompressedReceipts: expected {:02x}{:02x}, got {:02x}{:02x}",
-                COMPRESSED_RECEIPTS[0], COMPRESSED_RECEIPTS[1],
-                entry.entry_type[0], entry.entry_type[1]
+                COMPRESSED_RECEIPTS[0],
+                COMPRESSED_RECEIPTS[1],
+                entry.entry_type[0],
+                entry.entry_type[1]
             )));
         }
 

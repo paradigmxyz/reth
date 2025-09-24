@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 
 /// If `compact` or `rlp` is passed to `derive_arbitrary`, this function will generate the
 /// corresponding proptest roundtrip tests.

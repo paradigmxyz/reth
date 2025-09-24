@@ -1,17 +1,17 @@
 use crate::validation::StatelessValidationError;
 use alloc::{format, vec::Vec};
-use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256, map::B256Map};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+use alloy_trie::{EMPTY_ROOT_HASH, TrieAccount};
 use itertools::Itertools;
 use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
+    SparseStateTrie, SparseTrie, SparseTrieInterface,
     errors::SparseStateTrieResult,
     provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
-    SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 
 /// Trait for stateless trie implementations that can be used for stateless validation.

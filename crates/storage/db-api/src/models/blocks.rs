@@ -2,7 +2,7 @@
 
 use alloy_consensus::Header;
 use alloy_primitives::B256;
-use reth_codecs::{add_arbitrary_tests, Compact};
+use reth_codecs::{Compact, add_arbitrary_tests};
 use serde::{Deserialize, Serialize};
 
 /// The storage representation of a block's ommers.

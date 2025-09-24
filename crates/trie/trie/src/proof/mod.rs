@@ -1,21 +1,20 @@
 use crate::{
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
-    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
-    keccak256,
+    Address, B256, keccak256,
     map::{B256Map, B256Set, HashMap, HashSet},
-    Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
+    AccountProof, MultiProof, MultiProofTargets, StorageMultiProof, proof::ProofRetainer,
 };
 
 mod trie_node;

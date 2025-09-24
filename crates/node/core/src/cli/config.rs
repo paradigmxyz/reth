@@ -3,7 +3,7 @@
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
 use alloy_primitives::Bytes;
 use reth_chainspec::{Chain, ChainKind, NamedChain};
-use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
+use reth_network::{NetworkPrimitives, protocol::IntoRlpxSubProtocol};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 

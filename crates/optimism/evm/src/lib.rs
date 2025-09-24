@@ -23,8 +23,8 @@ use op_alloy_rpc_types_engine::OpExecutionData;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
-    precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor,
-    ExecutableTxIterator, ExecutionCtxFor, TransactionEnv,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+    TransactionEnv, precompiles::PrecompilesMap,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -40,7 +40,7 @@ use revm::{
 };
 
 mod config;
-pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock, OpNextBlockEnvAttributes};
+pub use config::{OpNextBlockEnvAttributes, revm_spec, revm_spec_by_timestamp_after_bedrock};
 mod execute;
 pub use execute::*;
 pub mod l1;
@@ -120,12 +120,12 @@ impl<ChainSpec, N, R, EvmF> ConfigureEvm for OpEvmConfig<ChainSpec, N, R, EvmF>
 where
     ChainSpec: EthChainSpec<Header = Header> + OpHardforks,
     N: NodePrimitives<
-        Receipt = R::Receipt,
-        SignedTx = R::Transaction,
-        BlockHeader = Header,
-        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
-        Block = alloy_consensus::Block<R::Transaction>,
-    >,
+            Receipt = R::Receipt,
+            SignedTx = R::Transaction,
+            BlockHeader = Header,
+            BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+            Block = alloy_consensus::Block<R::Transaction>,
+        >,
     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     EvmF: EvmFactory<
@@ -247,12 +247,12 @@ impl<ChainSpec, N, R> ConfigureEngineEvm<OpExecutionData> for OpEvmConfig<ChainS
 where
     ChainSpec: EthChainSpec<Header = Header> + OpHardforks,
     N: NodePrimitives<
-        Receipt = R::Receipt,
-        SignedTx = R::Transaction,
-        BlockHeader = Header,
-        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
-        Block = alloy_consensus::Block<R::Transaction>,
-    >,
+            Receipt = R::Receipt,
+            SignedTx = R::Transaction,
+            BlockHeader = Header,
+            BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+            Block = alloy_consensus::Block<R::Transaction>,
+        >,
     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
     Self: Send + Sync + Unpin + Clone + 'static,
@@ -317,14 +317,14 @@ mod tests {
     use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
+    use alloy_primitives::{Address, B256, LogData, bytes, map::HashMap};
     use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
-    use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET};
+    use reth_optimism_chainspec::{BASE_MAINNET, OpChainSpec};
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{

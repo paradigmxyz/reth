@@ -1,4 +1,4 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use reth_provider::{BlockNumReader, ProviderError};
 use std::cmp::Ordering;
 

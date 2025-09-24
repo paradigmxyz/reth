@@ -1,13 +1,13 @@
 //! Implements data structures specific to the database
 
 use crate::{
-    table::{Compress, Decode, Decompress, Encode},
     DatabaseError,
+    table::{Compress, Decode, Decompress, Encode},
 };
 use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Bytes, Log, B256, U256};
-use reth_codecs::{add_arbitrary_tests, Compact};
+use alloy_primitives::{Address, B256, Bytes, Log, U256};
+use reth_codecs::{Compact, add_arbitrary_tests};
 use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -79,7 +79,7 @@ impl Encode for Address {
     type Encoded = [u8; 20];
 
     fn encode(self) -> Self::Encoded {
-        self.0 .0
+        self.0.0
     }
 }
 

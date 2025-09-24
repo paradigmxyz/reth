@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, Bytes, Log as AlloyLog, B256};
+    use alloy_primitives::{Address, B256, Bytes, Log as AlloyLog};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{add_arbitrary_tests, Compact};
+    use reth_codecs::{Compact, add_arbitrary_tests};
     use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to

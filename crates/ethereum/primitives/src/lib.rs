@@ -18,8 +18,8 @@ pub use receipt::*;
 #[cfg(test)]
 mod transaction;
 
-pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};
+pub use alloy_consensus::{TxType, transaction::PooledTransaction};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 
 /// Typed Transaction type without a signature

@@ -8,7 +8,7 @@ mod tests {
     use crate::{OpEvmConfig, OpRethReceiptBuilder};
     use alloc::sync::Arc;
     use alloy_consensus::{Block, BlockBody, Header, SignableTransaction, TxEip1559};
-    use alloy_primitives::{b256, Address, Signature, StorageKey, StorageValue, U256};
+    use alloy_primitives::{Address, Signature, StorageKey, StorageValue, U256, b256};
     use op_alloy_consensus::TxDeposit;
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;

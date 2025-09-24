@@ -14,26 +14,26 @@
 
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{signal, GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal},
+    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal, signal},
 };
 use dyn_clone::DynClone;
 use futures_util::{
-    future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
+    future::{BoxFuture, select},
 };
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::{
     runtime::Handle,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     task::JoinHandle,
 };
 use tracing::{debug, error};
@@ -887,7 +887,10 @@ mod tests {
         let manager_future_handle = runtime.spawn(task_manager);
 
         let send_result = executor.initiate_graceful_shutdown();
-        assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future");
+        assert!(
+            send_result.is_ok(),
+            "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future"
+        );
 
         let manager_final_result = runtime.block_on(manager_future_handle);
 

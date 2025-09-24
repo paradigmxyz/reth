@@ -4,15 +4,14 @@ use crate::{Nibbles, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap},
-    Address, Bytes, B256, U256,
+    Address, B256, Bytes, U256, keccak256,
+    map::{B256Map, B256Set, HashMap, hash_map},
 };
-use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
+use alloy_rlp::{Decodable, EMPTY_STRING_CODE, encode_fixed_size};
 use alloy_trie::{
+    EMPTY_ROOT_HASH, TrieMask,
     nodes::TrieNode,
-    proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
-    TrieMask, EMPTY_ROOT_HASH,
+    proof::{DecodedProofNodes, ProofNodes, ProofVerificationError, verify_proof},
 };
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
@@ -153,11 +152,7 @@ impl Iterator for ChunkedMultiProofTargets {
             },
         );
 
-        if chunk.is_empty() {
-            None
-        } else {
-            Some(chunk)
-        }
+        if chunk.is_empty() { None } else { Some(chunk) }
     }
 }
 
@@ -841,7 +836,7 @@ impl DecodedStorageProof {
 /// for compatibility with `triehash` crate.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
-    use alloy_primitives::{keccak256, B256};
+    use alloy_primitives::{B256, keccak256};
     use alloy_rlp::RlpEncodable;
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;

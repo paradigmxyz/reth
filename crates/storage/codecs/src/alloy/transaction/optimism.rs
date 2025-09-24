@@ -1,18 +1,18 @@
 //! Compact implementation for [`AlloyTxDeposit`]
 
 use crate::{
+    Compact,
     alloy::transaction::ethereum::{CompactEnvelope, Envelope, FromTxCompact, ToTxCompact},
     generate_tests,
     txtype::{
         COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
         COMPACT_IDENTIFIER_LEGACY,
     },
-    Compact,
 };
 use alloy_consensus::{
-    constants::EIP7702_TX_TYPE_ID, Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy, constants::EIP7702_TX_TYPE_ID,
 };
-use alloy_primitives::{Address, Bytes, Sealed, Signature, TxKind, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, Sealed, Signature, TxKind, U256};
 use bytes::BufMut;
 use op_alloy_consensus::{OpTxEnvelope, OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit};
 use reth_codecs_derive::add_arbitrary_tests;

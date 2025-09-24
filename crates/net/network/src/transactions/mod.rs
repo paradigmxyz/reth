@@ -12,8 +12,8 @@ pub mod fetcher;
 pub mod policy;
 
 pub use self::constants::{
-    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
 };
 use config::{AnnouncementAcceptance, StrictEthAnnouncementFilter, TransactionPropagationKind};
 pub use config::{
@@ -24,8 +24,9 @@ use policy::{NetworkPolicies, TransactionPolicies};
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
-use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
+use self::constants::{DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE, tx_manager::*};
 use crate::{
+    NetworkHandle, TxTypesCounter,
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
@@ -34,13 +35,12 @@ use crate::{
     cache::LruCache,
     duration_metered_exec, metered_poll_nested_stream_with_budget,
     metrics::{
-        AnnouncedTxTypesMetrics, TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
+        AnnouncedTxTypesMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE, TransactionsManagerMetrics,
     },
-    NetworkHandle, TxTypesCounter,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{B256, TxHash};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-use futures::{stream::FuturesUnordered, Future, StreamExt};
+use futures::{Future, StreamExt, stream::FuturesUnordered};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
@@ -50,8 +50,8 @@ use reth_eth_wire::{
 use reth_ethereum_primitives::{TransactionSigned, TxType};
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
     NetworkEvent, NetworkEventListenerProvider, PeerKind, PeerRequest, PeerRequestSender, Peers,
+    events::{PeerEvent, SessionInfo},
 };
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
@@ -62,16 +62,16 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
-    error::{PoolError, PoolResult},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
+    error::{PoolError, PoolResult},
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -833,12 +833,10 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
 impl<Pool, N, PBundle> TransactionsManager<Pool, N, PBundle>
 where
     Pool: TransactionPool + Unpin + 'static,
-
     N: NetworkPrimitives<
             BroadcastedTransaction: SignedTransaction,
             PooledTransaction: SignedTransaction,
         > + Unpin,
-
     PBundle: TransactionPolicies,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
@@ -1488,13 +1486,13 @@ where
 // spawned in `NodeConfig::start_network`(reth_node_core::NodeConfig) and
 // `NetworkConfig::start_network`(reth_network::NetworkConfig)
 impl<
-        Pool: TransactionPool + Unpin + 'static,
-        N: NetworkPrimitives<
-                BroadcastedTransaction: SignedTransaction,
-                PooledTransaction: SignedTransaction,
-            > + Unpin,
-        PBundle: TransactionPolicies + Unpin,
-    > Future for TransactionsManager<Pool, N, PBundle>
+    Pool: TransactionPool + Unpin + 'static,
+    N: NetworkPrimitives<
+            BroadcastedTransaction: SignedTransaction,
+            PooledTransaction: SignedTransaction,
+        > + Unpin,
+    PBundle: TransactionPolicies + Unpin,
+> Future for TransactionsManager<Pool, N, PBundle>
 where
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
@@ -2096,15 +2094,15 @@ struct TxManagerPollDurations {
 mod tests {
     use super::*;
     use crate::{
+        NetworkConfigBuilder, NetworkManager,
         test_utils::{
-            transactions::{buffer_hash_to_tx_fetcher, new_mock_session, new_tx_manager},
             Testnet,
+            transactions::{buffer_hash_to_tx_fetcher, new_mock_session, new_tx_manager},
         },
         transactions::config::RelaxedEthAnnouncementFilter,
-        NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{TxEip1559, TxLegacy};
-    use alloy_primitives::{hex, Signature, TxKind, U256};
+    use alloy_primitives::{Signature, TxKind, U256, hex};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2116,7 +2114,7 @@ mod tests {
     };
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::test_utils::{
-        testing_pool, MockTransaction, MockTransactionFactory, TestPool,
+        MockTransaction, MockTransactionFactory, TestPool, testing_pool,
     };
     use secp256k1::SecretKey;
     use std::{
@@ -2429,11 +2427,13 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert!(transactions
-            .transactions_by_peers
-            .get(signed_tx.tx_hash())
-            .unwrap()
-            .contains(handle1.peer_id()));
+        assert!(
+            transactions
+                .transactions_by_peers
+                .get(signed_tx.tx_hash())
+                .unwrap()
+                .contains(handle1.peer_id())
+        );
 
         // advance the transaction manager future
         poll_fn(|cx| {

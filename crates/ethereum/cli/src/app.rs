@@ -1,5 +1,5 @@
-use crate::{interface::Commands, Cli};
-use eyre::{eyre, Result};
+use crate::{Cli, interface::Commands};
+use eyre::{Result, eyre};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -10,7 +10,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{EthEvmConfig, EthereumNode, consensus::EthBeaconConsensus};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
@@ -83,9 +83,9 @@ where
     ) -> Result<()>
     where
         N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader: CliHeader>,
-            ChainSpec: Hardforks + EthChainSpec,
-        >,
+                Primitives: NodePrimitives<BlockHeader: CliHeader>,
+                ChainSpec: Hardforks + EthChainSpec,
+            >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {

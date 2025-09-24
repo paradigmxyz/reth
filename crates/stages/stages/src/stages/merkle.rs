@@ -1,5 +1,5 @@
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_consensus::{BlockHeader, constants::KECCAK_EMPTY};
+use alloy_primitives::{B256, BlockNumber, Sealable};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db_api::{
@@ -442,19 +442,19 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner, stage_test_suite_ext,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{U256, keccak256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives_traits::{SealedBlock, StorageEntry};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_provider::{StaticFileProviderFactory, providers::StaticFileWriter};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_changeset_range,
-        random_contract_account_range, BlockParams, BlockRangeParams,
+        self, BlockParams, BlockRangeParams, random_block, random_block_range,
+        random_changeset_range, random_contract_account_range,
     };
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;

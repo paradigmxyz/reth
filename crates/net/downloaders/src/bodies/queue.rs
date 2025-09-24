@@ -2,7 +2,7 @@ use super::request::BodiesRequestFuture;
 use crate::metrics::BodyDownloaderMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
-use futures::{stream::FuturesUnordered, Stream};
+use futures::{Stream, stream::FuturesUnordered};
 use futures_util::StreamExt;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{

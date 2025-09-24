@@ -8,14 +8,14 @@ pub use reth_optimism_chainspec::decode_holocene_base_fee;
 
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
-use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH, TxReceipt};
 use alloy_eips::Encodable2718;
-use alloy_primitives::{Bloom, Bytes, B256};
+use alloy_primitives::{B256, Bloom, Bytes};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_consensus::ConsensusError;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{receipt::gas_spent_by_transactions, BlockBody, GotExpected};
+use reth_primitives_traits::{BlockBody, GotExpected, receipt::gas_spent_by_transactions};
 
 /// Ensures the block response data matches the header.
 ///
@@ -176,11 +176,11 @@ fn compare_receipts_root_and_logs_bloom(
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_primitives::{b256, hex, Bytes, U256};
+    use alloy_primitives::{Bytes, U256, b256, hex};
     use op_alloy_consensus::OpTxEnvelope;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
-    use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
-    use reth_optimism_forks::{OpHardfork, BASE_SEPOLIA_HARDFORKS};
+    use reth_optimism_chainspec::{BASE_SEPOLIA, OpChainSpec};
+    use reth_optimism_forks::{BASE_SEPOLIA_HARDFORKS, OpHardfork};
     use std::sync::Arc;
 
     const JOVIAN_TIMESTAMP: u64 = 1900000000;

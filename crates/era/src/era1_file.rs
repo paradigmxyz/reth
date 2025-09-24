@@ -8,11 +8,11 @@
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
     e2s_types::{E2sError, Entry, IndexEntry, Version},
-    era1_types::{BlockIndex, Era1Group, Era1Id, BLOCK_INDEX},
     era_file_ops::{EraFileFormat, FileReader, StreamReader, StreamWriter},
+    era1_types::{BLOCK_INDEX, BlockIndex, Era1Group, Era1Id},
     execution_types::{
         self, Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+        MAX_BLOCKS_PER_ERA1, TotalDifficulty,
     },
 };
 use alloy_primitives::BlockNumber;
@@ -223,7 +223,10 @@ impl<R: Read + Seek> Era1Reader<R> {
         {
             return Err(E2sError::Ssz(format!(
                 "Mismatched block component counts: headers={}, bodies={}, receipts={}, difficulties={}",
-                headers.len(), bodies.len(), receipts.len(), difficulties.len()
+                headers.len(),
+                bodies.len(),
+                receipts.len(),
+                difficulties.len()
             )));
         }
 

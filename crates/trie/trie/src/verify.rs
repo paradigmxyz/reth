@@ -1,13 +1,13 @@
 use crate::{
+    Nibbles,
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     progress::{IntermediateStateRootState, StateRootProgress},
     trie::StateRoot,
     trie_cursor::{
+        TrieCursor, TrieCursorFactory,
         depth_first::{self, DepthFirstTrieIterator},
         noop::NoopTrieCursorFactory,
-        TrieCursor, TrieCursorFactory,
     },
-    Nibbles,
 };
 use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
@@ -472,7 +472,7 @@ mod tests {
         hashed_cursor::mock::MockHashedCursorFactory,
         trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory},
     };
-    use alloy_primitives::{address, keccak256, map::B256Map, U256};
+    use alloy_primitives::{U256, address, keccak256, map::B256Map};
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;

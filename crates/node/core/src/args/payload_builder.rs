@@ -2,8 +2,8 @@ use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use alloy_eips::merge::SLOT_DURATION;
 use clap::{
-    builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
+    builder::{RangedU64ValueParser, TypedValueParser},
 };
 use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
@@ -120,12 +120,14 @@ mod tests {
 
     #[test]
     fn test_args_with_invalid_max_tasks() {
-        assert!(CommandParser::<PayloadBuilderArgs>::try_parse_from([
-            "reth",
-            "--builder.max-tasks",
-            "0"
-        ])
-        .is_err());
+        assert!(
+            CommandParser::<PayloadBuilderArgs>::try_parse_from([
+                "reth",
+                "--builder.max-tasks",
+                "0"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

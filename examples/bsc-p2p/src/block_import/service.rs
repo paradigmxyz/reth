@@ -1,7 +1,7 @@
 use super::handle::ImportHandle;
 use crate::block_import::parlia::{ParliaConsensus, ParliaConsensusErr};
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
-use futures::{future::Either, stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, future::Either, stream::FuturesUnordered};
 use reth_engine_primitives::{ConsensusEngineHandle, EngineTypes};
 use reth_eth_wire::NewBlock;
 use reth_network::{

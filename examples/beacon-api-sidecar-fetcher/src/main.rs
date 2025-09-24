@@ -20,11 +20,11 @@ use std::{
 
 use alloy_primitives::B256;
 use clap::Parser;
-use futures_util::{stream::FuturesUnordered, StreamExt};
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use mined_sidecar::MinedSidecarStream;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    node::{builder::NodeHandle, EthereumNode},
+    node::{EthereumNode, builder::NodeHandle},
     provider::CanonStateSubscriptions,
 };
 

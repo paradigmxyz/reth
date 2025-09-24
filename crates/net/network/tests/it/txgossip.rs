@@ -4,14 +4,14 @@ use alloy_primitives::{Signature, U256};
 use futures::StreamExt;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
+    NetworkEvent, NetworkEventListenerProvider, Peers,
     test_utils::{NetworkEventStream, Testnet},
     transactions::config::TransactionPropagationKind,
-    NetworkEvent, NetworkEventListenerProvider, Peers,
 };
-use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
+use reth_network_api::{PeerKind, PeersInfo, events::PeerEvent};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{
-    test_utils::TransactionGenerator, AddedTransactionOutcome, PoolTransaction, TransactionPool,
+    AddedTransactionOutcome, PoolTransaction, TransactionPool, test_utils::TransactionGenerator,
 };
 use std::sync::Arc;
 use tokio::join;

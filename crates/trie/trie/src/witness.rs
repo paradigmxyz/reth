@@ -10,9 +10,8 @@ use reth_trie_common::HashedPostState;
 use reth_trie_sparse::SparseTrieInterface;
 
 use alloy_primitives::{
-    keccak256,
+    B256, Bytes, keccak256,
     map::{B256Map, B256Set, Entry, HashMap},
-    Bytes, B256,
 };
 use itertools::Itertools;
 use reth_execution_errors::{
@@ -21,10 +20,10 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
+    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
 };
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 /// State transition witness for the trie.
 #[derive(Debug)]

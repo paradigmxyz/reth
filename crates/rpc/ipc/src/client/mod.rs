@@ -3,8 +3,8 @@
 use crate::stream_codec::StreamCodec;
 use futures::{StreamExt, TryFutureExt};
 use interprocess::local_socket::{
-    tokio::{prelude::*, RecvHalf, SendHalf},
     GenericFilePath,
+    tokio::{RecvHalf, SendHalf, prelude::*},
 };
 use jsonrpsee::{
     async_client::{Client, ClientBuilder},

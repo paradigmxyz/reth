@@ -97,7 +97,9 @@ pub enum EngineApiError {
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
     /// Requests hash provided, but can't be accepted by the API.
-    #[error("requests hash cannot be accepted by the API without `--engine.accept-execution-requests-hash` flag")]
+    #[error(
+        "requests hash cannot be accepted by the API without `--engine.accept-execution-requests-hash` flag"
+    )]
     UnexpectedRequestsHash,
     /// Any other rpc error
     #[error("{0}")]

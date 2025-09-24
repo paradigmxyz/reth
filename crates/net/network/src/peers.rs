@@ -8,22 +8,22 @@ use crate::{
 };
 use futures::StreamExt;
 
-use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
+use reth_eth_wire::{DisconnectReason, errors::EthStreamError};
 use reth_ethereum_forks::ForkId;
 use reth_net_banlist::BanList;
 use reth_network_api::test_utils::{PeerCommand, PeersHandle};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{
+    ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
+    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
     is_connection_failed_reputation,
     peers::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
     },
-    ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
-    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
     fmt::Display,
     io::{self},
     net::{IpAddr, SocketAddr},
@@ -1206,17 +1206,17 @@ impl Display for InboundConnectionError {
 mod tests {
     use alloy_primitives::B512;
     use reth_eth_wire::{
-        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
         DisconnectReason,
+        errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     };
     use reth_net_banlist::BanList;
     use reth_network_api::Direction;
     use reth_network_peers::{PeerId, TrustedPeer};
     use reth_network_types::{
-        peers::reputation::DEFAULT_REPUTATION, BackoffKind, Peer, ReputationChangeKind,
+        BackoffKind, Peer, ReputationChangeKind, peers::reputation::DEFAULT_REPUTATION,
     };
     use std::{
-        future::{poll_fn, Future},
+        future::{Future, poll_fn},
         io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         pin::Pin,
@@ -1227,13 +1227,13 @@ mod tests {
 
     use super::PeersManager;
     use crate::{
+        PeersConfig,
         error::SessionError,
         peers::{
             ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
             PeerConnectionState,
         },
         session::PendingSessionHandshakeError,
-        PeersConfig,
     };
 
     struct PeerActionFuture<'a> {
@@ -2510,9 +2510,11 @@ mod tests {
         tokio::time::sleep(peers.incoming_ip_throttle_duration).await;
 
         // await unban
-        poll_fn(|cx| loop {
-            if peers.poll(cx).is_pending() {
-                return Poll::Ready(());
+        poll_fn(|cx| {
+            loop {
+                if peers.poll(cx).is_pending() {
+                    return Poll::Ready(());
+                }
             }
         })
         .await;

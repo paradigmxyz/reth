@@ -2,6 +2,7 @@
 
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
+    StateProviderBuilder, TreeConfig,
     cached_state::{
         CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
         SavedCache,
@@ -11,9 +12,8 @@ use crate::tree::{
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieTask,
-    StateProviderBuilder, TreeConfig,
 };
-use alloy_evm::{block::StateChangeSource, ToTxEnv};
+use alloy_evm::{ToTxEnv, block::StateChangeSource};
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
@@ -21,13 +21,13 @@ use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
-    execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+    execute::{ExecutableTxFor, WithTxEnv},
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
-    StateReader,
+    BlockReader, DatabaseProviderFactory, StateProviderFactory, StateReader,
+    providers::ConsistentDbView,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
@@ -36,14 +36,14 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel, Sender},
     Arc,
+    atomic::AtomicBool,
+    mpsc::{self, Sender, channel},
 };
 use tracing::{debug, instrument};
 
@@ -631,12 +631,12 @@ where
 mod tests {
     use super::ExecutionCache;
     use crate::tree::{
+        StateProviderBuilder, TreeConfig,
         cached_state::{CachedStateMetrics, ExecutionCacheBuilder, SavedCache},
         payload_processor::{
-            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
+            PayloadProcessor, evm_state_to_hashed_post_state, executor::WorkloadExecutor,
         },
         precompile_cache::PrecompileCacheMap,
-        StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
     use rand::Rng;
@@ -647,13 +647,13 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
+        ChainSpecProvider, HashingWriter,
         providers::{BlockchainProvider, ConsistentDbView},
         test_utils::create_test_provider_factory_with_chain_spec,
-        ChainSpecProvider, HashingWriter,
     };
     use reth_testing_utils::generators;
-    use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use reth_trie::{HashedPostState, TrieInput, test_utils::state_root};
+    use revm_primitives::{Address, B256, HashMap, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
 

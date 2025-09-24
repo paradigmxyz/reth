@@ -1,23 +1,23 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_primitives::{B256, BlockHash, BlockNumber, Bytes};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_db_api::{
+    DbTxUnwindExt, RawKey, RawTable, RawValue,
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{FullBlockHeader, NodePrimitives, SealedHeader, serde_bincode_compat};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider,
-    HeaderSyncGapProvider, StaticFileProviderFactory,
+    BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGapProvider, StaticFileProviderFactory,
+    providers::StaticFileWriter,
 };
 use reth_stages_api::{
     CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
@@ -25,7 +25,7 @@ use reth_stages_api::{
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 
 use tokio::sync::watch;
 use tracing::*;
@@ -398,7 +398,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, stage_test_suite,
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
@@ -420,7 +420,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
-        use reth_provider::{test_utils::MockNodeTypesWithDB, BlockNumReader};
+        use reth_provider::{BlockNumReader, test_utils::MockNodeTypesWithDB};
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {

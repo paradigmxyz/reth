@@ -3,27 +3,27 @@
 
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
-    helpers::{estimate::EstimateCall, spec::SignersForRpc},
     FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
     RpcTransaction,
+    helpers::{estimate::EstimateCall, spec::SignersForRpc},
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, Transaction,
+    transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
 };
 use alloy_dyn_abi::TypedData;
-use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_eips::{BlockId, eip2718::Encodable2718};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_primitives::{Address, B256, Bytes, TxHash};
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
+use reth_rpc_convert::{RpcTxReq, transaction::RpcConvert};
 use reth_rpc_eth_types::{
-    utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
-    TransactionSource,
+    EthApiError, EthApiError::TransactionConfirmationTimeout, SignError, TransactionSource,
+    utils::binary_search,
 };
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,

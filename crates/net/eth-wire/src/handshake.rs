@@ -1,7 +1,7 @@
 use crate::{
+    CanDisconnect,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     ethstream::MAX_STATUS_SIZE,
-    CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};

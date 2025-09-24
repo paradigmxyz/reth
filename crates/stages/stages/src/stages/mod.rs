@@ -47,17 +47,17 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_primitives::{
-        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+        B256, BlockNumber, Signature, U256, address, hex_literal::hex, keccak256,
     };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::mdbx::{cursor::Cursor, RW};
+    use reth_db::mdbx::{RW, cursor::Cursor};
     use reth_db_api::{
+        AccountsHistory,
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,
         tables,
         transaction::{DbTx, DbTxMut},
-        AccountsHistory,
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
@@ -65,11 +65,11 @@ mod tests {
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
-        providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::MockNodeTypesWithDB,
         AccountExtReader, BlockBodyIndicesProvider, DatabaseProviderFactory, ProviderFactory,
         ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
         StorageReader,
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::MockNodeTypesWithDB,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{
@@ -77,7 +77,7 @@ mod tests {
     };
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
-        self, random_block, random_block_range, random_receipt, BlockRangeParams,
+        self, BlockRangeParams, random_block, random_block_range, random_receipt,
     };
     use std::{io::Write, sync::Arc};
 

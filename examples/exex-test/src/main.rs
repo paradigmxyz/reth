@@ -1,21 +1,21 @@
 use futures_util::StreamExt;
 use reth_e2e_test_utils::testsuite::{
+    TestBuilder,
     actions::ProduceBlocks,
     setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
 use reth_ethereum::{
+    EthPrimitives,
     chainspec::{ChainSpecBuilder, MAINNET},
     exex::{ExExContext, ExExEvent},
     node::{
-        api::{FullNodeComponents, NodeTypes},
         EthEngineTypes, EthereumNode,
+        api::{FullNodeComponents, NodeTypes},
     },
-    EthPrimitives,
 };
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 mod wal_test;

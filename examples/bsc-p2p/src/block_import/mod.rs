@@ -9,7 +9,7 @@ use reth_primitives::NodePrimitives;
 use service::{BlockMsg, BscBlock, ImportEvent, Outcome};
 use std::{
     fmt,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 mod handle;

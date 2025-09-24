@@ -22,8 +22,8 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
     EthEvmFactory, FromRecoveredTx, FromTxWithEncoded,
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
 };
 use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::ExecutionData;
@@ -31,11 +31,11 @@ use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
-    precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory,
-    ExecutableTxIterator, ExecutionCtxFor, NextBlockEnvAttributes, TransactionEnv,
+    ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory, ExecutableTxIterator,
+    ExecutionCtxFor, NextBlockEnvAttributes, TransactionEnv, precompiles::PrecompilesMap,
 };
 use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, SealedBlock, SealedHeader, SignedTransaction, TxTy,
+    SealedBlock, SealedHeader, SignedTransaction, TxTy, constants::MAX_TX_GAS_LIMIT_OSAKA,
 };
 use reth_storage_errors::any::AnyError;
 use revm::{
@@ -375,7 +375,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
-    use reth_evm::{execute::ProviderError, EvmEnv};
+    use reth_evm::{EvmEnv, execute::ProviderError};
     use revm::{
         context::{BlockEnv, CfgEnv},
         database::CacheDB,

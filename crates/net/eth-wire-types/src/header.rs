@@ -44,11 +44,7 @@ impl HeadersDirection {
     /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub const fn new(reverse: bool) -> Self {
-        if reverse {
-            Self::Falling
-        } else {
-            Self::Rising
-        }
+        if reverse { Self::Falling } else { Self::Rising }
     }
 }
 
@@ -87,8 +83,8 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-    use alloy_primitives::{address, b256, bloom, bytes, hex, Bytes, B256, U256};
+    use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH, Header};
+    use alloy_primitives::{B256, Bytes, U256, address, b256, bloom, bytes, hex};
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
@@ -123,12 +119,12 @@ mod tests {
         let expected_hash =
             b256!("0x6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f");
         let header = Header {
-            parent_hash: b256!("0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"),
+            parent_hash: b256!(
+                "0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"
+            ),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: address!("0xba5e000000000000000000000000000000000000"),
-            state_root: b256!(
-                "0xec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"
-            ),
+            state_root: b256!("0xec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"),
             transactions_root: b256!(
                 "0x50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf"
             ),
@@ -145,7 +141,7 @@ mod tests {
             timestamp: 0x079e,
             extra_data: bytes!("42"),
             mix_hash: b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
-            nonce: 0u64.into()  ,
+            nonce: 0u64.into(),
             base_fee_per_gas: Some(0x036b),
             withdrawals_root: None,
             blob_gas_used: None,

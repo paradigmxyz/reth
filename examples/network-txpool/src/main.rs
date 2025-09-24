@@ -10,10 +10,10 @@
 #![warn(unused_crate_dependencies)]
 
 use reth_ethereum::{
-    network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager},
+    network::{EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key},
     pool::{
-        blobstore::InMemoryBlobStore, test_utils::OkValidator, CoinbaseTipOrdering,
-        EthPooledTransaction, Pool, TransactionListenerKind, TransactionPool,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionListenerKind, TransactionPool,
+        blobstore::InMemoryBlobStore, test_utils::OkValidator,
     },
     provider::test_utils::NoopProvider,
 };

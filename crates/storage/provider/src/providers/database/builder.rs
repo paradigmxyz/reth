@@ -3,12 +3,13 @@
 //! This also includes general purpose staging types that provide builder style functions that lead
 //! up to the intended build target.
 
-use crate::{providers::StaticFileProvider, ProviderFactory};
+use crate::{ProviderFactory, providers::StaticFileProvider};
 use reth_db::{
+    DatabaseEnv,
     mdbx::{DatabaseArguments, MaxReadTransactionDuration},
-    open_db_read_only, DatabaseEnv,
+    open_db_read_only,
 };
-use reth_db_api::{database_metrics::DatabaseMetrics, Database};
+use reth_db_api::{Database, database_metrics::DatabaseMetrics};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use std::{
     marker::PhantomData,

@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes::BufMut, keccak256, B256};
+use alloy_primitives::{B256, bytes::BufMut, keccak256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -209,8 +209,8 @@ fn stage_checkpoint_progress(provider: &impl StatsReader) -> ProviderResult<Enti
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner, stage_test_suite_ext,
     };
     use alloy_primitives::{Address, U256};
     use assert_matches::assert_matches;
@@ -223,7 +223,7 @@ mod tests {
     use reth_primitives_traits::SealedBlock;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
-        self, random_block_range, random_contract_account_range, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_contract_account_range,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);

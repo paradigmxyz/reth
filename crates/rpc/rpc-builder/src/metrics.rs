@@ -1,12 +1,12 @@
 use jsonrpsee::{
+    MethodResponse, RpcModule,
     core::middleware::{Batch, Notification},
     server::middleware::rpc::RpcServiceT,
     types::Request,
-    MethodResponse, RpcModule,
 };
 use reth_metrics::{
-    metrics::{Counter, Histogram},
     Metrics,
+    metrics::{Counter, Histogram},
 };
 use std::{
     collections::HashMap,

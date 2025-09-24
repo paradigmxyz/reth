@@ -1,22 +1,22 @@
 use alloy_primitives::{
+    B256, BlockNumber,
     map::{HashMap, HashSet},
-    BlockNumber, B256,
 };
 use core::{
     marker::PhantomData,
     ops::{Deref, RangeInclusive},
 };
 use reth_db_api::{
+    DatabaseError,
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_primitives_traits::StorageEntry;
 use reth_trie::{
-    prefix_set::{PrefixSetMut, TriePrefixSets},
     KeyHasher, Nibbles,
+    prefix_set::{PrefixSetMut, TriePrefixSets},
 };
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.

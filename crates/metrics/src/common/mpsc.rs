@@ -6,7 +6,7 @@ use futures::Stream;
 use metrics::Counter;
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::mpsc::{
     self,

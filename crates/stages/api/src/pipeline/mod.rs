@@ -2,14 +2,14 @@ mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 use crate::{PipelineTarget, StageCheckpoint, StageId};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
-    ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
-    PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
+    BlockHashReader, BlockNumReader, ChainStateBlockReader, ChainStateBlockWriter,
+    DatabaseProviderFactory, ProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StageCheckpointWriter, providers::ProviderNodeTypes, writer::UnifiedStorageWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -650,11 +650,11 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use super::*;
-    use crate::{test_utils::TestStage, UnwindOutput};
+    use crate::{UnwindOutput, test_utils::TestStage};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
+    use reth_provider::test_utils::{MockNodeTypesWithDB, create_test_provider_factory};
     use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;

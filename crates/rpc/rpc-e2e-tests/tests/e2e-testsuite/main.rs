@@ -4,9 +4,9 @@ use alloy_genesis::Genesis;
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_e2e_test_utils::testsuite::{
+    TestBuilder,
     actions::{MakeCanonical, UpdateBlockInfo},
     setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use reth_rpc_e2e_tests::rpc_compat::{InitializeFromExecutionApis, RunRpcCompatTests};
@@ -94,7 +94,9 @@ async fn test_execution_apis_compat() -> Result<()> {
     let test_data_path = match env::var("EXECUTION_APIS_TEST_PATH") {
         Ok(path) => path,
         Err(_) => {
-            info!("SKIPPING: EXECUTION_APIS_TEST_PATH environment variable not set. Please set it to the path of execution-apis/tests directory to run this test.");
+            info!(
+                "SKIPPING: EXECUTION_APIS_TEST_PATH environment variable not set. Please set it to the path of execution-apis/tests directory to run this test."
+            );
             return Ok(());
         }
     };

@@ -5,41 +5,41 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
+    EthEvm, EthEvmFactory,
     block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     precompiles::PrecompilesMap,
     revm::context::result::ResultAndState,
-    EthEvm, EthEvmFactory,
 };
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth_ethereum::{
+    Block, EthPrimitives, Receipt, TransactionSigned,
     chainspec::ChainSpec,
     cli::interface::Cli,
     evm::{
+        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
         primitives::{
-            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
             Database, Evm, EvmEnv, EvmEnvFor, ExecutionCtxFor, InspectorFor,
             NextBlockEnvAttributes, OnStateHook,
+            execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
         },
         revm::{
+            DatabaseCommit,
             context::TxEnv,
             db::State,
-            primitives::{address, hardfork::SpecId, Address},
-            DatabaseCommit,
+            primitives::{Address, address, hardfork::SpecId},
         },
-        EthBlockAssembler, EthEvmConfig, RethReceiptBuilder,
     },
     node::{
-        api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
-        builder::{components::ExecutorBuilder, BuilderContext},
-        node::EthereumAddOns,
         EthereumNode,
+        api::{ConfigureEngineEvm, ConfigureEvm, ExecutableTxIterator, FullNodeTypes, NodeTypes},
+        builder::{BuilderContext, components::ExecutorBuilder},
+        node::EthereumAddOns,
     },
     primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
     rpc::types::engine::ExecutionData,
-    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 

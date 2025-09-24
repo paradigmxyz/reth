@@ -1,7 +1,7 @@
 use crate::{
-    provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RevealedSparseNode, SparseTrieInterface, SparseTrieUpdates,
     TrieMasks,
+    provider::{RevealedNode, TrieNodeProvider},
 };
 use alloc::{
     borrow::Cow,
@@ -12,16 +12,15 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{
-    hex, keccak256,
+    B256, hex, keccak256,
     map::{Entry, HashMap, HashSet},
-    B256,
 };
 use alloy_rlp::Decodable;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
+    BranchNodeCompact, BranchNodeRef, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH, ExtensionNodeRef,
+    LeafNodeRef, Nibbles, RlpNode, TrieMask, TrieNode,
     prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
-    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::{debug, trace};
@@ -72,7 +71,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{SerialSparseTrie, SparseTrie, provider::DefaultTrieNodeProvider};
     ///
     /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
@@ -121,7 +120,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{SerialSparseTrie, SparseTrie, provider::DefaultTrieNodeProvider};
     ///
     /// let trie = SparseTrie::<SerialSparseTrie>::blind();
     /// assert!(trie.is_blind());
@@ -153,22 +152,14 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     ///
     /// Returns `None` if the trie is blinded.
     pub const fn as_revealed_ref(&self) -> Option<&T> {
-        if let Self::Revealed(revealed) = self {
-            Some(revealed)
-        } else {
-            None
-        }
+        if let Self::Revealed(revealed) = self { Some(revealed) } else { None }
     }
 
     /// Returns a mutable reference to the underlying revealed sparse trie.
     ///
     /// Returns `None` if the trie is blinded.
     pub fn as_revealed_mut(&mut self) -> Option<&mut T> {
-        if let Self::Revealed(revealed) = self {
-            Some(revealed)
-        } else {
-            None
-        }
+        if let Self::Revealed(revealed) = self { Some(revealed) } else { None }
     }
 
     /// Wipes the trie by removing all nodes and values,
@@ -922,11 +913,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let rlp_node = self.rlp_node_allocate(&mut prefix_set);
-        if let Some(root_hash) = rlp_node.as_hash() {
-            root_hash
-        } else {
-            keccak256(rlp_node)
-        }
+        if let Some(root_hash) = rlp_node.as_hash() { root_hash } else { keccak256(rlp_node) }
     }
 
     fn update_subtrie_hashes(&mut self) {
@@ -2247,7 +2234,7 @@ mod find_leaf_tests {
 mod tests {
     use super::*;
     use crate::provider::DefaultTrieNodeProvider;
-    use alloy_primitives::{map::B256Set, U256};
+    use alloy_primitives::{U256, map::B256Set};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -2255,18 +2242,18 @@ mod tests {
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
     use reth_primitives_traits::Account;
-    use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
+    use reth_provider::{TrieWriter, test_utils::create_test_provider_factory};
     use reth_trie::{
-        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
-        node_iter::{TrieElement, TrieNodeIter},
-        trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
-        walker::TrieWalker,
         BranchNode, ExtensionNode, HashedPostState, LeafNode,
+        hashed_cursor::{HashedPostStateAccountCursor, noop::NoopHashedAccountCursor},
+        node_iter::{TrieElement, TrieNodeIter},
+        trie_cursor::{TrieCursor, TrieCursorFactory, noop::NoopAccountTrieCursor},
+        walker::TrieWalker,
     };
     use reth_trie_common::{
+        HashBuilder,
         proof::{ProofNodes, ProofRetainer},
         updates::TrieUpdates,
-        HashBuilder,
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
     use std::collections::{BTreeMap, BTreeSet};

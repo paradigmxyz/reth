@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
@@ -24,7 +24,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_transaction_pool::TransactionPool;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs,
     net::SocketAddr,
@@ -199,11 +199,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
 
     /// Sets --dev mode for the node [`NodeConfig::dev`], if `dev` is true.
     pub const fn set_dev(self, dev: bool) -> Self {
-        if dev {
-            self.dev()
-        } else {
-            self
-        }
+        if dev { self.dev() } else { self }
     }
 
     /// Set the data directory args for the node

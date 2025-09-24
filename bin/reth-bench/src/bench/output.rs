@@ -3,7 +3,7 @@
 
 use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{ser::SerializeStruct, Serialize};
+use serde::{Serialize, ser::SerializeStruct};
 use std::time::Duration;
 
 /// This is the suffix for gas output csv files.

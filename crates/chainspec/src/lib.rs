@@ -30,8 +30,8 @@ pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;
 pub use spec::{
-    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    ChainSpecProvider, DepositContract, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider, DEV,
+    DepositContract, ForkBaseFeeParams, HOLESKY, HOODI, MAINNET, SEPOLIA, make_genesis_header,
 };
 
 use reth_primitives_traits::sync::OnceLock;

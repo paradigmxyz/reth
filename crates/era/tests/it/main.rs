@@ -9,8 +9,8 @@
 use reqwest::{Client, Url};
 use reth_era::{
     e2s_types::E2sError,
-    era1_file::{Era1File, Era1Reader},
     era_file_ops::FileReader,
+    era1_file::{Era1File, Era1Reader},
 };
 use reth_era_downloader::EraClient;
 use std::{
@@ -20,7 +20,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use tempfile::TempDir;
 
 mod dd;

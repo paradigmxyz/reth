@@ -1,19 +1,19 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{map::B256Map, B256, U256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use alloy_primitives::{B256, U256, map::B256Map};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
-    hashed_cursor::{noop::NoopHashedStorageCursor, HashedPostStateStorageCursor},
+    HashedStorage,
+    hashed_cursor::{HashedPostStateStorageCursor, noop::NoopHashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{noop::NoopStorageTrieCursor, InMemoryTrieCursor},
+    trie_cursor::{InMemoryTrieCursor, noop::NoopStorageTrieCursor},
     updates::StorageTrieUpdates,
     walker::TrieWalker,
-    HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
-use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+use reth_trie_sparse::{SerialSparseTrie, SparseTrie, provider::DefaultTrieNodeProvider};
 
 fn calculate_root_from_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("calculate root from leaves");

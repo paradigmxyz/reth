@@ -2,24 +2,25 @@
 
 use crate::{OpEthApi, OpEthApiError, SequencerClient};
 use alloy_consensus::TxReceipt as _;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
-use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
+use op_alloy_consensus::{OpTransaction, transaction::OpTransactionInfo};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{BlockBody, SignedTransaction, SignerRecoverable};
 use reth_rpc_convert::transaction::ConvertReceiptInput;
 use reth_rpc_eth_api::{
+    EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore, RpcReceipt,
+    TxInfoMapper,
     helpers::{
-        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc, EthTransactions,
-        LoadReceipt, LoadTransaction,
+        EthTransactions, LoadReceipt, LoadTransaction,
+        receipt::calculate_gas_used_and_next_log_index, spec::SignersForRpc,
     },
-    try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
-    RpcReceipt, TxInfoMapper,
+    try_into_op_tx_info,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
+use reth_storage_api::{ReceiptProvider, errors::ProviderError};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };

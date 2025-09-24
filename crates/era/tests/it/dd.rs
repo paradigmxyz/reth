@@ -5,14 +5,14 @@ use alloy_consensus::{BlockBody, Header};
 use alloy_primitives::U256;
 use reth_era::{
     e2s_types::IndexEntry,
-    era1_file::{Era1Reader, Era1Writer},
     era_file_ops::{StreamReader, StreamWriter},
+    era1_file::{Era1Reader, Era1Writer},
     execution_types::CompressedBody,
 };
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
-use crate::{open_test_file, Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, MAINNET};
+use crate::{ERA1_MAINNET_FILES_NAMES, Era1TestDownloader, MAINNET, open_test_file};
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]

@@ -1,14 +1,14 @@
 use alloy_primitives::B256;
 use reth_db_api::{
+    DatabaseError,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_trie::{
+    BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::StorageTrieUpdates,
-    BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
@@ -69,7 +69,7 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0.0, value.1)))
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
@@ -77,12 +77,12 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0.0, value.1)))
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
+        Ok(self.0.next()?.map(|value| (value.0.0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
@@ -238,10 +238,10 @@ mod tests {
         }
 
         let db_data = cursor.walk_range(..).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-        assert_eq!(db_data[0].0 .0.to_vec(), data[0]);
-        assert_eq!(db_data[1].0 .0.to_vec(), data[1]);
-        assert_eq!(db_data[2].0 .0.to_vec(), data[2]);
-        assert_eq!(db_data[3].0 .0.to_vec(), data[3]);
+        assert_eq!(db_data[0].0.0.to_vec(), data[0]);
+        assert_eq!(db_data[1].0.0.to_vec(), data[1]);
+        assert_eq!(db_data[2].0.0.to_vec(), data[2]);
+        assert_eq!(db_data[3].0.0.to_vec(), data[3]);
 
         assert_eq!(
             cursor.seek(hex!("0303040f").to_vec().into()).unwrap().map(|(k, _)| k.0.to_vec()),

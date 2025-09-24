@@ -6,8 +6,8 @@ use alloy_eips::eip2718::Encodable2718;
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, PruneCheckpointReader,
-    PruneCheckpointWriter, StaticFileProviderFactory,
+    BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
+    StaticFileProviderFactory, providers::StaticFileProvider,
 };
 use reth_prune_types::PruneModes;
 

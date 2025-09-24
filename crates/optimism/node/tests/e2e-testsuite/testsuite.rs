@@ -2,11 +2,11 @@ use alloy_primitives::{Address, B256};
 use eyre::Result;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_e2e_test_utils::testsuite::{
+    TestBuilder,
     actions::AssertMineBlock,
     setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
-use reth_optimism_chainspec::{OpChainSpecBuilder, OP_MAINNET};
+use reth_optimism_chainspec::{OP_MAINNET, OpChainSpecBuilder};
 use reth_optimism_node::{OpEngineTypes, OpNode};
 use std::sync::Arc;
 

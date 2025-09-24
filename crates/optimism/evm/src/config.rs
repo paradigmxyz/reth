@@ -3,7 +3,7 @@ pub use alloy_op_evm::{
 };
 
 use alloy_consensus::BlockHeader;
-use revm::primitives::{Address, Bytes, B256};
+use revm::primitives::{Address, B256, Bytes};
 
 /// Context relevant for execution of a next block w.r.t OP.
 #[derive(Debug, Clone, PartialEq, Eq)]

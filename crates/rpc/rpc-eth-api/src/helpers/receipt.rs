@@ -2,11 +2,11 @@
 //! loads receipt data w.r.t. network.
 
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
-use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
+use alloy_consensus::{TxReceipt, transaction::TransactionMeta};
 use futures::Future;
 use reth_primitives_traits::SignerRecoverable;
-use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
-use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
+use reth_rpc_convert::{RpcConvert, transaction::ConvertReceiptInput};
+use reth_rpc_eth_types::{EthApiError, error::FromEthApiError};
 use reth_storage_api::{ProviderReceipt, ProviderTx};
 
 /// Calculates the gas used and next log index for a transaction at the given index

@@ -5,17 +5,17 @@ use core::fmt;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
+    FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore, helpers::estimate::EstimateCall,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{BlockHeader, transaction::TxHashRef};
 use alloy_eips::eip2930::AccessListResult;
-use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
+use alloy_evm::overrides::{OverrideBlockHashes, apply_block_overrides, apply_state_overrides};
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, Bytes, U256};
 use alloy_rpc_types_eth::{
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -31,18 +31,18 @@ use reth_revm::{
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-    error::{api::FromEvmHalt, ensure_success, FromEthApiError},
-    simulate::{self, EthSimulateError},
     EthApiError, RevertError, StateCacheDb,
+    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
+    error::{FromEthApiError, api::FromEvmHalt, ensure_success},
+    simulate::{self, EthSimulateError},
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
-    context_interface::{
-        result::{ExecutionResult, ResultAndState},
-        Transaction,
-    },
     Database, DatabaseCommit,
+    context_interface::{
+        Transaction,
+        result::{ExecutionResult, ResultAndState},
+    },
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::{trace, warn};

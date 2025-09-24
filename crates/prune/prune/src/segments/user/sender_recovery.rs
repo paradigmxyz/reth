@@ -1,7 +1,7 @@
 use crate::{
+    PrunerError,
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PrunerError,
 };
 use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
@@ -83,7 +83,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, SenderRecovery};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{B256, BlockNumber, TxNumber};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
@@ -94,7 +94,7 @@ mod tests {
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+    use reth_testing_utils::generators::{self, BlockRangeParams, random_block_range};
     use std::ops::Sub;
 
     #[test]

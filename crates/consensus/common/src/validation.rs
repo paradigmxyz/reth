@@ -1,17 +1,17 @@
 //! Collection of methods for block validation.
 
 use alloy_consensus::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH,
+    BlockHeader as _, EMPTY_OMMER_ROOT_HASH, Transaction, constants::MAXIMUM_EXTRA_DATA_SIZE,
 };
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
 use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
     constants::{
-        GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MAX_TX_GAS_LIMIT_OSAKA, MINIMUM_GAS_LIMIT,
+        GAS_LIMIT_BOUND_DIVISOR, MAX_TX_GAS_LIMIT_OSAKA, MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT,
     },
     transaction::TxHashRef,
-    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
 
 /// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).

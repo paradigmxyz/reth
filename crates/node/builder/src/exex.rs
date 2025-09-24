@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 
@@ -25,7 +25,7 @@ pub type BoxExEx = BoxFuture<'static, eyre::Result<()>>;
 pub trait BoxedLaunchExEx<Node: FullNodeComponents>: Send {
     /// Launches the `ExEx` and returns a boxed future.
     fn launch(self: Box<Self>, ctx: ExExContext<Node>)
-        -> BoxFuture<'static, eyre::Result<BoxExEx>>;
+    -> BoxFuture<'static, eyre::Result<BoxExEx>>;
 }
 
 /// Implements [`BoxedLaunchExEx`] for any [`LaunchExEx`] that is [Send] and `'static`.

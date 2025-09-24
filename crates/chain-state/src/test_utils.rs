@@ -1,13 +1,13 @@
 use crate::{
-    in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ExecutedTrieUpdates,
+    CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions, ExecutedTrieUpdates,
+    in_memory::ExecutedBlockWithTrieUpdates,
 };
-use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
+use alloy_consensus::{EMPTY_ROOT_HASH, Header, SignableTransaction, TxEip1559, TxReceipt};
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE},
     eip7685::Requests,
 };
-use alloy_primitives::{Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use core::marker::PhantomData;
@@ -18,12 +18,12 @@ use reth_ethereum_primitives::{
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{
-    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
     Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
+    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, HashedPostState};
+use reth_trie::{HashedPostState, root::state_root_unhashed};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{

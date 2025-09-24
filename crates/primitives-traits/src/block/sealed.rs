@@ -1,14 +1,14 @@
 //! Sealed block types
 
 use crate::{
-    block::{error::BlockRecoveryError, RecoveredBlock},
-    transaction::signed::RecoveryError,
     Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
+    block::{RecoveredBlock, error::BlockRecoveryError},
+    transaction::signed::RecoveryError,
 };
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
+use alloy_eips::{BlockNumHash, eip1898::BlockWithParent};
+use alloy_primitives::{Address, B256, BlockHash, Sealable, Sealed};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
@@ -380,20 +380,20 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{
-        serde_bincode_compat::{self, BincodeReprFor, SerdeBincodeCompat},
         Block,
+        serde_bincode_compat::{self, BincodeReprFor, SerdeBincodeCompat},
     };
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use serde_with::{serde_as, DeserializeAs, SerializeAs};
+    use serde_with::{DeserializeAs, SerializeAs, serde_as};
 
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_primitives_traits::{
+    ///     Block,
     ///     block::SealedBlock,
     ///     serde_bincode_compat::{self, SerdeBincodeCompat},
-    ///     Block,
     /// };
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;

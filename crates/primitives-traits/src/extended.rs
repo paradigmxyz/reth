@@ -4,18 +4,18 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, Transaction,
+    transaction::{SignerRecoverable, TxHashRef},
 };
 use alloy_eips::{
+    Decodable2718, Encodable2718, Typed2718,
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
-    Decodable2718, Encodable2718, Typed2718,
 };
 use alloy_primitives::{ChainId, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use revm_primitives::{Address, Bytes, TxKind, B256, U256};
+use revm_primitives::{Address, B256, Bytes, TxKind, U256};
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -278,7 +278,7 @@ impl<Eip4844, Tx> From<EthereumTxEnvelope<Eip4844>> for Extended<EthereumTxEnvel
 mod op {
     use crate::Extended;
     use alloy_consensus::error::ValueError;
-    use alloy_primitives::{Sealed, Signature, B256};
+    use alloy_primitives::{B256, Sealed, Signature};
     use op_alloy_consensus::{OpPooledTransaction, OpTransaction, OpTxEnvelope, TxDeposit};
 
     impl<B, T> OpTransaction for Extended<B, T>

@@ -1,8 +1,8 @@
 //! Dummy blocks and data for tests
 use crate::{DBProvider, DatabaseProviderRW, ExecutionOutcome};
-use alloy_consensus::{TxLegacy, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, TxLegacy};
 use alloy_primitives::{
-    b256, hex_literal::hex, map::HashMap, Address, BlockNumber, Bytes, Log, TxKind, B256, U256,
+    Address, B256, BlockNumber, Bytes, Log, TxKind, U256, b256, hex_literal::hex, map::HashMap,
 };
 
 use alloy_consensus::Header;

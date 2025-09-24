@@ -10,9 +10,9 @@ mod export;
 
 /// Export history from storage-api between 2 blocks
 /// with parameters defined in [`ExportConfig`].
-pub use export::{export, ExportConfig};
+pub use export::{ExportConfig, export};
 
 /// Imports history from ERA files.
 pub use history::{
-    build_index, decode, import, open, process, process_iter, save_stage_checkpoints, ProcessIter,
+    ProcessIter, build_index, decode, import, open, process, process_iter, save_stage_checkpoints,
 };

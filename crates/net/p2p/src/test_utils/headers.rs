@@ -19,10 +19,10 @@ use std::{
     fmt,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::Mutex;
 

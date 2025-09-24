@@ -13,7 +13,7 @@ use reth_node_builder::BlockTy;
 use reth_node_core::version::version_metadata;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
+use reth_optimism_primitives::{OpPrimitives, bedrock::is_dup_tx};
 use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, StageCheckpointReader};
 use reth_prune::PruneModes;
 use reth_stages::StageId;

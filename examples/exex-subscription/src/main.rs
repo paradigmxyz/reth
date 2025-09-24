@@ -7,12 +7,12 @@ use alloy_primitives::{Address, U256};
 use clap::Parser;
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
-    SubscriptionMessage,
+    PendingSubscriptionSink, SubscriptionMessage, core::SubscriptionResult, proc_macros::rpc,
+    tracing,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
-    node::{api::FullNodeComponents, builder::NodeHandleFor, EthereumNode},
+    node::{EthereumNode, api::FullNodeComponents, builder::NodeHandleFor},
 };
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};

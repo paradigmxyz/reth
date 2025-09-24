@@ -1,4 +1,4 @@
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{Metrics, metrics::Histogram};
 
 /// Metrics for blinded node fetching for the duration of the proof task manager.
 #[derive(Clone, Debug, Default)]

@@ -1,19 +1,19 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
-    providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
-    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateReader, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    providers::StaticFileProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{BlockHeader, transaction::TransactionMeta};
 use alloy_eips::{
-    eip2718::Encodable2718, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
-    HashOrNumber,
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+    eip2718::Encodable2718,
 };
 use alloy_primitives::{
-    map::{hash_map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, TxHash, TxNumber, U256,
+    map::{HashMap, hash_map},
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
@@ -1453,8 +1453,8 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::blockchain_provider::BlockchainProvider,
-        test_utils::create_test_provider_factory, BlockWriter,
+        BlockWriter, providers::blockchain_provider::BlockchainProvider,
+        test_utils::create_test_provider_factory,
     };
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::B256;
@@ -1469,7 +1469,7 @@ mod tests {
     use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
-        self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_changeset_range, random_eoa_accounts,
     };
     use revm_database::BundleState;
     use std::{
@@ -1776,30 +1776,32 @@ mod tests {
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {
-            new: vec![in_memory_blocks
-                .first()
-                .map(|block| {
-                    let senders = block.senders().expect("failed to recover senders");
-                    ExecutedBlockWithTrieUpdates::new(
-                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
-                        Arc::new(ExecutionOutcome {
-                            bundle: BundleState::new(
-                                in_memory_state.into_iter().map(|(address, (account, _))| {
-                                    (address, None, Some(account.into()), Default::default())
-                                }),
-                                [in_memory_changesets.iter().map(|(address, account, _)| {
-                                    (*address, Some(Some((*account).into())), Vec::new())
-                                })],
-                                [],
-                            ),
-                            first_block: first_in_memory_block,
-                            ..Default::default()
-                        }),
-                        Default::default(),
-                        ExecutedTrieUpdates::empty(),
-                    )
-                })
-                .unwrap()],
+            new: vec![
+                in_memory_blocks
+                    .first()
+                    .map(|block| {
+                        let senders = block.senders().expect("failed to recover senders");
+                        ExecutedBlockWithTrieUpdates::new(
+                            Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
+                            Arc::new(ExecutionOutcome {
+                                bundle: BundleState::new(
+                                    in_memory_state.into_iter().map(|(address, (account, _))| {
+                                        (address, None, Some(account.into()), Default::default())
+                                    }),
+                                    [in_memory_changesets.iter().map(|(address, account, _)| {
+                                        (*address, Some(Some((*account).into())), Vec::new())
+                                    })],
+                                    [],
+                                ),
+                                first_block: first_in_memory_block,
+                                ..Default::default()
+                            }),
+                            Default::default(),
+                            ExecutedTrieUpdates::empty(),
+                        )
+                    })
+                    .unwrap(),
+            ],
         };
         provider.canonical_in_memory_state.update_chain(chain);
 

@@ -2,36 +2,37 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
+    EthChainSpec,
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    holesky, hoodi, mainnet, sepolia, EthChainSpec,
+    holesky, hoodi, mainnet, sepolia,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
+    Header,
     constants::{
         EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH, MAINNET_GENESIS_HASH,
         SEPOLIA_GENESIS_HASH,
     },
-    Header,
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
     eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
 use derive_more::From;
 use reth_ethereum_forks::{
-    ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
+    ChainHardforks, DEV_HARDFORKS, DisplayHardforks, EthereumHardfork, EthereumHardforks,
+    ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head,
 };
 use reth_network_peers::{
-    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
-    NodeRecord,
+    NodeRecord, holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
+    sepolia_nodes,
 };
-use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+use reth_primitives_traits::{SealedHeader, sync::LazyLock};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -1051,7 +1052,7 @@ mod tests {
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
-    use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+    use alloy_trie::{EMPTY_ROOT_HASH, TrieAccount};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use std::{collections::HashMap, str::FromStr};
@@ -1903,16 +1904,20 @@ Post-merge hard forks (timestamp based):
         // Check that Paris is not active on terminal PoW block #15537393.
         let terminal_block_ttd = U256::from(58750003716598352816469_u128);
         let terminal_block_difficulty = U256::from(11055787484078698_u128);
-        assert!(!chainspec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
+        assert!(
+            !chainspec
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(terminal_block_ttd, terminal_block_difficulty)
+        );
 
         // Check that Paris is active on first PoS block #15537394.
         let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
         let first_pos_difficulty = U256::ZERO;
-        assert!(chainspec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
+        assert!(
+            chainspec
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(first_pos_block_ttd, first_pos_difficulty)
+        );
     }
 
     #[test]
@@ -2406,9 +2411,11 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn holesky_paris_activated_at_genesis() {
-        assert!(HOLESKY
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
+        assert!(
+            HOLESKY
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty)
+        );
     }
 
     #[test]
@@ -2565,10 +2572,12 @@ Post-merge hard forks (timestamp based):
             EthereumHardfork::Cancun.boxed(),
         ];
 
-        assert!(expected_hardforks
-            .iter()
-            .zip(hardforks.iter())
-            .all(|(expected, actual)| &**expected == *actual));
+        assert!(
+            expected_hardforks
+                .iter()
+                .zip(hardforks.iter())
+                .all(|(expected, actual)| &**expected == *actual)
+        );
         assert_eq!(expected_hardforks.len(), hardforks.len());
     }
 

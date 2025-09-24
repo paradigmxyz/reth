@@ -1,15 +1,15 @@
 /// Abstractions for managing `WebSocket` connections in the ethstats service.
 use crate::error::ConnectionError;
 use futures_util::{
-    stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
+    stream::{SplitSink, SplitStream},
 };
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_tungstenite::{
-    tungstenite::protocol::{frame::Utf8Bytes, Message},
     MaybeTlsStream, WebSocketStream,
+    tungstenite::protocol::{Message, frame::Utf8Bytes},
 };
 
 /// Type alias for a `WebSocket` stream that may be TLS or plain TCP

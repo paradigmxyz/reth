@@ -1,11 +1,11 @@
 //! All capability related types
 
 use crate::{
+    Capability, EthMessageID, EthVersion,
     errors::{P2PHandshakeError, P2PStreamError},
     p2pstream::MAX_RESERVED_MESSAGE_ID,
     protocol::{ProtoVersion, Protocol},
     version::ParseVersionError,
-    Capability, EthMessageID, EthVersion,
 };
 use derive_more::{Deref, DerefMut};
 use std::{

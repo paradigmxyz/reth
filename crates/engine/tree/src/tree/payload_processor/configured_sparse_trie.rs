@@ -3,8 +3,8 @@
 use alloy_primitives::B256;
 use reth_trie::{Nibbles, TrieNode};
 use reth_trie_sparse::{
-    errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
-    RevealedSparseNode, SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseTrieInterface,
+    SparseTrieUpdates, TrieMasks, errors::SparseTrieResult, provider::TrieNodeProvider,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::borrow::Cow;

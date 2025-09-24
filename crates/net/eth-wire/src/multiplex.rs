@@ -12,18 +12,18 @@ use std::{
     fmt,
     future::Future,
     io,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use crate::{
+    CanDisconnect, Capability, DisconnectReason, EthStream, HANDSHAKE_TIMEOUT, P2PStream,
+    UnifiedStatus,
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
-    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
-    HANDSHAKE_TIMEOUT,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
@@ -774,12 +774,12 @@ impl<'a> Future for ProtocolsPoller<'a> {
 mod tests {
     use super::*;
     use crate::{
+        UnauthedEthStream, UnauthedP2PStream,
         handshake::EthHandshake,
         test_utils::{
             connect_passthrough, eth_handshake, eth_hello,
-            proto::{test_hello, TestProtoMessage},
+            proto::{TestProtoMessage, test_hello},
         },
-        UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_eth_wire_types::EthNetworkPrimitives;
     use tokio::{net::TcpListener, sync::oneshot};

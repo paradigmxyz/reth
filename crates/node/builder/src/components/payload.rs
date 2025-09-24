@@ -23,8 +23,9 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool, EvmC
         ctx: &BuilderContext<Node>,
         pool: Pool,
         evm_config: EvmConfig,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>>
-           + Send;
+    ) -> impl Future<
+        Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypes>::Payload>>,
+    > + Send;
 }
 
 impl<Node, F, Fut, Pool, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig> for F

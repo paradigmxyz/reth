@@ -12,10 +12,10 @@ use reth_node_ethereum::EthereumEngineValidator;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::NoopProvider;
 use reth_rpc_builder::{
-    auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+    auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
 };
-use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_engine_api::{EngineApi, capabilities::EngineCapabilities};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TokioTaskExecutor;
@@ -117,8 +117,8 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder(
-) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
+pub fn test_rpc_builder()
+-> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
 {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())

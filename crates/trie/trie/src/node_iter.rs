@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
+    Nibbles, TrieType, hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker,
 };
 use alloy_primitives::B256;
 use alloy_trie::proof::AddedRemovedKeys;
@@ -308,12 +308,12 @@ where
 mod tests {
     use crate::{
         hashed_cursor::{
-            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
-            HashedPostStateAccountCursor,
+            HashedCursorFactory, HashedPostStateAccountCursor, mock::MockHashedCursorFactory,
+            noop::NoopHashedAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
         trie_cursor::{
-            mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
+            TrieCursorFactory, mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor,
         },
         walker::TrieWalker,
     };
@@ -322,13 +322,13 @@ mod tests {
         map::{B256Map, HashMap},
     };
     use alloy_trie::{
-        BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
+        BranchNodeCompact, EMPTY_ROOT_HASH, HashBuilder, Nibbles, TrieAccount, TrieMask,
     };
     use itertools::Itertools;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
-        prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
-        RlpNode,
+        BranchNode, HashedPostState, LeafNode, RlpNode, prefix_set::PrefixSetMut,
+        updates::TrieUpdates,
     };
     use std::collections::BTreeMap;
 

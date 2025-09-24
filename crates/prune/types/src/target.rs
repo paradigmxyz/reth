@@ -15,7 +15,9 @@ pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum UnwindTargetPrunedError {
     /// The target block is beyond the history limit
-    #[error("Cannot unwind to block {target_block} as it is beyond the {history_type} limit. Latest block: {latest_block}, History limit: {limit}")]
+    #[error(
+        "Cannot unwind to block {target_block} as it is beyond the {history_type} limit. Latest block: {latest_block}, History limit: {limit}"
+    )]
     TargetBeyondHistoryLimit {
         /// The latest block number
         latest_block: BlockNumber,

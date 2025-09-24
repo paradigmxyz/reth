@@ -3,7 +3,7 @@
 use std::{path::Path, sync::Arc};
 
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
 };
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{

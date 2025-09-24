@@ -1,18 +1,18 @@
 use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
 use alloy_consensus::Header;
-use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
-use futures::{stream::FuturesUnordered, Stream, StreamExt};
+use alloy_primitives::{B256, BlockHash, Bytes, bytes::BytesMut};
+use futures::{Stream, StreamExt, stream::FuturesUnordered};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
-use reth_network_api::{test_utils::PeersHandle, PeerId, ReputationChangeKind};
+use reth_network_api::{PeerId, ReputationChangeKind, test_utils::PeersHandle};
 use reth_storage_errors::ProviderResult;
 use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     task::{Context, Poll},
 };

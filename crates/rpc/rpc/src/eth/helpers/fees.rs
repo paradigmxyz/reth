@@ -2,8 +2,8 @@
 
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthFees, LoadFee},
     FromEvmError, RpcNodeCore,
+    helpers::{EthFees, LoadFee},
 };
 use reth_rpc_eth_types::{EthApiError, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::ProviderHeader;

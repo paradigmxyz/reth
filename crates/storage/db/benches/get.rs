@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::TxHash;
-use criterion::{criterion_group, criterion_main, Criterion};
-use reth_db::{test_utils::create_test_rw_db_with_path, Database, TransactionHashNumbers};
+use criterion::{Criterion, criterion_group, criterion_main};
+use reth_db::{Database, TransactionHashNumbers, test_utils::create_test_rw_db_with_path};
 use reth_db_api::transaction::DbTx;
 use std::{fs, sync::Arc};
 

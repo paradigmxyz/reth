@@ -87,14 +87,14 @@ impl<'a, S> CacheKeyRef<'a, S> {
 
 impl<S: PartialEq> PartialEq<CacheKey<S>> for CacheKeyRef<'_, S> {
     fn eq(&self, other: &CacheKey<S>) -> bool {
-        self.0 .0 == other.0 .0 && self.0 .1 == other.0 .1.as_ref()
+        self.0.0 == other.0.0 && self.0.1 == other.0.1.as_ref()
     }
 }
 
 impl<'a, S: Hash> Hash for CacheKeyRef<'a, S> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0 .0.hash(state);
-        self.0 .1.hash(state);
+        self.0.0.hash(state);
+        self.0.1.hash(state);
     }
 }
 

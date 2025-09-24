@@ -1,12 +1,12 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{address, b256, keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256, address, b256, keccak256};
 use alloy_rlp::EMPTY_STRING_CODE;
 use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
 use reth_primitives_traits::Account;
 use reth_provider::test_utils::{create_test_provider_factory, insert_genesis};
-use reth_trie::{proof::Proof, AccountProof, Nibbles, StorageProof};
+use reth_trie::{AccountProof, Nibbles, StorageProof, proof::Proof};
 use reth_trie_db::DatabaseProof;
 use std::{
     str::FromStr,
@@ -198,7 +198,9 @@ fn holesky_deposit_contract_proof() {
         info: Some(Account {
             balance: U256::ZERO,
             nonce: 0,
-            bytecode_hash: Some(b256!("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc"))
+            bytecode_hash: Some(b256!(
+                "0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc"
+            )),
         }),
         storage_root: b256!("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599"),
         proof: convert_to_proof([

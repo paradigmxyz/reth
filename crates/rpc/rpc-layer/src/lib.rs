@@ -22,7 +22,7 @@ pub use compression_layer::CompressionLayer;
 // Export alloy JWT types
 pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
 
-pub use auth_client_layer::{secret_to_bearer_header, AuthClientLayer, AuthClientService};
+pub use auth_client_layer::{AuthClientLayer, AuthClientService, secret_to_bearer_header};
 pub use auth_layer::AuthLayer;
 pub use jwt_validator::JwtAuthValidator;
 

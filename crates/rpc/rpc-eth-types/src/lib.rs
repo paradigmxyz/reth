@@ -25,8 +25,8 @@ pub mod utils;
 
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
-    config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
-    EthStateCache,
+    EthStateCache, config::EthStateCacheConfig, db::StateCacheDb,
+    multi_consumer::MultiConsumerLruCache,
 };
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};

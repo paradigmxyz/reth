@@ -1,6 +1,6 @@
 use crate::GetHeaders;
 use alloy_consensus::Header;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use alloy_rlp::Encodable;
 use reth_ethereum_primitives::BlockBody;
 use reth_network::eth_requests::{MAX_BODIES_SERVE, MAX_HEADERS_SERVE, SOFT_RESPONSE_LIMIT};

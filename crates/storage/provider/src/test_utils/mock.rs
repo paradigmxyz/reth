@@ -1,19 +1,19 @@
 use crate::{
-    traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, HeaderProvider, ReceiptProviderIdExt, StateProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
     TransactionsProvider,
+    traits::{BlockSource, ReceiptProvider},
 };
 use alloy_consensus::{
+    BlockHeader,
     constants::EMPTY_ROOT_HASH,
     transaction::{TransactionMeta, TxHashRef},
-    BlockHeader,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
+    keccak256, map::HashMap,
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
@@ -37,8 +37,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use std::{
     collections::BTreeMap,

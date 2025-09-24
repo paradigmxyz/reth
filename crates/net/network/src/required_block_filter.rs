@@ -139,7 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{b256, B256};
+    use alloy_primitives::{B256, b256};
     use reth_network_api::noop::NoopNetwork;
 
     #[test]

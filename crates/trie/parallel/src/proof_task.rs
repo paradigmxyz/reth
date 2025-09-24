@@ -9,20 +9,20 @@
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
 use crate::root::ParallelStateRootError;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{B256, map::B256Set};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult,
+    BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx, ProviderResult,
+    providers::ConsistentDbView,
 };
 use reth_trie::{
+    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
-    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -33,9 +33,9 @@ use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProvide
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, SendError, Sender, channel},
     },
     time::Instant,
 };

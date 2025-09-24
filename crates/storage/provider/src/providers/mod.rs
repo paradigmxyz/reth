@@ -33,19 +33,19 @@ pub use consistent::ConsistentProvider;
 pub trait NodeTypesForProvider
 where
     Self: NodeTypes<
-        ChainSpec: EthereumHardforks,
-        Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-    >,
+            ChainSpec: EthereumHardforks,
+            Storage: ChainStorage<Self::Primitives>,
+            Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >,
 {
 }
 
 impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
-        ChainSpec: EthereumHardforks,
-        Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-    >
+            ChainSpec: EthereumHardforks,
+            Storage: ChainStorage<T::Primitives>,
+            Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        >
 {
 }
 

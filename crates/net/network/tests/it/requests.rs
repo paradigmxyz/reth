@@ -6,8 +6,8 @@ use rand::Rng;
 use reth_eth_wire::{EthVersion, HeadersDirection};
 use reth_ethereum_primitives::Block;
 use reth_network::{
-    test_utils::{NetworkEventStream, PeerConfig, Testnet},
     BlockDownloaderProvider, NetworkEventListenerProvider,
+    test_utils::{NetworkEventStream, PeerConfig, Testnet},
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::{

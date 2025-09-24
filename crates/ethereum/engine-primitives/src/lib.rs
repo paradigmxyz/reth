@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod payload;
-pub use payload::{payload_id, BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use payload::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes, payload_id};
 
 mod error;
 pub use error::*;
@@ -34,13 +34,13 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
 }
 
 impl<
-        T: PayloadTypes<
+    T: PayloadTypes<
             ExecutionData = ExecutionData,
             BuiltPayload: BuiltPayload<
                 Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
             >,
         >,
-    > PayloadTypes for EthEngineTypes<T>
+> PayloadTypes for EthEngineTypes<T>
 {
     type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;

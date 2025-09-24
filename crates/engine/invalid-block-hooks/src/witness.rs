@@ -1,19 +1,19 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::{HashedStorage, updates::TrieUpdates};
 use revm_bytecode::Bytecode;
 use revm_database::states::{
-    reverts::{AccountInfoRevert, RevertToSlot},
     AccountStatus, StorageSlot,
+    reverts::{AccountInfoRevert, RevertToSlot},
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};

@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{B256, Bytes, keccak256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::database::State;
 

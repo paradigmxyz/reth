@@ -1,7 +1,7 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 
 use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
 
@@ -29,7 +29,7 @@ pub struct NodeData(pub Vec<Bytes>);
 mod tests {
     use alloy_primitives::hex;
 
-    use crate::{message::RequestPair, GetNodeData, NodeData};
+    use crate::{GetNodeData, NodeData, message::RequestPair};
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]

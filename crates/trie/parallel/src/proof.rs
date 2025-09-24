@@ -1,23 +1,25 @@
 use crate::{
+    StorageRootTargets,
     metrics::ParallelTrieMetrics,
     proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput},
     root::ParallelStateRootError,
     stats::ParallelTrieTracker,
-    StorageRootTargets,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashMap},
     B256,
+    map::{B256Map, B256Set, HashMap},
 };
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError,
+    BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx, ProviderError,
+    providers::ConsistentDbView,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
+    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
+    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
@@ -25,15 +27,13 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
-    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     proof::{DecodedProofNodes, ProofRetainer},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
+use std::sync::{Arc, mpsc::Receiver};
 use tracing::debug;
 
 /// Parallel proof calculator.
@@ -368,13 +368,12 @@ mod tests {
     use super::*;
     use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
     use alloy_primitives::{
-        keccak256,
+        Address, U256, keccak256,
         map::{B256Set, DefaultHashBuilder},
-        Address, U256,
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{HashingWriter, test_utils::create_test_provider_factory};
     use reth_trie::proof::Proof;
     use tokio::runtime::Runtime;
 

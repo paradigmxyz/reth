@@ -4,8 +4,8 @@ use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
 use reth_db_api::{table::Value, transaction::DbTxMut};
-use reth_era::{era1_file::Era1Reader, era_file_ops::StreamReader};
-use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
+use reth_era::{era_file_ops::StreamReader, era1_file::Era1Reader};
+use reth_era_downloader::{EraClient, EraMeta, EraStream, EraStreamConfig, read_dir};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
@@ -20,7 +20,7 @@ use std::{
     fmt::{Debug, Formatter},
     iter,
     path::Path,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 type Item<Header, Body> =
@@ -75,10 +75,10 @@ where
 impl EraImportSource {
     fn convert<Header, Body>(
         stream: impl Stream<Item = eyre::Result<impl EraMeta + Send + Sync + 'static + Unpin>>
-            + Send
-            + Sync
-            + 'static
-            + Unpin,
+        + Send
+        + Sync
+        + 'static
+        + Unpin,
     ) -> Result<ThreadSafeEraStream<Header, Body>, StageError>
     where
         Header: FullBlockHeader + Value,
@@ -262,7 +262,7 @@ impl EraImportSource {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, stage_test_suite,
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
@@ -333,7 +333,7 @@ mod tests {
         use reth_primitives_traits::{SealedBlock, SealedHeader};
         use reth_provider::{BlockNumReader, TransactionsProvider};
         use reth_testing_utils::generators::{
-            random_block_range, random_signed_tx, BlockRangeParams,
+            BlockRangeParams, random_block_range, random_signed_tx,
         };
         use tokio::sync::watch;
 

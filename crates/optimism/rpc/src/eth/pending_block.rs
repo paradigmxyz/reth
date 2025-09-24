@@ -5,12 +5,12 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use reth_chain_state::BlockState;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
     FromEvmError, RpcConvert, RpcNodeCore,
+    helpers::{LoadPendingBlock, SpawnBlocking, pending_block::PendingEnvBuilder},
 };
 use reth_rpc_eth_types::{
-    block::BlockAndReceipts, builder::config::PendingBlockKind, error::FromEthApiError,
-    EthApiError, PendingBlock,
+    EthApiError, PendingBlock, block::BlockAndReceipts, builder::config::PendingBlockKind,
+    error::FromEthApiError,
 };
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ReceiptProvider, StateProviderBox, StateProviderFactory,

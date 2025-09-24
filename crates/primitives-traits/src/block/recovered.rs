@@ -1,18 +1,18 @@
 //! Recovered Block variant.
 
 use crate::{
-    block::{error::SealedBlockRecoveryError, SealedBlock},
-    transaction::signed::{RecoveryError, SignedTransaction},
     Block, BlockBody, InMemorySize, SealedHeader,
+    block::{SealedBlock, error::SealedBlockRecoveryError},
+    transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{Recovered, TransactionMeta},
     BlockHeader,
+    transaction::{Recovered, TransactionMeta},
 };
-use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, Encodable2718};
+use alloy_eips::{BlockNumHash, Encodable2718, eip1898::BlockWithParent};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bloom, Bytes, Sealed, TxHash, B256, B64, U256,
+    Address, B64, B256, BlockHash, BlockNumber, Bloom, Bytes, Sealed, TxHash, U256,
 };
 use derive_more::Deref;
 
@@ -656,11 +656,11 @@ mod rpc_compat {
     use super::{
         Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
     };
-    use crate::{block::error::BlockRecoveryError, SealedHeader};
+    use crate::{SealedHeader, block::error::BlockRecoveryError};
     use alloc::vec::Vec;
     use alloy_consensus::{
-        transaction::{Recovered, TxHashRef},
         Block as CBlock, BlockBody, BlockHeader, Sealable,
+        transaction::{Recovered, TxHashRef},
     };
     use alloy_rpc_types_eth::{Block, BlockTransactions, BlockTransactionsKind, TransactionInfo};
 
@@ -863,8 +863,8 @@ mod rpc_compat {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{
-        serde_bincode_compat::{self, SerdeBincodeCompat},
         Block,
+        serde_bincode_compat::{self, SerdeBincodeCompat},
     };
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::Address;
@@ -876,9 +876,9 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_primitives_traits::{
+    ///     Block,
     ///     block::RecoveredBlock,
     ///     serde_bincode_compat::{self, SerdeBincodeCompat},
-    ///     Block,
     /// };
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
@@ -963,7 +963,7 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::{Header, TxLegacy};
-    use alloy_primitives::{bytes, Signature, TxKind};
+    use alloy_primitives::{Signature, TxKind, bytes};
 
     #[test]
     fn test_from_block_with_recovered_transactions() {

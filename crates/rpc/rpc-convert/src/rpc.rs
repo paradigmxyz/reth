@@ -3,7 +3,7 @@ use std::{fmt::Debug, future::Future};
 use alloy_consensus::{EthereumTxEnvelope, SignableTransaction, TxEip4844};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{
-    primitives::HeaderResponse, Network, ReceiptResponse, TransactionResponse, TxSigner,
+    Network, ReceiptResponse, TransactionResponse, TxSigner, primitives::HeaderResponse,
 };
 use alloy_primitives::Signature;
 use alloy_rpc_types_eth::TransactionRequest;

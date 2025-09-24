@@ -1,22 +1,22 @@
 use crate::{
     evm::{
-        alloy::{CustomEvm, CustomEvmFactory},
         CustomEvmConfig, CustomTxEnv,
+        alloy::{CustomEvm, CustomEvmFactory},
     },
     primitives::CustomTransaction,
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
+    Database, Evm,
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
         BlockExecutorFor, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
-    Database, Evm,
 };
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
 use reth_ethereum::evm::primitives::InspectorFor;
-use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
+use reth_op::{OpReceipt, chainspec::OpChainSpec, node::OpRethReceiptBuilder};
 use revm::{context::result::ResultAndState, database::State};
 use std::sync::Arc;
 

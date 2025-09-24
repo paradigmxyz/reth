@@ -1,30 +1,30 @@
 //! Node builder setup tests.
 
-use alloy_primitives::{address, Bytes};
+use alloy_primitives::{Bytes, address};
 use core::marker::PhantomData;
 use op_revm::{
-    precompiles::OpPrecompiles, OpContext, OpHaltReason, OpSpecId, OpTransaction,
-    OpTransactionError,
+    OpContext, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError,
+    precompiles::OpPrecompiles,
 };
 use reth_db::test_utils::create_test_rw_db;
-use reth_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
+use reth_evm::{Database, Evm, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{
-    components::ExecutorBuilder, BuilderContext, FullNodeTypes, Node, NodeBuilder, NodeConfig,
-    NodeTypes,
+    BuilderContext, FullNodeTypes, Node, NodeBuilder, NodeConfig, NodeTypes,
+    components::ExecutorBuilder,
 };
-use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET, OP_SEPOLIA};
+use reth_optimism_chainspec::{BASE_MAINNET, OP_SEPOLIA, OpChainSpec};
 use reth_optimism_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory, OpRethReceiptBuilder};
-use reth_optimism_node::{args::RollupArgs, OpEvmConfig, OpExecutorBuilder, OpNode};
+use reth_optimism_node::{OpEvmConfig, OpExecutorBuilder, OpNode, args::RollupArgs};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::providers::BlockchainProvider;
 use revm::{
+    Inspector,
     context::{Cfg, ContextTr, TxEnv},
     context_interface::result::EVMError,
     inspector::NoOpInspector,
     interpreter::interpreter::EthInterpreter,
     precompile::{Precompile, PrecompileId, PrecompileOutput, PrecompileResult, Precompiles},
-    Inspector,
 };
 use std::sync::OnceLock;
 

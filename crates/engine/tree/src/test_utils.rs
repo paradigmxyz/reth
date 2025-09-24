@@ -4,11 +4,11 @@ use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     ExecutionOutcome,
+    test_utils::{MockNodeTypesWithDB, create_test_provider_factory_with_chain_spec},
 };
 use reth_prune_types::PruneModes;
-use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+use reth_stages::{ExecOutput, StageError, test_utils::TestStages};
 use reth_stages_api::Pipeline;
 use reth_static_file::StaticFileProducer;
 use std::{collections::VecDeque, ops::Range, sync::Arc};

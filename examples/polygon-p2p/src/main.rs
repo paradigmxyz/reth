@@ -15,14 +15,14 @@
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_ethereum::network::{
-    api::events::SessionInfo, config::NetworkMode, NetworkConfig, NetworkEvent,
-    NetworkEventListenerProvider, NetworkManager,
+    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+    api::events::SessionInfo, config::NetworkMode,
 };
 use reth_tracing::{
-    tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
-    Tracer,
+    LayerInfo, LogFormat, RethTracer, Tracer, tracing::info,
+    tracing_subscriber::filter::LevelFilter,
 };
-use secp256k1::{rand, SecretKey};
+use secp256k1::{SecretKey, rand};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,

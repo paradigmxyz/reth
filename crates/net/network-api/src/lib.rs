@@ -35,8 +35,8 @@ pub use events::{
 };
 
 use reth_eth_wire_types::{
-    capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
-    UnifiedStatus,
+    Capability, DisconnectReason, EthVersion, NetworkPrimitives, UnifiedStatus,
+    capability::Capabilities,
 };
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;

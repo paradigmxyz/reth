@@ -13,7 +13,7 @@
 use alloy_eips::BlockNumberOrTag;
 use alloy_evm::Evm;
 use alloy_primitives::Address;
-use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
+use alloy_rpc_types_eth::{TransactionRequest, state::EvmOverrides};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
@@ -24,10 +24,10 @@ use reth_ethereum::{
             bytecode::opcode::OpCode,
             context_interface::ContextTr,
             inspector::Inspector,
-            interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
+            interpreter::{Interpreter, interpreter::EthInterpreter, interpreter_types::Jumps},
         },
     },
-    node::{builder::FullNodeFor, EthereumNode},
+    node::{EthereumNode, builder::FullNodeFor},
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };

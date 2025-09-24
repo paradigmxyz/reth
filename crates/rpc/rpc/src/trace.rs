@@ -2,12 +2,12 @@ use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
 use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{
+    Address, B256, BlockHash, Bytes, U256,
     map::{HashMap, HashSet},
-    Address, BlockHash, Bytes, B256, U256,
 };
 use alloy_rpc_types_eth::{
-    state::{EvmOverrides, StateOverride},
     BlockOverrides, Index,
+    state::{EvmOverrides, StateOverride},
 };
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
@@ -24,10 +24,10 @@ use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
+    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
 };
-use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
+use reth_rpc_eth_types::{EthConfig, error::EthApiError, utils::recover_raw_transaction};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
@@ -35,7 +35,7 @@ use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
+    tracing::{TracingInspector, TracingInspectorConfig, parity::populate_state_diff},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

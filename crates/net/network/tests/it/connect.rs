@@ -6,19 +6,19 @@ use reth_chainspec::{MAINNET, SEPOLIA};
 use reth_discv4::Discv4Config;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_network::{
-    test_utils::{NetworkEventStream, PeerConfig, Testnet},
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
+    test_utils::{NetworkEventStream, PeerConfig, Testnet},
 };
 use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
     NetworkInfo, Peers, PeersInfo,
+    events::{PeerEvent, SessionInfo},
 };
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
-use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
+use reth_network_peers::{NodeRecord, TrustedPeer, mainnet_nodes};
 use reth_network_types::peers::config::PeerBackoffDurations;
 use reth_storage_api::noop::NoopProvider;
 use reth_tracing::init_test_tracing;

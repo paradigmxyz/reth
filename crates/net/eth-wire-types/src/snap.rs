@@ -6,7 +6,7 @@
 //! Current version: snap/1
 
 use alloc::vec::Vec;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs_derive::add_arbitrary_tests;
 

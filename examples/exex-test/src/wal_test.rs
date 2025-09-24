@@ -1,13 +1,13 @@
 use eyre::Result;
 use futures_util::StreamExt;
 use reth_ethereum::{
+    EthPrimitives,
     exex::{ExExContext, ExExEvent},
     node::api::{FullNodeComponents, NodeTypes},
-    EthPrimitives,
 };
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 /// ExEx tests - WAL behavior

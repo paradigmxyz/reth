@@ -1,32 +1,32 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{
-        api::{FromEthApiError, FromEvmHalt},
-        ToRpcError,
-    },
     EthApiError, RevertError,
+    error::{
+        ToRpcError,
+        api::{FromEthApiError, FromEvmHalt},
+    },
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
+use alloy_consensus::{BlockHeader, Transaction as _, transaction::TxHashRef};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
-    simulate::{SimCallResult, SimulateError, SimulatedBlock},
     BlockTransactionsKind,
+    simulate::{SimCallResult, SimulateError, SimulatedBlock},
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
 };
 use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
+    Database,
     context_interface::result::ExecutionResult,
     primitives::{Address, Bytes, TxKind},
-    Database,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.

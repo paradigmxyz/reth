@@ -11,9 +11,9 @@ use futures_util::StreamExt;
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
+        EthereumNode,
         builder::{NodeBuilder, NodeHandle},
         core::{args::RpcServerArgs, node_config::NodeConfig},
-        EthereumNode,
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,

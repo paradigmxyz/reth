@@ -1,9 +1,9 @@
 //! RPC compatibility test actions for testing RPC methods against execution-apis test data.
 
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use futures_util::future::BoxFuture;
 use jsonrpsee::core::client::ClientT;
-use reth_e2e_test_utils::testsuite::{actions::Action, BlockInfo, Environment};
+use reth_e2e_test_utils::testsuite::{BlockInfo, Environment, actions::Action};
 use reth_node_api::EngineTypes;
 use serde_json::Value;
 use std::path::Path;

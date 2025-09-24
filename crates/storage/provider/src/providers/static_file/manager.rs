@@ -1,19 +1,19 @@
 use super::{
-    metrics::StaticFileProviderMetrics, writer::StaticFileWriters, LoadedJar,
-    StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    LoadedJar, StaticFileJarProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
+    metrics::StaticFileProviderMetrics, writer::StaticFileWriters,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt,
+    BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider,
+    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, to_range,
 };
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
     Header,
+    transaction::{SignerRecoverable, TransactionMeta},
 };
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_eips::{BlockHashOrNumber, eip2718::Encodable2718};
 use alloy_primitives::{
-    b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, TxHash, TxNumber, U256, b256, keccak256,
 };
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -22,8 +22,8 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
-        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TransactionMask,
+        BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
+        TDWithHashMask, TransactionMask, iter_static_files,
     },
 };
 use reth_db_api::{
@@ -34,23 +34,23 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
-use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
+use reth_nippy_jar::{CONFIG_FILE_EXTENSION, NippyJar, NippyJarChecker};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
-    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
-    DEFAULT_BLOCKS_PER_STATIC_FILE,
+    DEFAULT_BLOCKS_PER_STATIC_FILE, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
+    StaticFileSegment, find_fixed_range,
 };
 use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, hash_map::Entry},
     fmt::Debug,
     marker::PhantomData,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU64, mpsc, Arc},
+    sync::{Arc, atomic::AtomicU64, mpsc},
 };
 use tracing::{debug, info, trace, warn};
 
@@ -1489,11 +1489,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
         self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
             .and_then(|provider| provider.receipt(num))
             .or_else(|err| {
-                if let ProviderError::MissingStaticFileTx(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
+                if let ProviderError::MissingStaticFileTx(_, _) = err { Ok(None) } else { Err(err) }
             })
     }
 
@@ -1618,11 +1614,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id(num))
             .or_else(|err| {
-                if let ProviderError::MissingStaticFileTx(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
+                if let ProviderError::MissingStaticFileTx(_, _) = err { Ok(None) } else { Err(err) }
             })
     }
 
@@ -1633,11 +1625,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
             .and_then(|provider| provider.transaction_by_id_unhashed(num))
             .or_else(|err| {
-                if let ProviderError::MissingStaticFileTx(_, _) = err {
-                    Ok(None)
-                } else {
-                    Err(err)
-                }
+                if let ProviderError::MissingStaticFileTx(_, _) = err { Ok(None) } else { Err(err) }
             })
     }
 

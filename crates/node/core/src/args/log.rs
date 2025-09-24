@@ -3,11 +3,11 @@
 use crate::dirs::{LogsDir, PlatformPath};
 use clap::{ArgAction, Args, ValueEnum};
 use reth_tracing::{
-    tracing_subscriber::filter::Directive, FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat,
-    RethTracer, Tracer,
+    FileInfo, FileWorkerGuard, LayerInfo, Layers, LogFormat, RethTracer, Tracer,
+    tracing_subscriber::filter::Directive,
 };
 use std::{fmt, fmt::Display};
-use tracing::{level_filters::LevelFilter, Level};
+use tracing::{Level, level_filters::LevelFilter};
 /// Constant to convert megabytes to bytes
 const MB_TO_BYTES: u64 = 1024 * 1024;
 

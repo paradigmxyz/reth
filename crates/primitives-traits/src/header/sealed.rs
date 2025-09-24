@@ -1,8 +1,8 @@
-use crate::{sync::OnceLock, InMemorySize, NodePrimitives};
+use crate::{InMemorySize, NodePrimitives, sync::OnceLock};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
-use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{keccak256, BlockHash, Sealable};
+use alloy_eips::{BlockNumHash, eip1898::BlockWithParent};
+use alloy_primitives::{BlockHash, Sealable, keccak256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
@@ -279,7 +279,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{serde_bincode_compat, SealedHeader};
+    /// use reth_primitives_traits::{SealedHeader, serde_bincode_compat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -342,7 +342,7 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, SealedHeader};
+        use super::super::{SealedHeader, serde_bincode_compat};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use serde::{Deserialize, Serialize};

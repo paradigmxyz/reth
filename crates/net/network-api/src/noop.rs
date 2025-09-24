@@ -7,18 +7,18 @@ use core::{fmt, marker::PhantomData};
 use std::net::{IpAddr, SocketAddr};
 
 use crate::{
-    events::{NetworkPeersEvents, PeerEventStream},
-    test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
     PeersInfo,
+    events::{NetworkPeersEvents, PeerEventStream},
+    test_utils::{PeersHandle, PeersHandleProvider},
 };
 use alloy_rpc_types_admin::EthProtocolInfo;
-use enr::{secp256k1::SecretKey, Enr};
+use enr::{Enr, secp256k1::SecretKey};
 use reth_eth_wire_types::{
     DisconnectReason, EthNetworkPrimitives, NetworkPrimitives, ProtocolVersion,
 };
-use reth_network_p2p::{sync::NetworkSyncUpdater, NoopFullBlockClient};
+use reth_network_p2p::{NoopFullBlockClient, sync::NetworkSyncUpdater};
 use reth_network_peers::NodeRecord;
 use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};

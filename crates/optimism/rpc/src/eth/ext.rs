@@ -1,9 +1,9 @@
 //! Eth API extension.
 
-use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
+use crate::{OpEthApiError, SequencerClient, error::TxConditionalErr};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::{Bytes, StorageKey, B256, U256};
+use alloy_primitives::{B256, Bytes, StorageKey, U256};
 use alloy_rpc_types_eth::erc4337::{AccountStorage, TransactionConditional};
 use jsonrpsee_core::RpcResult;
 use reth_optimism_txpool::conditional::MaybeConditionalTransaction;

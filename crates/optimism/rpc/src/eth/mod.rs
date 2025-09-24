@@ -9,8 +9,8 @@ mod call;
 mod pending_block;
 
 use crate::{
-    eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper},
     OpEthApiError, SequencerClient,
+    eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper},
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::U256;
@@ -25,22 +25,22 @@ use reth_optimism_flashblocks::{
     ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService, PendingBlockRx,
     WsFlashBlockStream,
 };
-use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_rpc::eth::{DevSigner, core::EthApiInner};
 use reth_rpc_eth_api::{
-    helpers::{
-        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
-    },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, SignableTxRequest,
+    helpers::{
+        AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock, LoadState,
+        SpawnBlocking, Trace, pending_block::BuildPendingEnv, spec::SignersForApi,
+    },
 };
 use reth_rpc_eth_types::{
     EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{ProviderHeader, ProviderTx};
 use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
+    pool::{BlockingTaskGuard, BlockingTaskPool},
 };
 use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc, time::Instant};
 use tokio::sync::watch;

@@ -25,7 +25,7 @@ pub trait InvalidBlockHookExt {
         &self,
         data_dir: &ChainPath<DataDirPath>,
     ) -> impl std::future::Future<Output = eyre::Result<Box<dyn InvalidBlockHook<Self::Primitives>>>>
-           + Send;
+    + Send;
 }
 
 impl<N> InvalidBlockHookExt for AddOnsContext<'_, N>

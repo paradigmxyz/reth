@@ -1,5 +1,5 @@
 use reth_chainspec::{ChainSpec, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA};
-use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
+use reth_cli::chainspec::{ChainSpecParser, parse_genesis};
 use std::sync::Arc;
 
 /// Chains supported by reth. First value should be used as the default.

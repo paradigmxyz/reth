@@ -13,16 +13,16 @@ use alloy_consensus::Transaction;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
+    is_better_payload,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
+    execute::{BlockBuilder, BlockBuilderOutcome},
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -32,9 +32,9 @@ use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
 };
 use revm::context_interface::Block as _;
 use std::sync::Arc;

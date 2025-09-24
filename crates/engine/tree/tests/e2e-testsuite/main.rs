@@ -5,13 +5,13 @@ mod fcu_finalized_blocks;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
+    TestBuilder,
     actions::{
         CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus, MakeCanonical,
         ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo, SelectActiveNode,
         SendNewPayloads, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
     },
     setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;

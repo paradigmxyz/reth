@@ -2,11 +2,11 @@
 
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests, BlockNumHash};
+use alloy_eips::{BlockNumHash, eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Represents the core data structure of an execution payload.
 ///
@@ -195,10 +195,6 @@ where
     /// Returns `Some(requests)` if this is an execution payload with request data,
     /// `None` otherwise.
     pub fn execution_requests(&self) -> Option<&Requests> {
-        if let Self::ExecutionPayload(payload) = self {
-            payload.sidecar.requests()
-        } else {
-            None
-        }
+        if let Self::ExecutionPayload(payload) = self { payload.sidecar.requests() } else { None }
     }
 }

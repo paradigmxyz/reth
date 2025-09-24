@@ -10,10 +10,10 @@
 //! use op_alloy_network::Optimism;
 //! use reth_db::test_utils::create_test_rw_db_with_path;
 //! use reth_node_builder::{
+//!     LaunchContext, NodeConfig, RethFullAdapter,
 //!     components::ComponentsBuilder,
 //!     hooks::OnComponentInitializedHook,
 //!     rpc::{EthApiBuilder, EthApiCtx},
-//!     LaunchContext, NodeConfig, RethFullAdapter,
 //! };
 //! use reth_optimism_chainspec::OP_SEPOLIA;
 //! use reth_optimism_evm::OpEvmConfig;
@@ -23,7 +23,7 @@
 //! use reth_provider::providers::BlockchainProvider;
 //! use reth_rpc::TraceApi;
 //! use reth_rpc_eth_types::{EthConfig, EthStateCache};
-//! use reth_tasks::{pool::BlockingTaskGuard, TaskManager};
+//! use reth_tasks::{TaskManager, pool::BlockingTaskGuard};
 //! use std::sync::Arc;
 //!
 //! #[tokio::main]
@@ -88,7 +88,7 @@ use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, PayloadValidatorBuilder};
-use reth_node_core::version::{version_metadata, CLIENT_CODE};
+use reth_node_core::version::{CLIENT_CODE, version_metadata};
 use reth_optimism_rpc::engine::OP_ENGINE_CAPABILITIES;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};

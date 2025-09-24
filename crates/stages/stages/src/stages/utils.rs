@@ -2,16 +2,16 @@
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
+    BlockNumberList, DatabaseError,
     cursor::{DbCursorRO, DbCursorRW},
     models::sharded_key::NUM_OF_INDICES_IN_SHARD,
     table::{Decompress, Table},
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
-    StaticFileProviderFactory,
+    BlockReader, DBProvider, ProviderError, StaticFileProviderFactory,
+    providers::StaticFileProvider,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;

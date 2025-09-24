@@ -1,7 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 use alloy_consensus::ReceiptWithBloom;
 use alloy_primitives::B256;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_ethereum_primitives::Receipt;

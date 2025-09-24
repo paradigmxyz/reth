@@ -3,8 +3,8 @@ use reth_db::DatabaseEnv;
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 use crate::{
-    components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns, NodeHandle,
-    RethFullAdapter,
+    NodeAdapter, NodeAddOns, NodeHandle, RethFullAdapter, components::NodeComponentsBuilder,
+    rpc::RethRpcAddOns,
 };
 use reth_node_api::{EngineTypes, FullNodeComponents, PayloadTypes};
 use reth_node_core::{
@@ -14,7 +14,7 @@ use reth_node_core::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
-use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
+use reth_rpc_builder::{RpcServerHandle, auth::AuthServerHandle};
 use reth_tasks::TaskExecutor;
 use std::{
     fmt::Debug,

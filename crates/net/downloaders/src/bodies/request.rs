@@ -15,7 +15,7 @@ use std::{
     mem,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 /// Body request implemented as a [Future].
@@ -262,7 +262,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::zip_blocks,
-        test_utils::{generate_bodies, TestBodiesClient},
+        test_utils::{TestBodiesClient, generate_bodies},
     };
     use reth_consensus::test_utils::TestConsensus;
     use reth_ethereum_primitives::Block;

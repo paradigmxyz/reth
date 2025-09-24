@@ -64,9 +64,9 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
 }
 
 impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>,
-        Ext: clap::Args + fmt::Debug,
-    > Commands<C, Ext>
+    C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>,
+    Ext: clap::Args + fmt::Debug,
+> Commands<C, Ext>
 {
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {

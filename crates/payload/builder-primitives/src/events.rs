@@ -1,12 +1,12 @@
 use reth_payload_primitives::PayloadTypes;
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::broadcast;
 use tokio_stream::{
-    wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
     Stream, StreamExt,
+    wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
 };
 use tracing::debug;
 

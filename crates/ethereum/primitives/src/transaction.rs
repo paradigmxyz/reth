@@ -3,9 +3,9 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip7702,
     TxLegacy, TxType, Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -13,15 +13,15 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    bytes::BufMut, keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
+    Address, B256, Bytes, ChainId, Signature, TxHash, TxKind, U256, bytes::BufMut, keccak256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
 use reth_primitives_traits::{
+    InMemorySize, SignedTransaction,
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::signed::RecoveryError,
-    InMemorySize, SignedTransaction,
 };
 
 macro_rules! delegate {

@@ -6,7 +6,7 @@ use crate::{
     tree::{error::InsertPayloadError, metrics::EngineApiMetrics, payload_validator::TreeCtx},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{BlockNumHash, NumHash, eip1898::BlockWithParent, merge::EPOCH_SLOTS};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
@@ -31,9 +31,9 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, ProviderError, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant,
+    BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
+    ProviderError, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant, providers::ConsistentDbView,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -44,13 +44,13 @@ use state::TreeState;
 use std::{
     fmt::Debug,
     sync::{
-        mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
+        mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
     },
     time::Instant,
 };
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
@@ -1755,11 +1755,7 @@ where
         // check memory first
         let header = self.state.tree_state.sealed_header_by_hash(&hash);
 
-        if header.is_some() {
-            Ok(header)
-        } else {
-            self.provider.sealed_header_by_hash(hash)
-        }
+        if header.is_some() { Ok(header) } else { self.provider.sealed_header_by_hash(hash) }
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
@@ -2016,11 +2012,7 @@ where
     /// height or its block number is greater than the given block, this returns None.
     #[inline]
     const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
-        if block > local_tip {
-            Some(block - local_tip)
-        } else {
-            None
-        }
+        if block > local_tip { Some(block - local_tip) } else { None }
     }
 
     /// Returns the target hash to sync to if the distance from the local tip to the block is

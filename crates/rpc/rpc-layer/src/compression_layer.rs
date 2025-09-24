@@ -109,8 +109,8 @@ mod tests {
         }
     }
 
-    fn setup_compression_service(
-    ) -> impl Service<HttpRequest, Response = HttpResponse, Error = Infallible> {
+    fn setup_compression_service()
+    -> impl Service<HttpRequest, Response = HttpResponse, Error = Infallible> {
         CompressionLayer::new().layer(MockRequestService)
     }
 

@@ -1,7 +1,7 @@
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 use reth_revm::{
-    state::{AccountInfo, Bytecode},
     Database,
+    state::{AccountInfo, Bytecode},
 };
 use reth_trie::{HashedPostState, HashedStorage};
 

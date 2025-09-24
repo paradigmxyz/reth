@@ -1,7 +1,6 @@
 use crate::{
-    add_static_file_mask,
+    HeaderTerminalDifficulties, add_static_file_mask,
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo},
-    HeaderTerminalDifficulties,
 };
 use alloy_primitives::BlockHash;
 use reth_db_api::table::Table;

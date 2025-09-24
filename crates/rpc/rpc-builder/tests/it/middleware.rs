@@ -11,8 +11,8 @@ use reth_rpc_server_types::RpcModuleSelection;
 use std::{
     future::Future,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 use tower::Layer;

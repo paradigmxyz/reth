@@ -187,7 +187,7 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use alloy_primitives::BlockHash;
     use reth_primitives_traits::RecoveredBlock;
-    use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
+    use reth_testing_utils::generators::{self, BlockParams, Rng, random_block};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
@@ -221,16 +221,20 @@ mod tests {
         block: &RecoveredBlock<reth_ethereum_primitives::Block>,
     ) {
         assert!(!buffer.blocks.contains_key(&block.hash()));
-        assert!(buffer
-            .parent_to_child
-            .get(&block.parent_hash)
-            .and_then(|p| p.get(&block.hash()))
-            .is_none());
-        assert!(buffer
-            .earliest_blocks
-            .get(&block.number)
-            .and_then(|hashes| hashes.get(&block.hash()))
-            .is_none());
+        assert!(
+            buffer
+                .parent_to_child
+                .get(&block.parent_hash)
+                .and_then(|p| p.get(&block.hash()))
+                .is_none()
+        );
+        assert!(
+            buffer
+                .earliest_blocks
+                .get(&block.number)
+                .and_then(|hashes| hashes.get(&block.hash()))
+                .is_none()
+        );
     }
 
     #[test]

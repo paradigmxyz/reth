@@ -58,7 +58,7 @@ pub use reth_optimism_forks::*;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{proofs::storage_root_unhashed, BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, proofs::storage_root_unhashed};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
@@ -71,7 +71,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
-use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+use reth_primitives_traits::{SealedHeader, sync::LazyLock};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -503,11 +503,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
             if let Some(storage) = &predeploy.storage {
                 header.withdrawals_root =
                     Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
-                        if v.is_zero() {
-                            None
-                        } else {
-                            Some((*k, (*v).into()))
-                        }
+                        if v.is_zero() { None } else { Some((*k, (*v).into())) }
                     })));
             }
         }
@@ -521,7 +517,7 @@ mod tests {
     use alloc::string::String;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
-    use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
+    use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, test_fork_ids};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};
 

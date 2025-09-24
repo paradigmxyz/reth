@@ -3,38 +3,38 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_evm::{
+    Evm, EvmFactory,
     eth::EthEvmContext,
     precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
     revm::{handler::EthPrecompiles, precompile::PrecompileId},
-    Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
 use reth_ethereum::{
+    EthPrimitives,
     chainspec::{Chain, ChainSpec},
     evm::{
         primitives::{Database, EvmEnv},
         revm::{
+            MainBuilder, MainContext,
             context::{Context, TxEnv},
             context_interface::result::{EVMError, HaltReason},
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             precompile::PrecompileResult,
             primitives::hardfork::SpecId,
-            MainBuilder, MainContext,
         },
     },
     node::{
+        EthEvmConfig, EthereumNode,
         api::{FullNodeTypes, NodeTypes},
-        builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
+        builder::{BuilderContext, NodeBuilder, components::ExecutorBuilder},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         evm::EthEvm,
         node::EthereumAddOns,
-        EthEvmConfig, EthereumNode,
     },
     tasks::TaskManager,
-    EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};

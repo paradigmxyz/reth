@@ -4,14 +4,14 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{database::StateProviderDatabase, DatabaseRef};
+use reth_revm::{DatabaseRef, database::StateProviderDatabase};
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
+    Database, DatabaseCommit,
     database::{BundleState, CacheDB},
     primitives::HashMap,
     state::{AccountInfo, Bytecode},
-    Database, DatabaseCommit,
 };
 
 /// Helper alias type for the state's [`CacheDB`]

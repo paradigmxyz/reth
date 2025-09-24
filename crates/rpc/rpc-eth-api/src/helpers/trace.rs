@@ -2,24 +2,24 @@
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 use crate::FromEvmError;
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{BlockHeader, transaction::TxHashRef};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
-    Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
+    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
 };
 use reth_storage_api::{ProviderBlock, ProviderTx};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit};
+use revm::{DatabaseCommit, context_interface::result::ResultAndState};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 

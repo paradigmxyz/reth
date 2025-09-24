@@ -46,7 +46,7 @@ impl HelloMessageWithProtocols {
     /// ```
     /// use reth_eth_wire::HelloMessageWithProtocols;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
+    /// use secp256k1::{SECP256K1, SecretKey};
     /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessageWithProtocols::builder(id).build();
@@ -129,7 +129,7 @@ impl HelloMessage {
     /// ```
     /// use reth_eth_wire::HelloMessage;
     /// use reth_network_peers::pk2id;
-    /// use secp256k1::{SecretKey, SECP256K1};
+    /// use secp256k1::{SECP256K1, SecretKey};
     /// let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
@@ -216,10 +216,10 @@ impl HelloMessageBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, ProtocolVersion};
-    use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
+    use crate::{Capability, EthVersion, HelloMessage, ProtocolVersion, p2pstream::P2PMessage};
+    use alloy_rlp::{Decodable, EMPTY_STRING_CODE, Encodable};
     use reth_network_peers::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::{SECP256K1, SecretKey};
 
     #[test]
     fn test_hello_encoding_round_trip() {

@@ -4,7 +4,7 @@
 use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::address;
-use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
+use alloy_provider::{Provider, RootProvider, network::AnyNetwork};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
 use reqwest::Url;

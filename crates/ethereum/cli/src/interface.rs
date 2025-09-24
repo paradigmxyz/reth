@@ -1,7 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use crate::{
-    app::{run_commands_with, CliApp},
+    app::{CliApp, run_commands_with},
     chainspec::EthereumChainSpecParser,
 };
 use clap::{Parser, Subcommand};

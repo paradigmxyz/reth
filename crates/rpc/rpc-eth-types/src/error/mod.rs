@@ -4,8 +4,8 @@ pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_rpc_types_eth::{BlockError, error::EthRpcErrorCode, request::TransactionInputError};
 use alloy_sol_types::{ContractError, RevertReason};
 use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
@@ -828,11 +828,7 @@ impl RevertError {
     ///
     /// Note: this is intended to wrap an revm output
     pub fn new(output: Bytes) -> Self {
-        if output.is_empty() {
-            Self { output: None }
-        } else {
-            Self { output: Some(output) }
-        }
+        if output.is_empty() { Self { output: None } } else { Self { output: Some(output) } }
     }
 
     /// Returns error code to return for this error.

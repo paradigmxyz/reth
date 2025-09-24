@@ -9,14 +9,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::BlockHeader as _;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use parking_lot::Mutex;
 use reth_chain_state::{
     ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProvider,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_ress_protocol::RessProtocolProvider;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
@@ -24,7 +24,7 @@ use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::{Semaphore, oneshot};
 use tracing::*;
 
 mod recorder;

@@ -1,7 +1,7 @@
 //! reth's static file database table import and access
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     path::Path,
 };
 

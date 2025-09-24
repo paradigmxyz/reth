@@ -2,7 +2,7 @@
 
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
-use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt, TryFutureExt, stream::FuturesUnordered};
 use itertools::Either;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
@@ -11,20 +11,20 @@ use reth_engine_primitives::{
 use reth_engine_tree::tree::EngineValidator;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
+    execute::{BlockBuilder, BlockBuilderOutcome},
 };
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
 use reth_primitives_traits::{
-    block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
+    BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction, block::Block as _,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
+use reth_storage_api::{BlockReader, StateProviderFactory, errors::ProviderError};
 use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::oneshot;
 use tracing::*;

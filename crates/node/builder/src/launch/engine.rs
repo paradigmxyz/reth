@@ -1,15 +1,15 @@
 //! Engine node related functionality.
 
 use crate::{
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use futures::{stream_select, StreamExt};
+use futures::{StreamExt, stream_select};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
@@ -18,7 +18,7 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
+use reth_network::{NetworkSyncUpdater, SyncState, types::BlockRangeUpdate};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BuiltPayload, ConsensusEngineHandle, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
@@ -30,8 +30,8 @@ use reth_node_core::{
 };
 use reth_node_events::node;
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader,
+    providers::{BlockchainProvider, NodeTypesForProvider},
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -67,11 +67,11 @@ impl EngineNodeLauncher {
     ) -> eyre::Result<NodeHandle<NodeAdapter<T, CB::Components>, AO>>
     where
         T: FullNodeTypes<
-            Types: NodeTypesForProvider,
-            Provider = BlockchainProvider<
-                NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+                Types: NodeTypesForProvider,
+                Provider = BlockchainProvider<
+                    NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+                >,
             >,
-        >,
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
@@ -366,11 +366,11 @@ impl EngineNodeLauncher {
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     T: FullNodeTypes<
-        Types: NodeTypesForProvider,
-        Provider = BlockchainProvider<
-            NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+            Types: NodeTypesForProvider,
+            Provider = BlockchainProvider<
+                NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
+            >,
         >,
-    >,
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>

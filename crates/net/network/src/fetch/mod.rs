@@ -20,8 +20,8 @@ use std::{
     collections::{HashMap, VecDeque},
     ops::RangeInclusive,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
 };
@@ -476,7 +476,7 @@ pub(crate) enum BlockResponseOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{peers::PeersManager, PeersConfig};
+    use crate::{PeersConfig, peers::PeersManager};
     use alloy_consensus::Header;
     use alloy_primitives::B512;
     use std::future::poll_fn;
@@ -623,10 +623,12 @@ mod tests {
         let outcome =
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)).unwrap();
 
-        assert!(EthResponseValidator::reputation_change_err(&Err::<Vec<Header>, _>(
-            RequestError::Timeout
-        ))
-        .is_some());
+        assert!(
+            EthResponseValidator::reputation_change_err(&Err::<Vec<Header>, _>(
+                RequestError::Timeout
+            ))
+            .is_some()
+        );
 
         match outcome {
             BlockResponseOutcome::BadResponse(peer, _) => {

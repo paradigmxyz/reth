@@ -1,8 +1,8 @@
 use alloy_primitives::U256;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForApi, EthApiSpec},
     RpcNodeCore,
+    helpers::{EthApiSpec, spec::SignersForApi},
 };
 use reth_storage_api::ProviderTx;
 

@@ -1,10 +1,10 @@
 //! Contains the implementation of the mining mode for the local engine.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{B256, TxHash};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
-use futures_util::{stream::Fuse, StreamExt};
+use futures_util::{StreamExt, stream::Fuse};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{

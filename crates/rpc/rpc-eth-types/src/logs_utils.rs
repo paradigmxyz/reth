@@ -3,7 +3,7 @@
 //! Log parsing for building filter.
 
 use alloy_consensus::TxReceipt;
-use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
+use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{Filter, Log};
 use reth_chainspec::ChainInfo;

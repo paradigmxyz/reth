@@ -1,4 +1,4 @@
-use crate::superchain::chain_metadata::{to_genesis_chain_config, ChainMetadata};
+use crate::superchain::chain_metadata::{ChainMetadata, to_genesis_chain_config};
 use alloc::{
     format,
     string::{String, ToString},

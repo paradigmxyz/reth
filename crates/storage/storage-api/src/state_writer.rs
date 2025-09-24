@@ -3,8 +3,8 @@ use reth_execution_types::ExecutionOutcome;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::HashedPostStateSorted;
 use revm_database::{
-    states::{PlainStateReverts, StateChangeset},
     OriginalValuesKnown,
+    states::{PlainStateReverts, StateChangeset},
 };
 
 use super::StorageLocation;

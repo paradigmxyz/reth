@@ -8,7 +8,7 @@ use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
 use reth_op::rpc::RpcTypes;
 use reth_rpc_api::eth::{
-    transaction::TryIntoTxEnv, EthTxEnvError, SignTxRequestError, SignableTxRequest, TryIntoSimTx,
+    EthTxEnvError, SignTxRequestError, SignableTxRequest, TryIntoSimTx, transaction::TryIntoTxEnv,
 };
 use revm::context::{BlockEnv, CfgEnv};
 

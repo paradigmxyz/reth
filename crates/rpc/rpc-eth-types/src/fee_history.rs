@@ -3,15 +3,15 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Debug,
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
 };
 
 use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
-    future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
+    future::{Fuse, FusedFuture},
 };
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;

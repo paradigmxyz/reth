@@ -6,8 +6,8 @@ use reth_chainspec::ChainInfo;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::Instant,
 };

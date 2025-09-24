@@ -1,5 +1,5 @@
 use super::LaunchNode;
-use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
+use crate::{EngineNodeLauncher, Node, NodeHandle, rpc::RethRpcAddOns};
 use alloy_consensus::transaction::Either;
 use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};

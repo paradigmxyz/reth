@@ -1,7 +1,7 @@
 //! Tracks state of RPC cache.
 
 use metrics::Counter;
-use reth_metrics::{metrics::Gauge, Metrics};
+use reth_metrics::{Metrics, metrics::Gauge};
 
 #[derive(Metrics)]
 #[metrics(scope = "rpc.eth_cache")]

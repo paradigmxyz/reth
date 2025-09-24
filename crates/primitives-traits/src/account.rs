@@ -1,6 +1,6 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_primitives::{B256, Bytes, U256, keccak256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
 use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
@@ -238,7 +238,7 @@ impl From<Account> for AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex_literal::hex, B256, U256};
+    use alloy_primitives::{B256, U256, hex_literal::hex};
     use reth_codecs::Compact;
     use revm_bytecode::{JumpTable, LegacyAnalyzedBytecode};
 

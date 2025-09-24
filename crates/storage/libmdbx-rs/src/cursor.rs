@@ -1,15 +1,15 @@
 use crate::{
-    error::{mdbx_result, Error, Result},
+    TableObject, Transaction,
+    error::{Error, Result, mdbx_result},
     flags::*,
     mdbx_try_optional,
-    transaction::{TransactionKind, RW},
-    TableObject, Transaction,
+    transaction::{RW, TransactionKind},
 };
 use ffi::{
-    MDBX_cursor_op, MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE,
-    MDBX_GET_CURRENT, MDBX_GET_MULTIPLE, MDBX_LAST, MDBX_LAST_DUP, MDBX_NEXT, MDBX_NEXT_DUP,
-    MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
-    MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
+    MDBX_FIRST, MDBX_FIRST_DUP, MDBX_GET_BOTH, MDBX_GET_BOTH_RANGE, MDBX_GET_CURRENT,
+    MDBX_GET_MULTIPLE, MDBX_LAST, MDBX_LAST_DUP, MDBX_NEXT, MDBX_NEXT_DUP, MDBX_NEXT_MULTIPLE,
+    MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE, MDBX_PREV_NODUP, MDBX_SET,
+    MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE, MDBX_cursor_op,
 };
 use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
 

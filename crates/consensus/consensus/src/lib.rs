@@ -13,13 +13,13 @@ extern crate alloc;
 
 use alloc::{boxed::Box, fmt::Debug, string::String, vec::Vec};
 use alloy_consensus::Header;
-use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
+use alloy_primitives::{B256, BlockHash, BlockNumber, Bloom};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
-    transaction::error::InvalidTransactionError,
     Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
+    constants::{MAXIMUM_GAS_LIMIT_BLOCK, MINIMUM_GAS_LIMIT},
+    transaction::error::InvalidTransactionError,
 };
 
 /// A consensus implementation that does nothing.
@@ -200,9 +200,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the block number does not match the parent block number.
-    #[error(
-        "block number {block_number} does not match parent block number {parent_block_number}"
-    )]
+    #[error("block number {block_number} does not match parent block number {parent_block_number}")]
     ParentBlockNumberMismatch {
         /// The parent block number.
         parent_block_number: BlockNumber,
@@ -370,7 +368,9 @@ pub enum ConsensusError {
     /// Error indicating that the block gas limit is above the allowed maximum.
     ///
     /// This error occurs when the gas limit is more than the specified maximum gas limit.
-    #[error("child gas limit {block_gas_limit} is above the maximum allowed limit ({MAXIMUM_GAS_LIMIT_BLOCK})")]
+    #[error(
+        "child gas limit {block_gas_limit} is above the maximum allowed limit ({MAXIMUM_GAS_LIMIT_BLOCK})"
+    )]
     GasLimitInvalidBlockMaximum {
         /// block gas limit.
         block_gas_limit: u64,

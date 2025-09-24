@@ -1,6 +1,6 @@
 use super::ExecutedBlockWithTrieUpdates;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, StorageKey, StorageValue, keccak256};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -8,8 +8,8 @@ use reth_storage_api::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    TrieInput, updates::TrieUpdates,
 };
 use revm_database::BundleState;
 use std::sync::OnceLock;

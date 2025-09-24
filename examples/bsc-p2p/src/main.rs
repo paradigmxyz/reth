@@ -20,9 +20,9 @@ use reth_network::{
 use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_provider::noop::NoopProvider;
 use reth_tracing::{
-    tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
+    LayerInfo, LogFormat, RethTracer, Tracer, tracing_subscriber::filter::LevelFilter,
 };
-use secp256k1::{rand, SecretKey};
+use secp256k1::{SecretKey, rand};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,

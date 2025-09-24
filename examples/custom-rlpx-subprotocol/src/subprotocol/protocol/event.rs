@@ -1,5 +1,5 @@
 use crate::subprotocol::connection::CustomCommand;
-use reth_ethereum::network::{api::PeerId, Direction};
+use reth_ethereum::network::{Direction, api::PeerId};
 use tokio::sync::mpsc;
 
 /// The events that can be emitted by our custom protocol.

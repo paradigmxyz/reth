@@ -2,7 +2,7 @@
 
 use reth_ethereum::{
     cli::interface::Cli,
-    node::{builder::components::NoopNetworkBuilder, node::EthereumAddOns, EthereumNode},
+    node::{EthereumNode, builder::components::NoopNetworkBuilder, node::EthereumAddOns},
 };
 
 /// Maps the ethereum node's network component to the noop implementation.

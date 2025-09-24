@@ -1,7 +1,7 @@
 use crate::{
-    providers::{StaticFileProvider, StaticFileWriter as SfWriter},
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateWriter, StaticFileProviderFactory,
     StorageLocation, TrieWriter,
+    providers::{StaticFileProvider, StaticFileWriter as SfWriter},
 };
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
@@ -228,9 +228,9 @@ where
 mod tests {
     use super::*;
     use crate::{
-        test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
+        AccountReader, StorageTrieWriter, TrieWriter, test_utils::create_test_provider_factory,
     };
-    use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256, keccak256, map::HashMap};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
@@ -242,15 +242,15 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
-        test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        test_utils::{state_root, storage_root_prehashed},
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm_database::{
-        states::{
-            bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-        },
         BundleState, State,
+        states::{
+            PlainStorageChangeset, bundle_state::BundleRetention, changes::PlainStorageRevert,
+        },
     };
     use revm_database_interface::{DatabaseCommit, EmptyDB};
     use revm_state::{

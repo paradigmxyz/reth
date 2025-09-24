@@ -52,11 +52,7 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
         _block: &RecoveredBlock<N::Block>,
         _result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
+        if self.fail_validation() { Err(ConsensusError::BaseFeeMissing) } else { Ok(()) }
     }
 }
 
@@ -68,29 +64,17 @@ impl<B: Block> Consensus<B> for TestConsensus {
         _body: &B::Body,
         _header: &SealedHeader<B::Header>,
     ) -> Result<(), Self::Error> {
-        if self.fail_body_against_header() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
+        if self.fail_body_against_header() { Err(ConsensusError::BaseFeeMissing) } else { Ok(()) }
     }
 
     fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
-        if self.fail_validation() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
+        if self.fail_validation() { Err(ConsensusError::BaseFeeMissing) } else { Ok(()) }
     }
 }
 
 impl<H> HeaderValidator<H> for TestConsensus {
     fn validate_header(&self, _header: &SealedHeader<H>) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
+        if self.fail_validation() { Err(ConsensusError::BaseFeeMissing) } else { Ok(()) }
     }
 
     fn validate_header_against_parent(
@@ -98,10 +82,6 @@ impl<H> HeaderValidator<H> for TestConsensus {
         _header: &SealedHeader<H>,
         _parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
+        if self.fail_validation() { Err(ConsensusError::BaseFeeMissing) } else { Ok(()) }
     }
 }

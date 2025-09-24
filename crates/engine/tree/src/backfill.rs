@@ -11,7 +11,7 @@ use futures::FutureExt;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll, ready};
 use tokio::sync::oneshot;
 use tracing::trace;
 
@@ -229,10 +229,10 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
+    use crate::test_utils::{TestPipelineBuilder, insert_headers_into_client};
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{B256, BlockNumber};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};

@@ -3,15 +3,16 @@
 // TODO(rand): update ::random calls after rand_09 migration
 
 use crate::{
+    Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent, IngressReceiver, PeerId,
+    SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
-    receive_loop, send_loop, Discv4, Discv4Config, Discv4Service, EgressSender, IngressEvent,
-    IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+    receive_loop, send_loop,
 };
-use alloy_primitives::{hex, B256, B512};
-use rand_08::{thread_rng, Rng, RngCore};
+use alloy_primitives::{B256, B512, hex};
+use rand_08::{Rng, RngCore, thread_rng};
 use reth_ethereum_forks::{ForkHash, ForkId};
-use reth_network_peers::{pk2id, NodeRecord};
-use secp256k1::{SecretKey, SECP256K1};
+use reth_network_peers::{NodeRecord, pk2id};
+use secp256k1::{SECP256K1, SecretKey};
 use std::{
     collections::{HashMap, HashSet},
     io,

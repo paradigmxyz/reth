@@ -96,9 +96,9 @@ impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{message::RequestPair, GetReceipts, Receipts};
+    use crate::{GetReceipts, Receipts, message::RequestPair};
     use alloy_consensus::TxType;
-    use alloy_primitives::{hex, Log};
+    use alloy_primitives::{Log, hex};
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]

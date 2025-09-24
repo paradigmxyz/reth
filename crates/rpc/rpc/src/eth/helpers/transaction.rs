@@ -3,13 +3,13 @@
 use std::time::Duration;
 
 use crate::EthApi;
-use alloy_primitives::{hex, Bytes, B256};
+use alloy_primitives::{B256, Bytes, hex};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
     FromEvmError, RpcNodeCore,
+    helpers::{EthTransactions, LoadTransaction, spec::SignersForRpc},
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
 use reth_transaction_pool::{AddedTransactionOutcome, PoolTransaction, TransactionPool};
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -77,13 +77,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex_literal::hex, Bytes};
+    use alloy_primitives::{Bytes, hex_literal::hex};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
-    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
+    use reth_transaction_pool::{TransactionPool, test_utils::testing_pool};
 
     #[tokio::test]
     async fn send_raw_transaction() {

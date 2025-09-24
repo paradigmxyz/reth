@@ -1,14 +1,14 @@
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use futures::StreamExt;
-use reth_network::{test_utils::Testnet, NetworkEventListenerProvider, Peers};
+use reth_network::{NetworkEventListenerProvider, Peers, test_utils::Testnet};
 use reth_network_api::{
     events::{NetworkEvent, PeerEvent},
     test_utils::PeersHandleProvider,
 };
 use reth_provider::test_utils::MockEthProvider;
 use reth_ress_protocol::{
-    test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
     GetHeaders, NodeType, ProtocolEvent, ProtocolState, RessPeerRequest, RessProtocolHandler,
+    test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};

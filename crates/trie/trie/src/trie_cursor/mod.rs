@@ -50,7 +50,7 @@ pub trait TrieCursor: Send + Sync {
 
     /// Move the cursor to the key and return a value matching of greater than the key.
     fn seek(&mut self, key: Nibbles)
-        -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
+    -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
 
     /// Move the cursor to the next key.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;

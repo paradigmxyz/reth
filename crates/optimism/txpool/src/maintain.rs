@@ -9,16 +9,16 @@ const MAX_SUPERVISOR_QUERIES: usize = 10;
 
 use crate::{
     conditional::MaybeConditionalTransaction,
-    interop::{is_stale_interop, is_valid_interop, MaybeInteropTransaction},
+    interop::{MaybeInteropTransaction, is_stale_interop, is_valid_interop},
     supervisor::SupervisorClient,
 };
-use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader};
-use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
+use alloy_consensus::{BlockHeader, conditional::BlockConditionalAttributes};
+use futures_util::{FutureExt, Stream, StreamExt, future::BoxFuture};
 use metrics::{Gauge, Histogram};
 use reth_chain_state::CanonStateNotification;
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{Metrics, metrics::Counter};
 use reth_primitives_traits::NodePrimitives;
-use reth_transaction_pool::{error::PoolTransactionError, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool, error::PoolTransactionError};
 use std::time::Instant;
 use tracing::warn;
 

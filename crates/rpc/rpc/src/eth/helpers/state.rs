@@ -3,8 +3,8 @@
 use crate::EthApi;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthState, LoadPendingBlock, LoadState},
     RpcNodeCore,
+    helpers::{EthState, LoadPendingBlock, LoadState},
 };
 
 impl<N, Rpc> EthState for EthApi<N, Rpc>
@@ -36,11 +36,11 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::{
-        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
         ChainSpecProvider,
+        test_utils::{ExtendedAccount, MockEthProvider, NoopProvider},
     };
     use reth_rpc_eth_api::{helpers::EthState, node::RpcNodeCoreAdapter};
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{TestPool, testing_pool};
     use std::collections::HashMap;
 
     fn noop_eth_api() -> EthApi<

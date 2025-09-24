@@ -1,10 +1,10 @@
 use super::{
-    manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
+    StaticFileProvider, manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
-use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
+use parking_lot::{RawRwLock, RwLock, lock_api::RwLockWriteGuard};
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};

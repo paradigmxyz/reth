@@ -2,7 +2,7 @@
 //!
 //! See also <https://docs.flashbots.net/flashbots-auction/advanced/rpc-endpoint>
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use alloy_rpc_types_mev::{
     EthBundleHash, EthCallBundle, EthCallBundleResponse, EthCancelBundle,
     EthCancelPrivateTransaction, EthSendBundle, EthSendPrivateTransaction,
@@ -31,7 +31,7 @@ pub trait EthBundleApi {
     /// `eth_sendBundle` can be used to send your bundles to the builder.
     #[method(name = "sendBundle")]
     async fn send_bundle(&self, bundle: EthSendBundle)
-        -> jsonrpsee::core::RpcResult<EthBundleHash>;
+    -> jsonrpsee::core::RpcResult<EthBundleHash>;
 
     /// `eth_callBundle` can be used to simulate a bundle against a specific block number,
     /// including simulating a bundle at the top of the next block.

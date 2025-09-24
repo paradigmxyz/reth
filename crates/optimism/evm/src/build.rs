@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs, Block, BlockBody, Header, TxReceipt,
-    EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, EMPTY_OMMER_ROOT_HASH, Header, TxReceipt, constants::EMPTY_WITHDRAWALS,
+    proofs,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_evm::block::BlockExecutorFactory;
@@ -32,10 +32,10 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
     /// Builds a block for `input` without any bounds on header `H`.
     pub fn assemble_block<
         F: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a>: Into<OpBlockExecutionCtx>,
-            Transaction: SignedTransaction,
-            Receipt: Receipt + DepositReceipt,
-        >,
+                ExecutionCtx<'a>: Into<OpBlockExecutionCtx>,
+                Transaction: SignedTransaction,
+                Receipt: Receipt + DepositReceipt,
+            >,
         H,
     >(
         &self,
@@ -133,10 +133,10 @@ impl<F, ChainSpec> BlockAssembler<F> for OpBlockAssembler<ChainSpec>
 where
     ChainSpec: OpHardforks,
     F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
 {
     type Block = Block<F::Transaction>;
 

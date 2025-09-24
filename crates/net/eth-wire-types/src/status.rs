@@ -1,7 +1,7 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
-use alloy_primitives::{hex, B256, U256};
+use alloy_primitives::{B256, U256, hex};
 use alloy_rlp::{BufMut, Encodable, RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
@@ -461,7 +461,7 @@ mod tests {
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
-    use alloy_primitives::{b256, hex, B256, U256};
+    use alloy_primitives::{B256, U256, b256, hex};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
@@ -548,7 +548,9 @@ mod tests {
 
     #[test]
     fn encode_eth69_status_message() {
-        let expected = hex!("f8544501a0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d8083ed14f2840112a880a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d");
+        let expected = hex!(
+            "f8544501a0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d8083ed14f2840112a880a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
+        );
         let status = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),
@@ -585,7 +587,9 @@ mod tests {
 
     #[test]
     fn decode_eth69_status_message() {
-        let data =  hex!("f8544501a0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d8083ed14f2840112a880a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d");
+        let data = hex!(
+            "f8544501a0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d8083ed14f2840112a880a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"
+        );
         let expected = StatusEth69 {
             version: EthVersion::Eth69,
             chain: Chain::from_named(NamedChain::Mainnet),

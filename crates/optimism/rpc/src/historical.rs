@@ -3,7 +3,7 @@
 use crate::sequencer::Error;
 use alloy_eips::BlockId;
 use alloy_json_rpc::{RpcRecv, RpcSend};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use alloy_rpc_client::RpcClient;
 use jsonrpsee_core::{
     middleware::{Batch, Notification, RpcServiceT},
@@ -123,7 +123,6 @@ impl<S, P> HistoricalRpcService<S, P> {
 impl<S, P> RpcServiceT for HistoricalRpcService<S, P>
 where
     S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
-
     P: BlockReaderIdExt + TransactionsProvider + Send + Sync + Clone + 'static,
 {
     type MethodResponse = S::MethodResponse;

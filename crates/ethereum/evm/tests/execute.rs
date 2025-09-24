@@ -1,6 +1,6 @@
 //! Execution tests.
 
-use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
+use alloy_consensus::{Header, TxLegacy, constants::ETH_TO_WEI};
 use alloy_eips::{
     eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -9,26 +9,26 @@ use alloy_eips::{
     eip7685::EMPTY_REQUESTS_HASH,
 };
 use alloy_evm::block::BlockValidationError;
-use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{B256, Bytes, TxKind, U256, b256, fixed_bytes, keccak256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
-    execute::{BasicBlockExecutor, Executor},
     ConfigureEvm,
+    execute::{BasicBlockExecutor, Executor},
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
+    Block as _, RecoveredBlock, crypto::secp256k1::public_key_to_address,
 };
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
 use revm::{
+    Database,
     database::{CacheDB, EmptyDB, TransitionState},
     primitives::address,
     state::{AccountInfo, Bytecode, EvmState},
-    Database,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
@@ -633,8 +633,8 @@ fn eip_7002() {
 
     // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
     let validator_public_key = fixed_bytes!(
-            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-        );
+        "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    );
     let withdrawal_amount = fixed_bytes!("0203040506070809");
     let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
     assert_eq!(input.len(), 56);
@@ -706,8 +706,8 @@ fn block_gas_limit_error() {
 
     // Define the validator public key and withdrawal amount as fixed bytes
     let validator_public_key = fixed_bytes!(
-            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
-        );
+        "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    );
     let withdrawal_amount = fixed_bytes!("2222222222222222");
     // Concatenate the validator public key and withdrawal amount into a single byte array
     let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();

@@ -2,13 +2,13 @@
 
 use crate::ExecutionOutcome;
 use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
-use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
+use alloy_consensus::{BlockHeader, transaction::Recovered};
+use alloy_eips::{BlockNumHash, eip1898::ForkBlock, eip2718::Encodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
-    SealedHeader,
+    Block, BlockBody, NodePrimitives, RecoveredBlock, SealedHeader,
+    transaction::signed::SignedTransaction,
 };
 use reth_trie_common::updates::TrieUpdates;
 use revm::database::BundleState;
@@ -416,23 +416,23 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::{serde_bincode_compat, ExecutionOutcome};
+    use crate::{ExecutionOutcome, serde_bincode_compat};
     use alloc::{borrow::Cow, collections::BTreeMap};
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{
-        serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
         Block, NodePrimitives,
+        serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
     };
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
-    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeMap};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::Chain`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_execution_types::{serde_bincode_compat, Chain};
+    /// use reth_execution_types::{Chain, serde_bincode_compat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -555,7 +555,7 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, Chain};
+        use super::super::{Chain, serde_bincode_compat};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives_traits::RecoveredBlock;
@@ -575,8 +575,10 @@ pub(super) mod serde_bincode_compat {
             rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
                 chain: Chain::new(
-                    vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                        .unwrap()],
+                    vec![
+                        RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap(),
+                    ],
                     Default::default(),
                     None,
                 ),

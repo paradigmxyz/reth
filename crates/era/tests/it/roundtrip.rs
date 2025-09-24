@@ -11,9 +11,9 @@ use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptWithBloom};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
     e2s_types::IndexEntry,
+    era_file_ops::{EraFileFormat, StreamReader, StreamWriter},
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
-    era_file_ops::{EraFileFormat, StreamReader, StreamWriter},
     execution_types::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },
@@ -22,7 +22,7 @@ use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
 
 use crate::{
-    Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
+    ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, Era1TestDownloader, MAINNET, SEPOLIA,
 };
 
 // Helper function to test roundtrip compression/encoding for a specific file

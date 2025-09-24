@@ -2,7 +2,7 @@
 #![allow(missing_docs)]
 
 use reth_libmdbx::{Environment, WriteFlags};
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 pub fn get_key(n: u32) -> String {
     format!("key{n}")

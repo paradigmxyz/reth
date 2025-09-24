@@ -4,8 +4,8 @@ use core::fmt::Debug;
 
 use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
-    map::{HashMap, HashSet},
     B256,
+    map::{HashMap, HashSet},
 };
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::SparseTrieResult;

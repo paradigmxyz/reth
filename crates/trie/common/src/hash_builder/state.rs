@@ -1,6 +1,6 @@
 use crate::TrieMask;
 use alloc::vec::Vec;
-use alloy_trie::{hash_builder::HashBuilderValue, nodes::RlpNode, HashBuilder};
+use alloy_trie::{HashBuilder, hash_builder::HashBuilderValue, nodes::RlpNode};
 use nybbles::Nibbles;
 
 /// The hash builder state for storing in the database.

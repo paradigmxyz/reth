@@ -1,7 +1,7 @@
 use super::error::HeadersDownloaderResult;
 use crate::error::{DownloadError, DownloadResult};
-use alloy_eips::{eip1898::BlockWithParent, BlockHashOrNumber};
-use alloy_primitives::{Sealable, B256};
+use alloy_eips::{BlockHashOrNumber, eip1898::BlockWithParent};
+use alloy_primitives::{B256, Sealable};
 use futures::Stream;
 use reth_consensus::HeaderValidator;
 use reth_primitives_traits::{BlockHeader, Header, SealedHeader};

@@ -12,21 +12,21 @@ use std::time::Duration;
 
 use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv4::{DEFAULT_DISCOVERY_ADDRESS, DiscoveryUpdate, Discv4, Discv4ConfigBuilder};
 use reth_ecies::stream::ECIESStream;
 use reth_ethereum::{
     chainspec::{Chain, EthereumHardfork, Head, MAINNET},
     network::{
+        EthNetworkPrimitives,
         config::rng_secret_key,
         eth_wire::{
             EthMessage, EthStream, HelloMessage, P2PStream, UnauthedEthStream, UnauthedP2PStream,
             UnifiedStatus,
         },
-        EthNetworkPrimitives,
     },
 };
-use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
-use secp256k1::{SecretKey, SECP256K1};
+use reth_network_peers::{NodeRecord, mainnet_nodes, pk2id};
+use secp256k1::{SECP256K1, SecretKey};
 use std::sync::LazyLock;
 use tokio::net::TcpStream;
 

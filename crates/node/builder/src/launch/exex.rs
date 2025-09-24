@@ -1,12 +1,12 @@
 //! Support for launching execution extensions.
 
-use alloy_eips::{eip2124::Head, BlockNumHash};
+use alloy_eips::{BlockNumHash, eip2124::Head};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
-    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
-    DEFAULT_EXEX_MANAGER_CAPACITY,
+    DEFAULT_EXEX_MANAGER_CAPACITY, ExExContext, ExExHandle, ExExManager, ExExManagerHandle,
+    ExExNotificationSource, Wal,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;

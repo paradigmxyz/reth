@@ -4,22 +4,22 @@ use crate::server::connection::{IpcConn, JsonRpcStream};
 use futures::StreamExt;
 use futures_util::future::Either;
 use interprocess::local_socket::{
+    GenericFilePath, ListenerOptions, ToFsName,
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
     traits::tokio::{Listener, Stream},
-    GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    core::{middleware::layer::RpcLoggerLayer, JsonRawValue, TEN_MB_SIZE_BYTES},
-    server::{
-        middleware::rpc::RpcServiceT, stop_channel, ConnectionGuard, ConnectionPermit, IdProvider,
-        RandomIntegerIdProvider, ServerHandle, StopHandle,
-    },
     BoundedSubscriptions, MethodResponse, MethodSink, Methods,
+    core::{JsonRawValue, TEN_MB_SIZE_BYTES, middleware::layer::RpcLoggerLayer},
+    server::{
+        ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
+        StopHandle, middleware::rpc::RpcServiceT, stop_channel,
+    },
 };
 use std::{
     future::Future,
     io,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -27,8 +27,8 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::oneshot,
 };
-use tower::{layer::util::Identity, Layer, Service};
-use tracing::{debug, instrument, trace, warn, Instrument};
+use tower::{Layer, Service, layer::util::Identity};
+use tracing::{Instrument, debug, instrument, trace, warn};
 // re-export so can be used during builder setup
 use crate::{
     server::{connection::IpcConnDriver, rpc_service::RpcServiceCfg},
@@ -36,7 +36,7 @@ use crate::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tower::layer::{util::Stack, LayerFn};
+use tower::layer::{LayerFn, util::Stack};
 
 mod connection;
 mod ipc;
@@ -763,11 +763,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 pub fn dummy_name() -> String {
     use rand::Rng;
     let num: u64 = rand::rng().random();
-    if cfg!(windows) {
-        format!(r"\\.\pipe\my-pipe-{num}")
-    } else {
-        format!(r"/tmp/my-uds-{num}")
-    }
+    if cfg!(windows) { format!(r"\\.\pipe\my-pipe-{num}") } else { format!(r"/tmp/my-uds-{num}") }
 }
 
 #[cfg(test)]
@@ -776,6 +772,7 @@ mod tests {
     use crate::client::IpcClientBuilder;
     use futures::future::select;
     use jsonrpsee::{
+        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
         core::{
             client::{self, ClientT, Error, Subscription, SubscriptionClientT},
             middleware::{Batch, BatchEntry, Notification},
@@ -783,7 +780,6 @@ mod tests {
         },
         rpc_params,
         types::Request,
-        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
     use std::pin::pin;

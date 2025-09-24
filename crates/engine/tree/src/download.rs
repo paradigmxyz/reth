@@ -6,13 +6,13 @@ use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
-    full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
+    full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
 };
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
+    collections::{BinaryHeap, HashSet, VecDeque, binary_heap::PeekMut},
     fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
@@ -253,7 +253,7 @@ where
         while let Some(block) = self.set_buffered_blocks.pop() {
             // peek ahead and pop duplicates
             while let Some(peek) = self.set_buffered_blocks.peek_mut() {
-                if peek.0 .0.hash() == block.0 .0.hash() {
+                if peek.0.0.hash() == block.0.0.hash() {
                     PeekMut::pop(peek);
                 } else {
                     break

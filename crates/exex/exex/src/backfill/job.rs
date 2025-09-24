@@ -10,7 +10,7 @@ use alloy_primitives::BlockNumber;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, Executor};
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction, format_gas_throughput};
 use reth_provider::{
     BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
     TransactionVariant,
@@ -243,11 +243,11 @@ impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
 #[cfg(test)]
 mod tests {
     use crate::{
+        BackfillJobFactory,
         backfill::{
             job::ExecutionStageThresholds,
             test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         },
-        BackfillJobFactory,
     };
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;

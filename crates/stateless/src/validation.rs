@@ -1,7 +1,7 @@
 use crate::{
+    ExecutionWitness,
     trie::{StatelessSparseTrie, StatelessTrie},
     witness_db::WitnessDatabase,
-    ExecutionWitness,
 };
 use alloc::{
     collections::BTreeMap,
@@ -11,13 +11,13 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{B256, keccak256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
-use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
+use reth_ethereum_consensus::{EthBeaconConsensus, validate_block_post_execution};
 use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
@@ -285,7 +285,7 @@ fn compute_ancestor_hashes(
 
         if parent_header.number + 1 != child_header.number {
             return Err(StatelessValidationError::InvalidAncestorChain); // Header number should be
-                                                                        // contiguous
+            // contiguous
         }
 
         child_header = parent_header

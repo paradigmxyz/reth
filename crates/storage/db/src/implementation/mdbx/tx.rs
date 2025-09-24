@@ -2,14 +2,14 @@
 
 use super::{cursor::Cursor, utils::*};
 use crate::{
-    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     DatabaseError,
+    metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
 };
 use reth_db_api::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
 };
-use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_libmdbx::{CommitLatency, RW, Transaction, TransactionKind, WriteFlags, ffi::MDBX_dbi};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
@@ -17,8 +17,8 @@ use std::{
     collections::HashMap,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -203,11 +203,7 @@ impl<K: TransactionKind> MetricsHandler<K> {
     }
 
     const fn transaction_mode(&self) -> TransactionMode {
-        if K::IS_READ_ONLY {
-            TransactionMode::ReadOnly
-        } else {
-            TransactionMode::ReadWrite
-        }
+        if K::IS_READ_ONLY { TransactionMode::ReadOnly } else { TransactionMode::ReadWrite }
     }
 
     /// Logs the caller location and ID of the transaction that was opened.
@@ -399,7 +395,7 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
+    use crate::{DatabaseEnv, DatabaseEnvKind, mdbx::DatabaseArguments, tables};
     use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;

@@ -5,7 +5,7 @@ use crate::{
     version::VersionInfo,
 };
 use eyre::WrapErr;
-use http::{header::CONTENT_TYPE, HeaderValue, Response};
+use http::{HeaderValue, Response, header::CONTENT_TYPE};
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reth_metrics::metrics::Unit;

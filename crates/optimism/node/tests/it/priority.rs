@@ -1,6 +1,6 @@
 //! Node builder test that customizes priority of transactions in the block.
 
-use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction, TxEip1559};
+use alloy_consensus::{SignableTransaction, Transaction, TxEip1559, transaction::Recovered};
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
@@ -11,12 +11,13 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::FullNodeTypes;
 use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, Node, NodeBuilder, NodeConfig,
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
 };
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
+    OpNode,
     args::RollupArgs,
     node::{
         OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpNodeComponentBuilder,
@@ -24,7 +25,6 @@ use reth_optimism_node::{
     },
     txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
-    OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_payload_util::{

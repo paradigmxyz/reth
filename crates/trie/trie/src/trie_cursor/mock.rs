@@ -4,10 +4,10 @@ use tracing::instrument;
 
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{
-    mock::{KeyVisit, KeyVisitType},
     BranchNodeCompact, Nibbles,
+    mock::{KeyVisit, KeyVisitType},
 };
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{B256, map::B256Map};
 use reth_storage_errors::db::DatabaseError;
 
 /// Mock trie cursor factory.

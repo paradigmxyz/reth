@@ -21,10 +21,10 @@ use std::{
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::trace;
 
 /// Default max capacity for cache of discovered peers.
@@ -449,11 +449,13 @@ mod tests {
         // add node_2:discv5 to node_1:discv5, manual insertion won't emit an event
         node_1.add_discv5_node(EnrCombinedKeyWrapper(discv5_enr_node_2.clone()).into()).unwrap();
         // verify node_2 is in KBuckets of node_1:discv5
-        assert!(node_1
-            .discv5
-            .as_ref()
-            .unwrap()
-            .with_discv5(|discv5| discv5.table_entries_id().contains(&discv5_id_2)));
+        assert!(
+            node_1
+                .discv5
+                .as_ref()
+                .unwrap()
+                .with_discv5(|discv5| discv5.table_entries_id().contains(&discv5_id_2))
+        );
 
         // manually trigger connection from node_1:discv5 to node_2:discv5
         node_1

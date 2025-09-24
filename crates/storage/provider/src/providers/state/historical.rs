@@ -1,16 +1,16 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, ProviderError, StateProvider,
+    StateRootProvider, providers::state::macros::delegate_provider_impls,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, StorageKey, StorageValue};
 use reth_db_api::{
+    BlockNumberList,
     cursor::{DbCursorRO, DbDupCursorRO},
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{ShardedKey, storage_sharded_key::StorageShardedKey},
     table::Table,
     tables,
     transaction::DbTx,
-    BlockNumberList,
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -18,11 +18,11 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
+    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    StateRoot, StorageMultiProof, StorageRoot, TrieInput,
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StateRoot, StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
@@ -167,7 +167,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         // Lookup the history chunk in the history index. If they key does not appear in the
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
+        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1.0) {
             // Get the rank of the first entry before or equal to our block.
             let mut rank = chunk.rank(self.block_number);
 
@@ -518,16 +518,16 @@ impl LowestAvailableBlocks {
 #[cfg(test)]
 mod tests {
     use crate::{
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
-    use alloy_primitives::{address, b256, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256, address, b256};
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
+        BlockNumberList,
+        models::{AccountBeforeTx, ShardedKey, storage_sharded_key::StorageShardedKey},
         tables,
         transaction::{DbTx, DbTxMut},
-        BlockNumberList,
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_api::{BlockHashReader, BlockNumReader, DBProvider, DatabaseProviderFactory};

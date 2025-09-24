@@ -1,7 +1,7 @@
 use std::{
     ops::RangeInclusive,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};

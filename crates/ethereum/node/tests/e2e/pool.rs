@@ -1,6 +1,6 @@
 use crate::utils::eth_payload_attributes;
 use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, Encodable2718};
+use alloy_eips::{Encodable2718, eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -14,9 +14,8 @@ use reth_primitives_traits::Recovered;
 use reth_provider::CanonStateSubscriptions;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, test_utils::OkValidator, BlockInfo, CoinbaseTipOrdering,
-    EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin, TransactionPool,
-    TransactionPoolExt,
+    BlockInfo, CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
+    TransactionPool, TransactionPoolExt, blobstore::InMemoryBlobStore, test_utils::OkValidator,
 };
 use std::{sync::Arc, time::Duration};
 

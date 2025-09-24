@@ -3,7 +3,7 @@
 use eyre::WrapErr;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use std::sync::{atomic::AtomicBool, LazyLock};
+use std::sync::{LazyLock, atomic::AtomicBool};
 
 /// Installs the Prometheus recorder as the global recorder.
 ///

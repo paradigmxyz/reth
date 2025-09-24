@@ -1,8 +1,8 @@
 //! Utils for testing purposes.
 
 use crate::{
-    traits::KeepPayloadJobAlive, EthBuiltPayload, EthPayloadBuilderAttributes,
-    PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
+    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
+    PayloadJob, PayloadJobGenerator, traits::KeepPayloadJobAlive,
 };
 
 use alloy_consensus::Block;

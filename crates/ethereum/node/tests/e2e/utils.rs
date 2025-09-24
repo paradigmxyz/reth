@@ -1,16 +1,16 @@
-use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
-use alloy_primitives::{bytes, Address, B256, U256};
+use alloy_eips::{BlockId, BlockNumberOrTag, eip2930::AccessListItem, eip7702::Authorization};
+use alloy_primitives::{Address, B256, U256, bytes};
 use alloy_provider::{
+    Provider, ProviderBuilder, SendableTx,
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
     },
-    Provider, ProviderBuilder, SendableTx,
 };
 use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
-use rand::{seq::IndexedRandom, Rng};
-use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
+use rand::{Rng, seq::IndexedRandom};
+use reth_e2e_test_utils::{NodeHelperType, TmpDB, wallet::Wallet};
 use reth_ethereum_engine_primitives::EthPayloadBuilderAttributes;
 use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;

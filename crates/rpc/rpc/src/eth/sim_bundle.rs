@@ -1,6 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{BlockHeader, transaction::TxHashRef};
 use alloy_eips::BlockNumberOrTag;
 use alloy_evm::overrides::apply_block_overrides;
 use alloy_primitives::U256;
@@ -15,14 +15,14 @@ use reth_primitives_traits::Recovered;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
-    helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
+    helpers::{Call, EthTransactions, block::LoadBlock},
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{DatabaseCommit, DatabaseRef, context_interface::result::ResultAndState};
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 

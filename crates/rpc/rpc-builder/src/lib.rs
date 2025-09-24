@@ -21,19 +21,19 @@
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_network::{Ethereum, IntoWallet};
-use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_provider::{Provider, ProviderBuilder, fillers::RecommendedFillers};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
-use http::{header::AUTHORIZATION, HeaderMap};
+use http::{HeaderMap, header::AUTHORIZATION};
 use jsonrpsee::{
-    core::RegisterMethodError,
-    server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
     Methods, RpcModule,
+    core::RegisterMethodError,
+    server::{AlreadyStoppedError, IdProvider, ServerHandle, middleware::rpc::RpcServiceBuilder},
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
-use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_network_api::{NetworkInfo, Peers, noop::NoopNetwork};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
@@ -41,22 +41,22 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{
-        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
-        TraceExt,
-    },
-    node::RpcNodeCoreAdapter,
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
     RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
+    helpers::{
+        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt,
+        pending_block::PendingEnvBuilder,
+    },
+    node::RpcNodeCoreAdapter,
 };
-use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider, receipt::EthReceiptConverter};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
 };
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor, pool::BlockingTaskGuard};
+use reth_transaction_pool::{TransactionPool, noop::NoopTransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -74,7 +74,7 @@ use jsonrpsee::server::ServerConfigBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
-pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection, constants};
 pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
@@ -1254,11 +1254,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
     /// based on the client's `Accept-Encoding` header
     fn maybe_compression_layer(disable_compression: bool) -> Option<CompressionLayer> {
-        if disable_compression {
-            None
-        } else {
-            Some(CompressionLayer::new())
-        }
+        if disable_compression { None } else { Some(CompressionLayer::new()) }
     }
 
     /// Builds and starts the configured server(s): http, ws, ipc.

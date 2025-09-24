@@ -5,16 +5,16 @@
 //! Handles handshaking, message processing, and RLP serialization.
 
 use crate::{
+    CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
+    UnifiedStatus,
     errors::{EthHandshakeError, EthStreamError},
     handshake::EthereumEthHandshake,
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
-    CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
-    UnifiedStatus,
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
-use futures::{ready, Sink, SinkExt};
+use futures::{Sink, SinkExt, ready};
 use pin_project::pin_project;
 use reth_eth_wire_types::{NetworkPrimitives, RawCapabilityMessage};
 use reth_ethereum_forks::ForkFilter;
@@ -326,23 +326,23 @@ where
 mod tests {
     use super::UnauthedEthStream;
     use crate::{
+        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
+        ProtocolVersion, Status, StatusMessage,
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
         ethstream::RawCapabilityMessage,
         hello::DEFAULT_TCP_PORT,
         p2pstream::UnauthedP2PStream,
-        EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec,
-        ProtocolVersion, Status, StatusMessage,
     };
     use alloy_chains::NamedChain;
-    use alloy_primitives::{bytes::Bytes, B256, U256};
+    use alloy_primitives::{B256, U256, bytes::Bytes};
     use alloy_rlp::Decodable;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire_types::{EthNetworkPrimitives, UnifiedStatus};
     use reth_ethereum_forks::{ForkFilter, Head};
     use reth_network_peers::pk2id;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::{SECP256K1, SecretKey};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;

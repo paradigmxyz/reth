@@ -1,6 +1,6 @@
 //! Additional testing support for `NoopProvider`.
 
-use crate::{providers::StaticFileProvider, StaticFileProviderFactory};
+use crate::{StaticFileProviderFactory, providers::StaticFileProvider};
 use reth_primitives_traits::NodePrimitives;
 use std::path::PathBuf;
 

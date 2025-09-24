@@ -1,20 +1,20 @@
 use std::sync::Arc;
 
-use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
+use alloy_consensus::{BlockHeader, Header, TxEip2930, constants::ETH_TO_WEI};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{b256, Address, TxKind, U256};
+use alloy_primitives::{Address, TxKind, U256, b256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
 use reth_evm::{
-    execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
+    execute::{BlockExecutionOutput, Executor},
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
-    ProviderFactory,
+    BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory,
+    providers::ProviderNodeTypes,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;
@@ -194,9 +194,9 @@ pub(crate) fn blocks_and_execution_outcome<N>(
 where
     N: ProviderNodeTypes,
     N::Primitives: FullNodePrimitives<
-        Block = reth_ethereum_primitives::Block,
-        Receipt = reth_ethereum_primitives::Receipt,
-    >,
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+        >,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 

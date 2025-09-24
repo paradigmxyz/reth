@@ -1,8 +1,8 @@
 //! Helpers for testing trace calls.
 
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
-use alloy_rpc_types_eth::{transaction::TransactionRequest, Index};
+use alloy_primitives::{B256, Bytes, TxHash, map::HashSet};
+use alloy_rpc_types_eth::{Index, transaction::TransactionRequest};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::BlockOpcodeGas,

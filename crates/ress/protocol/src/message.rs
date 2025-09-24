@@ -6,11 +6,11 @@
 use crate::NodeType;
 use alloy_consensus::Header;
 use alloy_primitives::{
+    B256, BlockHash, Bytes,
     bytes::{Buf, BufMut},
-    BlockHash, Bytes, B256,
 };
 use alloy_rlp::{BytesMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
-use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
+use reth_eth_wire::{Capability, message::RequestPair, protocol::Protocol};
 use reth_ethereum_primitives::BlockBody;
 
 /// An Ress protocol message, containing a message ID and payload.

@@ -4,16 +4,16 @@
 use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
+use alloy_primitives::{Address, B256, Bytes, Signature, TxHash, TxKind, Uint, keccak256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -23,10 +23,10 @@ use core::{
 use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use reth_primitives_traits::{
+    InMemorySize, SignedTransaction,
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    InMemorySize, SignedTransaction,
 };
 
 /// Signed transaction.
@@ -231,11 +231,7 @@ impl alloy_rlp::Decodable for OpTransactionSigned {
 
 impl Encodable2718 for OpTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
-        if Typed2718::is_legacy(self) {
-            None
-        } else {
-            Some(self.ty())
-        }
+        if Typed2718::is_legacy(self) { None } else { Some(self.ty()) }
     }
 
     fn encode_2718_len(&self) -> usize {

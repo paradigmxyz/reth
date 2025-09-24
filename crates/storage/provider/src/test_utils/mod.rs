@@ -1,12 +1,12 @@
 use crate::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
     HashingWriter, ProviderFactory, TrieWriter,
+    providers::{ProviderNodeTypes, StaticFileProvider},
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
+    test_utils::{TempDatabase, create_test_rw_db, create_test_static_files_dir},
 };
 use reth_errors::ProviderResult;
 use reth_ethereum_engine_primitives::EthEngineTypes;

@@ -15,7 +15,7 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
 };
 use core::{
     fmt::Debug,
@@ -35,8 +35,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 
 /// Supports various api interfaces for testing purposes.

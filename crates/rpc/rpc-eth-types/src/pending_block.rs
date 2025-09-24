@@ -7,7 +7,7 @@ use std::{sync::Arc, time::Instant};
 use crate::block::BlockAndReceipts;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockHash, B256};
+use alloy_primitives::{B256, BlockHash};
 use derive_more::Constructor;
 use reth_chain_state::{
     BlockState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,

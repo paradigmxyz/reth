@@ -1,21 +1,21 @@
 //! This is our custom implementation of validator struct
 
 use crate::{
+    InvalidCrossTx,
     interop::MaybeInteropTransaction,
     supervisor::{
-        metrics::SupervisorMetrics, parse_access_list_items_to_inbox_entries, ExecutingDescriptor,
-        InteropTxValidatorError,
+        ExecutingDescriptor, InteropTxValidatorError, metrics::SupervisorMetrics,
+        parse_access_list_items_to_inbox_entries,
     },
-    InvalidCrossTx,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::eip2930::AccessList;
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{B256, TxHash};
 use alloy_rpc_client::ReqwestClient;
 use futures_util::{
+    Stream,
     future::BoxFuture,
     stream::{self, StreamExt},
-    Stream,
 };
 use op_alloy_consensus::interop::SafetyLevel;
 use reth_transaction_pool::PoolTransaction;

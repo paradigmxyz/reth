@@ -12,23 +12,23 @@ use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
 };
-use reth_primitives_traits::{transaction::error::InvalidTransactionError, HeaderTy, SealedHeader};
+use reth_primitives_traits::{HeaderTy, SealedHeader, transaction::error::InvalidTransactionError};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
-    block::BlockAndReceipts, builder::config::PendingBlockKind, EthApiError, PendingBlock,
-    PendingBlockEnv, PendingBlockEnvOrigin,
+    EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin, block::BlockAndReceipts,
+    builder::config::PendingBlockKind,
 };
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderBox, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, noop::NoopProvider,
 };
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool,
+    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    error::InvalidPoolTransactionError,
 };
 use revm::context_interface::Block;
 use std::{

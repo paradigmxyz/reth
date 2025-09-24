@@ -8,8 +8,8 @@ use crate::{
 };
 use futures::Stream;
 use reth_eth_wire::{
-    errors::EthStreamError, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
-    NetworkPrimitives, UnifiedStatus,
+    Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    UnifiedStatus, errors::EthStreamError,
 };
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;

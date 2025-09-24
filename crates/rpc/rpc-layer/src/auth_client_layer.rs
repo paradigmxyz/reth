@@ -1,5 +1,5 @@
 use crate::{Claims, JwtSecret};
-use http::{header::AUTHORIZATION, HeaderValue};
+use http::{HeaderValue, header::AUTHORIZATION};
 use std::{
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},

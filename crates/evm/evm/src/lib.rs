@@ -55,7 +55,7 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_evm::{
-    block::{state_changes, system_calls, OnStateHook},
+    block::{OnStateHook, state_changes, system_calls},
     *,
 };
 
@@ -195,22 +195,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Configured [`BlockExecutorFactory`], contains [`EvmFactory`] internally.
     type BlockExecutorFactory: for<'a> BlockExecutorFactory<
-        Transaction = TxTy<Self::Primitives>,
-        Receipt = ReceiptTy<Self::Primitives>,
-        ExecutionCtx<'a>: Debug + Send,
-        EvmFactory: EvmFactory<
-            Tx: TransactionEnv
-                    + FromRecoveredTx<TxTy<Self::Primitives>>
-                    + FromTxWithEncoded<TxTy<Self::Primitives>>,
-            Precompiles = PrecompilesMap,
-        >,
-    >;
+            Transaction = TxTy<Self::Primitives>,
+            Receipt = ReceiptTy<Self::Primitives>,
+            ExecutionCtx<'a>: Debug + Send,
+            EvmFactory: EvmFactory<
+                Tx: TransactionEnv
+                        + FromRecoveredTx<TxTy<Self::Primitives>>
+                        + FromTxWithEncoded<TxTy<Self::Primitives>>,
+                Precompiles = PrecompilesMap,
+            >,
+        >;
 
     /// A type that knows how to build a block.
-    type BlockAssembler: BlockAssembler<
-        Self::BlockExecutorFactory,
-        Block = BlockTy<Self::Primitives>,
-    >;
+    type BlockAssembler: BlockAssembler<Self::BlockExecutorFactory, Block = BlockTy<Self::Primitives>>;
 
     /// Returns reference to the configured [`BlockExecutorFactory`].
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;

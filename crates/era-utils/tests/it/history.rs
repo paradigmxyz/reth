@@ -3,10 +3,10 @@ use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
-use reth_era_utils::{export, import, ExportConfig};
+use reth_era_utils::{ExportConfig, export, import};
 use reth_etl::Collector;
 use reth_fs_util as fs;
-use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
+use reth_provider::{BlockNumReader, BlockReader, test_utils::create_test_provider_factory};
 use std::str::FromStr;
 use tempfile::tempdir;
 

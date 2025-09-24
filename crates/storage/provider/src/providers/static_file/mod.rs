@@ -55,18 +55,18 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
+        HeaderProvider, StaticFileProviderFactory, test_utils::create_test_provider_factory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{BlockHash, Signature, TxNumber, B256, U256};
+    use alloy_primitives::{B256, BlockHash, Signature, TxNumber, U256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{
-        transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
+        CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, transaction::DbTxMut,
     };
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
     use reth_static_file_types::{
-        find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
+        DEFAULT_BLOCKS_PER_STATIC_FILE, SegmentRangeInclusive, find_fixed_range,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};

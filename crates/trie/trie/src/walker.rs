@@ -1,9 +1,9 @@
 use crate::{
-    prefix_set::PrefixSet,
-    trie_cursor::{subnode::SubNodePosition, CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
+    prefix_set::PrefixSet,
+    trie_cursor::{CursorSubNode, TrieCursor, subnode::SubNodePosition},
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{B256, map::HashSet};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};

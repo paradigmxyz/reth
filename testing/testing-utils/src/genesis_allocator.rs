@@ -2,14 +2,14 @@
 //! signers to the genesis block.
 
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
 use secp256k1::{
-    rand::{thread_rng, RngCore},
     Keypair, Secp256k1,
+    rand::{RngCore, thread_rng},
 };
 use std::{
-    collections::{hash_map::Entry, BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, hash_map::Entry},
     fmt,
 };
 

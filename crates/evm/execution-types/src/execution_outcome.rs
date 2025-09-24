@@ -1,11 +1,11 @@
 use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, Bloom, Log, U256, logs_bloom, map::HashMap};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
-    database::{states::BundleState, BundleAccount},
+    database::{BundleAccount, states::BundleState},
     state::AccountInfo,
 };
 
@@ -415,7 +415,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_execution_types::{serde_bincode_compat, ExecutionOutcome};
+    /// use reth_execution_types::{ExecutionOutcome, serde_bincode_compat};
     /// ///
     /// use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     /// use serde::{Deserialize, Serialize};
@@ -517,7 +517,7 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, ExecutionOutcome};
+        use super::super::{ExecutionOutcome, serde_bincode_compat};
         use rand::Rng;
         use reth_ethereum_primitives::Receipt;
         use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
@@ -555,7 +555,7 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::TxType;
-    use alloy_primitives::{bytes, Address, LogData, B256};
+    use alloy_primitives::{Address, B256, LogData, bytes};
 
     #[test]
     fn test_initialization() {

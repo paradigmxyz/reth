@@ -2,10 +2,10 @@
 
 use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{address, Address, B256};
+use alloy_primitives::{Address, B256, address};
 use alloy_trie::EMPTY_ROOT_HASH;
 use core::fmt::Debug;
-use reth_storage_api::{errors::ProviderResult, StorageRootProvider};
+use reth_storage_api::{StorageRootProvider, errors::ProviderResult};
 use reth_trie_common::HashedStorage;
 use revm::database::BundleState;
 use tracing::warn;
@@ -134,19 +134,19 @@ mod test {
     use alloc::sync::Arc;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{B256, U256, keccak256};
     use core::str::FromStr;
     use reth_db_common::init::init_genesis;
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_node::OpNode;
     use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_node_types,
-        StateWriter,
+        StateWriter, providers::BlockchainProvider,
+        test_utils::create_test_provider_factory_with_node_types,
     };
     use reth_revm::db::BundleState;
     use reth_storage_api::StateProviderFactory;
-    use reth_trie::{test_utils::storage_root_prehashed, HashedStorage};
+    use reth_trie::{HashedStorage, test_utils::storage_root_prehashed};
     use reth_trie_common::HashedPostState;
 
     #[test]

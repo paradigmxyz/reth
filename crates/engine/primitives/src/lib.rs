@@ -19,7 +19,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};

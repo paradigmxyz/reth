@@ -3,20 +3,20 @@
 #![warn(unused_crate_dependencies)]
 
 use reth_ethereum::{
+    EthPrimitives,
     chainspec::ChainSpec,
     cli::interface::Cli,
     node::{
-        api::{FullNodeTypes, NodeTypes},
-        builder::{components::PoolBuilder, BuilderContext},
-        node::EthereumAddOns,
         EthereumNode,
+        api::{FullNodeTypes, NodeTypes},
+        builder::{BuilderContext, components::PoolBuilder},
+        node::EthereumAddOns,
     },
     pool::{
-        blobstore::InMemoryBlobStore, EthTransactionPool, PoolConfig,
-        TransactionValidationTaskExecutor,
+        EthTransactionPool, PoolConfig, TransactionValidationTaskExecutor,
+        blobstore::InMemoryBlobStore,
     },
     provider::CanonStateSubscriptions,
-    EthPrimitives,
 };
 use reth_tracing::tracing::{debug, info};
 

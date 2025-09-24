@@ -1,9 +1,9 @@
 //! Storage sharded key
 use crate::{
-    table::{Decode, Encode},
     DatabaseError,
+    table::{Decode, Encode},
 };
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, B256, BlockNumber};
 use derive_more::AsRef;
 use serde::{Deserialize, Serialize};
 

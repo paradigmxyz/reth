@@ -1,8 +1,8 @@
 //! Compact implementation for transaction types
 use crate::Compact;
 use alloy_consensus::{
-    transaction::{RlpEcdsaEncodableTx, TxEip1559, TxEip2930, TxEip7702, TxLegacy},
     EthereumTypedTransaction, TxType,
+    transaction::{RlpEcdsaEncodableTx, TxEip1559, TxEip2930, TxEip7702, TxLegacy},
 };
 use alloy_primitives::bytes::BufMut;
 

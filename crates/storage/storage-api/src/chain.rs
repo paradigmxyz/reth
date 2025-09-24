@@ -5,11 +5,11 @@ use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
+    DbTxUnwindExt,
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt,
 };
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;

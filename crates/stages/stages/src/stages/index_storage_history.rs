@@ -2,7 +2,7 @@ use super::{collect_history_indices, load_history_indices};
 use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
+    models::{AddressStorageKey, BlockNumberAddress, storage_sharded_key::StorageShardedKey},
     table::Decode,
     tables,
     transaction::DbTxMut,
@@ -150,25 +150,25 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner, stage_test_suite_ext,
     };
-    use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+    use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
     use itertools::Itertools;
     use reth_db_api::{
+        BlockNumberList,
         cursor::DbCursorRO,
         models::{
-            sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey,
-            StoredBlockBodyIndices,
+            ShardedKey, StoredBlockBodyIndices, sharded_key,
+            storage_sharded_key::NUM_OF_INDICES_IN_SHARD,
         },
         transaction::DbTx,
-        BlockNumberList,
     };
     use reth_primitives_traits::StorageEntry;
-    use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
+    use reth_provider::{DatabaseProviderFactory, providers::StaticFileWriter};
     use reth_testing_utils::generators::{
-        self, random_block_range, random_changeset_range, random_contract_account_range,
-        BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_changeset_range,
+        random_contract_account_range,
     };
     use std::collections::BTreeMap;
 

@@ -1,7 +1,7 @@
 //! Ethereum Node types config.
 
-pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
+pub use crate::{EthereumEngineValidator, payload::EthereumPayloadBuilder};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
@@ -14,15 +14,16 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
-    SpecFor, TxEnvFor,
+    ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes, SpecFor, TxEnvFor,
+    eth::spec::EthExecutorSpec,
 };
-use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_network::{NetworkHandle, PeersInfo, primitives::BasicNetworkPrimitives};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
+    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PoolBuilder, TxPoolBuilder,
@@ -33,29 +34,28 @@ use reth_node_builder::{
         EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity, PayloadValidatorBuilder,
         RethRpcAddOns, RpcAddOns, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::{EthStorage, providers::ProviderFactoryBuilder};
 use reth_rpc::{
-    eth::core::{EthApiFor, EthRpcConverterFor},
     ValidationApi,
+    eth::core::{EthApiFor, EthRpcConverterFor},
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_api::{
+    RpcConvert, RpcTypes, SignableTxRequest,
     helpers::{
         config::{EthConfigApiServer, EthConfigHandler},
         pending_block::BuildPendingEnv,
     },
-    RpcConvert, RpcTypes, SignableTxRequest,
 };
-use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
+use reth_rpc_eth_types::{EthApiError, error::FromEvmError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    EthTransactionPool, PoolPooledTx, PoolTransaction, TransactionPool,
+    TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore,
 };
 use revm::context::TxEnv;
 use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
@@ -83,10 +83,10 @@ impl EthereumNode {
             >,
         >,
         <Node::Types as NodeTypes>::Payload: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
+                BuiltPayload = EthBuiltPayload,
+                PayloadAttributes = EthPayloadAttributes,
+                PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            >,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -153,17 +153,17 @@ impl<NetworkT> Default for EthereumEthApiBuilder<NetworkT> {
 impl<N, NetworkT> EthApiBuilder<N> for EthereumEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
-        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
-    >,
+            Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
+            Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
+        >,
     NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<
-        Primitives = PrimitivesTy<N::Types>,
-        TxEnv = TxEnvFor<N::Evm>,
-        Error = EthApiError,
-        Network = NetworkT,
-        Spec = SpecFor<N::Evm>,
-    >,
+            Primitives = PrimitivesTy<N::Types>,
+            TxEnv = TxEnvFor<N::Evm>,
+            Error = EthApiError,
+            Network = NetworkT,
+            Spec = SpecFor<N::Evm>,
+        >,
     EthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = EthApiFor<N, NetworkT>;
@@ -271,13 +271,13 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
     for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: Hardforks + EthereumHardforks,
-            Primitives = EthPrimitives,
-            Payload: EngineTypes<ExecutionData = ExecutionData>,
+            Types: NodeTypes<
+                ChainSpec: Hardforks + EthereumHardforks,
+                Primitives = EthPrimitives,
+                Payload: EngineTypes<ExecutionData = ExecutionData>,
+            >,
+            Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
         >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -324,13 +324,13 @@ where
 impl<N, EthB, PVB, EB, EVB> RethRpcAddOns<N> for EthereumAddOns<N, EthB, PVB, EB, EVB>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: Hardforks + EthereumHardforks,
-            Primitives = EthPrimitives,
-            Payload: EngineTypes<ExecutionData = ExecutionData>,
+            Types: NodeTypes<
+                ChainSpec: Hardforks + EthereumHardforks,
+                Primitives = EthPrimitives,
+                Payload: EngineTypes<ExecutionData = ExecutionData>,
+            >,
+            Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
         >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-    >,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -349,13 +349,13 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
     for EthereumAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: EthChainSpec + EthereumHardforks,
-            Primitives = EthPrimitives,
-            Payload: EngineTypes<ExecutionData = ExecutionData>,
+            Types: NodeTypes<
+                ChainSpec: EthChainSpec + EthereumHardforks,
+                Primitives = EthPrimitives,
+                Payload: EngineTypes<ExecutionData = ExecutionData>,
+            >,
+            Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
         >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
-    >,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -418,9 +418,9 @@ pub struct EthereumExecutorBuilder;
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
     Types: NodeTypes<
-        ChainSpec: Hardforks + EthExecutorSpec + EthereumHardforks,
-        Primitives = EthPrimitives,
-    >,
+            ChainSpec: Hardforks + EthExecutorSpec + EthereumHardforks,
+            Primitives = EthPrimitives,
+        >,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig<Types::ChainSpec>;
@@ -445,9 +445,9 @@ pub struct EthereumPoolBuilder {
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
     Types: NodeTypes<
-        ChainSpec: EthereumHardforks,
-        Primitives: NodePrimitives<SignedTx = TransactionSigned>,
-    >,
+            ChainSpec: EthereumHardforks,
+            Primitives: NodePrimitives<SignedTx = TransactionSigned>,
+        >,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -563,11 +563,11 @@ pub struct EthereumEngineValidatorBuilder;
 impl<Node, Types> PayloadValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypes<
-        ChainSpec: Hardforks + EthereumHardforks + Clone + 'static,
-        Payload: EngineTypes<ExecutionData = ExecutionData>
-                     + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
-        Primitives = EthPrimitives,
-    >,
+            ChainSpec: Hardforks + EthereumHardforks + Clone + 'static,
+            Payload: EngineTypes<ExecutionData = ExecutionData>
+                         + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
+            Primitives = EthPrimitives,
+        >,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = EthereumEngineValidator<Types::ChainSpec>;

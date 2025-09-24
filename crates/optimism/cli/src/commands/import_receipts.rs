@@ -14,12 +14,12 @@ use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::ReceiptTy;
 use reth_node_core::version::version_metadata;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, bedrock::is_dup_tx};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;

@@ -1,4 +1,4 @@
-use crate::{providers::NodeTypesForProvider, DatabaseProvider};
+use crate::{DatabaseProvider, providers::NodeTypesForProvider};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::FullNodePrimitives;
 
@@ -25,11 +25,11 @@ where
     T: FullSignedTx,
     H: FullBlockHeader,
     N: FullNodePrimitives<
-        Block = alloy_consensus::Block<T, H>,
-        BlockHeader = H,
-        BlockBody = alloy_consensus::BlockBody<T, H>,
-        SignedTx = T,
-    >,
+            Block = alloy_consensus::Block<T, H>,
+            BlockHeader = H,
+            BlockBody = alloy_consensus::BlockBody<T, H>,
+            SignedTx = T,
+        >,
 {
     fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
     where
@@ -53,11 +53,11 @@ where
     T: FullSignedTx,
     H: FullBlockHeader,
     N: FullNodePrimitives<
-        Block = alloy_consensus::Block<T, H>,
-        BlockHeader = H,
-        BlockBody = alloy_consensus::BlockBody<T, H>,
-        SignedTx = T,
-    >,
+            Block = alloy_consensus::Block<T, H>,
+            BlockHeader = H,
+            BlockBody = alloy_consensus::BlockBody<T, H>,
+            SignedTx = T,
+        >,
 {
     fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
     where

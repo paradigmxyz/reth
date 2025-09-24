@@ -1,14 +1,14 @@
 use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::Genesis;
-use alloy_primitives::{b256, hex, Address};
+use alloy_primitives::{Address, b256, hex};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
-use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_builder::{FullNode, NodeBuilder, NodeConfig, NodeHandle, rpc::RethRpcAddOns};
 use reth_node_core::args::DevArgs;
-use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
-use reth_rpc_eth_api::{helpers::EthTransactions, EthApiServer};
+use reth_node_ethereum::{EthereumNode, node::EthereumAddOns};
+use reth_provider::{CanonStateSubscriptions, providers::BlockchainProvider};
+use reth_rpc_eth_api::{EthApiServer, helpers::EthTransactions};
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 

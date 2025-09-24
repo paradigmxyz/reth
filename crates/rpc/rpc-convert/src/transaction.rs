@@ -1,23 +1,23 @@
 //! Compatibility functions for rpc `Transaction` type.
 
 use crate::{
-    fees::{CallFees, CallFeesError},
     RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
+    fees::{CallFees, CallFeesError},
 };
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
+    EthereumTxEnvelope, Sealable, TxEip4844, error::ValueError, transaction::Recovered,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
-    request::{TransactionInputError, TransactionRequest},
     Transaction, TransactionInfo,
+    request::{TransactionInputError, TransactionRequest},
 };
 use core::error;
 use dyn_clone::DynClone;
 use reth_evm::{
-    revm::context_interface::{either::Either, Block},
     ConfigureEvm, SpecFor, TxEnvFor,
+    revm::context_interface::{Block, either::Either},
 };
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
@@ -817,12 +817,12 @@ impl<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
         self,
     ) -> Box<
         dyn RpcConvert<
-            Primitives = <Self as RpcConvert>::Primitives,
-            Network = <Self as RpcConvert>::Network,
-            Error = <Self as RpcConvert>::Error,
-            TxEnv = <Self as RpcConvert>::TxEnv,
-            Spec = <Self as RpcConvert>::Spec,
-        >,
+                Primitives = <Self as RpcConvert>::Primitives,
+                Network = <Self as RpcConvert>::Network,
+                Error = <Self as RpcConvert>::Error,
+                TxEnv = <Self as RpcConvert>::TxEnv,
+                Spec = <Self as RpcConvert>::Spec,
+            >,
     >
     where
         Self: RpcConvert,
@@ -856,15 +856,15 @@ where
 }
 
 impl<
-        Network,
-        Evm,
-        Receipt: Clone,
-        Header: Clone,
-        Map: Clone,
-        SimTx: Clone,
-        RpcTx: Clone,
-        TxEnv: Clone,
-    > Clone for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
+    Network,
+    Evm,
+    Receipt: Clone,
+    Header: Clone,
+    Map: Clone,
+    SimTx: Clone,
+    RpcTx: Clone,
+    TxEnv: Clone,
+> Clone for RpcConverter<Network, Evm, Receipt, Header, Map, SimTx, RpcTx, TxEnv>
 {
     fn clone(&self) -> Self {
         Self {
@@ -977,14 +977,14 @@ pub mod op {
     use alloy_consensus::SignableTransaction;
     use alloy_primitives::{Address, Bytes, Signature};
     use op_alloy_consensus::{
-        transaction::{OpDepositInfo, OpTransactionInfo},
         OpTxEnvelope,
+        transaction::{OpDepositInfo, OpTransactionInfo},
     };
     use op_alloy_rpc_types::OpTransactionRequest;
     use op_revm::OpTransaction;
     use reth_optimism_primitives::DepositReceipt;
     use reth_primitives_traits::SignedTransaction;
-    use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+    use reth_storage_api::{ReceiptProvider, errors::ProviderError};
 
     /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
     /// a deposit.
@@ -1095,9 +1095,9 @@ impl TryFromTransactionResponse<op_alloy_network::Optimism>
 #[cfg(test)]
 mod transaction_response_tests {
     use super::*;
-    use alloy_consensus::{transaction::Recovered, EthereumTxEnvelope, Signed, TxLegacy};
+    use alloy_consensus::{EthereumTxEnvelope, Signed, TxLegacy, transaction::Recovered};
     use alloy_network::Ethereum;
-    use alloy_primitives::{Address, Signature, B256, U256};
+    use alloy_primitives::{Address, B256, Signature, U256};
     use alloy_rpc_types_eth::Transaction;
 
     #[test]
@@ -1164,7 +1164,7 @@ mod transaction_response_tests {
         #[test]
         fn test_op_into_tx_env() {
             use op_alloy_rpc_types::OpTransactionRequest;
-            use op_revm::{transaction::OpTxTr, OpSpecId};
+            use op_revm::{OpSpecId, transaction::OpTxTr};
             use revm_context::Transaction;
 
             let s = r#"{"from":"0x0000000000000000000000000000000000000000","to":"0x6d362b9c3ab68c0b7c79e8a714f1d7f3af63655f","input":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","data":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","chainId":"0x7a69"}"#;

@@ -1,9 +1,10 @@
 //! Discovery v4 protocol implementation.
 
-use crate::{error::DecodePacketError, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{MAX_PACKET_SIZE, MIN_PACKET_SIZE, error::DecodePacketError};
 use alloy_primitives::{
+    B256,
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, B256,
+    keccak256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
@@ -11,10 +12,10 @@ use alloy_rlp::{
 };
 use enr::Enr;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_network_peers::{pk2id, NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, pk2id};
 use secp256k1::{
+    SECP256K1, SecretKey,
     ecdsa::{RecoverableSignature, RecoveryId},
-    SecretKey, SECP256K1,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -588,13 +589,13 @@ impl Decodable for Pong {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+        test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
     };
     use alloy_primitives::hex;
     use assert_matches::assert_matches;
     use enr::EnrPublicKey;
-    use rand_08::{thread_rng as rng, Rng, RngCore};
+    use rand_08::{Rng, RngCore, thread_rng as rng};
     use reth_ethereum_forks::ForkHash;
 
     #[test]
@@ -833,7 +834,7 @@ mod tests {
     #[test]
     fn encode_known_rlp_enr() {
         use alloy_rlp::Decodable;
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
+        use enr::{EnrPublicKey, secp256k1::SecretKey};
         use std::net::Ipv4Addr;
 
         let valid_record = hex!(
@@ -915,7 +916,7 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
+        use enr::{EnrPublicKey, secp256k1::SecretKey};
         use std::net::Ipv4Addr;
 
         let key = SecretKey::new(&mut rand_08::rngs::OsRng);

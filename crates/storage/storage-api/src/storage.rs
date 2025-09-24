@@ -2,7 +2,7 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
 };
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, B256, BlockNumber};
 use core::ops::RangeInclusive;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;

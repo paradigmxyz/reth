@@ -422,7 +422,7 @@ impl DataReader {
 mod tests {
     use super::*;
     use compression::Compression;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::SliceRandom};
     use std::{fs::OpenOptions, io::Read};
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
@@ -760,11 +760,13 @@ mod tests {
                 const BLOCKS_EMPTY_MASK: usize = 0b00;
                 for (row_num, _) in &data {
                     // Simulates `by_number` queries
-                    assert!(cursor
-                        .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .is_empty());
+                    assert!(
+                        cursor
+                            .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
+                            .unwrap()
+                            .unwrap()
+                            .is_empty()
+                    );
                 }
             }
         }

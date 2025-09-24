@@ -4,8 +4,8 @@ use crate::{
     bench::{
         context::BenchContext,
         output::{
-            NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
-            NEW_PAYLOAD_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX, NEW_PAYLOAD_OUTPUT_SUFFIX, NewPayloadResult, TotalGasOutput,
+            TotalGasRow,
         },
     },
     valid_payload::{block_to_new_payload, call_new_payload},

@@ -1,11 +1,11 @@
 #![allow(missing_docs)]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use reth_chain_state::{
-    test_utils::TestBlockBuilder, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProviderRef,
+    ExecutedBlockWithTrieUpdates, MemoryOverlayStateProviderRef, test_utils::TestBlockBuilder,
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_storage_api::{noop::NoopProvider, BlockHashReader};
+use reth_storage_api::{BlockHashReader, noop::NoopProvider};
 
 criterion_group!(benches, bench_canonical_hashes_range);
 criterion_main!(benches);

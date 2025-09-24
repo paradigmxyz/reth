@@ -1,10 +1,10 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
-use crate::{assert::assert_equal, Error};
+use crate::{Error, assert::assert_equal};
 use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, B64, B256, Bloom, Bytes, U256, keccak256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::SealedHeader;

@@ -5,7 +5,7 @@ mod user;
 
 use crate::{PruneLimiter, PrunerError};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
+use reth_provider::{BlockReader, PruneCheckpointWriter, errors::provider::ProviderResult};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
 pub use static_file::{
@@ -148,9 +148,9 @@ mod tests {
     use alloy_primitives::B256;
     use reth_provider::{
         providers::BlockchainProvider,
-        test_utils::{create_test_provider_factory, MockEthProvider},
+        test_utils::{MockEthProvider, create_test_provider_factory},
     };
-    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+    use reth_testing_utils::generators::{self, BlockRangeParams, random_block_range};
 
     #[test]
     fn test_prune_input_get_next_tx_num_range_no_to_block() {

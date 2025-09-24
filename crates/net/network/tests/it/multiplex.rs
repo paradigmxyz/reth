@@ -4,7 +4,7 @@
 use std::{
     net::SocketAddr,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use alloy_primitives::bytes::BytesMut;
@@ -13,9 +13,9 @@ use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::{
+    NetworkConfigBuilder, NetworkEventListenerProvider, NetworkManager,
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::{NetworkEventStream, Testnet},
-    NetworkConfigBuilder, NetworkEventListenerProvider, NetworkManager,
 };
 use reth_network_api::{Direction, NetworkInfo, PeerId, Peers};
 use reth_provider::{noop::NoopProvider, test_utils::MockEthProvider};

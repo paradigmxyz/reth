@@ -1,5 +1,5 @@
 use crate::{Cli, Commands};
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;

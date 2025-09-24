@@ -1,6 +1,6 @@
 use crate::{
-    compression::Compression, ColumnResult, NippyJar, NippyJarChecker, NippyJarError,
-    NippyJarHeader,
+    ColumnResult, NippyJar, NippyJarChecker, NippyJarError, NippyJarHeader,
+    compression::Compression,
 };
 use std::{
     fs::{File, OpenOptions},

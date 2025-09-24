@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to tracing.
 
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_api::{helpers::Trace, FromEvmError, RpcNodeCore};
+use reth_rpc_eth_api::{FromEvmError, RpcNodeCore, helpers::Trace};
 use reth_rpc_eth_types::EthApiError;
 
 use crate::EthApi;

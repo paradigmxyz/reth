@@ -6,23 +6,23 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{Address, B256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
-    executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
-    StateProviderBuilder, TreeConfig,
+    PayloadProcessor, StateProviderBuilder, TreeConfig, executor::WorkloadExecutor,
+    precompile_cache::PrecompileCacheMap,
 };
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
-    providers::{BlockchainProvider, ConsistentDbView},
-    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
+    providers::{BlockchainProvider, ConsistentDbView},
+    test_utils::{MockNodeTypesWithDB, create_test_provider_factory_with_chain_spec},
 };
 use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};

@@ -6,21 +6,21 @@ use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    BlockReader, DBProvider, DatabaseProviderFactory, ProviderError, providers::ConsistentDbView,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
+    HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE, TrieInput,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     collections::HashMap,
-    sync::{mpsc, Arc, OnceLock},
+    sync::{Arc, OnceLock, mpsc},
     time::Duration,
 };
 use thiserror::Error;
@@ -301,11 +301,11 @@ fn get_runtime_handle() -> Handle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{Address, U256, keccak256};
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::{test_utils, HashedPostState, HashedStorage};
+    use reth_provider::{HashingWriter, test_utils::create_test_provider_factory};
+    use reth_trie::{HashedPostState, HashedStorage, test_utils};
 
     #[tokio::test]
     async fn random_parallel_root() {

@@ -1,7 +1,7 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, B256, Bytes, U64, U256};
 use alloy_rpc_types_eth::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus, state::StateOverride,
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;

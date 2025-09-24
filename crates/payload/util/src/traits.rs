@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::{Address, map::HashSet};
 use reth_transaction_pool::{PoolTransaction, ValidPoolTransaction};
 
 /// Iterator that returns transactions for the block building process in the order they should be
@@ -97,11 +97,11 @@ mod tests {
         BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
         PayloadTransactionsFixed,
     };
-    use alloy_primitives::{map::HashSet, Address};
+    use alloy_primitives::{Address, map::HashSet};
     use reth_transaction_pool::{
+        PoolTransaction,
         pool::{BestTransactionsWithPrioritizedSenders, PendingPool},
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        PoolTransaction,
     };
 
     #[test]

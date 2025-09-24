@@ -2,16 +2,16 @@
 //! and injecting them into era1 files with `Era1Writer`.
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256, U256};
-use eyre::{eyre, Result};
+use alloy_primitives::{B256, BlockNumber, U256};
+use eyre::{Result, eyre};
 use reth_era::{
     e2s_types::IndexEntry,
+    era_file_ops::{EraFileId, StreamWriter},
     era1_file::Era1Writer,
     era1_types::{BlockIndex, Era1Id},
-    era_file_ops::{EraFileId, StreamWriter},
     execution_types::{
         Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+        MAX_BLOCKS_PER_ERA1, TotalDifficulty,
     },
 };
 use reth_fs_util as fs;

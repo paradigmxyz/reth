@@ -6,20 +6,20 @@ use futures::{future, future::Either};
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::{
+    BlockClient,
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
-    BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use std::{
     ops::RangeInclusive,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};

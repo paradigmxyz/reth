@@ -92,12 +92,12 @@ impl<B> From<Vec<B>> for BlockBodies<B> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-        HeadersDirection,
+        BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, HeadersDirection,
+        message::RequestPair,
     };
     use alloy_consensus::{Header, TxLegacy};
     use alloy_eips::BlockHashOrNumber;
-    use alloy_primitives::{hex, Signature, TxKind, U256};
+    use alloy_primitives::{Signature, TxKind, U256, hex};
     use alloy_rlp::{Decodable, Encodable};
     use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;

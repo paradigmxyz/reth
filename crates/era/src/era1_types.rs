@@ -174,8 +174,8 @@ impl EraFileId for Era1Id {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{create_sample_block, create_test_block_with_compressed_data},
         DecodeCompressed,
+        test_utils::{create_sample_block, create_test_block_with_compressed_data},
     };
     use alloy_consensus::ReceiptWithBloom;
     use alloy_primitives::{B256, U256};

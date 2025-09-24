@@ -7,7 +7,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
-use tokio::sync::mpsc::{error::SendError, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, error::SendError};
 
 /// Captures the context that an `ExEx` has access to.
 ///

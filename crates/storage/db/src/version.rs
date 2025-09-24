@@ -85,7 +85,7 @@ pub fn db_version_file_path<P: AsRef<Path>>(db_path: P) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_db_version_file, db_version_file_path, DatabaseVersionError};
+    use super::{DatabaseVersionError, check_db_version_file, db_version_file_path};
     use assert_matches::assert_matches;
     use std::fs;
     use tempfile::tempdir;

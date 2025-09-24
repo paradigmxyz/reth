@@ -13,13 +13,13 @@ use reth_ethereum::{
     node::EthereumNode,
     primitives::{Account, Bytecode},
     provider::{
+        ProviderResult,
         db::{
             cursor::{DbCursorRO, DbDupCursorRO},
             tables,
             transaction::DbTx,
         },
         providers::ReadOnlyConfig,
-        ProviderResult,
     },
     storage::{DBProvider, StateProvider},
 };

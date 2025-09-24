@@ -20,17 +20,16 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
-    metrics,
-    metrics::{gauge, Gauge},
-    Metrics,
+    Metrics, metrics,
+    metrics::{Gauge, gauge},
 };
 use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
+    constants::GAS_LIMIT_BOUND_DIVISOR,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -41,7 +40,7 @@ use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
@@ -93,11 +92,7 @@ where
     /// Returns the cached reads for the given head hash.
     async fn cached_reads(&self, head: B256) -> CachedReads {
         let cache = self.inner.cached_state.read().await;
-        if cache.0 == head {
-            cache.1.clone()
-        } else {
-            Default::default()
-        }
+        if cache.0 == head { cache.1.clone() } else { Default::default() }
     }
 
     /// Updates the cached state for the given head hash.

@@ -1,4 +1,5 @@
 use crate::{
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
     hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
@@ -10,10 +11,9 @@ use crate::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
-    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{Address, B256, keccak256};
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};

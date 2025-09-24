@@ -1,16 +1,16 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash};
+use alloy_eips::{BlockNumHash, eip1898::BlockWithParent, merge::EPOCH_SLOTS};
 use alloy_primitives::{
+    B256, BlockNumber,
     map::{HashMap, HashSet},
-    BlockNumber, B256,
 };
 use reth_chain_state::{EthPrimitives, ExecutedBlockWithTrieUpdates};
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use reth_trie::updates::TrieUpdates;
 use std::{
-    collections::{btree_map, hash_map, BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque, btree_map, hash_map},
     ops::Bound,
     sync::Arc,
 };
@@ -490,10 +490,14 @@ mod tests {
         tree_state.insert_executed(fork_block_4.clone());
         assert_eq!(tree_state.blocks_by_hash.len(), 8);
 
-        assert!(tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
-            .contains(&fork_block_4.recovered_block().hash()));
-        assert!(tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
-            .contains(&fork_block_5.recovered_block().hash()));
+        assert!(
+            tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
+                .contains(&fork_block_4.recovered_block().hash())
+        );
+        assert!(
+            tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
+                .contains(&fork_block_5.recovered_block().hash())
+        );
 
         assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
         assert_eq!(tree_state.blocks_by_number[&5].len(), 2);

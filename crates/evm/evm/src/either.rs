@@ -1,6 +1,6 @@
 //! Helper type that represents one of two possible executor types
 
-use crate::{execute::Executor, Database, OnStateHook};
+use crate::{Database, OnStateHook, execute::Executor};
 
 // re-export Either
 pub use futures_util::future::Either;

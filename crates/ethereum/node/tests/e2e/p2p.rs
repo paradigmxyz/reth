@@ -1,6 +1,6 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
 use alloy_provider::{Provider, ProviderBuilder};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;

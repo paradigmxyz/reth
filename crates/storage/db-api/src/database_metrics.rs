@@ -1,4 +1,4 @@
-use metrics::{counter, gauge, histogram, Label};
+use metrics::{Label, counter, gauge, histogram};
 use std::sync::Arc;
 
 /// Represents a type that can report metrics, used mainly with the database. The `report_metrics`

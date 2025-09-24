@@ -9,8 +9,8 @@ use reth_cli_commands::{
     test_vectors::{
         compact,
         compact::{
-            generate_vector, read_vector, GENERATE_VECTORS as ETH_GENERATE_VECTORS,
-            READ_VECTORS as ETH_READ_VECTORS,
+            GENERATE_VECTORS as ETH_GENERATE_VECTORS, READ_VECTORS as ETH_READ_VECTORS,
+            generate_vector, read_vector,
         },
         tables,
     },

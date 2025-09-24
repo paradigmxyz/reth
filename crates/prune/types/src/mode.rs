@@ -1,4 +1,4 @@
-use crate::{segment::PrunePurpose, PruneSegment, PruneSegmentError};
+use crate::{PruneSegment, PruneSegmentError, segment::PrunePurpose};
 use alloy_primitives::BlockNumber;
 
 /// Prune mode.
@@ -85,7 +85,7 @@ impl PruneMode {
 #[cfg(test)]
 mod tests {
     use crate::{
-        PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
+        MINIMUM_PRUNING_DISTANCE, PruneMode, PrunePurpose, PruneSegment, PruneSegmentError,
     };
     use assert_matches::assert_matches;
     use serde::Deserialize;

@@ -16,7 +16,7 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    node::{builder::NodeHandle, EthereumNode},
+    node::{EthereumNode, builder::NodeHandle},
     pool::TransactionPool,
     rpc::eth::primitives::TransactionRequest,
 };

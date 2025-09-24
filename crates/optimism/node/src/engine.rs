@@ -7,18 +7,18 @@ use op_alloy_rpc_types_engine::{
 };
 use reth_consensus::ConsensusError;
 use reth_node_api::{
+    BuiltPayload, EngineApiValidator, EngineTypes, NodePrimitives, PayloadValidator,
     payload::{
-        validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-        EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
-        PayloadTypes, VersionSpecificValidationError,
+        EngineApiMessageVersion, EngineObjectValidationError, MessageValidationKind,
+        NewPayloadError, PayloadOrAttributes, PayloadTypes, VersionSpecificValidationError,
+        validate_parent_beacon_block_root_presence,
     },
-    validate_version_specific_fields, BuiltPayload, EngineApiValidator, EngineTypes,
-    NodePrimitives, PayloadValidator,
+    validate_version_specific_fields,
 };
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
-use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{ADDRESS_L2_TO_L1_MESSAGE_PASSER, OpBlock};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
@@ -164,10 +164,10 @@ where
 impl<Types, P, Tx, ChainSpec> EngineApiValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
 where
     Types: PayloadTypes<
-        PayloadAttributes = OpPayloadAttributes,
-        ExecutionData = OpExecutionData,
-        BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
-    >,
+            PayloadAttributes = OpPayloadAttributes,
+            ExecutionData = OpExecutionData,
+            BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
+        >,
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
@@ -301,10 +301,10 @@ mod test {
     use super::*;
 
     use crate::engine;
-    use alloy_primitives::{b64, Address, B256, B64};
+    use alloy_primitives::{Address, B64, B256, b64};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
-    use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
+    use reth_optimism_chainspec::{BASE_SEPOLIA, OpChainSpec};
     use reth_optimism_forks::OpHardfork;
     use reth_provider::noop::NoopProvider;
     use reth_trie_common::KeccakKeyHasher;

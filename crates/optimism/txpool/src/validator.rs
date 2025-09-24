@@ -1,4 +1,4 @@
-use crate::{supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
+use crate::{InvalidCrossTx, OpPooledTx, supervisor::SupervisorClient};
 use alloy_consensus::{BlockHeader, Transaction};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
@@ -6,16 +6,16 @@ use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
+    Block, BlockBody, GotExpected, SealedBlock, transaction::error::InvalidTransactionError,
 };
 use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator, error::InvalidPoolTransactionError,
 };
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 /// The interval for which we check transaction against supervisor, 1 hour.

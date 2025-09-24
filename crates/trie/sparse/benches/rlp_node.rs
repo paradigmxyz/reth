@@ -1,13 +1,13 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use prop::strategy::ValueTree;
 use proptest::{prelude::*, test_runner::TestRunner};
-use rand::{seq::IteratorRandom, Rng};
+use rand::{Rng, seq::IteratorRandom};
 use reth_testing_utils::generators;
 use reth_trie::Nibbles;
-use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrieInterface};
+use reth_trie_sparse::{SerialSparseTrie, SparseTrieInterface, provider::DefaultTrieNodeProvider};
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();

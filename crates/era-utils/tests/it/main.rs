@@ -1,7 +1,7 @@
 //! Root module for test modules, so that the tests are built into a single binary.
 
 use alloy_primitives::bytes::Bytes;
-use futures_util::{stream, Stream, TryStreamExt};
+use futures_util::{Stream, TryStreamExt, stream};
 use reqwest::{Client, IntoUrl};
 use reth_era_downloader::HttpClient;
 use tokio_util::either::Either;

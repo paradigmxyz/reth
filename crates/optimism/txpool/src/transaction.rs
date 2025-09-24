@@ -2,14 +2,14 @@ use crate::{
     conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
     interop::MaybeInteropTransaction,
 };
-use alloy_consensus::{transaction::Recovered, BlobTransactionValidationError, Typed2718};
+use alloy_consensus::{BlobTransactionValidationError, Typed2718, transaction::Recovered};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, TxHash, TxKind, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
 use core::fmt::Debug;
@@ -21,8 +21,8 @@ use reth_transaction_pool::{
 use std::{
     borrow::Cow,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -319,8 +319,8 @@ mod tests {
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
-        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
-        TransactionValidationOutcome,
+        TransactionOrigin, TransactionValidationOutcome, blobstore::InMemoryBlobStore,
+        validate::EthTransactionValidatorBuilder,
     };
     #[tokio::test]
     async fn validate_optimism_transaction() {

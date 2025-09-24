@@ -4,21 +4,21 @@
 //! the consensus client.
 
 use alloy_eips::{
+    BlockId, BlockNumberOrTag,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7685::RequestsOrHash,
-    BlockId, BlockNumberOrTag,
 };
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
+use alloy_primitives::{Address, B256, BlockHash, Bytes, U64, U256};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use alloy_rpc_types_eth::{
-    state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus,
+    BlockOverrides, EIP1186AccountProofResponse, Filter, Log, SyncStatus, state::StateOverride,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
+use jsonrpsee::{RpcModule, core::RpcResult, proc_macros::rpc};
 use reth_engine_primitives::EngineTypes;
 
 /// Helper trait for the engine api server.

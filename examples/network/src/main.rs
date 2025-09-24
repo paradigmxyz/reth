@@ -11,7 +11,7 @@
 use futures::StreamExt;
 use reth_ethereum::{
     network::{
-        config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+        NetworkConfig, NetworkEventListenerProvider, NetworkManager, config::rng_secret_key,
     },
     provider::test_utils::NoopProvider,
 };

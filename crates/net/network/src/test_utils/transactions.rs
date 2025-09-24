@@ -3,16 +3,16 @@
 #![allow(dead_code)]
 
 use crate::{
+    NetworkConfigBuilder, NetworkManager,
     cache::LruCache,
     transactions::{
+        PeerMetadata, TransactionsManager,
         constants::{
             tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS,
             tx_manager::DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
         },
         fetcher::{TransactionFetcher, TxFetchMetadata},
-        PeerMetadata, TransactionsManager,
     },
-    NetworkConfigBuilder, NetworkManager,
 };
 use alloy_primitives::TxHash;
 use reth_eth_wire::EthVersion;
@@ -20,15 +20,15 @@ use reth_eth_wire_types::EthNetworkPrimitives;
 use reth_network_api::{PeerKind, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
 use reth_storage_api::noop::NoopProvider;
-use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+use reth_transaction_pool::test_utils::{TestPool, testing_pool};
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::trace;
 
 /// A new tx manager for testing.
-pub async fn new_tx_manager(
-) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
+pub async fn new_tx_manager()
+-> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 

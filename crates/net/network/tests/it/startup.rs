@@ -4,10 +4,10 @@ use std::{
 };
 
 use reth_chainspec::MAINNET;
-use reth_discv4::{Discv4Config, NatResolver, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, Discv4Config, NatResolver};
 use reth_network::{
-    error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
+    error::{NetworkError, ServiceKind},
 };
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_storage_api::noop::NoopProvider;

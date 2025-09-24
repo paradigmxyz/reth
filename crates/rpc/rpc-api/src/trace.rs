@@ -1,6 +1,6 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashSet, Bytes, B256};
-use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides, Index};
+use alloy_primitives::{B256, Bytes, map::HashSet};
+use alloy_rpc_types_eth::{BlockOverrides, Index, state::StateOverride};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
     opcode::{BlockOpcodeGas, TransactionOpcodeGas},

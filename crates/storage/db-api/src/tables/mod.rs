@@ -18,16 +18,16 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 use crate::{
     models::{
+        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
+        StoredBlockBodyIndices, StoredBlockWithdrawals,
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
-        StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
 };
 use alloy_consensus::Header;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, TxHash, TxNumber};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -52,8 +52,8 @@ pub enum TableType {
 ///
 /// ```
 /// use reth_db_api::{
-///     table::{DupSort, Table},
 ///     TableViewer, Tables,
+///     table::{DupSort, Table},
 /// };
 ///
 /// struct MyTableViewer;

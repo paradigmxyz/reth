@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{B256, Bytes, keccak256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::NetworkInfo;

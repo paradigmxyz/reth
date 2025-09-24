@@ -1,20 +1,20 @@
 use crate::tree::MeteredStateHook;
 use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::{
-    block::{BlockExecutor, ExecutableTx},
     Evm,
+    block::{BlockExecutor, ExecutableTx},
 };
 use core::borrow::BorrowMut;
 use reth_errors::BlockExecutionError;
-use reth_evm::{metrics::ExecutorMetrics, OnStateHook};
+use reth_evm::{OnStateHook, metrics::ExecutorMetrics};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::{
-    metrics::{Counter, Gauge, Histogram},
     Metrics,
+    metrics::{Counter, Gauge, Histogram},
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
-use revm::database::{states::bundle_state::BundleRetention, State};
+use revm::database::{State, states::bundle_state::BundleRetention};
 use std::time::Instant;
 use tracing::{debug_span, trace};
 
@@ -219,12 +219,12 @@ mod tests {
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives_traits::RecoveredBlock;
     use revm::{
+        Context, MainBuilder, MainContext,
         context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
         state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot},
-        Context, MainBuilder, MainContext,
     };
     use revm_primitives::Bytes;
     use std::sync::mpsc;

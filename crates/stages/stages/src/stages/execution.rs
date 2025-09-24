@@ -5,15 +5,15 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor, metrics::ExecutorMetrics};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
+use reth_primitives_traits::{BlockBody, NodePrimitives, format_gas_throughput};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    providers::{StaticFileProvider, StaticFileWriter},
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -26,7 +26,7 @@ use std::{
     cmp::Ordering,
     ops::RangeInclusive,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -662,7 +662,7 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256, address, hex_literal::hex, keccak256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -675,8 +675,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
-        test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
-        ReceiptProvider, StaticFileProviderFactory,
+        AccountReader, DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
+        test_utils::create_test_provider_factory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};

@@ -3,8 +3,8 @@
 use crate::supervisor::InteropTxValidatorError;
 use op_alloy_rpc_types::SuperchainDAError;
 use reth_metrics::{
-    metrics::{Counter, Histogram},
     Metrics,
+    metrics::{Counter, Histogram},
 };
 use std::time::Duration;
 

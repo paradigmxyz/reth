@@ -1,7 +1,7 @@
 use crate::{
+    DatabaseError,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{DupSort, Encode, Table},
-    DatabaseError,
 };
 use std::fmt::Debug;
 
@@ -52,7 +52,7 @@ pub trait DbTxMut: Send + Sync {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
     /// Delete value from database
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>)
-        -> Result<bool, DatabaseError>;
+    -> Result<bool, DatabaseError>;
     /// Clears database.
     fn clear<T: Table>(&self) -> Result<(), DatabaseError>;
     /// Cursor mut

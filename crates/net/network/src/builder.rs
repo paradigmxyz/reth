@@ -3,13 +3,13 @@
 use std::fmt::Debug;
 
 use crate::{
+    NetworkHandle, NetworkManager,
     eth_requests::EthRequestHandler,
     transactions::{
+        TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig,
         config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
         policy::NetworkPolicies,
-        TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandleProvider;

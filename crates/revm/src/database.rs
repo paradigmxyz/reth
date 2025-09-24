@@ -4,7 +4,7 @@ use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{Database, DatabaseRef, bytecode::Bytecode, state::AccountInfo};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///

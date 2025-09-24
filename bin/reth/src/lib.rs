@@ -131,7 +131,7 @@ pub mod tasks {
 pub mod network {
     pub use reth_network::*;
     pub use reth_network_api::{
-        noop, test_utils::PeersHandleProvider, NetworkInfo, Peers, PeersInfo,
+        NetworkInfo, Peers, PeersInfo, noop, test_utils::PeersHandleProvider,
     };
 }
 
@@ -186,7 +186,7 @@ pub mod ress;
 
 // re-export for convenience
 #[doc(inline)]
-pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
+pub use reth_cli_runner::{CliContext, CliRunner, tokio_runtime};
 
 // for rendering diagrams
 use aquamarine as _;

@@ -30,23 +30,23 @@ pub trait NodePrimitives:
 pub trait FullNodePrimitives
 where
     Self: NodePrimitives<
-        Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
-        BlockHeader: FullBlockHeader,
-        BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
-        SignedTx: FullSignedTx,
-        Receipt: FullReceipt,
-    >,
+            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+            BlockHeader: FullBlockHeader,
+            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+            SignedTx: FullSignedTx,
+            Receipt: FullReceipt,
+        >,
 {
 }
 
 impl<T> FullNodePrimitives for T where
     T: NodePrimitives<
-        Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
-        BlockHeader: FullBlockHeader,
-        BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
-        SignedTx: FullSignedTx,
-        Receipt: FullReceipt,
-    >
+            Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>,
+            BlockHeader: FullBlockHeader,
+            BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
+            SignedTx: FullSignedTx,
+            Receipt: FullReceipt,
+        >
 {
 }
 

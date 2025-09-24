@@ -4,9 +4,9 @@ use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, Sealable, B256};
-use futures::{stream::Stream, FutureExt};
-use futures_util::{stream::FuturesUnordered, StreamExt};
+use alloy_primitives::{B256, BlockNumber, Sealable};
+use futures::{FutureExt, stream::Stream};
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
 use reth_consensus::HeaderValidator;
@@ -14,7 +14,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
         client::{HeadersClient, HeadersRequest},
-        downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+        downloader::{HeaderDownloader, SyncTarget, validate_header_download},
         error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
     priority::Priority,
@@ -24,11 +24,11 @@ use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{binary_heap::PeekMut, BinaryHeap},
+    collections::{BinaryHeap, binary_heap::PeekMut},
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use thiserror::Error;
 use tracing::{debug, error, trace};
@@ -1259,7 +1259,7 @@ mod tests {
     use super::*;
     use crate::headers::test_utils::child_header;
     use alloy_consensus::Header;
-    use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
+    use alloy_eips::{BlockNumHash, eip1898::BlockWithParent};
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;

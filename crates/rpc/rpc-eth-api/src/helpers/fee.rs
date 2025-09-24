@@ -10,8 +10,8 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
-    fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
+    fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
 };
 use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
 use tracing::debug;

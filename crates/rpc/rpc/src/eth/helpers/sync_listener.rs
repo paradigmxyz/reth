@@ -6,7 +6,7 @@ use reth_network_api::NetworkInfo;
 use std::{
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 /// This future resolves once the node is no longer syncing: [`NetworkInfo::is_syncing`].
@@ -64,8 +64,8 @@ mod tests {
     use std::{
         net::{IpAddr, SocketAddr},
         sync::{
-            atomic::{AtomicBool, Ordering},
             Arc,
+            atomic::{AtomicBool, Ordering},
         },
     };
 

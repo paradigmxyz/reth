@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::TxEip4844Sidecar, EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
+    EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant,
+    TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType, transaction::TxEip4844Sidecar,
 };
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Signature, TxHash, B256};
+use alloy_primitives::{B256, Signature, TxHash};
 use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.

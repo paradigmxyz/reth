@@ -1,9 +1,9 @@
 //! Loads and formats OP block RPC response.
 
-use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
+use crate::{OpEthApi, OpEthApiError, eth::RpcNodeCore};
 use reth_rpc_eth_api::{
-    helpers::{EthBlocks, LoadBlock},
     FromEvmError, RpcConvert,
+    helpers::{EthBlocks, LoadBlock},
 };
 
 impl<N, Rpc> EthBlocks for OpEthApi<N, Rpc>

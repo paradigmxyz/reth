@@ -21,7 +21,7 @@ use crate::error::{
     ParseDnsEntryError::{FieldNotFound, UnknownEntry},
     ParseEntryResult,
 };
-use alloy_primitives::{hex, Bytes};
+use alloy_primitives::{Bytes, hex};
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey, Error as EnrError};
 use secp256k1::SecretKey;

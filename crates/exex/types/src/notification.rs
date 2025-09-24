@@ -83,7 +83,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_exex_types::{serde_bincode_compat, ExExNotification};
+    /// use reth_exex_types::{ExExNotification, serde_bincode_compat};
     /// use reth_primitives_traits::NodePrimitives;
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
@@ -178,7 +178,7 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{serde_bincode_compat, ExExNotification};
+        use super::super::{ExExNotification, serde_bincode_compat};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_execution_types::Chain;
@@ -203,14 +203,18 @@ pub(super) mod serde_bincode_compat {
             let data = Data {
                 notification: ExExNotification::ChainReorged {
                     old: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![
+                            RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                                .unwrap(),
+                        ],
                         Default::default(),
                         None,
                     )),
                     new: Arc::new(Chain::new(
-                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                            .unwrap()],
+                        vec![
+                            RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                                .unwrap(),
+                        ],
                         Default::default(),
                         None,
                     )),

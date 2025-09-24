@@ -1,23 +1,23 @@
 //! `EthApiBuilder` implementation
 
-use crate::{eth::core::EthApiInner, EthApi};
+use crate::{EthApi, eth::core::EthApiInner};
 use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
+    RpcNodeCore, helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter,
 };
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
-    receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
-    FeeHistoryCacheConfig, ForwardConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    EthStateCache, EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig,
+    GasCap, GasPriceOracle, GasPriceOracleConfig, builder::config::PendingBlockKind,
+    fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor, pool::BlockingTaskPool};
 use std::{sync::Arc, time::Duration};
 
 /// A helper to build the `EthApi` handler instance.

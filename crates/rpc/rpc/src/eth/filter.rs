@@ -8,9 +8,9 @@ use alloy_rpc_types_eth::{
 };
 use async_trait::async_trait;
 use futures::{
+    Future,
     future::TryFutureExt,
     stream::{FuturesOrdered, StreamExt},
-    Future,
 };
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
@@ -21,10 +21,10 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
+    logs_utils::{self, ProviderOrBlock, append_matching_block_logs},
 };
-use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
+use reth_rpc_server_types::{ToRpcResult, result::rpc_error_with_code};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
@@ -41,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc::Receiver, oneshot, Mutex},
+    sync::{Mutex, mpsc::Receiver, oneshot},
     time::MissedTickBehavior,
 };
 use tracing::{debug, error, trace};
@@ -919,9 +919,8 @@ enum RangeMode<
     Range(RangeBlockMode<Eth>),
 }
 
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeMode<Eth>
+impl<Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static>
+    RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
     fn new(
@@ -998,9 +997,8 @@ struct CachedMode<
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > CachedMode<Eth>
+impl<Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static>
+    CachedMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         for header in self.headers_iter.by_ref() {
@@ -1036,9 +1034,8 @@ struct RangeBlockMode<
     pending_tasks: FuturesOrdered<ReceiptFetchFuture<Eth::Provider>>,
 }
 
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeBlockMode<Eth>
+impl<Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static>
+    RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
@@ -1204,7 +1201,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::EthApi, EthApiBuilder};
+    use crate::{EthApiBuilder, eth::EthApi};
     use alloy_network::Ethereum;
     use alloy_primitives::FixedBytes;
     use rand::Rng;
@@ -1218,7 +1215,7 @@ mod tests {
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{TestPool, testing_pool};
     use std::{collections::VecDeque, sync::Arc};
 
     #[test]

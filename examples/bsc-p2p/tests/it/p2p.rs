@@ -8,7 +8,7 @@ use reth_network::{
     EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };
 use reth_provider::noop::NoopProvider;
-use secp256k1::{rand, SecretKey};
+use secp256k1::{SecretKey, rand};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,

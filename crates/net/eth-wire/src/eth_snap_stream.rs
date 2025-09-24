@@ -5,9 +5,9 @@
 
 use super::message::MAX_MESSAGE_SIZE;
 use crate::{
-    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, NetworkPrimitives, ProtocolMessage,
     RawCapabilityMessage, SnapMessageId, SnapProtocolMessage,
+    message::{EthBroadcastMessage, ProtocolBroadcastMessage},
 };
 use alloy_rlp::{Bytes, BytesMut, Encodable};
 use core::fmt::Debug;
@@ -16,7 +16,7 @@ use pin_project::pin_project;
 use std::{
     marker::PhantomData,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio_stream::Stream;
 
@@ -294,7 +294,7 @@ mod tests {
     use alloy_primitives::B256;
     use alloy_rlp::Encodable;
     use reth_eth_wire_types::{
-        message::RequestPair, GetAccountRangeMessage, GetBlockHeaders, HeadersDirection,
+        GetAccountRangeMessage, GetBlockHeaders, HeadersDirection, message::RequestPair,
     };
 
     // Helper to create eth message and its bytes

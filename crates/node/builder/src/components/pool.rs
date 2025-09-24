@@ -4,8 +4,8 @@ use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::TxTy;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit,
-    TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
+    CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit, TransactionPool,
+    TransactionValidationTaskExecutor, TransactionValidator, blobstore::DiskFileBlobStore,
 };
 use std::{collections::HashSet, future::Future};
 

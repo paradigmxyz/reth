@@ -1,12 +1,12 @@
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvm;
-use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
+use reth_network::{NetworkProtocols, protocol::IntoRlpxSubProtocol};
 use reth_network_api::FullNetwork;
 use reth_node_api::ConsensusEngineEvent;
 use reth_node_core::args::RessArgs;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_ress_protocol::{NodeType, ProtocolState, RessProtocolHandler};
-use reth_ress_provider::{maintain_pending_state, PendingState, RethRessProtocolProvider};
+use reth_ress_provider::{PendingState, RethRessProtocolProvider, maintain_pending_state};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventStream;
 use tokio::sync::mpsc;

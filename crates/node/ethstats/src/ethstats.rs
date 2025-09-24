@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc, Mutex, RwLock},
+    sync::{Mutex, RwLock, mpsc},
     time::{interval, sleep, timeout},
 };
 use tokio_stream::StreamExt;
@@ -704,7 +704,7 @@ mod tests {
     use reth_transaction_pool::noop::NoopTransactionPool;
     use serde_json::json;
     use tokio::net::TcpListener;
-    use tokio_tungstenite::tungstenite::protocol::{frame::Utf8Bytes, Message};
+    use tokio_tungstenite::tungstenite::protocol::{Message, frame::Utf8Bytes};
 
     const TEST_HOST: &str = "127.0.0.1";
     const TEST_PORT: u16 = 0; // Let OS choose port

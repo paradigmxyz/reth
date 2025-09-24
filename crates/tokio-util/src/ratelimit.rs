@@ -1,7 +1,7 @@
 //! A rate limit implementation to enforce a specific rate.
 
 use std::{
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     pin::Pin,
     task::{Context, Poll},
     time::Duration,

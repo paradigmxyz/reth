@@ -1,5 +1,5 @@
 //! Metrics for the parallel sparse trie
-use reth_metrics::{metrics::Histogram, Metrics};
+use reth_metrics::{Metrics, metrics::Histogram};
 
 /// Metrics for the parallel sparse trie
 #[derive(Metrics, Clone)]

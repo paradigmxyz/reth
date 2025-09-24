@@ -52,11 +52,11 @@ pub enum Error {
     /// busy.
     ///
     /// This can mean:
-    /// - The database size was extended by other processes beyond the environment map size, and
-    ///   the engine was unable to extend the mapping while starting a read transaction. The
-    ///   environment should be re-opened to continue.
-    /// - The engine was unable to extend the mapping during a write transaction or an explicit
-    ///   call to change the geometry of the environment.
+    /// - The database size was extended by other processes beyond the environment map size, and the
+    ///   engine was unable to extend the mapping while starting a read transaction. The environment
+    ///   should be re-opened to continue.
+    /// - The engine was unable to extend the mapping during a write transaction or an explicit call
+    ///   to change the geometry of the environment.
     #[error("database engine was unable to extend mapping")]
     UnableExtendMapSize,
     /// Environment or database is not compatible with the requested operation or flags.

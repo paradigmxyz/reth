@@ -1,39 +1,39 @@
 //! A network implementation for testing purposes.
 
 use crate::{
+    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
     transactions::{
+        TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
         config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
         policy::NetworkPolicies,
-        TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
-    NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
-    protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
+    DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols, protocol::Protocol,
 };
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network_api::{
+    NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
-    NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
 use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory, noop::NoopProvider,
 };
 use reth_tasks::TokioTaskExecutor;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
     blobstore::InMemoryBlobStore,
     test_utils::{TestPool, TestPoolBuilder},
-    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use secp256k1::SecretKey;
 use std::{

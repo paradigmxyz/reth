@@ -6,6 +6,7 @@ use alloy_network::{Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder}
 use alloy_primitives::{Address, TxHash, U256};
 use futures_util::StreamExt;
 use reth_ethereum::{
+    EthPrimitives, TransactionSigned,
     node::api::{FullNodeComponents, NodeTypes},
     pool::{
         AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
@@ -13,7 +14,6 @@ use reth_ethereum::{
     },
     primitives::SignerRecoverable,
     rpc::eth::primitives::TransactionRequest,
-    EthPrimitives, TransactionSigned,
 };
 
 /// Submit a transaction to the transaction pool

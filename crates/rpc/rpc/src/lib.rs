@@ -51,7 +51,7 @@ pub use admin::AdminApi;
 pub use aliases::*;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
-pub use eth::{helpers::SyncListener, EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub};
+pub use eth::{EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub, helpers::SyncListener};
 pub use miner::MinerApi;
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;

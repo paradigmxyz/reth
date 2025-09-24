@@ -1,14 +1,14 @@
 use crate::utils::eth_payload_attributes;
 use alloy_eips::{eip2718::Encodable2718, eip7910::EthConfig};
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
+use alloy_provider::{Provider, ProviderBuilder, SendableTx, network::EthereumWallet};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     SignedBidSubmissionV3, SignedBidSubmissionV4,
 };
 use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
 use alloy_rpc_types_eth::TransactionRequest;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
 use reth_node_ethereum::EthereumNode;
@@ -183,23 +183,29 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         registered_gas_limit: payload.block().gas_limit,
     };
 
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await
-        .is_ok());
+    assert!(
+        provider
+            .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+            .await
+            .is_ok()
+    );
 
     request.registered_gas_limit -= 1;
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await
-        .is_err());
+    assert!(
+        provider
+            .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+            .await
+            .is_err()
+    );
     request.registered_gas_limit += 1;
 
     request.request.execution_payload.payload_inner.payload_inner.state_root = B256::ZERO;
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
-        .await
-        .is_err());
+    assert!(
+        provider
+            .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV3".into(), (&request,))
+            .await
+            .is_err()
+    );
     Ok(())
 }
 
@@ -272,17 +278,21 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
         .expect("request should validate");
 
     request.registered_gas_limit -= 1;
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
-        .await
-        .is_err());
+    assert!(
+        provider
+            .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
+            .await
+            .is_err()
+    );
     request.registered_gas_limit += 1;
 
     request.request.execution_payload.payload_inner.payload_inner.state_root = B256::ZERO;
-    assert!(provider
-        .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
-        .await
-        .is_err());
+    assert!(
+        provider
+            .raw_request::<_, ()>("flashbots_validateBuilderSubmissionV4".into(), (&request,))
+            .await
+            .is_err()
+    );
     Ok(())
 }
 

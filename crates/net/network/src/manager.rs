@@ -16,6 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
+    FetchClient, NetworkBuilder,
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
@@ -24,7 +25,7 @@ use crate::{
     import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation, NewBlockEvent},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
-    metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    metrics::{DisconnectMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE, NetworkMetrics},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     poll_nested_stream_with_budget,
@@ -34,7 +35,6 @@ use crate::{
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
-    FetchClient, NetworkBuilder,
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
@@ -43,9 +43,9 @@ use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
+    EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
     events::{PeerEvent, SessionInfo},
     test_utils::PeersHandle,
-    EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
@@ -58,8 +58,8 @@ use std::{
     path::Path,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -362,7 +362,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///
     /// ```
     /// use reth_network::{
-    ///     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+    ///     EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key,
     /// };
     /// use reth_network_peers::mainnet_nodes;
     /// use reth_storage_api::noop::NoopProvider;

@@ -5,7 +5,7 @@ use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
@@ -13,7 +13,7 @@ use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
-    error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
+    EthApiError, PendingBlockEnv, RpcInvalidTransactionError, error::FromEvmError,
 };
 use reth_storage_api::{
     BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,

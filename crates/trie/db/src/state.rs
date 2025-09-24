@@ -1,20 +1,20 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
 use alloy_primitives::{
+    Address, B256, BlockNumber, U256,
     map::{AddressMap, B256Map},
-    Address, BlockNumber, B256, U256,
 };
 use reth_db_api::{
+    DatabaseError,
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
-    StateRootProgress, TrieInput,
+    HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress,
+    TrieInput, hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates,
 };
 use std::{collections::HashMap, ops::RangeInclusive};
 use tracing::debug;
@@ -81,7 +81,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// use reth_db::test_utils::create_test_rw_db;
     /// use reth_db_api::database::Database;
     /// use reth_primitives_traits::Account;
-    /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
+    /// use reth_trie::{HashedPostState, StateRoot, updates::TrieUpdates};
     /// use reth_trie_db::DatabaseStateRoot;
     ///
     /// // Initialize the database
@@ -266,7 +266,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex, map::HashMap, Address, U256};
+    use alloy_primitives::{Address, U256, hex, map::HashMap};
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::database::Database;
     use reth_trie::KeccakKeyHasher;

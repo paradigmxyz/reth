@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, B256, BlockNumber};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_api::models::BlockNumberAddress;

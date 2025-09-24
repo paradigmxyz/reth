@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{Metrics, metrics::Counter};
 
 /// Task Executor Metrics
 #[derive(Metrics, Clone)]

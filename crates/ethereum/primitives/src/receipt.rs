@@ -2,16 +2,16 @@ use core::fmt::Debug;
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope, ReceiptWithBloom, RlpDecodableReceipt,
+    Eip658Value, Eip2718EncodableReceipt, ReceiptEnvelope, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     Decodable2718,
+    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
 };
-use alloy_primitives::{Bloom, Log, B256};
+use alloy_primitives::{B256, Bloom, Log};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
-use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
+use reth_primitives_traits::{InMemorySize, proofs::ordered_trie_root_with_encoder};
 
 /// Helper trait alias with requirements for transaction type generic to be used within [`Receipt`].
 pub trait TxTy:
@@ -395,8 +395,8 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use alloy_consensus::TxType;
-    /// use reth_ethereum_primitives::{serde_bincode_compat, Receipt};
-    /// use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    /// use reth_ethereum_primitives::{Receipt, serde_bincode_compat};
+    /// use serde::{Deserialize, Serialize, de::DeserializeOwned};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
@@ -490,7 +490,7 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use crate::{receipt::serde_bincode_compat, Receipt};
+        use crate::{Receipt, receipt::serde_bincode_compat};
         use alloy_consensus::TxType;
         use arbitrary::Arbitrary;
         use rand::Rng;
@@ -522,8 +522,8 @@ pub(super) mod serde_bincode_compat {
 mod compact {
     use super::*;
     use reth_codecs::{
+        __private::{Buf, modular_bitfield::prelude::*},
         Compact,
-        __private::{modular_bitfield::prelude::*, Buf},
     };
 
     impl Receipt {
@@ -642,7 +642,7 @@ mod tests {
     use crate::TransactionSigned;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{
-        address, b256, bloom, bytes, hex_literal::hex, Address, Bytes, Log, LogData,
+        Address, Bytes, Log, LogData, address, b256, bloom, bytes, hex_literal::hex,
     };
     use alloy_rlp::Decodable;
     use reth_codecs::Compact;

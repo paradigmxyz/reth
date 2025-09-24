@@ -16,9 +16,9 @@
 
 use clap::Parser;
 use jsonrpsee::{
+    PendingSubscriptionSink, SubscriptionMessage,
     core::{RpcResult, SubscriptionResult},
     proc_macros::rpc,
-    PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},

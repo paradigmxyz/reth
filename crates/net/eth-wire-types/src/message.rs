@@ -7,21 +7,20 @@
 //! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md).
 
 use super::{
-    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
-    Transactions,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions,
+    GetReceipts, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
+    PooledTransactions, Receipts, Status, StatusEth69, Transactions, broadcast::NewBlockHashes,
 };
 use crate::{
-    status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    RawCapabilityMessage, Receipts69, SharedTransactions,
+    BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives, RawCapabilityMessage,
+    Receipts69, SharedTransactions, status::StatusMessage,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
-    bytes::{Buf, BufMut},
     Bytes,
+    bytes::{Buf, BufMut},
 };
-use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use alloy_rlp::{Decodable, Encodable, Header, length_of_length};
 use core::fmt::Debug;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
@@ -494,11 +493,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth69() {
-            Self::BlockRangeUpdate.to_u8()
-        } else {
-            Self::Receipts.to_u8()
-        }
+        if version.is_eth69() { Self::BlockRangeUpdate.to_u8() } else { Self::Receipts.to_u8() }
     }
 
     /// Returns the total number of message types for the given version.
@@ -647,8 +642,8 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetNodeData, NodeData, ProtocolMessage, RawCapabilityMessage,
+        EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, GetNodeData, NodeData,
+        ProtocolMessage, RawCapabilityMessage, message::RequestPair,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};

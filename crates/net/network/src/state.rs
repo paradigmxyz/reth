@@ -1,13 +1,13 @@
 //! Keeps track of the state of the network.
 
 use crate::{
+    FetchClient,
     cache::LruCache,
     discovery::Discovery,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     session::BlockRangeInfo,
-    FetchClient,
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
@@ -27,8 +27,8 @@ use std::{
     net::{IpAddr, SocketAddr},
     ops::Deref,
     sync::{
-        atomic::{AtomicU64, AtomicUsize},
         Arc,
+        atomic::{AtomicU64, AtomicUsize},
     },
     task::{Context, Poll},
 };
@@ -565,11 +565,11 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
 #[cfg(test)]
 mod tests {
     use crate::{
+        PeerRequest,
         discovery::Discovery,
         fetch::StateFetcher,
         peers::PeersManager,
         state::{BlockNumReader, NetworkState},
-        PeerRequest,
     };
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -581,10 +581,10 @@ mod tests {
     use reth_storage_api::noop::NoopProvider;
     use std::{
         future::poll_fn,
-        sync::{atomic::AtomicU64, Arc},
+        sync::{Arc, atomic::AtomicU64},
     };
     use tokio::sync::mpsc;
-    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+    use tokio_stream::{StreamExt, wrappers::ReceiverStream};
 
     /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<EthNetworkPrimitives> {

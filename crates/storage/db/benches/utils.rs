@@ -2,11 +2,11 @@
 #![cfg(feature = "test-utils")]
 
 use alloy_primitives::Bytes;
-use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
+use reth_db::{DatabaseEnv, test_utils::create_test_rw_db_with_path};
 use reth_db_api::{
+    Database,
     table::{Compress, Encode, Table, TableRow},
     transaction::DbTxMut,
-    Database,
 };
 use reth_fs_util as fs;
 use std::{path::Path, sync::Arc};

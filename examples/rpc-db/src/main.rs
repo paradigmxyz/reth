@@ -20,16 +20,16 @@ use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     consensus::EthBeaconConsensus,
     network::api::noop::NoopNetwork,
-    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
+    node::{EthEvmConfig, EthereumNode, api::NodeTypesWithDBAdapter},
     pool::noop::NoopTransactionPool,
     provider::{
-        db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
-        providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
+        db::{ClientVersion, DatabaseEnv, mdbx::DatabaseArguments, open_db_read_only},
+        providers::{BlockchainProvider, StaticFileProvider},
     },
     rpc::{
-        builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
+        builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
     },
     tasks::TokioTaskExecutor,
 };

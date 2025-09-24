@@ -6,8 +6,8 @@ use reth_eth_wire::BlockRangeUpdate;
 use std::{
     ops::RangeInclusive,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 

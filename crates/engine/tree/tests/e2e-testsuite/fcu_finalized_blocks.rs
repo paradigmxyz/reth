@@ -5,12 +5,12 @@
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
+    TestBuilder,
     actions::{
         BlockReference, CaptureBlock, CreateFork, FinalizeBlock, MakeCanonical, ProduceBlocks,
         SendForkchoiceUpdate,
     },
     setup::{NetworkSetup, Setup},
-    TestBuilder,
 };
 use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;

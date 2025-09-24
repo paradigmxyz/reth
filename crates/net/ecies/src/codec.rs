@@ -1,7 +1,7 @@
 //! This contains the main codec for `RLPx` ECIES messages
 
-use crate::{algorithm::ECIES, ECIESError, ECIESErrorImpl, EgressECIESValue, IngressECIESValue};
-use alloy_primitives::{bytes::BytesMut, B512 as PeerId};
+use crate::{ECIESError, ECIESErrorImpl, EgressECIESValue, IngressECIESValue, algorithm::ECIES};
+use alloy_primitives::{B512 as PeerId, bytes::BytesMut};
 use secp256k1::SecretKey;
 use std::{fmt::Debug, io};
 use tokio_util::codec::{Decoder, Encoder};

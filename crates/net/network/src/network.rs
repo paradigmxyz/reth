@@ -1,6 +1,6 @@
 use crate::{
-    config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
-    swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
+    FetchClient, config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
+    swarm::NetworkConnectionState, transactions::TransactionsHandle,
 };
 use alloy_primitives::B256;
 use enr::Enr;
@@ -14,11 +14,11 @@ use reth_eth_wire::{
 };
 use reth_ethereum_forks::Head;
 use reth_network_api::{
-    events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
-    test_utils::{PeersHandle, PeersHandleProvider},
     BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerInfo, PeerRequest, Peers,
     PeersInfo,
+    events::{NetworkPeersEvents, PeerEvent, PeerEventStream},
+    test_utils::{PeersHandle, PeersHandleProvider},
 };
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_network_peers::{NodeRecord, PeerId};
@@ -28,8 +28,8 @@ use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
 use tokio::sync::{

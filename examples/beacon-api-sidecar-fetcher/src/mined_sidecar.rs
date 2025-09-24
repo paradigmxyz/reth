@@ -4,13 +4,13 @@ use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
-use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
+use futures_util::{Future, Stream, StreamExt, stream::FuturesUnordered};
 use reqwest::{Error, StatusCode};
 use reth_ethereum::{
+    PooledTransactionVariant,
     pool::{BlobStoreError, TransactionPoolExt},
     primitives::RecoveredBlock,
     provider::CanonStateNotification,
-    PooledTransactionVariant,
 };
 use serde::{Deserialize, Serialize};
 use std::{

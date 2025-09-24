@@ -1,6 +1,6 @@
-use crate::{client::HttpClient, EraClient, BLOCKS_PER_FILE};
+use crate::{BLOCKS_PER_FILE, EraClient, client::HttpClient};
 use alloy_primitives::BlockNumber;
-use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
+use futures_util::{FutureExt, Stream, StreamExt, stream::FuturesOrdered};
 use reqwest::Url;
 use reth_fs_util as fs;
 use std::{

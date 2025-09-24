@@ -1,6 +1,6 @@
 use crate::{
-    table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
     DatabaseError,
+    table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
 };
 use serde::{Deserialize, Serialize};
 

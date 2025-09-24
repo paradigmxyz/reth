@@ -1,4 +1,4 @@
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{B256, map::B256Map};
 use derive_more::{Deref, DerefMut};
 use reth_trie::prefix_set::PrefixSet;
 

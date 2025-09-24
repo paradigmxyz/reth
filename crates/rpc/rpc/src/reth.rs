@@ -4,7 +4,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use futures::StreamExt;
-use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
+use jsonrpsee::{PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink, core::RpcResult};
 use jsonrpsee_types::ErrorObject;
 use reth_chain_state::{CanonStateNotificationStream, CanonStateSubscriptions};
 use reth_errors::RethResult;

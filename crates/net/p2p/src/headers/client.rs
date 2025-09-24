@@ -7,7 +7,7 @@ use reth_primitives_traits::BlockHeader;
 use std::{
     fmt::Debug,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 /// The header request struct to be sent to connected peers, which

@@ -3,12 +3,12 @@
 use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_trie::{updates::TrieUpdates, Nibbles};
+use reth_trie::{Nibbles, updates::TrieUpdates};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
 };
 use smallvec::SmallVec;
 use std::{

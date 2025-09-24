@@ -3,8 +3,8 @@
 use std::io;
 
 use reth_rpc_builder::{
-    error::{RpcError, ServerKind, WsHttpSamePortError},
     RpcServerConfig, TransportRpcModuleConfig,
+    error::{RpcError, ServerKind, WsHttpSamePortError},
 };
 use reth_rpc_server_types::RethRpcModule;
 

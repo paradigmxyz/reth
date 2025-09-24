@@ -1,9 +1,9 @@
 #![allow(missing_docs, unreachable_pub)]
 mod utils;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use rand::{prelude::SliceRandom, rngs::StdRng, SeedableRng};
-use reth_libmdbx::{ffi::*, ObjectLength, WriteFlags};
+use criterion::{Criterion, criterion_group, criterion_main};
+use rand::{SeedableRng, prelude::SliceRandom, rngs::StdRng};
+use reth_libmdbx::{ObjectLength, WriteFlags, ffi::*};
 use std::{hint::black_box, ptr};
 use utils::*;
 

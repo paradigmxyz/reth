@@ -1,18 +1,18 @@
 use crate::{
-    providers::{state::latest::LatestStateProvider, StaticFileProvider},
-    to_range,
-    traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider,
+    providers::{StaticFileProvider, state::latest::LatestStateProvider},
+    to_range,
+    traits::{BlockSource, ReceiptProvider},
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, TxHash, TxNumber, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{DatabaseEnv, init_db, mdbx::DatabaseArguments};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{
@@ -618,23 +618,23 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
 mod tests {
     use super::*;
     use crate::{
-        providers::{StaticFileProvider, StaticFileWriter},
-        test_utils::{blocks::TEST_BLOCK, create_test_provider_factory, MockNodeTypesWithDB},
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
         StorageLocation, TransactionsProvider,
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::{MockNodeTypesWithDB, blocks::TEST_BLOCK, create_test_provider_factory},
     };
-    use alloy_primitives::{TxNumber, B256, U256};
+    use alloy_primitives::{B256, TxNumber, U256};
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
-        test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
+        test_utils::{ERROR_TEMPDIR, create_test_static_files_dir},
     };
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
-    use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
+    use reth_testing_utils::generators::{self, BlockParams, random_block, random_header};
     use std::{ops::RangeInclusive, sync::Arc};
 
     #[test]

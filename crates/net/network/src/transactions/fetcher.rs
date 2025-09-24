@@ -26,9 +26,9 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use super::{
-    config::TransactionFetcherConfig,
-    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    config::TransactionFetcherConfig,
+    constants::{SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST, tx_fetcher::*},
 };
 use crate::{
     cache::{LruCache, LruMap},
@@ -38,7 +38,7 @@ use crate::{
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
-use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Stream, StreamExt, stream::FuturesUnordered};
 use pin_project::pin_project;
 use reth_eth_wire::{
     DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -53,7 +53,7 @@ use schnellru::ByLength;
 use std::{
     collections::HashMap,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
@@ -264,7 +264,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: impl HandleMempoolData
-            + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
+        + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
 
@@ -1289,7 +1289,7 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::test_utils::transactions::{buffer_hash_to_tx_fetcher, new_mock_session};
-    use alloy_primitives::{hex, B256};
+    use alloy_primitives::{B256, hex};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
     use reth_eth_wire_types::EthVersion;

@@ -1,7 +1,7 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{
+    B256, BlockNumber,
     map::{B256HashSet, B256Map},
-    BlockNumber, B256,
 };
 use futures::StreamExt;
 use parking_lot::RwLock;

@@ -4,7 +4,7 @@ use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use futures::{future::Either, stream::FuturesOrdered, Stream, StreamExt};
+use futures::{Stream, StreamExt, future::Either, stream::FuturesOrdered};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
@@ -19,8 +19,9 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, Semaphore,
+    Semaphore,
+    mpsc::{UnboundedSender, unbounded_channel},
+    oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -259,11 +260,7 @@ impl<N: NodePrimitives> EthStateCache<N> {
         });
 
         let blocks = rx.await.unwrap_or_default();
-        if blocks.is_empty() {
-            None
-        } else {
-            Some(blocks)
-        }
+        if blocks.is_empty() { None } else { Some(blocks) }
     }
 }
 /// Thrown when the cache service task dropped.

@@ -8,19 +8,19 @@ use alloy_rpc_types_engine::ExecutionData;
 use parking_lot::Mutex;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
+    ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
+    ExecutableTxIterator, ExecutionCtxFor,
     block::{
         BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
-    ConfigureEngineEvm, ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
-    ExecutableTxIterator, ExecutionCtxFor,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
+    Inspector,
     context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
     database::State,
-    Inspector,
 };
 
 /// A helper type alias for mocked block executor provider.

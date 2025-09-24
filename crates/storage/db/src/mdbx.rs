@@ -1,6 +1,6 @@
 //! Helper functions for initializing and opening a database.
 
-use crate::{is_database_empty, TableSet, Tables};
+use crate::{TableSet, Tables, is_database_empty};
 use eyre::Context;
 use std::path::Path;
 
@@ -10,7 +10,7 @@ pub use reth_libmdbx::*;
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
-    use crate::version::{check_db_version_file, create_db_version_file, DatabaseVersionError};
+    use crate::version::{DatabaseVersionError, check_db_version_file, create_db_version_file};
 
     let rpath = path.as_ref();
     if is_database_empty(rpath) {

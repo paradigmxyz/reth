@@ -2,28 +2,28 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
-    address, b256, hex_literal::hex, keccak256, map::HashMap, Address, B256, U256,
+    Address, B256, U256, address, b256, hex_literal::hex, keccak256, map::HashMap,
 };
 use alloy_rlp::Encodable;
 use proptest::{prelude::ProptestConfig, proptest};
 use proptest_arbitrary_interop::arb;
-use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{DatabaseEnv, tables, test_utils::TempDatabase};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{
-    providers::ProviderNodeTypes, test_utils::create_test_provider_factory, DatabaseProviderRW,
-    StorageTrieWriter, TrieWriter,
+    DatabaseProviderRW, StorageTrieWriter, TrieWriter, providers::ProviderNodeTypes,
+    test_utils::create_test_provider_factory,
 };
 use reth_trie::{
+    BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
+    StateRootProgress, StorageRoot, TrieMask,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
-    BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
-    StateRootProgress, StorageRoot, TrieMask,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
@@ -576,10 +576,14 @@ fn account_and_storage_trie() {
             trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
             1
         );
-        assert!(!trie_updates
-            .storage_tries_ref()
-            .iter()
-            .any(|(_, u)| !u.storage_nodes_ref().is_empty() || !u.removed_nodes_ref().is_empty())); // no storage root update
+        assert!(
+            !trie_updates
+                .storage_tries_ref()
+                .iter()
+                .any(
+                    |(_, u)| !u.storage_nodes_ref().is_empty() || !u.removed_nodes_ref().is_empty()
+                )
+        ); // no storage root update
 
         assert_eq!(trie_updates.account_nodes_ref().len(), 1);
 

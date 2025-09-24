@@ -1,5 +1,5 @@
 //! Implements a state provider that tracks latency metrics.
-use alloy_primitives::{Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, StorageKey, StorageValue};
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -9,8 +9,8 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use std::{
     sync::atomic::{AtomicU64, Ordering},

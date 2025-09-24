@@ -4,20 +4,20 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{BlockHeader, transaction::TransactionMeta};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, BlockNumber, TxHash, B256};
+use alloy_primitives::{B256, BlockNumber, TxHash, map::HashMap};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_metrics::{metrics::Gauge, Metrics};
+use reth_metrics::{Metrics, metrics::Gauge};
 use reth_primitives_traits::{
     BlockBody as _, IndexedTx, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{HashedPostState, updates::TrieUpdates};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 

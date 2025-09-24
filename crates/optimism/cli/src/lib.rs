@@ -40,7 +40,7 @@ use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use std::{ffi::OsString, fmt, marker::PhantomData, sync::Arc};
 
 use chainspec::OpChainSpecParser;
-use clap::{command, Parser};
+use clap::{Parser, command};
 use commands::Commands;
 use futures_util::Future;
 use reth_cli::chainspec::ChainSpecParser;
@@ -136,9 +136,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{chainspec::OpChainSpecParser, commands::Commands, Cli};
+    use crate::{Cli, chainspec::OpChainSpecParser, commands::Commands};
     use clap::Parser;
-    use reth_cli_commands::{node::NoArgs, NodeCommand};
+    use reth_cli_commands::{NodeCommand, node::NoArgs};
     use reth_optimism_chainspec::{BASE_MAINNET, OP_DEV};
     use reth_optimism_node::args::RollupArgs;
 

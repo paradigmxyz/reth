@@ -2,8 +2,8 @@ use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_ethereum_primitives::TxType;
 use reth_metrics::{
-    metrics::{Counter, Gauge},
     Metrics,
+    metrics::{Counter, Gauge},
 };
 
 /// Scope for monitoring transactions sent from the manager to the tx manager

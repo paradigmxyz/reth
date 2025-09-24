@@ -31,7 +31,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{oneshot, Semaphore},
+    sync::{Semaphore, oneshot},
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
@@ -884,11 +884,7 @@ impl<Payload> fmt::Debug for MissingPayloadBehaviour<Payload> {
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
 pub fn is_better_payload<T: BuiltPayload>(best_payload: Option<&T>, new_fees: U256) -> bool {
-    if let Some(best_payload) = best_payload {
-        new_fees > best_payload.fees()
-    } else {
-        true
-    }
+    if let Some(best_payload) = best_payload { new_fees > best_payload.fees() } else { true }
 }
 
 /// Returns the duration until the given unix timestamp in seconds.

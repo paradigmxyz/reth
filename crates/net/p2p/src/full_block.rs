@@ -1,14 +1,14 @@
 use super::headers::client::HeadersRequest;
 use crate::{
+    BlockClient,
     bodies::client::{BodiesClient, SingleBodyRequest},
     download::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
     priority::Priority,
-    BlockClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Sealable, B256};
+use alloy_primitives::{B256, Sealable};
 use core::marker::PhantomData;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
@@ -23,7 +23,7 @@ use std::{
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tracing::debug;
 

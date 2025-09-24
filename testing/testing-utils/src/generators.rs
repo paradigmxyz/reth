@@ -4,17 +4,17 @@
 
 use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
+    NumHash,
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
-    NumHash,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
+use alloy_primitives::{Address, B64, B256, BlockNumber, Bytes, TxKind, U256};
 pub use rand::Rng;
-use rand::{distr::uniform::SampleRange, rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, distr::uniform::SampleRange, rngs::StdRng};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    crypto::secp256k1::sign_message, proofs, Account, Block as _, Log, SealedBlock, SealedHeader,
-    StorageEntry,
+    Account, Block as _, Log, SealedBlock, SealedHeader, StorageEntry,
+    crypto::secp256k1::sign_message, proofs,
 };
 use secp256k1::{Keypair, Secp256k1};
 use std::{
@@ -487,10 +487,10 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, Signature};
+    use alloy_primitives::{Signature, hex};
     use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, sign_message},
         SignerRecoverable,
+        crypto::secp256k1::{public_key_to_address, sign_message},
     };
     use std::str::FromStr;
 

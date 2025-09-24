@@ -2,8 +2,8 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{DatabaseEnvMetrics, Operation},
     DatabaseError,
+    metrics::{DatabaseEnvMetrics, Operation},
 };
 use reth_db_api::{
     common::{PairResult, ValueOnlyResult},
@@ -13,7 +13,7 @@ use reth_db_api::{
     },
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
 };
-use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
+use reth_libmdbx::{Error as MDBXError, RO, RW, TransactionKind, WriteFlags};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 

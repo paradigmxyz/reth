@@ -12,19 +12,19 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
+    ExecutionEnv, StateProviderBuilder,
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor, multiproof::MultiProofMessage,
-        ExecutionCache as PayloadExecutionCache,
+        ExecutionCache as PayloadExecutionCache, executor::WorkloadExecutor,
+        multiproof::MultiProofMessage,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    ExecutionEnv, StateProviderBuilder,
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_primitives::{B256, keccak256, map::B256Set};
 use metrics::{Counter, Gauge, Histogram};
-use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_evm::{ConfigureEvm, Evm, EvmFor, SpecFor, execute::ExecutableTxFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderFactory, StateReader};
@@ -32,9 +32,9 @@ use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmStat
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
         Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender, channel},
     },
     time::Instant,
 };

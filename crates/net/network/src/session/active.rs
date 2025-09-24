@@ -6,26 +6,26 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{atomic::AtomicU64, Arc},
-    task::{ready, Context, Poll},
+    sync::{Arc, atomic::AtomicU64},
+    task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
 
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     session::{
+        BlockRangeInfo, EthVersion, SessionId,
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
-        BlockRangeInfo, EthVersion, SessionId,
     },
 };
 use alloy_primitives::Sealable;
-use futures::{stream::Fuse, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, stream::Fuse};
 use metrics::Gauge;
 use reth_eth_wire::{
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -904,14 +904,14 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
-        HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
-        UnifiedStatus,
+        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
+        StatusBuilder, UnauthedEthStream, UnauthedP2PStream, UnifiedStatus,
+        handshake::EthHandshake,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use secp256k1::{SecretKey, SECP256K1};
+    use secp256k1::{SECP256K1, SecretKey};
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,

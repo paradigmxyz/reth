@@ -2,7 +2,7 @@
 name = "reth-mdbx-sys"
 description = "Raw bindings for libmdbx"
 version.workspace = true
-edition.workspace = true
+edition = "2021"
 rust-version.workspace = true
 license = "Apache-2.0"
 homepage.workspace = true

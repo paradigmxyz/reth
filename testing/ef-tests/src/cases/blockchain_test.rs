@@ -1,26 +1,26 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
-    models::{BlockchainTest, ForkSpec},
     Case, Error, Suite,
+    models::{BlockchainTest, ForkSpec},
 };
 use alloy_rlp::{Decodable, Encodable};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
-use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
+use reth_ethereum_consensus::{EthBeaconConsensus, validate_block_post_execution};
 use reth_ethereum_primitives::Block;
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{ConfigureEvm, execute::Executor};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
-    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
-    ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StorageLocation,
+    BlockWriter, DatabaseProviderFactory, ExecutionOutcome, HeaderProvider, HistoryWriter,
+    OriginalValuesKnown, StateProofProvider, StateWriter, StorageLocation,
+    test_utils::create_test_provider_factory_with_chain_spec,
 };
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
-use reth_stateless::{validation::stateless_validation, ExecutionWitness};
+use reth_revm::{State, database::StateProviderDatabase, witness::ExecutionWitnessRecord};
+use reth_stateless::{ExecutionWitness, validation::stateless_validation};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
 use std::{

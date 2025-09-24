@@ -3,13 +3,13 @@
 use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
-use alloy_primitives::{b256, U256};
+use alloy_primitives::{U256, b256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::{EthereumHardfork, Hardfork};
-use reth_optimism_forks::{OpHardfork, BASE_MAINNET_HARDFORKS};
+use reth_optimism_forks::{BASE_MAINNET_HARDFORKS, OpHardfork};
 use reth_primitives_traits::SealedHeader;
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
+use crate::{LazyLock, OpChainSpec, make_op_genesis_header};
 
 /// The Base mainnet spec
 pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {

@@ -2,10 +2,10 @@
 
 use crate::{args::error::ReceiptsLogError, primitives::EthereumHardfork};
 use alloy_primitives::{Address, BlockNumber};
-use clap::{builder::RangedU64ValueParser, Args};
+use clap::{Args, builder::RangedU64ValueParser};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
-use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
+use reth_prune_types::{MINIMUM_PRUNING_DISTANCE, PruneMode, PruneModes, ReceiptsLogPruneConfig};
 use std::collections::BTreeMap;
 
 /// Parameters for pruning and full node

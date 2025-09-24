@@ -1,6 +1,6 @@
 //! Loads and formats OP receipt RPC response.
 
-use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
+use crate::{OpEthApi, OpEthApiError, eth::RpcNodeCore};
 use alloy_consensus::{BlockHeader, Receipt, TxReceipt};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
@@ -13,11 +13,11 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::SealedBlock;
 use reth_rpc_eth_api::{
+    RpcConvert,
     helpers::LoadReceipt,
     transaction::{ConvertReceiptInput, ReceiptConverter},
-    RpcConvert,
 };
-use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
+use reth_rpc_eth_types::{EthApiError, receipt::build_receipt};
 use reth_storage_api::BlockReader;
 use std::fmt::Debug;
 
@@ -325,7 +325,7 @@ impl OpReceiptBuilder {
 mod test {
     use super::*;
     use alloy_consensus::{Block, BlockBody};
-    use alloy_primitives::{hex, U256};
+    use alloy_primitives::{U256, hex};
     use op_alloy_network::eip2718::Decodable2718;
     use reth_optimism_chainspec::{BASE_MAINNET, OP_MAINNET};
     use reth_optimism_primitives::OpTransactionSigned;

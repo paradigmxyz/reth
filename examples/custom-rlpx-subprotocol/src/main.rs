@@ -16,12 +16,12 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth_ethereum::{
     network::{
-        api::{test_utils::PeersHandleProvider, NetworkInfo},
+        NetworkConfig, NetworkManager, NetworkProtocols,
+        api::{NetworkInfo, test_utils::PeersHandleProvider},
         config::rng_secret_key,
         protocol::IntoRlpxSubProtocol,
-        NetworkConfig, NetworkManager, NetworkProtocols,
     },
-    node::{builder::NodeHandle, EthereumNode},
+    node::{EthereumNode, builder::NodeHandle},
 };
 use subprotocol::{
     connection::CustomCommand,

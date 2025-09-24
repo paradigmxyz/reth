@@ -3,11 +3,11 @@
 use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
 use alloc::fmt;
 use alloy_consensus::{
-    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     EthereumTxEnvelope, SignableTransaction,
+    transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, Signature, B256};
+use alloy_primitives::{Address, B256, Signature, keccak256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 

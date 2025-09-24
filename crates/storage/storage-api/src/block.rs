@@ -4,7 +4,7 @@ use crate::{
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use core::ops::RangeInclusive;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
@@ -58,9 +58,9 @@ pub trait BlockReader:
 {
     /// The block type this provider reads.
     type Block: reth_primitives_traits::Block<
-        Body: reth_primitives_traits::BlockBody<Transaction = Self::Transaction>,
-        Header = Self::Header,
-    >;
+            Body: reth_primitives_traits::BlockBody<Transaction = Self::Transaction>,
+            Header = Self::Header,
+        >;
 
     /// Tries to find in the given block source.
     ///

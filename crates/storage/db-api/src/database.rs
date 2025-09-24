@@ -1,7 +1,7 @@
 use crate::{
+    DatabaseError,
     table::TableImporter,
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
 use std::{fmt::Debug, sync::Arc};
 

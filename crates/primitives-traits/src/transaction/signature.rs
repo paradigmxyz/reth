@@ -6,7 +6,7 @@ pub use alloy_primitives::Signature;
 #[cfg(test)]
 mod tests {
     use crate::crypto::secp256k1::recover_signer;
-    use alloy_primitives::{address, b256, Signature, U256};
+    use alloy_primitives::{Signature, U256, address, b256};
     use std::str::FromStr;
 
     #[test]

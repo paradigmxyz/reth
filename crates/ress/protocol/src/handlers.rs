@@ -1,18 +1,18 @@
 use crate::{
-    connection::{RessPeerRequest, RessProtocolConnection},
     NodeType, RessProtocolMessage, RessProtocolProvider,
+    connection::{RessPeerRequest, RessProtocolConnection},
 };
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler};
-use reth_network_api::{test_utils::PeersHandle, Direction, PeerId};
+use reth_network_api::{Direction, PeerId, test_utils::PeersHandle};
 use std::{
     fmt,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 use tokio::sync::mpsc;

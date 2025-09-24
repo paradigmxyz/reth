@@ -3,8 +3,8 @@
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{
+    B256, Bytes, TxHash, U128,
     map::{HashMap, HashSet},
-    Bytes, TxHash, B256, U128,
 };
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
@@ -801,9 +801,9 @@ pub struct BlockRangeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::TxHashRef, Typed2718};
+    use alloy_consensus::{Typed2718, transaction::TxHashRef};
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{b256, hex, Signature, U256};
+    use alloy_primitives::{Signature, U256, b256, hex};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 

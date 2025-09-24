@@ -3,28 +3,27 @@
 use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
-    keccak256,
+    B256, keccak256,
     map::{B256Set, HashSet},
-    B256,
 };
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
-use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx};
+use reth_provider::{BlockReader, DatabaseProviderFactory, FactoryTx, providers::ConsistentDbView};
 use reth_revm::state::EvmState;
 use reth_trie::{
-    added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
-    updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
-    HashedStorage, MultiProofTargets, TrieInput,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProofTargets,
+    TrieInput, added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
+    updates::TrieUpdatesSorted,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc,
+        mpsc::{Receiver, Sender, channel},
     },
     time::{Duration, Instant},
 };

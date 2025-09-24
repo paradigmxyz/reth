@@ -1,7 +1,7 @@
 use alloy_primitives::{hex, hex::ToHexExt};
 use bytes::Bytes;
-use eyre::{eyre, OptionExt};
-use futures_util::{stream::StreamExt, Stream, TryStreamExt};
+use eyre::{OptionExt, eyre};
+use futures_util::{Stream, TryStreamExt, stream::StreamExt};
 use reqwest::{Client, IntoUrl, Url};
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
@@ -20,7 +20,7 @@ pub trait HttpClient {
     ) -> impl Future<
         Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>,
     > + Send
-           + Sync;
+    + Sync;
 }
 
 impl HttpClient for Client {

@@ -3,7 +3,7 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
 };
 use proptest::{
     arbitrary::Arbitrary,
@@ -11,7 +11,7 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
+use reth_db::{DatabaseEnv, TransactionHashNumbers, test_utils::create_test_rw_db_with_path};
 use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,

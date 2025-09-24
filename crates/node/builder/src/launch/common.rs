@@ -30,23 +30,23 @@
 //! This ensures correct initialization order without runtime checks.
 
 use crate::{
+    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
-use reth_config::{config::EtlConfig, PruneConfig};
+use reth_config::{PruneConfig, config::EtlConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitStorageError};
+use reth_db_common::init::{InitStorageError, init_genesis};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
-use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{ConfigureEvm, noop::NoopEvmConfig};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -66,17 +66,17 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, ProviderError,
     ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
     StaticFileProviderFactory,
+    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
-    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId,
+    MetricEvent, PipelineBuilder, PipelineTarget, StageId, sets::DefaultStages,
+    stages::EraImportSource,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -84,11 +84,11 @@ use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, thread::available_parallelism};
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
+    mpsc::{UnboundedSender, unbounded_channel},
     oneshot, watch,
 };
 
-use futures::{future::Either, stream, Stream, StreamExt};
+use futures::{Stream, StreamExt, future::Either, stream};
 use reth_node_ethstats::EthStatsService;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
@@ -1072,9 +1072,9 @@ impl<T, CB>
     >
 where
     T: FullNodeTypes<
-        Provider: StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypesForProvider,
-    >,
+            Provider: StateProviderFactory + ChainSpecProvider,
+            Types: NodeTypesForProvider,
+        >,
     CB: NodeComponentsBuilder<T>,
 {
 }

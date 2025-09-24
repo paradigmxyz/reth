@@ -1,8 +1,8 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::{transaction::TxHashRef, EnvKzgSettings, Transaction as _};
+use alloy_consensus::{EnvKzgSettings, Transaction as _, transaction::TxHashRef};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::{uint, Keccak256, U256};
+use alloy_primitives::{Keccak256, U256, uint};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -10,15 +10,15 @@ use reth_evm::{ConfigureEvm, Evm};
 
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
+    helpers::{Call, EthTransactions, LoadPendingBlock},
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{EthApiError, RpcInvalidTransactionError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{DatabaseCommit, DatabaseRef, context_interface::result::ResultAndState};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
