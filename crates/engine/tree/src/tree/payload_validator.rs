@@ -329,6 +329,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
+        /// This macro is used for early returns before we convert the input to a block
         macro_rules! ensure_ok {
             ($expr:expr) => {
                 match $expr {
@@ -338,6 +339,18 @@ where
                         return Err(
                             InsertBlockError::new(block.into_sealed_block(), e.into()).into()
                         )
+                    }
+                }
+            };
+        }
+
+        /// A helper macro for errors after block conversion
+        macro_rules! ensure_ok_post_block {
+            ($expr:expr, $block:expr) => {
+                match $expr {
+                    Ok(val) => val,
+                    Err(e) => {
+                        return Err(InsertBlockError::new($block.into_sealed_block(), e.into()).into())
                     }
                 }
             };
@@ -430,22 +443,12 @@ where
 
         let block = self.convert_to_block(input)?;
 
-        // A helper macro that returns the block in case there was an error
-        macro_rules! ensure_ok {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(val) => val,
-                    Err(e) => return Err(InsertBlockError::new(block.into_sealed_block(), e.into()).into()),
-                }
-            };
-        }
-
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
         // validate block consensus rules
-        ensure_ok!(self.validate_block_inner(&block));
+        ensure_ok_post_block!(self.validate_block_inner(&block), block);
 
         let hashed_state =
-            ensure_ok!(self.validate_post_execution(&block, &parent_block, &output, &mut ctx));
+            ensure_ok_post_block!(self.validate_post_execution(&block, &parent_block, &output, &mut ctx), block);
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
@@ -516,7 +519,7 @@ where
             }
 
             let (root, updates) =
-                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
+                ensure_ok_post_block!(state_provider.state_root_with_updates(hashed_state.clone()), block);
             (root, updates, root_time.elapsed())
         };
 
@@ -555,7 +558,7 @@ where
         //
         // Instead, they will be recomputed on persistence.
         let connects_to_last_persisted =
-            ensure_ok!(self.block_connects_to_last_persisted(ctx, &block));
+            ensure_ok_post_block!(self.block_connects_to_last_persisted(ctx, &block), block);
         let should_discard_trie_updates =
             !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
         debug!(
