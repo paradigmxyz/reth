@@ -46,20 +46,6 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, trace, warn};
 
-/// Arguments for spawning a payload processor task.
-struct PayloadProcessorArgs<'a, N: NodePrimitives, P> {
-    /// State provider builder for DB access
-    provider_builder: StateProviderBuilder<N, P>,
-    /// Type of persistence operation
-    persisting_kind: PersistingKind,
-    /// Parent block hash
-    parent_hash: B256,
-    /// Current tree state
-    state: &'a EngineApiTreeState<N>,
-    /// Block number and hash
-    block_num_hash: NumHash,
-}
-
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
@@ -425,13 +411,11 @@ where
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
-            PayloadProcessorArgs {
                 provider_builder,
                 persisting_kind,
                 parent_hash,
-                state: ctx.state(),
+            ctx.state(),
                 block_num_hash,
-            },
             &mut strategy,
         ));
 
@@ -832,11 +816,16 @@ where
     }
 
     /// Spawns a payload processor task based on the state root strategy.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_payload_processor(
         &mut self,
         env: ExecutionEnv<Evm>,
         txs: impl ExecutableTxIterator<Evm>,
-        args: PayloadProcessorArgs<'_, N, P>,
+        provider_builder: StateProviderBuilder<N, P>,
+        persisting_kind: PersistingKind,
+        parent_hash: B256,
+        state: &EngineApiTreeState<N>,
+        block_num_hash: NumHash,
         strategy: &mut StateRootStrategy,
     ) -> Result<
         PayloadHandle<impl ExecutableTxFor<Evm>, impl core::error::Error + Send + Sync + 'static>,
@@ -853,10 +842,10 @@ where
                 // Compute trie input
                 let trie_input_start = Instant::now();
                 let trie_input = self.compute_trie_input(
-                    args.persisting_kind,
+                    persisting_kind,
                     consistent_view.provider_ro()?,
-                    args.parent_hash,
-                    args.state,
+                    parent_hash,
+                    state,
                     allocated_trie_input,
                 )?;
 
@@ -872,7 +861,7 @@ where
                     self.payload_processor.spawn(
                         env,
                         txs,
-                        args.provider_builder,
+                        provider_builder,
                         consistent_view,
                         trie_input,
                         &self.config,
@@ -882,11 +871,11 @@ where
                 } else {
                     debug!(
                         target: "engine::tree",
-                        block=?args.block_num_hash,
+                        block=?block_num_hash,
                         "Disabling state root task due to non-empty prefix sets"
                     );
                     *strategy = StateRootStrategy::Parallel;
-                    self.payload_processor.spawn_cache_exclusive(env, txs, args.provider_builder)
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder)
                 };
 
                 // record prewarming initialization duration
@@ -900,7 +889,7 @@ where
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
                 let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, args.provider_builder);
+                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
 
                 // Record prewarming initialization duration
                 self.metrics
