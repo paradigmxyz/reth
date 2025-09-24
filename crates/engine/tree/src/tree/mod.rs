@@ -614,7 +614,7 @@ where
             Err(error) => match error {
                 InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
                 InsertPayloadError::Payload(error) => {
-                    tracing::debug!("payload in new payload l 617 {:?}", payload.clone());
+                    tracing::debug!("payload in new payload l 617 {:?}", payload);
                     Ok(self.on_new_payload_error(error, parent_hash)?)
                 }
             },
@@ -645,7 +645,7 @@ where
                 }
             }
             Err(error) => {
-                tracing::debug!("payload in new payload l 648 {:?}", payload.clone());
+                tracing::debug!("payload in new payload l 648 {:?}", payload);
                 Ok(self.on_new_payload_error(error, parent_hash)?)
             }
         }
@@ -1923,7 +1923,7 @@ where
         let block = match self.payload_validator.ensure_well_formed_payload(payload.clone()) {
             Ok(block) => block,
             Err(error) => {
-                tracing::debug!("payload in new payload l 1925 {:?}", payload.clone());
+                tracing::debug!("payload in new payload l 1925 {:?}", payload);
                 return Ok(self.on_new_payload_error(error, parent_hash)?)
             }
         };
