@@ -748,6 +748,31 @@ where
         self.client.latest()
     }
 
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let mut provider: Option<StateProviderBox> = None;
+        let mut outcomes = Vec::with_capacity(transactions.len());
+        for (origin, transaction) in transactions {
+            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
+        }
+        outcomes
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let mut provider: Option<StateProviderBox> = None;
+        let mut outcomes = Vec::new();
+        for transaction in transactions {
+            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
+        }
+        outcomes
+    }
+
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
         B: Block,
