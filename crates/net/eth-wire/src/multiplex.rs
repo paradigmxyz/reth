@@ -30,7 +30,10 @@ use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+
+/// Capacity for bounded routing channels to prevent unbounded memory growth.
+const ROUTING_CHANNEL_CAPACITY: usize = 256;
 
 /// A Stream and Sink type that wraps a raw rlpx stream [`P2PStream`] and handles message ID
 /// multiplexing.
@@ -86,11 +89,11 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared)
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) = mpsc::channel(ROUTING_CHANNEL_CAPACITY);
         let (to_wire, from_primary) = mpsc::unbounded_channel();
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
+            from_wire: ReceiverStream::new(from_wire),
             to_wire,
         };
 
@@ -154,11 +157,11 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared.into())
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) = mpsc::channel(ROUTING_CHANNEL_CAPACITY);
         let (to_wire, mut from_primary) = mpsc::unbounded_channel();
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
+            from_wire: ReceiverStream::new(from_wire),
             to_wire,
         };
 
@@ -178,8 +181,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
                             if cap == shared_cap {
-                                // delegate to primary
-                                let _ = to_primary.send(msg);
+                                // delegate to primary; await here to avoid dropping critical handshake messages
+                                let _ = to_primary.send(msg).await;
                             } else {
                                 // delegate to satellite
                                 self.inner.delegate_message(&cap, msg);
@@ -275,8 +278,8 @@ impl<St> MultiplexInner<St> {
     {
         let shared_cap =
             self.conn.shared_capabilities().ensure_matching_capability(cap).cloned()?;
-        let (to_satellite, rx) = mpsc::unbounded_channel();
-        let proto_conn = ProtocolConnection { from_wire: UnboundedReceiverStream::new(rx) };
+        let (to_satellite, rx) = mpsc::channel(ROUTING_CHANNEL_CAPACITY);
+        let proto_conn = ProtocolConnection { from_wire: ReceiverStream::new(rx) };
         let st = f(proto_conn);
         let st = ProtocolStream { shared_cap, to_satellite, satellite_st: Box::pin(st) };
         self.protocols.push(st);
@@ -288,7 +291,7 @@ impl<St> MultiplexInner<St> {
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
     /// Channel to send messages to the primary protocol.
-    to_primary: UnboundedSender<BytesMut>,
+    to_primary: mpsc::Sender<BytesMut>,
     /// Receiver for messages from the primary protocol.
     from_primary: UnboundedReceiverStream<Bytes>,
     /// Shared capability of the primary protocol.
@@ -304,7 +307,7 @@ struct PrimaryProtocol<Primary> {
 pub struct ProtocolProxy {
     shared_cap: SharedCapability,
     /// Receives _non-empty_ messages from the wire
-    from_wire: UnboundedReceiverStream<BytesMut>,
+    from_wire: ReceiverStream<BytesMut>,
     /// Sends _non-empty_ messages from the wire
     to_wire: UnboundedSender<Bytes>,
 }
@@ -607,8 +610,18 @@ where
                             this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
                         {
                             if cap == &this.primary.shared_cap {
-                                // delegate to primary
-                                let _ = this.primary.to_primary.send(msg);
+                                // delegate to primary using bounded channel
+                                // If full, drop the message to avoid unbounded memory growth.
+                                match this.primary.to_primary.try_send(msg) {
+                                    Ok(()) => {}
+                                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                        // Channel is congested; drop inbound message to apply backpressure.
+                                    }
+                                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                        // Primary is closed; end the stream.
+                                        return Poll::Ready(None)
+                                    }
+                                }
                             } else {
                                 // delegate to installed satellite if any
                                 for proto in &this.inner.protocols {
@@ -677,7 +690,7 @@ where
 struct ProtocolStream {
     shared_cap: SharedCapability,
     /// the channel shared with the satellite stream
-    to_satellite: UnboundedSender<BytesMut>,
+    to_satellite: mpsc::Sender<BytesMut>,
     satellite_st: Pin<Box<dyn Stream<Item = BytesMut> + Send>>,
 }
 
@@ -710,7 +723,10 @@ impl ProtocolStream {
 
     /// Sends the message to the satellite stream.
     fn send_raw(&self, msg: BytesMut) {
-        let _ = self.unmask_id(msg).map(|msg| self.to_satellite.send(msg));
+        // Apply backpressure: drop if the satellite channel is full.
+        if let Ok(msg) = self.unmask_id(msg) {
+            let _ = self.to_satellite.try_send(msg);
+        }
     }
 }
 
