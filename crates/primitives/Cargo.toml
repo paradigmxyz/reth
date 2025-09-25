@@ -24,8 +24,7 @@ alloy-consensus.workspace = true
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
-# misc
-once_cell.workspace = true
+
 
 [dev-dependencies]
 # eth
