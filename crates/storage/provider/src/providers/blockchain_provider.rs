@@ -781,14 +781,14 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
-        ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, TransactionVariant,
-        TransactionsProvider,
+        ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, StateWriter,
+        TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::BundleState;
+    use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
         ops::{Bound, Deref, Range, RangeBounds},
         sync::Arc,
@@ -865,9 +865,21 @@ mod tests {
         let provider_rw = factory.database_provider_rw()?;
 
         // Insert blocks into the database
-        for (block, receipts) in database_blocks.iter().zip(&receipts) {
+        for block in &database_blocks {
             provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
+            )?;
+        }
+
+        // Insert receipts into the database
+        if let Some(first_block) = database_blocks.first() {
+            provider_rw.write_state(
+                &ExecutionOutcome {
+                    first_block: first_block.number,
+                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
+                    ..Default::default()
+                },
+                OriginalValuesKnown::No,
             )?;
         }
 
