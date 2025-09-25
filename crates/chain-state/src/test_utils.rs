@@ -139,16 +139,18 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
 
+        // Convert recovered transactions into plain transactions once and reuse
+        let plain_transactions: Vec<_> =
+            transactions.into_iter().map(|tx| tx.into_inner()).collect();
+
         let header = Header {
             number,
             parent_hash,
-            gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
+            gas_used: plain_transactions.len() as u64 * MIN_TRANSACTION_GAS,
             mix_hash: B256::random(),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_inner()).collect::<Vec<_>>(),
-            ),
+            transactions_root: calculate_transaction_root(&plain_transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
             state_root: state_root_unhashed(HashMap::from([(
@@ -173,7 +175,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block = SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
+                transactions: plain_transactions,
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
