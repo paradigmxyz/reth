@@ -54,20 +54,28 @@ pub fn mock_tx_pool() -> MockTxPool {
 
 /// Sets the value for the field
 macro_rules! set_value {
-    ($this:expr => $field:ident) => {{
+    ($this:ident => $field:ident) => {
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { $field, .. } |
-            MockTransaction::Eip1559 { $field, .. } |
-            MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } |
+            MockTransaction::Legacy { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip1559 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip4844 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip2930 { $field, .. } => {
+                *$field = new_value;
+            }
             MockTransaction::Eip7702 { $field, .. } => {
-                *$field = new_value.into();
+                *$field = new_value;
             }
         }
         // Ensure the tx cost is always correct after each mutation.
         $this.update_cost();
-    }};
+    };
 }
 
 /// Gets the value for the field
