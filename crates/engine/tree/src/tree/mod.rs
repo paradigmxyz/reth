@@ -1024,22 +1024,22 @@ where
             return Ok(TreeOutcome::new(early_result));
         }
 
-        // Check if head is already canonical
+        // Case 1: Check if head is already canonical
         if let Some(result) = self.handle_canonical_head(state, attrs.clone(), version)? {
             return Ok(result);
         }
 
-        // Apply chain update if head is not canonical
+        // Case 2 Apply chain update if head is not canonical
         if let Some(result) = self.apply_chain_update(state, attrs, version)? {
             return Ok(result);
         }
 
-        // Handle missing block scenario
+        // Case 3 Handle missing block scenario
         self.handle_missing_block(state)
     }
 
-    /// Records forkchoice metrics for the given payload attributes.
-    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
+    /// Records metrics for forkchoice updated calls
+    fn record_forkchoice_metrics(&mut self, attrs: &Option<T::PayloadAttributes>) {
         self.metrics.engine.forkchoice_updated_messages.increment(1);
         if attrs.is_some() {
             self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
@@ -1064,6 +1064,8 @@ where
         }
 
         if !self.backfill_sync_state.is_idle() {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
             trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
             return Ok(Some(OnForkChoiceUpdated::syncing()));
         }
@@ -1078,6 +1080,20 @@ where
         attrs: Option<T::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
+        // Process the forkchoice update by trying to make the head block canonical
+        //
+        // We can only process this forkchoice update if:
+        // - we have the `head` block
+        // - the head block is part of a chain that is connected to the canonical chain. This
+        //   includes reorgs.
+        //
+        // Performing a FCU involves:
+        // - marking the FCU's head block as canonical
+        // - updating in memory state to reflect the new canonical chain
+        // - updating canonical state trackers
+        // - emitting a canonicalization event for the new chain (including reorg)
+        // - if we have payload attributes, delegate them to the payload service
+
         if self.state.tree_state.canonical_block_hash() != state.head_block_hash {
             return Ok(None);
         }
@@ -1094,7 +1110,11 @@ where
         if let Some(attr) = attrs {
             let tip = self
                 .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
-                .ok_or_else(|| ProviderError::HeaderNotFound(state.head_block_hash.into()))?;
+                .ok_or_else(|| {
+                    // If we can't find the canonical block, then something is wrong and we need
+                    // to return an error
+                    ProviderError::HeaderNotFound(state.head_block_hash.into())
+                })?;
             let updated = self.process_payload_attributes(attr, &tip, state, version);
             return Ok(Some(TreeOutcome::new(updated)));
         }
@@ -1118,6 +1138,8 @@ where
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
+            // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
+            // own chain at will, so we need to always trigger a new payload job if requested.
             if self.engine_kind.is_opstack() ||
                 self.config.always_process_payload_attributes_on_canonical_head()
             {
@@ -1128,10 +1150,27 @@ where
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
 
+                // At this point, no alternative block has been triggered, so we need effectively
+                // unwind the _canonical_ chain to the FCU's head, which is part of the canonical
+                // chain. We need to update the latest block state to reflect the
+                // canonical ancestor. This ensures that state providers and the
+                // transaction pool operate with the correct chain state after
+                // forkchoice update processing.
+
                 if self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
             }
+
+            // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
+            //    payload build process if `forkchoiceState.headBlockHash` references a `VALID`
+            //    ancestor of the head of canonical chain, i.e. the ancestor passed payload
+            //    validation process and deemed `VALID`. In the case of such an event, client
+            //    software MUST return `{payloadStatus: {status: VALID, latestValidHash:
+            //    forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
+
+            // the head block is already canonical, so we're not triggering a payload job and can
+            // return right away
 
             let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
@@ -1171,6 +1210,12 @@ where
         &self,
         state: ForkchoiceState,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        // 4. we don't have the block to perform the update
+        // we assume the FCU is valid and at least the head is missing,
+        // so we need to start syncing to it
+        //
+        // find the appropriate target to sync to, if we don't have the safe block hash then we
+        // start syncing to the safe block via backfill first
         let target = if self.state.forkchoice_state_tracker.is_empty() &&
             // check that safe block is valid and missing
             !state.safe_block_hash.is_zero() &&
@@ -1993,7 +2038,7 @@ where
 
         if blocks.is_empty() {
             // nothing to append
-            return Ok(());
+            return Ok(())
         }
 
         let now = Instant::now();
@@ -2709,7 +2754,7 @@ where
             Ok(None) => {
                 debug!(target: "engine::tree", "Finalized block not found in canonical chain");
                 // if the finalized block is not known, we can't update the finalized block
-                return Err(OnForkChoiceUpdated::invalid_state());
+                return Err(OnForkChoiceUpdated::invalid_state())
             }
             Ok(Some(finalized)) => {
                 if Some(finalized.num_hash()) !=
