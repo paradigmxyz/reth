@@ -40,6 +40,7 @@ pub(crate) struct ZstdConfig {
 /// types, a fixed number of bits is allocated (from `fn get_bit_size`):
 /// - `bool`, `Option<T>`, `TransactionKind`, `Signature`: **1 bit**
 /// - `TxType`: **2 bits**
+/// - `u32`: **3 bits**
 /// - `u64`, `BlockNumber`, `TxNumber`, `ChainId`, `NumTransactions`: **4 bits**
 /// - `u128`: **5 bits**
 /// - `U256`: **6 bits**
