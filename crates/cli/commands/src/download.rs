@@ -141,10 +141,10 @@ impl<R: Read> ProgressReader<R> {
 impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bytes = self.reader.read(buf)?;
-        if bytes > 0 {
-            if let Err(e) = self.progress.update(bytes as u64) {
-                return Err(io::Error::other(e));
-            }
+        if bytes > 0 &&
+            let Err(e) = self.progress.update(bytes as u64)
+        {
+            return Err(io::Error::other(e));
         }
         Ok(bytes)
     }
