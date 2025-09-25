@@ -48,7 +48,6 @@ fn get_bearer(headers: &HeaderMap) -> Option<String> {
     let auth: &str = header.to_str().ok()?;
     let prefix = "Bearer ";
 
-    // Ensure the header starts with "Bearer " to prevent bypass attacks
     if !auth.starts_with(prefix) {
         return None;
     }
