@@ -72,14 +72,7 @@ where
         if let Some(bal) = block_access_list {
             let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
             if let Some(body_bal) = block.body().block_access_list() {
-                if bal != body_bal {
-                    tracing::debug!(
-                        ?bal,
-                        ?body_bal,
-                        "block access list in body does not match the provided block access list"
-                    );
-                    return Err(ConsensusError::BlockAccessListMismatch)
-                }
+                verify_bal(body_bal, bal)?;
             }
 
             if bal_hash != header_block_access_list_hash {
@@ -88,9 +81,7 @@ where
                     ?header_block_access_list_hash,
                     "block access list hash mismatch"
                 );
-                return Err(ConsensusError::BodyBlockAccessListHashDiff(
-                    GotExpected::new(bal_hash, header_block_access_list_hash).into(),
-                ))
+                return Err(ConsensusError::InvalidBalHash);
             }
         }
     }
@@ -143,6 +134,43 @@ fn compare_receipts_root_and_logs_bloom(
     }
 
     Ok(())
+}
+
+/// Validates that the block access list in the body matches the expected block access list.
+fn verify_bal(
+    body_bal: &BlockAccessList,
+    expected_bal: &BlockAccessList,
+) -> Result<(), ConsensusError> {
+    if body_bal == expected_bal {
+        return Ok(());
+    }
+
+    // Extract addresses
+    let body_addrs: Vec<_> = body_bal.iter().map(|a| a.address).collect();
+    let expected_addrs: Vec<_> = expected_bal.iter().map(|a| a.address).collect();
+
+    // Missing accounts (expected but not found in body)
+    for addr in &expected_addrs {
+        if !body_addrs.contains(addr) {
+            return Err(ConsensusError::InvalidBalMissingAccount);
+        }
+    }
+
+    // Extra accounts (body has accounts not in expected)
+    for addr in &body_addrs {
+        if !expected_addrs.contains(addr) {
+            return Err(ConsensusError::InvalidBalExtraAccount);
+        }
+    }
+
+    tracing::debug!(
+        ?expected_bal,
+        ?body_bal,
+        "block access list in body does not match the provided block access list"
+    );
+
+    // Fallback: mismatched access lists
+    Err(ConsensusError::InvalidBlockAccessList)
 }
 
 #[cfg(test)]

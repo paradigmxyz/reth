@@ -89,9 +89,7 @@ pub fn validate_amsterdam_block_access_lists<B: Block>(
             ?bal,
             "Block access list hash mismatch in validation.rs in L81"
         );
-        return Err(ConsensusError::BodyBlockAccessListHashDiff(
-            GotExpected { got: bal_hash, expected: header_bal_hash }.into(),
-        ));
+        return Err(ConsensusError::InvalidBalHash);
     }
     Ok(())
 }
@@ -170,9 +168,7 @@ where
                 ?body_bal,
                 "Block access list hash mismatch in validation.rs in L164"
             );
-            return Err(ConsensusError::BodyBlockAccessListHashDiff(
-                GotExpected { got: got_hash, expected: expected_hash }.into(),
-            ));
+            return Err(ConsensusError::InvalidBalHash);
         }
     }
 

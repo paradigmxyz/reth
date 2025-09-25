@@ -614,9 +614,12 @@ where
                 Ok(PayloadStatus::new(status, latest_valid_hash))
             }
             Err(error) => match error {
-                InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
-                InsertPayloadError::Payload(error) => {
+                InsertPayloadError::Block(error) => {
                     tracing::debug!("payload in new payload l 617 {:?}", payload);
+                    Ok(self.on_insert_block_error(error)?)
+                }
+                InsertPayloadError::Payload(error) => {
+                    tracing::debug!("payload in new payload l 621 {:?}", payload);
                     Ok(self.on_new_payload_error(error, parent_hash)?)
                 }
             },
