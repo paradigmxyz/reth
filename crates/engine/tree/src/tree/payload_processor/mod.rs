@@ -519,9 +519,7 @@ impl CacheTaskHandle {
     pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
         if let Some(tx) = self.to_prewarm_task.take() {
             // Only clone when we have an active task and a state to send
-            let event = PrewarmTaskEvent::Terminate {
-                block_output: block_output.cloned()
-            };
+            let event = PrewarmTaskEvent::Terminate { block_output: block_output.cloned() };
             let _ = tx.send(event);
         }
     }
