@@ -265,26 +265,29 @@ where
         Ok((cfg, block_env).into())
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
-        EthBlockExecutionCtx {
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<Block>,
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
+        Ok(EthBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> EthBlockExecutionCtx<'_> {
-        EthBlockExecutionCtx {
+    ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
+        Ok(EthBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals.map(Cow::Owned),
-        }
+        })
     }
 }
 

@@ -285,7 +285,7 @@ where
         .with_bundle_update()
         .build();
 
-    let ctx = evm_config.context_for_block(&reorg_target);
+    let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
     let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
 

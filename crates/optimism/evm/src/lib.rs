@@ -222,24 +222,27 @@ where
         Ok(EvmEnv { cfg_env, block_env })
     }
 
-    fn context_for_block(&self, block: &'_ SealedBlock<N::Block>) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
+    fn context_for_block(
+        &self,
+        block: &'_ SealedBlock<N::Block>,
+    ) -> Result<OpBlockExecutionCtx, Self::Error> {
+        Ok(OpBlockExecutionCtx {
             parent_hash: block.header().parent_hash(),
             parent_beacon_block_root: block.header().parent_beacon_block_root(),
             extra_data: block.header().extra_data().clone(),
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> OpBlockExecutionCtx {
-        OpBlockExecutionCtx {
+    ) -> Result<OpBlockExecutionCtx, Self::Error> {
+        Ok(OpBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data,
-        }
+        })
     }
 }
 

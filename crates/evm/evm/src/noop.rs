@@ -58,7 +58,7 @@ where
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> crate::ExecutionCtxFor<'a, Self> {
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error> {
         self.inner().context_for_block(block)
     }
 
@@ -66,7 +66,7 @@ where
         &self,
         parent: &SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> crate::ExecutionCtxFor<'_, Self> {
+    ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner().context_for_next_block(parent, attributes)
     }
 }

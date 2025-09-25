@@ -259,14 +259,14 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
-    ) -> ExecutionCtxFor<'a, Evm>
+    ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.evm_config.context_for_payload(payload),
-            BlockOrPayload::Block(block) => self.evm_config.context_for_block(block),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
         }
     }
 
@@ -740,7 +740,8 @@ where
             .build();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
-        let ctx = self.execution_ctx_for(input);
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
