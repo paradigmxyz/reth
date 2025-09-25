@@ -129,11 +129,11 @@ where
             }
 
             // Write block access lists  if any
-            if let Some(block_access_list) = body.block_access_list {
-                if !block_access_list.is_empty() {
-                    block_access_lists_cursor
-                        .append(block_number, &StoredBlockAccessList { block_access_list })?;
-                }
+            if let Some(block_access_list) = body.block_access_list &&
+                !block_access_list.is_empty()
+            {
+                block_access_lists_cursor
+                    .append(block_number, &StoredBlockAccessList { block_access_list })?;
             }
         }
 
