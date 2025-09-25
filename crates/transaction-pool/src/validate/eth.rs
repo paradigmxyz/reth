@@ -725,6 +725,7 @@ where
 {
     type Transaction = Tx;
 
+    /// Performs validations not requiring state access
     async fn validate_transaction_stateless(
         &self,
         origin: TransactionOrigin,
@@ -733,6 +734,7 @@ where
         self.validate_one_no_state(origin, transaction)
     }
 
+    /// Performs validation against the latest state
     async fn validate_transaction_stateful(
         &self,
         origin: TransactionOrigin,
