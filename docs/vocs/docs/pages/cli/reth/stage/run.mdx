@@ -47,7 +47,7 @@ Database:
           - fatal:   Enables logging for critical conditions, i.e. assertion failures
           - error:   Enables logging for error conditions
           - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
+          - notice:  Enables logging for normal but significant conditions
           - verbose: Enables logging for verbose informational
           - debug:   Enables logging for debug-level messages
           - trace:   Enables logging for trace debug-level messages
@@ -85,7 +85,7 @@ Database:
           Batch size for stage execution and unwind
 
   -s, --skip-unwind
-          Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
+          Normally, running the stage requires unwinding for stages that have already been run, in order not to rewrite to the same database slots.
 
           You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
 
