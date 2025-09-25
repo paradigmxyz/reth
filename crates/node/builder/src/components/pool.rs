@@ -256,7 +256,7 @@ where
 }
 
 /// Spawn all maintenance tasks for a transaction pool (backup + main maintenance).
-fn spawn_maintenance_tasks<Node, Pool>(
+pub fn spawn_maintenance_tasks<Node, Pool>(
     ctx: &BuilderContext<Node>,
     pool: Pool,
     pool_config: &PoolConfig,
