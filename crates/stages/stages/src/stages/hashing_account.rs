@@ -453,7 +453,7 @@ mod tests {
                 let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
-                    SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },
+                    SeedOpts { blocks: 0..=input.target(), accounts: 10, txs: 0..3 },
                 )
                 .unwrap());
                 provider.commit().expect("failed to commit");
