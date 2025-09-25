@@ -71,7 +71,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
 /// A type that knows how to convert a consensus header into an RPC header.
 pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// An associated RPC conversion error.
-    type Err;
+    type Err: error::Error;
 
     /// Converts a consensus header into an RPC header.
     fn convert_header(
@@ -219,7 +219,7 @@ pub trait IntoRpcTx<T> {
     /// implementation specific extra information.
     type TxInfo;
     /// An associated RPC conversion error.
-    type Err;
+    type Err: error::Error;
 
     /// Performs the conversion consuming `self` with `signer` and `tx_info`. See [`IntoRpcTx`]
     /// for details.
@@ -242,7 +242,7 @@ pub trait FromConsensusTx<T>: Sized {
     /// implementation specific extra information.
     type TxInfo;
     /// An associated RPC conversion error.
-    type Err;
+    type Err: error::Error;
 
     /// Performs the conversion consuming `tx` with `signer` and `tx_info`. See [`FromConsensusTx`]
     /// for details.
