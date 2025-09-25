@@ -8,7 +8,10 @@ use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{
+    errors::provider::ProviderResult, AccountInfoReader, BlockReaderIdExt, StateProvider,
+    StateProviderBox, StateProviderFactory,
+};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -163,7 +166,8 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_state(origin, transaction, &mut None).await
+        let mut provider: Option<StateProviderBox> = None;
+        self.validate_one_with_state(origin, transaction, &mut provider).await
     }
 
     /// Validates a single transaction with a provided state provider.
@@ -181,7 +185,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<StateProviderBox>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -298,33 +302,53 @@ where
 {
     type Transaction = Tx;
 
-    async fn validate_transaction(
+    async fn validate_transaction_stateless(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction).await
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        if transaction.is_eip4844() {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            ))
+        }
+
+        let mut transaction = transaction;
+
+        match self.is_valid_cross_tx(&transaction).await {
+            Some(Err(err)) => {
+                let err = match err {
+                    InvalidCrossTx::CrossChainTxPreInterop => {
+                        InvalidTransactionError::TxTypeNotSupported.into()
+                    }
+                    err => InvalidPoolTransactionError::Other(Box::new(err)),
+                };
+                return Err(TransactionValidationOutcome::Invalid(transaction, err))
+            }
+            Some(Ok(_)) => {
+                transaction.set_interop_deadline(
+                    self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                );
+            }
+            _ => {}
+        }
+
+        self.inner.validate_transaction_stateless(origin, transaction).await
     }
 
-    async fn validate_transactions(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
-        )
-        .await
-    }
-
-    async fn validate_transactions_with_origin(
+    async fn validate_transaction_stateful(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
-        )
-        .await
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let outcome = self.inner.validate_transaction_stateful(origin, transaction, state).await;
+        self.apply_op_checks(outcome)
+    }
+
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+        self.inner.latest_state_provider()
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

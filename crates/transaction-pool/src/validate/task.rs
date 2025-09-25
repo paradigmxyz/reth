@@ -9,6 +9,7 @@ use crate::{
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives_traits::{Block, SealedBlock};
+use reth_storage_api::{errors::provider::ProviderResult, StateProvider, StateProviderBox};
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -186,11 +187,90 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
+impl<V> TransactionValidationTaskExecutor<V>
+where
+    V: TransactionValidator + 'static,
+{
+    async fn validate_transaction_internal(
+        validator: Arc<V>,
+        origin: TransactionOrigin,
+        transaction: V::Transaction,
+    ) -> TransactionValidationOutcome<V::Transaction> {
+        let mut results =
+            Self::validate_transactions_internal(validator, vec![(origin, transaction)]).await;
+        results.pop().expect("transaction result present")
+    }
+
+    async fn validate_transactions_internal(
+        validator: Arc<V>,
+        transactions: Vec<(TransactionOrigin, V::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
+        let len = transactions.len();
+        let mut outcomes = Vec::with_capacity(len);
+        outcomes.resize_with(len, || None);
+        let mut stateful: Vec<(usize, TransactionOrigin, V::Transaction)> = Vec::new();
+
+        for (idx, (origin, transaction)) in transactions.into_iter().enumerate() {
+            match validator.validate_transaction_stateless(origin, transaction).await {
+                Ok(tx) => stateful.push((idx, origin, tx)),
+                Err(outcome) => outcomes[idx] = Some(outcome),
+            }
+        }
+
+        if stateful.is_empty() {
+            return outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect();
+        }
+
+        let provider = match validator.latest_state_provider() {
+            Ok(provider) => provider,
+            Err(err) => {
+                for (idx, _, tx) in stateful {
+                    let hash = *tx.hash();
+                    outcomes[idx] = Some(TransactionValidationOutcome::Error(
+                        hash,
+                        Box::new(err.clone()) as Box<dyn core::error::Error + Send + Sync>,
+                    ));
+                }
+                return outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect();
+            }
+        };
+
+        for (idx, origin, tx) in stateful {
+            let result =
+                validator.validate_transaction_stateful(origin, tx, provider.as_ref()).await;
+            outcomes[idx] = Some(result);
+        }
+
+        outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect()
+    }
+}
+
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + 'static,
 {
     type Transaction = <V as TransactionValidator>::Transaction;
+
+    async fn validate_transaction_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        self.validator.validate_transaction_stateless(origin, transaction).await
+    }
+
+    async fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validator.validate_transaction_stateful(origin, transaction, state).await
+    }
+
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+        self.validator.latest_state_provider()
+    }
 
     async fn validate_transaction(
         &self,
@@ -204,7 +284,8 @@ where
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
+                    let res =
+                        Self::validate_transaction_internal(validator, origin, transaction).await;
                     let _ = tx.send(res);
                 });
                 let to_validation_task = to_validation_task.lock().await;
@@ -238,7 +319,7 @@ where
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
                 let fut = Box::pin(async move {
-                    let res = validator.validate_transactions(transactions).await;
+                    let res = Self::validate_transactions_internal(validator, transactions).await;
                     let _ = tx.send(res);
                 });
                 let to_validation_task = to_validation_task.lock().await;

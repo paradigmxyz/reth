@@ -10,6 +10,7 @@ use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthoriz
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
+use reth_storage_api::{errors::provider::ProviderResult, StateProvider, StateProviderBox};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
@@ -166,6 +167,29 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// The transaction type to validate.
     type Transaction: PoolTransaction;
 
+    /// Performs validation steps that do not require state access.
+    ///
+    /// Implementers should return the sanitized transaction if stateless checks succeed, or the
+    /// corresponding [`TransactionValidationOutcome`] if validation should terminate early.
+    fn validate_transaction_stateless(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> impl Future<
+        Output = Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>>,
+    > + Send;
+
+    /// Completes validation against the latest state for transactions that passed stateless checks.
+    fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
+
+    /// Returns a provider for accessing the latest account state used during validation.
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox>;
+
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
     ///
@@ -195,7 +219,30 @@ pub trait TransactionValidator: Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send {
+        async move {
+            match self.validate_transaction_stateless(origin, transaction).await {
+                Ok(transaction) => {
+                    let hash = *transaction.hash();
+                    match self.latest_state_provider() {
+                        Ok(provider) => {
+                            self.validate_transaction_stateful(
+                                origin,
+                                transaction,
+                                provider.as_ref(),
+                            )
+                            .await
+                        }
+                        Err(err) => TransactionValidationOutcome::Error(
+                            hash,
+                            Box::new(err) as Box<dyn core::error::Error + Send + Sync>,
+                        ),
+                    }
+                }
+                Err(outcome) => outcome,
+            }
+        }
+    }
 
     /// Validates a batch of transactions.
     ///
@@ -242,35 +289,33 @@ where
 {
     type Transaction = A::Transaction;
 
-    async fn validate_transaction(
+    async fn validate_transaction_stateless(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
         match self {
-            Self::Left(v) => v.validate_transaction(origin, transaction).await,
-            Self::Right(v) => v.validate_transaction(origin, transaction).await,
+            Self::Left(v) => v.validate_transaction_stateless(origin, transaction).await,
+            Self::Right(v) => v.validate_transaction_stateless(origin, transaction).await,
         }
     }
 
-    async fn validate_transactions(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        match self {
-            Self::Left(v) => v.validate_transactions(transactions).await,
-            Self::Right(v) => v.validate_transactions(transactions).await,
-        }
-    }
-
-    async fn validate_transactions_with_origin(
+    async fn validate_transaction_stateful(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
         match self {
-            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
-            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
+            Self::Left(v) => v.validate_transaction_stateful(origin, transaction, state).await,
+            Self::Right(v) => v.validate_transaction_stateful(origin, transaction, state).await,
+        }
+    }
+
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+        match self {
+            Self::Left(v) => v.latest_state_provider(),
+            Self::Right(v) => v.latest_state_provider(),
         }
     }
 

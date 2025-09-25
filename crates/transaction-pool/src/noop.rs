@@ -22,6 +22,10 @@ use alloy_eips::{
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
+use reth_storage_api::{
+    errors::provider::{ProviderError, ProviderResult},
+    StateProvider, StateProviderBox,
+};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -372,20 +376,40 @@ pub struct MockTransactionValidator<T> {
 impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
-    async fn validate_transaction(
+    async fn validate_transaction_stateless(
         &self,
         origin: TransactionOrigin,
         mut transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
         if self.return_invalid {
-            return TransactionValidationOutcome::Invalid(
+            return Err(TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::Underpriced,
-            );
+            ));
         }
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
-        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
-        // overdraft
+        let outcome = TransactionValidationOutcome::Valid {
+            balance: U256::MAX,
+            state_nonce: 0,
+            bytecode_hash: None,
+            transaction: ValidTransaction::new(transaction, maybe_sidecar),
+            propagate: match origin {
+                TransactionOrigin::External => true,
+                TransactionOrigin::Local => self.propagate_local,
+                TransactionOrigin::Private => false,
+            },
+            authorities: None,
+        };
+        Err(outcome)
+    }
+
+    async fn validate_transaction_stateful(
+        &self,
+        origin: TransactionOrigin,
+        mut transaction: Self::Transaction,
+        _state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
@@ -398,6 +422,10 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
             },
             authorities: None,
         }
+    }
+
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 

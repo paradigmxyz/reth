@@ -30,7 +30,10 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Account, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{AccountInfoReader, BytecodeReader, StateProviderFactory};
+use reth_storage_api::{
+    errors::provider::ProviderResult, AccountInfoReader, BytecodeReader, StateProvider,
+    StateProviderBox, StateProviderFactory,
+};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -191,7 +194,8 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_provider(origin, transaction, &mut None)
+        let mut provider: Option<StateProviderBox> = None;
+        self.validate_one_with_state(origin, transaction, &mut provider)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -204,29 +208,13 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates a single transaction using an optional cached state provider.
-    /// If no provider is passed, a new one will be created. This allows reusing
-    /// the same provider across multiple txs.
-    fn validate_one_with_provider(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<StateProviderBox>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
-                // stateless checks passed, pass transaction down stateful validation pipeline
-                // If we don't have a state provider yet, fetch the latest state
-                if maybe_state.is_none() {
-                    match self.client.latest() {
-                        Ok(new_state) => {
-                            *maybe_state = Some(Box::new(new_state));
-                        }
+                if state.is_none() {
+                    match self.latest_state_provider() {
+                        Ok(provider) => *state = Some(provider),
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
                                 *transaction.hash(),
@@ -236,9 +224,8 @@ where
                     }
                 }
 
-                let state = maybe_state.as_deref().expect("provider is set");
-
-                self.validate_one_against_state(origin, transaction, state)
+                let provider = state.as_ref().expect("provider is set");
+                self.validate_one_against_state(origin, transaction, provider.as_ref())
             }
             Err(invalid_outcome) => invalid_outcome,
         }
@@ -697,31 +684,6 @@ where
             .map(|auths| auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>())
     }
 
-    /// Validates all given transactions.
-    fn validate_batch(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
-        transactions
-            .into_iter()
-            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
-            .collect()
-    }
-
-    /// Validates all given transactions with origin.
-    fn validate_batch_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let mut provider = None;
-        transactions
-            .into_iter()
-            .map(|tx| self.validate_one_with_provider(origin, tx, &mut provider))
-            .collect()
-    }
-
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
         if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
@@ -763,27 +725,25 @@ where
 {
     type Transaction = Tx;
 
-    async fn validate_transaction(
+    async fn validate_transaction_stateless(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        self.validate_one_no_state(origin, transaction)
     }
 
-    async fn validate_transactions(
-        &self,
-        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_batch(transactions)
-    }
-
-    async fn validate_transactions_with_origin(
+    async fn validate_transaction_stateful(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_batch_with_origin(origin, transactions)
+        transaction: Self::Transaction,
+        state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validate_one_against_state(origin, transaction, state)
+    }
+
+    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+        self.client.latest()
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
