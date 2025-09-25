@@ -204,10 +204,10 @@ where
         };
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if price > max_price {
-                price = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            price > max_price
+        {
+            price = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
@@ -254,10 +254,10 @@ where
             };
 
             // ignore transactions with a tip under the configured threshold
-            if let Some(ignore_under) = self.ignore_price {
-                if effective_tip < Some(ignore_under) {
-                    continue
-                }
+            if let Some(ignore_under) = self.ignore_price &&
+                effective_tip < Some(ignore_under)
+            {
+                continue
             }
 
             // check if the sender was the coinbase, if so, ignore
@@ -338,10 +338,10 @@ where
         }
 
         // constrain to the max price
-        if let Some(max_price) = self.oracle_config.max_price {
-            if suggestion > max_price {
-                suggestion = max_price;
-            }
+        if let Some(max_price) = self.oracle_config.max_price &&
+            suggestion > max_price
+        {
+            suggestion = max_price;
         }
 
         inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };

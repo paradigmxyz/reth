@@ -92,10 +92,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     for block in chain.blocks_iter() {
-                        if block.body().contains_transaction(&hash) {
-                            if let Some(receipt) = this.transaction_receipt(hash).await? {
-                                return Ok(receipt);
-                            }
+                        if block.body().contains_transaction(&hash) &&
+                            let Some(receipt) = this.transaction_receipt(hash).await?
+                        {
+                            return Ok(receipt);
                         }
                     }
                 }
@@ -294,13 +294,12 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             // Check the pool first
-            if include_pending {
-                if let Some(tx) =
+            if include_pending &&
+                let Some(tx) =
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
-                {
-                    let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
-                }
+            {
+                let transaction = tx.transaction.clone_into_consensus();
+                return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
             }
 
             // Check if the sender is a contract
@@ -370,10 +369,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.recovered_block(block_id).await? {
-                if let Some(tx) = block.body().transactions().get(index) {
-                    return Ok(Some(tx.encoded_2718().into()))
-                }
+            if let Some(block) = self.recovered_block(block_id).await? &&
+                let Some(tx) = block.body().transactions().get(index)
+            {
+                return Ok(Some(tx.encoded_2718().into()))
             }
 
             Ok(None)

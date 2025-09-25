@@ -1801,10 +1801,10 @@ where
     fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? {
-            if !parent.difficulty().is_zero() {
-                parent_hash = B256::ZERO;
-            }
+        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? &&
+            !parent.difficulty().is_zero()
+        {
+            parent_hash = B256::ZERO;
         }
 
         let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
@@ -1970,62 +1970,65 @@ where
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
         // check if the downloaded block is the tracked finalized block
-        let mut exceeds_backfill_threshold = if let Some(buffered_finalized) = sync_target_state
-            .as_ref()
-            .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
-        {
-            // if we have buffered the finalized block, we should check how far
-            // we're off
-            self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number())
-        } else {
-            // check if the distance exceeds the threshold for backfill sync
-            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
-        };
-
-        // If this is invoked after we downloaded a block we can check if this block is the
-        // finalized block
-        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
-            if downloaded_block.hash == state.finalized_block_hash {
-                // we downloaded the finalized block and can now check how far we're off
-                exceeds_backfill_threshold =
-                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
-            }
-        }
+        let exceeds_backfill_threshold =
+            match (downloaded_block.as_ref(), sync_target_state.as_ref()) {
+                // if we downloaded the finalized block we can now check how far we're off
+                (Some(downloaded_block), Some(state))
+                    if downloaded_block.hash == state.finalized_block_hash =>
+                {
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
+                }
+                _ => match sync_target_state
+                    .as_ref()
+                    .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+                {
+                    Some(buffered_finalized) => {
+                        // if we have buffered the finalized block, we should check how far we're
+                        // off
+                        self.exceeds_backfill_run_threshold(
+                            canonical_tip_num,
+                            buffered_finalized.number(),
+                        )
+                    }
+                    None => {
+                        // check if the distance exceeds the threshold for backfill sync
+                        self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+                    }
+                },
+            };
 
         // if the number of missing blocks is greater than the max, trigger backfill
-        if exceeds_backfill_threshold {
-            if let Some(state) = sync_target_state {
-                // if we have already canonicalized the finalized block, we should skip backfill
-                match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
-                    Err(err) => {
-                        warn!(target: "engine::tree", %err, "Failed to get finalized block header");
+        if exceeds_backfill_threshold && let Some(state) = sync_target_state {
+            // if we have already canonicalized the finalized block, we should skip backfill
+            match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                Err(err) => {
+                    warn!(target: "engine::tree", %err, "Failed to get finalized block header");
+                }
+                Ok(None) => {
+                    // ensure the finalized block is known (not the zero hash)
+                    if !state.finalized_block_hash.is_zero() {
+                        // we don't have the block yet and the distance exceeds the allowed
+                        // threshold
+                        return Some(state.finalized_block_hash)
                     }
-                    Ok(None) => {
-                        // ensure the finalized block is known (not the zero hash)
-                        if !state.finalized_block_hash.is_zero() {
-                            // we don't have the block yet and the distance exceeds the allowed
-                            // threshold
-                            return Some(state.finalized_block_hash)
-                        }
 
-                        // OPTIMISTIC SYNCING
-                        //
-                        // It can happen when the node is doing an
-                        // optimistic sync, where the CL has no knowledge of the finalized hash,
-                        // but is expecting the EL to sync as high
-                        // as possible before finalizing.
-                        //
-                        // This usually doesn't happen on ETH mainnet since CLs use the more
-                        // secure checkpoint syncing.
-                        //
-                        // However, optimism chains will do this. The risk of a reorg is however
-                        // low.
-                        debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
-                        return Some(state.head_block_hash)
-                    }
-                    Ok(Some(_)) => {
-                        // we're fully synced to the finalized block
-                    }
+                    // OPTIMISTIC SYNCING
+                    //
+                    // It can happen when the node is doing an
+                    // optimistic sync, where the CL has no knowledge of the finalized hash,
+                    // but is expecting the EL to sync as high
+                    // as possible before finalizing.
+                    //
+                    // This usually doesn't happen on ETH mainnet since CLs use the more
+                    // secure checkpoint syncing.
+                    //
+                    // However, optimism chains will do this. The risk of a reorg is however
+                    // low.
+                    debug!(target: "engine::tree", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
+                    return Some(state.head_block_hash)
+                }
+                Ok(Some(_)) => {
+                    // we're fully synced to the finalized block
                 }
             }
         }

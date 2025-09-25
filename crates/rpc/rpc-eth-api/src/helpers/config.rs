@@ -115,19 +115,19 @@ where
 
         let mut config = EthConfig { current, next: None, last: None };
 
-        if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
-            if let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied() {
-                let fake_header = {
-                    let mut header = latest.clone();
-                    header.timestamp = last_fork_timestamp;
-                    header
-                };
-                let last_precompiles = evm_to_precompiles_map(
-                    self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
-                );
+        if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) &&
+            let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied()
+        {
+            let fake_header = {
+                let mut header = latest.clone();
+                header.timestamp = last_fork_timestamp;
+                header
+            };
+            let last_precompiles = evm_to_precompiles_map(
+                self.evm_config.evm_for_block(EmptyDB::default(), &fake_header),
+            );
 
-                config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
-            }
+            config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
         }
 
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {

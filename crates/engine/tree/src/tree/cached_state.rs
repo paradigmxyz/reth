@@ -664,7 +664,7 @@ mod tests {
 
         unsafe impl GlobalAlloc for TrackingAllocator {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                let ret = self.inner.alloc(layout);
+                let ret = unsafe { self.inner.alloc(layout) };
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
                     self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
@@ -674,7 +674,7 @@ mod tests {
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
                 self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
-                self.inner.dealloc(ptr, layout)
+                unsafe { self.inner.dealloc(ptr, layout) }
             }
         }
     }
