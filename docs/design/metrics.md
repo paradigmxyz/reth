@@ -29,7 +29,7 @@ There are three types of metrics:
 
 - **Counters**: Represent (ideally) monotonically increasing values, e.g. the number of errors that have occurred, the number of blocks processed, etc.
 - **Gauges**: Represent metrics that can go up or down arbitrarily over time. Usually they are used to measure things like resource usage (memory, CPU, ...) and throughput.
-- **Histograms**: Used to store an arbitrary number of observations of a specific measurement, and provides statistical analysis over the observed values. A typical use case is latency of some operation (writing to disk, responding to a request, ...).
+- **Histograms**: Used to store an arbitrary number of observations of a specific measurement, and provide statistical analysis over the observed values. A typical use case is the latency of some operation (writing to disk, responding to a request, ...).
 
 Each metric is identified by a [`Key`][metrics.Key], which itself is composed of a [`KeyName`][metrics.KeyName] and an arbitrary number of [`Label`][metrics.Label]s.
 
