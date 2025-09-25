@@ -18,8 +18,9 @@ use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
+use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService, PendingBlockRx,
@@ -28,14 +29,14 @@ use reth_optimism_flashblocks::{
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
-        EthState, LoadFee, LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+        pending_block::BuildPendingEnv, AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee,
+        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{
-    block::BlockAndReceipts, EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlockEnvOrigin,
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{ProviderHeader, ProviderTx};
 use reth_tasks::{
@@ -113,12 +114,13 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         OpEthApiBuilder::new()
     }
 
-    /// Returns a [`BlockAndReceipts`] that is built out of flashblocks.
+    /// Returns a [`PendingBlock`] that is built out of flashblocks.
     ///
     /// If flashblocks receiver is not set, then it always returns `None`.
-    pub fn pending_flashblock(&self) -> eyre::Result<Option<BlockAndReceipts<N::Primitives>>>
+    pub fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlock<N::Primitives>>>
     where
-        Self: LoadPendingBlock,
+        OpEthApiError: FromEvmError<N::Evm>,
+        Rpc: RpcConvert<Primitives = N::Primitives>,
     {
         let pending = self.pending_block_env_and_cfg()?;
         let parent = match pending.origin {
@@ -137,7 +139,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             parent.hash() == pending_block.block().parent_hash() &&
             now <= pending_block.expires_at
         {
-            return Ok(Some(pending_block.to_block_and_receipts()));
+            return Ok(Some(pending_block.clone()));
         }
 
         Ok(None)
@@ -206,17 +208,9 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-    type Transaction = ProviderTx<Self::Provider>;
-    type Rpc = Rpc::Network;
-
     #[inline]
     fn starting_block(&self) -> U256 {
         self.inner.eth_api.starting_block()
-    }
-
-    #[inline]
-    fn signers(&self) -> &SignersForApi<Self> {
-        self.inner.eth_api.signers()
     }
 }
 
@@ -440,6 +434,7 @@ where
                                  + From<ExecutionPayloadBaseV1>
                                  + Unpin,
         >,
+        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,

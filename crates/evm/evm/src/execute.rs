@@ -199,6 +199,32 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_root: B256,
 }
 
+impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
+    /// Creates a new [`BlockAssemblerInput`].
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
+        evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
+        execution_ctx: F::ExecutionCtx<'a>,
+        parent: &'a SealedHeader<H>,
+        transactions: Vec<F::Transaction>,
+        output: &'b BlockExecutionResult<F::Receipt>,
+        bundle_state: &'a BundleState,
+        state_provider: &'b dyn StateProvider,
+        state_root: B256,
+    ) -> Self {
+        Self {
+            evm_env,
+            execution_ctx,
+            parent,
+            transactions,
+            output,
+            bundle_state,
+            state_provider,
+            state_root,
+        }
+    }
+}
+
 /// A type that knows how to assemble a block from execution results.
 ///
 /// The [`BlockAssembler`] is the final step in block production. After transactions

@@ -404,10 +404,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // Appends new offsets to disk
         for offset in self.offsets.drain(..) {
-            if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
-                if last_offset_ondisk == offset {
-                    continue
-                }
+            if let Some(last_offset_ondisk) = last_offset_ondisk.take() &&
+                last_offset_ondisk == offset
+            {
+                continue
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
         }

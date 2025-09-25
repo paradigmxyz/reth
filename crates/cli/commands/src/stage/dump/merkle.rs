@@ -92,10 +92,8 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };
 
     // Unwind hashes all the way to FROM
-
-    StorageHashingStage::default().unwind(&provider, unwind).unwrap();
-    AccountHashingStage::default().unwind(&provider, unwind).unwrap();
-
+    StorageHashingStage::default().unwind(&provider, unwind)?;
+    AccountHashingStage::default().unwind(&provider, unwind)?;
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
@@ -127,15 +125,13 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
         commit_threshold: u64::MAX,
         etl_config: EtlConfig::default(),
     }
-    .execute(&provider, execute_input)
-    .unwrap();
+    .execute(&provider, execute_input)?;
     StorageHashingStage {
         clean_threshold: u64::MAX,
         commit_threshold: u64::MAX,
         etl_config: EtlConfig::default(),
     }
-    .execute(&provider, execute_input)
-    .unwrap();
+    .execute(&provider, execute_input)?;
 
     let unwind_inner_tx = provider.into_tx();
 

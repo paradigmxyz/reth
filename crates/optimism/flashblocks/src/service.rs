@@ -1,13 +1,15 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
-    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequence,
+    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
+use metrics::Histogram;
 use reth_chain_state::{CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions};
 use reth_evm::ConfigureEvm;
+use reth_metrics::Metrics;
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
 };
@@ -20,10 +22,7 @@ use std::{
     task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::{
-    pin,
-    sync::{broadcast, oneshot},
-};
+use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
@@ -48,6 +47,7 @@ pub struct FlashBlockService<
     /// fb received on top of the same block. Avoid redundant I/O across multiple executions
     /// within the same block.
     cached_state: Option<(B256, CachedReads)>,
+    metrics: FlashBlockServiceMetrics,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -80,11 +80,12 @@ where
             spawner,
             job: None,
             cached_state: None,
+            metrics: FlashBlockServiceMetrics::default(),
         }
     }
 
     /// Returns a subscriber to the flashblock sequence.
-    pub fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence> {
+    pub fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
         self.blocks.subscribe_block_sequence()
     }
 
@@ -106,7 +107,12 @@ where
     /// Returns `None` if the flashblock have no `base` or the base is not a child block of latest.
     fn build_args(
         &mut self,
-    ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>> {
+    ) -> Option<
+        BuildArgs<
+            impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>
+                + use<N, S, EvmConfig, Provider>,
+        >,
+    > {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
                 flashblock_number = ?self.blocks.block_number(),
@@ -118,11 +124,11 @@ where
         };
 
         // attempt an initial consecutive check
-        if let Some(latest) = self.builder.provider().latest_header().ok().flatten() {
-            if latest.hash() != base.parent_hash {
-                trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
-                return None;
-            }
+        if let Some(latest) = self.builder.provider().latest_header().ok().flatten() &&
+            latest.hash() != base.parent_hash
+        {
+            trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
+            return None;
         }
 
         Some(BuildArgs {
@@ -134,8 +140,25 @@ where
 
     /// Takes out `current` [`PendingBlock`] if `state` is not preceding it.
     fn on_new_tip(&mut self, state: CanonStateNotification<N>) -> Option<PendingBlock<N>> {
-        let latest = state.tip_checked()?.hash();
-        self.current.take_if(|current| current.parent_hash() != latest)
+        let tip = state.tip_checked()?;
+        let tip_hash = tip.hash();
+        let current = self.current.take_if(|current| current.parent_hash() != tip_hash);
+
+        // Prefill the cache with state from the new canonical tip, similar to payload/basic
+        let mut cached = CachedReads::default();
+        let committed = state.committed();
+        let new_execution_outcome = committed.execution_outcome();
+        for (addr, acc) in new_execution_outcome.bundle_accounts_iter() {
+            if let Some(info) = acc.info.clone() {
+                // Pre-cache existing accounts and their storage (only changed accounts/storage)
+                let storage =
+                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                cached.insert_account(addr, info, storage);
+            }
+        }
+        self.cached_state = Some((tip_hash, cached));
+
+        current
     }
 }
 
@@ -183,11 +206,13 @@ where
                         this.cached_state = Some((new_pending.parent_hash(), cached_reads));
                         this.rebuild = false;
 
+                        let elapsed = now.elapsed();
+                        this.metrics.execution_duration.record(elapsed.as_secs_f64());
                         trace!(
                             parent_hash = %new_pending.block().parent_hash(),
                             block_number = new_pending.block().number(),
                             flash_blocks = this.blocks.count(),
-                            elapsed = ?now.elapsed(),
+                            ?elapsed,
                             "Built new block with flashblocks"
                         );
 
@@ -206,10 +231,15 @@ where
             // consume new flashblocks while they're ready
             while let Poll::Ready(Some(result)) = this.rx.poll_next_unpin(cx) {
                 match result {
-                    Ok(flashblock) => match this.blocks.insert(flashblock) {
-                        Ok(_) => this.rebuild = true,
-                        Err(err) => debug!(%err, "Failed to prepare flashblock"),
-                    },
+                    Ok(flashblock) => {
+                        if flashblock.index == 0 {
+                            this.metrics.last_flashblock_length.record(this.blocks.count() as f64);
+                        }
+                        match this.blocks.insert(flashblock) {
+                            Ok(_) => this.rebuild = true,
+                            Err(err) => debug!(%err, "Failed to prepare flashblock"),
+                        }
+                    }
                     Err(err) => return Poll::Ready(Some(Err(err))),
                 }
             }
@@ -219,16 +249,15 @@ where
                 let fut = this.canon_receiver.recv();
                 pin!(fut);
                 fut.poll_unpin(cx)
-            } {
-                if let Some(current) = this.on_new_tip(state) {
-                    trace!(
-                        parent_hash = %current.block().parent_hash(),
-                        block_number = current.block().number(),
-                        "Clearing current flashblock on new canonical block"
-                    );
+            } && let Some(current) = this.on_new_tip(state)
+            {
+                trace!(
+                    parent_hash = %current.block().parent_hash(),
+                    block_number = current.block().number(),
+                    "Clearing current flashblock on new canonical block"
+                );
 
-                    return Poll::Ready(Some(Ok(None)))
-                }
+                return Poll::Ready(Some(Ok(None)))
             }
 
             if !this.rebuild && this.current.is_some() {
@@ -258,3 +287,12 @@ where
 
 type BuildJob<N> =
     (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
+
+#[derive(Metrics)]
+#[metrics(scope = "flashblock_service")]
+struct FlashBlockServiceMetrics {
+    /// The last complete length of flashblocks per block.
+    last_flashblock_length: Histogram,
+    /// The duration applying flashblock state changes in seconds.
+    execution_duration: Histogram,
+}

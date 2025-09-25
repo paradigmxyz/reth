@@ -46,6 +46,12 @@ jsonrpsee-types.workspace = true
 # error
 thiserror.workspace = true
 
+auto_impl.workspace = true
+dyn-clone.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 default = []
 op = [

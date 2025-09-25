@@ -2,7 +2,7 @@
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 use crate::FromEvmError;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
@@ -12,7 +12,7 @@ use reth_evm::{
     evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
     Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
-use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
