@@ -295,7 +295,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if msg.latest_hash.is_zero() {
                     return OnIncomingMessageOutcome::BadMessage {
                         error: EthStreamError::InvalidMessage(MessageError::Other(
-                            "invalid block range: latest_hash cannot be zero".to_string()
+                            "invalid block range: latest_hash cannot be zero".to_string(),
                         )),
                         message: EthMessage::BlockRangeUpdate(msg),
                     };
