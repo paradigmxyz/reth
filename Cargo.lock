@@ -60,7 +60,6 @@ checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
  "getrandom 0.3.3",
- "once_cell",
  "version_check",
  "zerocopy",
 ]
