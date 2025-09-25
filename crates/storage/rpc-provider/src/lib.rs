@@ -1063,8 +1063,6 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         {
             Ok(None)
         } else {
-            // Use account_info.code_hash() directly instead of creating Bytecode and calling
-            // hash_slow()
             let bytecode_hash =
                 if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
