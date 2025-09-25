@@ -419,13 +419,13 @@ It's worth noting that once the node starts downloading either headers or bodies
 
 When `FetchClient.get_headers` or `FetchClient.get_block_bodies` is called, those `DownloadRequest`s are sent into the `StateFetcher.download_requests_tx` channel, and are processed as the `StateFetcher` gets polled.
 
-Every time the `StateFetcher` is polled, it finds the next idle peer available to service the current request (for either a block header, or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
+Every time the `StateFetcher` is polled, it finds the next idle peer available to service the current request (for either a block header or a block body). In this context, "idle" means any peer that is not currently handling a request from the node:
 
 [File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
 /// Returns the next action to return
 fn poll_action(&mut self) -> PollAction {
-    // we only check and not pop here since we don't know yet whether a peer is available.
+    // we only check and do not pop here since we don't know yet whether a peer is available.
     if self.queued_requests.is_empty() {
         return PollAction::NoRequests
     }
@@ -558,7 +558,7 @@ fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
                 }
                 HeadersDirection::Falling => {
                     if skip > 0 {
-                        // prevent under flows for block.number == 0 and `block.number - skip <
+                        // prevent underflows for block.number == 0 and `block.number - skip <
                         // 0`
                         if let Some(next) =
                             header.number.checked_sub(1).and_then(|num| num.checked_sub(skip))
