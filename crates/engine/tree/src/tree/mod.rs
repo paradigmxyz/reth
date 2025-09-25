@@ -2038,32 +2038,32 @@ where
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
         // check if the downloaded block is the tracked finalized block
-        let mut exceeds_backfill_threshold = match sync_target_state
-            .as_ref()
-            .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
-        {
-            Some(buffered_finalized) => {
-                // if we have buffered the finalized block, we should check how far we're off
-                self.exceeds_backfill_run_threshold(
-                    canonical_tip_num,
-                    buffered_finalized.number(),
-                )
-            }
-            None => {
-                // check if the distance exceeds the threshold for backfill sync
-                self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
-            }
-        };
-
-        // If this is invoked after we downloaded a block we can check if this block is the
-        // finalized block
-        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) &&
-            downloaded_block.hash == state.finalized_block_hash
-        {
-            // we downloaded the finalized block and can now check how far we're off
-            exceeds_backfill_threshold =
-                self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
-        }
+        let exceeds_backfill_threshold =
+            match (downloaded_block.as_ref(), sync_target_state.as_ref()) {
+                // if we downloaded the finalized block we can now check how far we're off
+                (Some(downloaded_block), Some(state))
+                    if downloaded_block.hash == state.finalized_block_hash =>
+                {
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number)
+                }
+                _ => match sync_target_state
+                    .as_ref()
+                    .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+                {
+                    Some(buffered_finalized) => {
+                        // if we have buffered the finalized block, we should check how far we're
+                        // off
+                        self.exceeds_backfill_run_threshold(
+                            canonical_tip_num,
+                            buffered_finalized.number(),
+                        )
+                    }
+                    None => {
+                        // check if the distance exceeds the threshold for backfill sync
+                        self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+                    }
+                },
+            };
 
         // if the number of missing blocks is greater than the max, trigger backfill
         if exceeds_backfill_threshold && let Some(state) = sync_target_state {
