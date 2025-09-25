@@ -329,13 +329,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
-        if let Some(lowest) = self.independent_transactions.get(&id.sender) {
-            if lowest.transaction.nonce() == id.nonce {
-                self.independent_transactions.remove(&id.sender);
-                // mark the next as independent if it exists
-                if let Some(unlocked) = self.get(&id.descendant()) {
-                    self.independent_transactions.insert(id.sender, unlocked.clone());
-                }
+        if let Some(lowest) = self.independent_transactions.get(&id.sender) &&
+            lowest.transaction.nonce() == id.nonce
+        {
+            self.independent_transactions.remove(&id.sender);
+            // mark the next as independent if it exists
+            if let Some(unlocked) = self.get(&id.descendant()) {
+                self.independent_transactions.insert(id.sender, unlocked.clone());
             }
         }
 
