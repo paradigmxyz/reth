@@ -110,21 +110,35 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         let Some(action) = self.persistence().current_action() else {
             return PersistingKind::NotPersisting
         };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
 
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.block.number > highest.number &&
-            self.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
+        match action {
+            CurrentPersistenceAction::SavingBlocks { highest } => {
+                // The block being validated can only be a descendant if its number is higher than
+                // the highest block persisting. Otherwise, it's likely a fork of a lower block.
+                if block.block.number > highest.number &&
+                    self.state().tree_state.is_descendant(*highest, block)
+                {
+                    return PersistingKind::PersistingDescendant
+                }
+                // In all other cases, the block is not a descendant.
+                PersistingKind::PersistingNotDescendant
+            }
+            CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+                // During block removal, we can still allow parallel state root computation
+                // for blocks that are descendants of the canonical chain and are not being removed.
+                // A block is safe to process in parallel if:
+                // 1. It's a descendant of the current canonical head, AND
+                // 2. Its number is greater than the new tip (not being removed)
+                let canonical_head = self.state().tree_state.current_canonical_head;
+                if block.block.number > *new_tip_num &&
+                    self.state().tree_state.is_descendant(canonical_head, block)
+                {
+                    return PersistingKind::PersistingDescendant
+                }
+                // If the block is being removed or is not a canonical descendant, don't run in parallel
+                PersistingKind::PersistingNotDescendant
+            }
         }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
     }
 }
 
