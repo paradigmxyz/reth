@@ -310,7 +310,6 @@ where
         self.inner.auth_server_handle().clone()
     }
 
-<<<<<<< HEAD
     /// Start a background task that forwards trie updates from canonical state notifications
     /// to the test environment via the provided channel
     pub fn start_trie_update_forwarder(
@@ -404,7 +403,8 @@ where
 
             tracing::debug!("Trie update forwarder ended for node {}", node_idx);
         });
-=======
+    }
+
     /// Creates a [`crate::testsuite::NodeClient`] from this test context.
     ///
     /// This helper method extracts the necessary handles and creates a client
@@ -419,6 +419,5 @@ where
         let beacon_handle = self.inner.add_ons_handle.beacon_engine_handle.clone();
 
         Ok(crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle))
->>>>>>> origin/main
     }
 }
