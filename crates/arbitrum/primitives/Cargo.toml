@@ -1,0 +1,51 @@
+[package]
+name = "reth-arbitrum-primitives"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[features]
+default = ["std", "serde", "reth-codec", "serde-bincode-compat"]
+std = [
+    "alloy-consensus/std",
+    "reth-codecs?/std",
+]
+serde = [
+    "dep:serde",
+    "reth-primitives-traits/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "std",
+    "reth-primitives-traits/reth-codec",
+    "reth-codecs?/std",
+    "dep:reth-zstd-compressors",
+    "dep:modular-bitfield",
+]
+serde-bincode-compat = [
+    "reth-primitives-traits/serde-bincode-compat",
+]
+
+[dependencies]
+# alloy core crates used in primitives
+alloy-consensus = { version = "1", default-features = false, features = ["std"] }
+alloy-eips = { version = "1", default-features = false }
+alloy-rlp = { version = "0.3", default-features = false, features = ["derive"] }
+alloy-primitives = { version = "1.3", default-features = false, features = ["rlp"] }
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+bytes = { version = "1", default-features = false }
+
+# arb-alloy consensus types
+arb-alloy-consensus = { workspace = true }
+# arb-alloy predeploys helpers used for selectors and addresses
+arb-alloy-predeploys = { path = "../../../../arb-alloy/crates/predeploys" }
+
+# reth workspace crates
+reth-codecs = { path = "../../storage/codecs", default-features = false, package = "reth-codecs", optional = true }
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false, package = "reth-primitives-traits" }
+reth-zstd-compressors = { path = "../../storage/zstd-compressors", default-features = false, optional = true }
+modular-bitfield = { version = "0.11.2", default-features = false, optional = true }

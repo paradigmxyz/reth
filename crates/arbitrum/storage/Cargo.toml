@@ -1,0 +1,43 @@
+[package]
+name = "reth-arbitrum-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-node-api.workspace = true
+reth-chainspec.workspace = true
+reth-primitives-traits.workspace = true
+reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["reth-codec"] }
+reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-db-api = { workspace = true, features = ["arb"] }
+reth-provider.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+
+[dev-dependencies]
+reth-codecs = { workspace = true, features = ["test-utils"] }
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-storage-api/std",
+    "alloy-primitives/std",
+    "reth-prune-types/std",
+    "reth-stages-types/std",
+    "alloy-consensus/std",
+    "reth-chainspec/std",
+    "reth-arbitrum-primitives/std",
+    "reth-primitives-traits/std",
+]
