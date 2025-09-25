@@ -3039,6 +3039,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+            )
+            .unwrap();
         provider_rw.insert_block(data.blocks[0].0.clone()).unwrap();
         provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
@@ -3059,6 +3065,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+            )
+            .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
@@ -3083,6 +3095,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+            )
+            .unwrap();
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
@@ -3137,7 +3155,7 @@ mod tests {
 
         // create blocks with no transactions
         let mut blocks = Vec::new();
-        for i in 1..=3 {
+        for i in 0..3 {
             let block =
                 random_block(&mut rng, i, BlockParams { tx_count: Some(0), ..Default::default() });
             blocks.push(block);
@@ -3165,6 +3183,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+            )
+            .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
