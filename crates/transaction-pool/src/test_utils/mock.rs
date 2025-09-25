@@ -54,28 +54,46 @@ pub fn mock_tx_pool() -> MockTxPool {
 
 /// Sets the value for the field
 macro_rules! set_value {
-    ($this:ident => $field:ident) => {
+    // For mutable references
+    (&mut $this:expr => $field:ident) => {{ 1Code has comments. Press enter to view.
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { $field, .. } => {
-                *$field = new_value;
+            &mut MockTransaction::Legacy { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            MockTransaction::Eip1559 { $field, .. } => {
-                *$field = new_value;
+            &mut MockTransaction::Eip1559 { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            MockTransaction::Eip4844 { $field, .. } => {
-                *$field = new_value;
+            &mut MockTransaction::Eip4844 { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            MockTransaction::Eip2930 { $field, .. } => {
-                *$field = new_value;
+            &mut MockTransaction::Eip2930 { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            MockTransaction::Eip7702 { $field, .. } => {
-                *$field = new_value;
+            &mut MockTransaction::Eip7702 { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
         }
         // Ensure the tx cost is always correct after each mutation.
         $this.update_cost();
-    };
+    }};
+    // For owned values
+    ($this:expr => $field:ident) => {{
+        let new_value = $field;
+        match $this {
+            MockTransaction::Legacy { ref mut $field, .. } |
+            MockTransaction::Eip1559 { ref mut $field, .. } |
+            MockTransaction::Eip4844 { ref mut $field, .. } |
+            MockTransaction::Eip2930 { ref mut $field, .. } |
+            MockTransaction::Eip7702 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+                *$field = new_value.into();
+            }
+        }
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
+    }};
 }
 
 /// Gets the value for the field
