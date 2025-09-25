@@ -9,8 +9,8 @@ use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
 use reth_storage_api::{
-    errors::provider::ProviderResult, AccountInfoReader, BlockReaderIdExt, StateProvider,
-    StateProviderBox, StateProviderFactory,
+    errors::provider::ProviderResult, BlockReaderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
@@ -313,8 +313,6 @@ where
                 InvalidTransactionError::TxTypeNotSupported.into(),
             ))
         }
-
-        let mut transaction = transaction;
 
         match self.is_valid_cross_tx(&transaction).await {
             Some(Err(err)) => {
