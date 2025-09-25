@@ -47,16 +47,15 @@ fn get_bearer(headers: &HeaderMap) -> Option<String> {
     let header = headers.get(header::AUTHORIZATION)?;
     let auth: &str = header.to_str().ok()?;
     let prefix = "Bearer ";
-    
+
     // Ensure the header starts with "Bearer " to prevent bypass attacks
     if !auth.starts_with(prefix) {
         return None;
     }
-    
+
     let token: &str = &auth[prefix.len()..];
     Some(token.into())
 }
-
 
 fn err_response(err: JwtError) -> HttpResponse {
     // We build a response from an error message.
@@ -72,8 +71,7 @@ fn err_response(err: JwtError) -> HttpResponse {
 mod tests {
     use crate::jwt_validator::get_bearer;
     use http::{header, HeaderMap};
-
-    
+  
     #[test]
     fn auth_header_available() {
         let jwt = "foo";
@@ -124,5 +122,4 @@ mod tests {
         // Function should return None since header doesn't start with "Bearer "
         assert!(token.is_none());
     }
-
 }
