@@ -388,6 +388,8 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
             ));
         }
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
         let outcome = TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
@@ -410,6 +412,8 @@ impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T>
         _state: &dyn StateProvider,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
+        // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
+        // overdraft
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
