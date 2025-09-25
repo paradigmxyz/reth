@@ -58,55 +58,51 @@ pub fn mock_tx_pool() -> MockTxPool {
 #[allow(unused_macros)]
 macro_rules! set_value {
     // For mutable references
-    (&mut $this:expr => $field:ident) => {
-        {
-            let new_value = $field;
-            match $this {
-                &mut MockTransaction::Legacy { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                &mut MockTransaction::Eip1559 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                &mut MockTransaction::Eip4844 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                &mut MockTransaction::Eip2930 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                &mut MockTransaction::Eip7702 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
+    (&mut $this:expr => $field:ident) => {{
+        let new_value = $field;
+        match $this {
+            &mut MockTransaction::Legacy { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            // Ensure the tx cost is always correct after each mutation.
-            $this.update_cost();
+            &mut MockTransaction::Eip1559 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            &mut MockTransaction::Eip4844 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            &mut MockTransaction::Eip2930 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            &mut MockTransaction::Eip7702 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
         }
-    };
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
+    }};
     // For owned values
-    ($this:expr => $field:ident) => {
-        {
-            let new_value = $field;
-            match $this {
-                MockTransaction::Legacy { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                MockTransaction::Eip1559 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                MockTransaction::Eip4844 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                MockTransaction::Eip2930 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
-                MockTransaction::Eip7702 { ref mut $field, .. } => {
-                    *$field = new_value.into();
-                }
+    ($this:expr => $field:ident) => {{
+        let new_value = $field;
+        match $this {
+            MockTransaction::Legacy { ref mut $field, .. } => {
+                *$field = new_value.into();
             }
-            // Ensure the tx cost is always correct after each mutation.
-            $this.update_cost();
+            MockTransaction::Eip1559 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            MockTransaction::Eip4844 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            MockTransaction::Eip2930 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
+            MockTransaction::Eip7702 { ref mut $field, .. } => {
+                *$field = new_value.into();
+            }
         }
-    };
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
+    }};
 }
 
 /// Gets the value for the field

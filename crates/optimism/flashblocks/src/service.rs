@@ -103,7 +103,12 @@ where
     /// Returns `None` if the flashblock have no `base` or the base is not a child block of latest.
     fn build_args(
         &mut self,
-    ) -> Option<BuildArgs<impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>> + use<N, S, EvmConfig, Provider>>> {
+    ) -> Option<
+        BuildArgs<
+            impl IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>
+                + use<N, S, EvmConfig, Provider>,
+        >,
+    > {
         let Some(base) = self.blocks.payload_base() else {
             trace!(
                 flashblock_number = ?self.blocks.block_number(),
