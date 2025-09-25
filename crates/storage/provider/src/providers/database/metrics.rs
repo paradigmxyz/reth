@@ -36,9 +36,6 @@ impl DurationsRecorder {
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum Action {
-    InsertStorageHashing,
-    InsertAccountHashing,
-    InsertMerkleTree,
     InsertBlock,
     InsertState,
     InsertHashes,
@@ -58,12 +55,6 @@ pub(crate) enum Action {
 #[derive(Metrics)]
 #[metrics(scope = "storage.providers.database")]
 struct DatabaseProviderMetrics {
-    /// Duration of insert storage hashing
-    insert_storage_hashing: Histogram,
-    /// Duration of insert account hashing
-    insert_account_hashing: Histogram,
-    /// Duration of insert merkle tree
-    insert_merkle_tree: Histogram,
     /// Duration of insert block
     insert_block: Histogram,
     /// Duration of insert state
@@ -96,9 +87,6 @@ impl DatabaseProviderMetrics {
     /// Records the duration for the given action.
     pub(crate) fn record_duration(&self, action: Action, duration: Duration) {
         match action {
-            Action::InsertStorageHashing => self.insert_storage_hashing.record(duration),
-            Action::InsertAccountHashing => self.insert_account_hashing.record(duration),
-            Action::InsertMerkleTree => self.insert_merkle_tree.record(duration),
             Action::InsertBlock => self.insert_block.record(duration),
             Action::InsertState => self.insert_state.record(duration),
             Action::InsertHashes => self.insert_hashes.record(duration),

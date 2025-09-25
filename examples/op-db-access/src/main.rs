@@ -1,8 +1,8 @@
-//! Shows how manually access the database
+//! Shows how to manually access the database
 
 use reth_op::{chainspec::BASE_MAINNET, node::OpNode, provider::providers::ReadOnlyConfig};
 
-// Providers are zero cost abstractions on top of an opened MDBX Transaction
+// Providers are zero-cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
 // of the inner tables.
 //

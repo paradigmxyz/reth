@@ -6,7 +6,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_stages::StageId;
 use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
@@ -28,7 +29,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub fn execute<N: NodeTypesWithDB>(
+    pub fn execute<N: ProviderNodeTypes>(
         self,
         provider_factory: ProviderFactory<N>,
     ) -> eyre::Result<()> {
@@ -77,17 +78,59 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
     Ok(())
 }
 
-fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
-    // Get a database transaction directly from the database
-    let db = provider_factory.db_ref();
-    let mut tx = db.tx_mut()?;
+/// Checks that the merkle stage has completed running up to the account and storage hashing stages.
+fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> {
+    let account_hashing_checkpoint =
+        provider.get_stage_checkpoint(StageId::AccountHashing)?.unwrap_or_default();
+    let storage_hashing_checkpoint =
+        provider.get_stage_checkpoint(StageId::StorageHashing)?.unwrap_or_default();
+    let merkle_checkpoint =
+        provider.get_stage_checkpoint(StageId::MerkleExecute)?.unwrap_or_default();
+
+    if account_hashing_checkpoint.block_number != merkle_checkpoint.block_number {
+        return Err(eyre::eyre!(
+            "MerkleExecute stage checkpoint ({}) != AccountHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
+            merkle_checkpoint.block_number,
+            account_hashing_checkpoint.block_number,
+        ))
+    }
+
+    if storage_hashing_checkpoint.block_number != merkle_checkpoint.block_number {
+        return Err(eyre::eyre!(
+            "MerkleExecute stage checkpoint ({}) != StorageHashing stage checkpoint ({}), you must first complete the pipeline sync by running `reth node`",
+            merkle_checkpoint.block_number,
+            storage_hashing_checkpoint.block_number,
+        ))
+    }
+
+    let merkle_checkpoint_progress =
+        provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?;
+    if merkle_checkpoint_progress.is_some_and(|progress| !progress.is_empty()) {
+        return Err(eyre::eyre!(
+            "MerkleExecute sync stage in-progress, you must first complete the pipeline sync by running `reth node`",
+        ))
+    }
+
+    Ok(())
+}
+
+fn verify_and_repair<N: ProviderNodeTypes>(
+    provider_factory: ProviderFactory<N>,
+) -> eyre::Result<()> {
+    // Get a read-write database provider
+    let mut provider_rw = provider_factory.provider_rw()?;
+
+    // Check that a pipeline sync isn't in progress.
+    verify_checkpoints(provider_rw.as_ref())?;
+
+    let tx = provider_rw.tx_mut();
     tx.disable_long_read_transaction_safety();
 
     // Create the hashed cursor factory
-    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
+    let hashed_cursor_factory = DatabaseHashedCursorFactory::new(tx);
 
     // Create the trie cursor factory
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
     let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
@@ -152,9 +195,8 @@ fn verify_and_repair<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        info!("Repaired {} inconsistencies", inconsistent_nodes);
-        tx.commit()?;
-        info!("Changes committed to database");
+        info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
+        provider_rw.commit()?;
     }
 
     Ok(())

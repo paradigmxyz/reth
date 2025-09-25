@@ -2,7 +2,7 @@ use crate::{
     network::NetworkTestContext, payload::PayloadTestContext, rpc::RpcTestContext,
     testsuite::TrieUpdateEvent,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -17,7 +17,7 @@ use reth_node_api::{
     PrimitivesTy,
 };
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes};
-use reth_node_core::primitives::SignedTransaction;
+
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateNotification, CanonStateNotificationStream,
@@ -310,6 +310,7 @@ where
         self.inner.auth_server_handle().clone()
     }
 
+<<<<<<< HEAD
     /// Start a background task that forwards trie updates from canonical state notifications
     /// to the test environment via the provided channel
     pub fn start_trie_update_forwarder(
@@ -403,5 +404,21 @@ where
 
             tracing::debug!("Trie update forwarder ended for node {}", node_idx);
         });
+=======
+    /// Creates a [`crate::testsuite::NodeClient`] from this test context.
+    ///
+    /// This helper method extracts the necessary handles and creates a client
+    /// that can interact with both the regular RPC and Engine API endpoints.
+    /// It automatically includes the beacon engine handle for direct consensus engine interaction.
+    pub fn to_node_client(&self) -> eyre::Result<crate::testsuite::NodeClient<Payload>> {
+        let rpc = self
+            .rpc_client()
+            .ok_or_else(|| eyre::eyre!("Failed to create HTTP RPC client for node"))?;
+        let auth = self.auth_server_handle();
+        let url = self.rpc_url();
+        let beacon_handle = self.inner.add_ons_handle.beacon_engine_handle.clone();
+
+        Ok(crate::testsuite::NodeClient::new_with_beacon_engine(rpc, auth, url, beacon_handle))
+>>>>>>> origin/main
     }
 }

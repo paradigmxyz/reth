@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
-use alloy_consensus::{BlockHeader, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::{Bytes, Encodable};

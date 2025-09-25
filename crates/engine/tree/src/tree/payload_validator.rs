@@ -573,7 +573,7 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(target: "engine::tree", %error, "Background parallel state root computation failed");
+                        debug!(target: "engine::tree", %error, "State root task failed");
                     }
                 }
             } else {
@@ -593,15 +593,8 @@ where
                         );
                         maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
-                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                        debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
-                    }
                     Err(error) => {
-                        return Err(InsertBlockError::new(
-                            block.into_sealed_block(),
-                            InsertBlockErrorKind::Other(Box::new(error)),
-                        )
-                        .into())
+                        debug!(target: "engine::tree", %error, "Parallel state root computation failed");
                     }
                 }
             }

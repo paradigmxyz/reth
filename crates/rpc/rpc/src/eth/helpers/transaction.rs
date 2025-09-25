@@ -1,5 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 
+use std::time::Duration;
+
 use crate::EthApi;
 use alloy_primitives::{hex, Bytes, B256};
 use reth_rpc_convert::RpcConvert;
@@ -19,6 +21,11 @@ where
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
+    }
+
+    #[inline]
+    fn send_raw_transaction_sync_timeout(&self) -> Duration {
+        self.inner.send_raw_transaction_sync_timeout()
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

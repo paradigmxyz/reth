@@ -23,8 +23,8 @@ use reth_rpc_eth_types::{
     PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderBox, StateProviderFactory,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader,
+    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
@@ -367,7 +367,7 @@ pub trait LoadPendingBlock:
         }
 
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
+            builder.finish(NoopProvider::default()).map_err(Self::Error::from_eth_err)?;
 
         let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
