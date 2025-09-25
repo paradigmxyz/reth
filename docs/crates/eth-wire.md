@@ -47,7 +47,7 @@ pub enum EthMessageID {
 }
 
 ```
-Messages can either be broadcast to the network, or can be a request/response message to a single peer. This 2nd type of message is
+Messages can be either broadcast to the network or sent as a request/response message to a single peer. This 2nd type of message is
 described using a `RequestPair` struct, which is simply a concatenation of the underlying message with a request id.
 
 [File: crates/net/eth-wire/src/types/message.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/types/message.rs)
