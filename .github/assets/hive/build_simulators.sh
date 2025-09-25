@@ -9,7 +9,7 @@ go build .
 
 ./hive -client reth # first builds and caches the client
 
-# Run each hive command in the background for each simulator and wait
+# Run each hive command in the background for each simulator and wait(using fork tar)
 echo "Building images"
 
 ./hive -client reth --sim "ethereum/eest" \
