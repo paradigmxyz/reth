@@ -954,11 +954,11 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Destination::Pool(move_to) => {
                     debug_assert_ne!(&move_to, &current, "destination must be different");
                     let moved = self.move_transaction(current, move_to, &id);
-                    if matches!(move_to, SubPool::Pending) {
-                        if let Some(tx) = moved {
-                            trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
-                            outcome.promoted.push(tx);
-                        }
+                    if matches!(move_to, SubPool::Pending) &&
+                        let Some(tx) = moved
+                    {
+                        trace!(target: "txpool", hash=%tx.transaction.hash(), "Promoted transaction to pending");
+                        outcome.promoted.push(tx);
                     }
                 }
             }
@@ -1856,18 +1856,18 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // overdraft
             let id = new_blob_tx.transaction_id;
             let mut descendants = self.descendant_txs_inclusive(&id).peekable();
-            if let Some((maybe_replacement, _)) = descendants.peek() {
-                if **maybe_replacement == new_blob_tx.transaction_id {
-                    // replacement transaction
-                    descendants.next();
+            if let Some((maybe_replacement, _)) = descendants.peek() &&
+                **maybe_replacement == new_blob_tx.transaction_id
+            {
+                // replacement transaction
+                descendants.next();
 
-                    // check if any of descendant blob transactions should be shifted into overdraft
-                    for (_, tx) in descendants {
-                        cumulative_cost += tx.transaction.cost();
-                        if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
-                            // the transaction would shift
-                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
-                        }
+                // check if any of descendant blob transactions should be shifted into overdraft
+                for (_, tx) in descendants {
+                    cumulative_cost += tx.transaction.cost();
+                    if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
+                        // the transaction would shift
+                        return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
                     }
                 }
             }

@@ -221,10 +221,10 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         async move {
-            if at.is_pending() {
-                if let Ok(Some(state)) = self.local_pending_state().await {
-                    return Ok(state)
-                }
+            if at.is_pending() &&
+                let Ok(Some(state)) = self.local_pending_state().await
+            {
+                return Ok(state)
             }
 
             self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)

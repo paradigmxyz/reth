@@ -1,11 +1,13 @@
 //! Standalone bootnode command
 
 use clap::Parser;
+use reth_cli_util::{get_secret_key, load_secret_key::rng_secret_key};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{discv5::Event, Config, Discv5};
 use reth_net_nat::NatResolver;
 use reth_network_peers::NodeRecord;
-use std::net::SocketAddr;
+use secp256k1::SecretKey;
+use std::{net::SocketAddr, path::PathBuf};
 use tokio::select;
 use tokio_stream::StreamExt;
 use tracing::info;
@@ -17,13 +19,14 @@ pub struct Command {
     #[arg(long, default_value = "0.0.0.0:30301")]
     pub addr: SocketAddr,
 
-    /// Generate a new node key and save it to the specified file.
-    #[arg(long, default_value = "")]
-    pub gen_key: String,
-
-    /// Private key filename for the node.
-    #[arg(long, default_value = "")]
-    pub node_key: String,
+    /// Secret key to use for the bootnode.
+    ///
+    /// This will also deterministically set the peer ID.  
+    /// If a path is provided but no key exists at that path,  
+    /// a new random secret will be generated and stored there.  
+    /// If no path is specified, a new ephemeral random secret will be used.
+    #[arg(long, value_name = "PATH")]
+    pub p2p_secret_key: Option<PathBuf>,
 
     /// NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
     #[arg(long, default_value = "any")]
@@ -37,15 +40,16 @@ pub struct Command {
 impl Command {
     /// Execute the bootnode command.
     pub async fn execute(self) -> eyre::Result<()> {
-        info!("Bootnode started with config: {:?}", self);
-        let sk = reth_network::config::rng_secret_key();
+        info!("Bootnode started with config: {self:?}");
+
+        let sk = self.network_secret()?;
         let local_enr = NodeRecord::from_secret_key(self.addr, &sk);
 
         let config = Discv4Config::builder().external_ip_resolver(Some(self.nat)).build();
 
         let (_discv4, mut discv4_service) = Discv4::bind(self.addr, local_enr, sk, config).await?;
 
-        info!("Started discv4 at address:{:?}", self.addr);
+        info!("Started discv4 at address: {local_enr:?}");
 
         let mut discv4_updates = discv4_service.update_stream();
         discv4_service.spawn();
@@ -101,5 +105,12 @@ impl Command {
         }
 
         Ok(())
+    }
+
+    fn network_secret(&self) -> eyre::Result<SecretKey> {
+        match &self.p2p_secret_key {
+            Some(path) => Ok(get_secret_key(path)?),
+            None => Ok(rng_secret_key()),
+        }
     }
 }

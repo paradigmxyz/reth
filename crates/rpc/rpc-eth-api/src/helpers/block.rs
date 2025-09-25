@@ -195,16 +195,14 @@ pub trait EthBlocks:
             }
 
             if let Some(block_hash) =
-                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
-            {
-                if let Some((block, receipts)) = self
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)? &&
+                let Some((block, receipts)) = self
                     .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)?
-                {
-                    return Ok(Some((block, receipts)));
-                }
+            {
+                return Ok(Some((block, receipts)));
             }
 
             Ok(None)

@@ -54,7 +54,31 @@ pub fn mock_tx_pool() -> MockTxPool {
 
 /// Sets the value for the field
 macro_rules! set_value {
-    ($this:ident => $field:ident) => {
+    // For mutable references
+    (&mut $this:expr => $field:ident) => {{
+        let new_value = $field;
+        match $this {
+            MockTransaction::Legacy { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip1559 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip4844 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip2930 { $field, .. } => {
+                *$field = new_value;
+            }
+            MockTransaction::Eip7702 { $field, .. } => {
+                *$field = new_value;
+            }
+        }
+        // Ensure the tx cost is always correct after each mutation.
+        $this.update_cost();
+    }};
+    // For owned values
+    ($this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
             MockTransaction::Legacy { ref mut $field, .. } |
@@ -67,7 +91,7 @@ macro_rules! set_value {
         }
         // Ensure the tx cost is always correct after each mutation.
         $this.update_cost();
-    };
+    }};
 }
 
 /// Gets the value for the field
@@ -89,7 +113,7 @@ macro_rules! make_setters_getters {
         paste! {$(
             /// Sets the value of the specified field.
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
-                set_value!(self => $name);
+                set_value!(&mut self => $name);
                 self
             }
 

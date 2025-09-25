@@ -40,6 +40,7 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
+async-compression = { workspace = true, features = ["gzip", "tokio"] }
 
 # metrics
 reth-metrics.workspace = true
