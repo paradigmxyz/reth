@@ -96,12 +96,11 @@ impl ReceiptsLogPruneConfig {
         let mut lowest = None;
 
         for mode in self.values() {
-            if mode.is_distance() {
-                if let Some((block, _)) =
+            if mode.is_distance() &&
+                let Some((block, _)) =
                     mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?
-                {
-                    lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
-                }
+            {
+                lowest = Some(lowest.unwrap_or(u64::MAX).min(block));
             }
         }
 
