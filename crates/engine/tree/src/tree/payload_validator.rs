@@ -643,7 +643,7 @@ where
         }
 
         // terminate prewarming task with good state output
-        handle.terminate_caching(Some(output.state.clone()));
+        handle.terminate_caching(Some(&output.state));
 
         // If the block doesn't connect to the database tip, we don't save its trie updates, because
         // they may be incorrect as they were calculated on top of the forked block.
