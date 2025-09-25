@@ -550,15 +550,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
                     // If we were previously looking at the upper trie, and the new path is in the
                     // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper {
-                        if let SparseSubtrieType::Lower(idx) =
+                    if curr_subtrie_is_upper &&
+                        let SparseSubtrieType::Lower(idx) =
                             SparseSubtrieType::from_path(&curr_path)
-                        {
-                            curr_subtrie = self.lower_subtries[idx]
-                                .as_revealed_mut()
-                                .expect("lower subtrie is revealed");
-                            curr_subtrie_is_upper = false;
-                        }
+                    {
+                        curr_subtrie = self.lower_subtries[idx]
+                            .as_revealed_mut()
+                            .expect("lower subtrie is revealed");
+                        curr_subtrie_is_upper = false;
                     }
                 }
             };
@@ -599,7 +598,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
         // any required changes for that node, relative to the removed leaf.
-        if let (Some(branch_path), Some(SparseNode::Branch { mut state_mask, .. })) =
+        if let (Some(branch_path), &Some(SparseNode::Branch { mut state_mask, .. })) =
             (&branch_parent_path, &branch_parent_node)
         {
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
@@ -885,11 +884,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     curr_path = next_path;
                     // If we were previously looking at the upper trie, and the new path is in the
                     // lower trie, we need to pull out a ref to the lower trie.
-                    if curr_subtrie_is_upper {
-                        if let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path) {
-                            curr_subtrie = lower_subtrie;
-                            curr_subtrie_is_upper = false;
-                        }
+                    if curr_subtrie_is_upper &&
+                        let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path)
+                    {
+                        curr_subtrie = lower_subtrie;
+                        curr_subtrie_is_upper = false;
                     }
                 }
             }
@@ -1591,37 +1590,37 @@ impl SparseSubtrie {
                     current = Some(next_node);
                 }
                 LeafUpdateStep::Complete { reveal_path, .. } => {
-                    if let Some(reveal_path) = reveal_path {
-                        if self.nodes.get(&reveal_path).expect("node must exist").is_hash() {
-                            debug!(
+                    if let Some(reveal_path) = reveal_path &&
+                        self.nodes.get(&reveal_path).expect("node must exist").is_hash()
+                    {
+                        debug!(
+                            target: "trie::parallel_sparse",
+                            child_path = ?reveal_path,
+                            leaf_full_path = ?full_path,
+                            "Extension node child not revealed in update_leaf, falling back to db",
+                        );
+                        if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                            provider.trie_node(&reveal_path)?
+                        {
+                            let decoded = TrieNode::decode(&mut &node[..])?;
+                            trace!(
                                 target: "trie::parallel_sparse",
-                                child_path = ?reveal_path,
-                                leaf_full_path = ?full_path,
-                                "Extension node child not revealed in update_leaf, falling back to db",
+                                ?reveal_path,
+                                ?decoded,
+                                ?tree_mask,
+                                ?hash_mask,
+                                "Revealing child (from lower)",
                             );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&reveal_path)?
-                            {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(
-                                    target: "trie::parallel_sparse",
-                                    ?reveal_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing child (from lower)",
-                                );
-                                self.reveal_node(
-                                    reveal_path,
-                                    &decoded,
-                                    TrieMasks { hash_mask, tree_mask },
-                                )?;
-                            } else {
-                                return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                                    path: reveal_path,
-                                }
-                                .into())
+                            self.reveal_node(
+                                reveal_path,
+                                &decoded,
+                                TrieMasks { hash_mask, tree_mask },
+                            )?;
+                        } else {
+                            return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                                path: reveal_path,
                             }
+                            .into())
                         }
                     }
 

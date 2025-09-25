@@ -89,11 +89,11 @@ async fn test_apply_with_import() -> Result<()> {
         )
         .await;
 
-        if let Ok(Some(block)) = block_result {
-            if block.header.number == 10 {
-                debug!("Pipeline finished, block 10 is fully available");
-                break;
-            }
+        if let Ok(Some(block)) = block_result &&
+            block.header.number == 10
+        {
+            debug!("Pipeline finished, block 10 is fully available");
+            break;
         }
 
         if start.elapsed() > std::time::Duration::from_secs(10) {
