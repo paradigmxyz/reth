@@ -291,6 +291,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     };
                 }
 
+                // Validate that the latest hash is not zero
+                if msg.latest_hash.is_zero() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(
+                            "invalid block range: latest_hash cannot be zero".to_string()
+                        )),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
