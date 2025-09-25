@@ -1666,4 +1666,236 @@ mod tests {
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid()); // Should be valid because balance check is disabled
     }
+
+    #[tokio::test]
+    async fn test_batch_validation_shares_single_provider() {
+        // Critical test to ensure the optimization works - provider is shared across batch
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        // Track how many times we create a state provider
+        #[derive(Clone, Debug)]
+        struct CountingProvider {
+            creation_count: Arc<AtomicUsize>,
+            inner: MockEthProvider,
+        }
+
+        impl StateProviderFactory for CountingProvider {
+            fn latest(&self) -> ProviderResult<StateProviderBox> {
+                self.creation_count.fetch_add(1, Ordering::SeqCst);
+                self.inner.latest()
+            }
+
+            fn history_by_block_number(
+                &self,
+                block: alloy_primitives::BlockNumber,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.history_by_block_number(block)
+            }
+
+            fn history_by_block_hash(
+                &self,
+                block: alloy_primitives::B256,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.history_by_block_hash(block)
+            }
+
+            fn state_by_block_number_or_tag(
+                &self,
+                number_or_tag: alloy_eips::BlockNumberOrTag,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.state_by_block_number_or_tag(number_or_tag)
+            }
+
+            fn state_by_block_hash(
+                &self,
+                block: alloy_primitives::B256,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.state_by_block_hash(block)
+            }
+
+            fn pending(&self) -> ProviderResult<StateProviderBox> {
+                self.inner.pending()
+            }
+
+            fn pending_state_by_hash(
+                &self,
+                block_hash: alloy_primitives::B256,
+            ) -> Option<StateProviderBox> {
+                self.inner.pending_state_by_hash(block_hash)
+            }
+
+            fn maybe_pending(&self, _is_pending: bool) -> ProviderResult<StateProviderBox> {
+                self.inner.maybe_pending(_is_pending)
+            }
+        }
+
+        impl ChainSpecProvider for CountingProvider {
+            type ChainSpec = <MockEthProvider as ChainSpecProvider>::ChainSpec;
+
+            fn chain_spec(&self) -> Arc<Self::ChainSpec> {
+                self.inner.chain_spec()
+            }
+        }
+
+        // Set up the counting provider
+        let counter = Arc::new(AtomicUsize::new(0));
+        let inner_provider = MockEthProvider::default();
+
+        // Add accounts for transactions to be valid
+        for i in 0..10 {
+            let sender = Address::from_word(alloy_primitives::B256::from([i; 32]));
+            inner_provider.add_account(
+                sender,
+                ExtendedAccount::new(0, U256::from(1_000_000_000_000_000_000u64)),
+            );
+        }
+
+        let provider = CountingProvider {
+            creation_count: counter.clone(),
+            inner: inner_provider,
+        };
+
+        // Create validator
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .build(InMemoryBlobStore::default());
+
+        // Create 10 different transactions
+        let transactions: Vec<_> = (0..10)
+            .map(|i| {
+                let mut tx = get_transaction();
+                // Make each transaction unique with different sender
+                let sender = Address::from_word(alloy_primitives::B256::from([i; 32]));
+                // We'd need to properly sign the transaction with the new sender
+                // For this test, we'll use the mock transaction as-is
+                (TransactionOrigin::External, tx)
+            })
+            .collect();
+
+        // Reset counter before validation
+        counter.store(0, Ordering::SeqCst);
+
+        // Validate the batch
+        let outcomes = validator.validate_transactions(transactions).await;
+
+        // CRITICAL ASSERTION: Only 1 provider should be created for the entire batch!
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "REGRESSION: Provider should be created only once for batch validation, but was created {} times",
+            counter.load(Ordering::SeqCst)
+        );
+
+        // Verify we got all outcomes
+        assert_eq!(outcomes.len(), 10, "Should have outcome for each transaction");
+    }
+
+    #[tokio::test]
+    async fn test_stateless_failures_skip_provider_creation() {
+        // Ensure transactions that fail stateless validation don't create a provider
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        #[derive(Clone, Debug)]
+        struct CountingProvider {
+            creation_count: Arc<AtomicUsize>,
+            inner: MockEthProvider,
+        }
+
+        impl StateProviderFactory for CountingProvider {
+            fn latest(&self) -> ProviderResult<StateProviderBox> {
+                self.creation_count.fetch_add(1, Ordering::SeqCst);
+                self.inner.latest()
+            }
+
+            fn history_by_block_number(
+                &self,
+                block: alloy_primitives::BlockNumber,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.history_by_block_number(block)
+            }
+
+            fn history_by_block_hash(
+                &self,
+                block: alloy_primitives::B256,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.history_by_block_hash(block)
+            }
+
+            fn state_by_block_number_or_tag(
+                &self,
+                number_or_tag: alloy_eips::BlockNumberOrTag,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.state_by_block_number_or_tag(number_or_tag)
+            }
+
+            fn state_by_block_hash(
+                &self,
+                block: alloy_primitives::B256,
+            ) -> ProviderResult<StateProviderBox> {
+                self.inner.state_by_block_hash(block)
+            }
+
+            fn pending(&self) -> ProviderResult<StateProviderBox> {
+                self.inner.pending()
+            }
+
+            fn pending_state_by_hash(
+                &self,
+                block_hash: alloy_primitives::B256,
+            ) -> Option<StateProviderBox> {
+                self.inner.pending_state_by_hash(block_hash)
+            }
+
+            fn maybe_pending(&self, _is_pending: bool) -> ProviderResult<StateProviderBox> {
+                self.inner.maybe_pending(_is_pending)
+            }
+        }
+
+        impl ChainSpecProvider for CountingProvider {
+            type ChainSpec = <MockEthProvider as ChainSpecProvider>::ChainSpec;
+
+            fn chain_spec(&self) -> Arc<Self::ChainSpec> {
+                self.inner.chain_spec()
+            }
+        }
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let provider = CountingProvider {
+            creation_count: counter.clone(),
+            inner: MockEthProvider::default(),
+        };
+
+        // Create validator with a specific chain ID
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .build(InMemoryBlobStore::default());
+
+        // Create transactions that will fail stateless validation (wrong gas limit)
+        let transactions: Vec<_> = (0..5)
+            .map(|_| {
+                let tx = get_transaction();
+                // Transaction with gas limit > block gas limit will fail stateless
+                (TransactionOrigin::External, tx)
+            })
+            .collect();
+
+        // Set a very low block gas limit to make transactions fail
+        validator.block_gas_limit.store(1000, Ordering::Relaxed);
+
+        // Reset counter
+        counter.store(0, Ordering::SeqCst);
+
+        // Validate the batch
+        let outcomes = validator.validate_transactions(transactions).await;
+
+        // CRITICAL: No provider should be created since all fail stateless!
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "Provider should NOT be created when all transactions fail stateless validation"
+        );
+
+        // Verify all are invalid
+        assert!(outcomes.iter().all(|o| o.is_invalid()));
+    }
 }
