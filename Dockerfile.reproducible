@@ -1,17 +1,17 @@
-# Use the Rust 1.88 image based on Debian Bookworm
-FROM rust:1.88-bookworm AS builder
+ARG RUST_VERSION=1
 
-# Install specific version of libclang-dev
-RUN apt-get update && apt-get install -y libclang-dev=1:14.0-55.7~deb12u1
+FROM rust:$RUST_VERSION-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+  git \
+  libclang-dev=1:14.0-55.7~deb12u1
 
 # Copy the project to the container
 COPY ./ /app
 WORKDIR /app
 
-# Build the project with the reproducible settings
-RUN make build-reproducible
-
-RUN mv /app/target/x86_64-unknown-linux-gnu/release/reth /reth
+RUN make build-reth-reproducible
+RUN mv /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
 
 # Create a minimal final image with just the binary
 FROM gcr.io/distroless/cc-debian12:nonroot-6755e21ccd99ddead6edc8106ba03888cbeed41a
