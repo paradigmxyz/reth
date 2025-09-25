@@ -476,7 +476,10 @@ impl Transaction<RW> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
-        mdbx_result(self.txn_execute(|txn| ffi::mdbx_drop(txn, db.dbi(), true))?)?;
+        mdbx_result(self.txn_execute(|txn| {
+            // SAFETY: The caller ensures proper safety requirements are met
+            unsafe { ffi::mdbx_drop(txn, db.dbi(), true) }
+        })?)?;
 
         Ok(())
     }
@@ -489,7 +492,8 @@ impl Transaction<RO> {
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
     pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
+        // SAFETY: The caller ensures proper safety requirements are met
+        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()) })?;
 
         Ok(())
     }

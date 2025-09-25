@@ -599,7 +599,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // If there is a parent branch node (very likely, unless the leaf is at the root) execute
         // any required changes for that node, relative to the removed leaf.
-        if let (Some(branch_path), Some(SparseNode::Branch { mut state_mask, .. })) =
+        if let (&Some(ref branch_path), &Some(SparseNode::Branch { mut state_mask, .. })) =
             (&branch_parent_path, &branch_parent_node)
         {
             let child_nibble = leaf_path.get_unchecked(branch_path.len());
