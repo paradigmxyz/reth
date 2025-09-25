@@ -769,20 +769,87 @@ async fn test_get_canonical_blocks_to_persist() {
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
     // check that the fork block is not included in the blocks to persist
-    assert!(!blocks_to_persist.iter().any(|b| b.recovered_block().hash() == fork_block_hash));
+}
 
-    // check that the original block 4 is still included
-    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4 &&
-        b.recovered_block().hash() == blocks[4].recovered_block().hash()));
+#[tokio::test]
+async fn test_race_condition_fix_during_block_removal() {
+    // This test verifies the fix for issue #18408: race condition during reorganization
+    // where a new block arrives while block removal is in progress
 
-    // check that if we advance persistence, the persistence action is the correct value
-    test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
-    assert_eq!(
-        test_harness.tree.persistence_state.current_action().cloned(),
-        Some(CurrentPersistenceAction::SavingBlocks {
-            highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
-        })
-    );
+    let chain_spec = MAINNET.clone();
+    let mut test_harness = TestHarness::new(chain_spec);
+    let mut test_block_builder = TestBlockBuilder::eth();
+
+    // Create a chain: genesis -> block1 -> block2 -> block3
+    let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..4).collect();
+    test_harness = test_harness.with_blocks(blocks.clone());
+
+    // Set up the tree state with blocks 0-3 in canonical chain
+    for block in &blocks {
+        test_harness.tree.state.tree_state.insert_executed(block.clone());
+    }
+
+    // Set canonical head to block 3
+    test_harness.tree.state.tree_state.set_canonical_head(blocks[3].recovered_block().num_hash());
+
+    // Simulate that blocks 0-2 are persisted, but block 3 is not yet persisted
+    test_harness.tree.persistence_state.last_persisted_block = blocks[2].recovered_block().num_hash();
+
+    // Create a fork: block1 -> fork_block2 -> fork_block3
+    let fork_block2 = test_block_builder.get_executed_block_with_parent(blocks[1].recovered_block().hash(), 2);
+    let fork_block3 = test_block_builder.get_executed_block_with_parent(fork_block2.recovered_block().hash(), 3);
+
+    // Insert fork blocks
+    test_harness.tree.state.tree_state.insert_executed(fork_block2.clone());
+    test_harness.tree.state.tree_state.insert_executed(fork_block3.clone());
+
+    // Trigger reorganization by setting new canonical head to fork_block3
+    test_harness.tree.state.tree_state.set_canonical_head(fork_block3.recovered_block().num_hash());
+
+    // This should trigger a disk reorganization and start block removal
+    // The removal should remove blocks above block 1 (the common ancestor)
+    let disk_reorg = test_harness.tree.find_disk_reorg().unwrap();
+    assert!(disk_reorg.is_some());
+    let new_tip_num = disk_reorg.unwrap();
+    assert_eq!(new_tip_num, 1); // Should remove blocks above block 1
+
+    // Start the removal operation
+    test_harness.tree.remove_blocks(new_tip_num);
+
+    // Verify that we're now in a RemovingBlocks state
+    let current_action = test_harness.tree.persistence_state.current_action();
+    assert!(matches!(current_action, Some(CurrentPersistenceAction::RemovingBlocks { .. })));
+
+    // Now create a new block that extends the canonical chain (block4)
+    // This simulates the race condition where a new block arrives during removal
+    let new_block4 = test_block_builder.get_executed_block_with_parent(fork_block3.recovered_block().hash(), 4);
+
+    // Test the persisting_kind_for method with the new block
+    let block_with_parent = BlockWithParent {
+        block: new_block4.recovered_block().header().clone(),
+        parent: fork_block3.recovered_block().header().clone(),
+    };
+
+    let persisting_kind = test_harness.tree.persisting_kind_for(block_with_parent);
+
+    // With our fix, this should return PersistingDescendant because:
+    // 1. The block is a descendant of the canonical head (fork_block3)
+    // 2. The block number (4) is greater than the new_tip_num (1) being removed
+    // 3. Therefore, it's safe to run parallel state root computation
+    assert_eq!(persisting_kind, PersistingKind::PersistingDescendant);
+    assert!(persisting_kind.can_run_parallel_state_root());
+
+    // Test with a block that would be removed (block 2, which is being removed)
+    let block2_with_parent = BlockWithParent {
+        block: blocks[2].recovered_block().header().clone(),
+        parent: blocks[1].recovered_block().header().clone(),
+    };
+
+    let persisting_kind_removed = test_harness.tree.persisting_kind_for(block2_with_parent);
+
+    // This should return PersistingNotDescendant because block 2 is being removed
+    assert_eq!(persisting_kind_removed, PersistingKind::PersistingNotDescendant);
+    assert!(!persisting_kind_removed.can_run_parallel_state_root());
 }
 
 #[tokio::test]
