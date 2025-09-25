@@ -71,7 +71,7 @@ fn err_response(err: JwtError) -> HttpResponse {
 mod tests {
     use crate::jwt_validator::get_bearer;
     use http::{header, HeaderMap};
-  
+
     #[test]
     fn auth_header_available() {
         let jwt = "foo";
