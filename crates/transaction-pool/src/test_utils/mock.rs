@@ -88,8 +88,6 @@ macro_rules! set_value {
             MockTransaction::Eip7702 { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
-                *$field = new_value.into();
-            }
         }
         // Ensure the tx cost is always correct after each mutation.
         $this.update_cost();
