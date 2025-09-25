@@ -57,19 +57,19 @@ macro_rules! set_value {
     ($this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { $field, .. } => {
+            MockTransaction::Legacy { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
-            MockTransaction::Eip1559 { $field, .. } => {
+            MockTransaction::Eip1559 { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
-            MockTransaction::Eip4844 { $field, .. } => {
+            MockTransaction::Eip4844 { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
-            MockTransaction::Eip2930 { $field, .. } => {
+            MockTransaction::Eip2930 { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
-            MockTransaction::Eip7702 { $field, .. } => {
+            MockTransaction::Eip7702 { ref mut $field, .. } => {
                 *$field = new_value.into();
             }
         }
