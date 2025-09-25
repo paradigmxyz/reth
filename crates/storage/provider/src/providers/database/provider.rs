@@ -1020,12 +1020,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if self.chain_spec.is_paris_active_at_block(number) {
-            if let Some(td) = self.chain_spec.final_paris_total_difficulty() {
-                // if this block is higher than the final paris(merge) block, return the final paris
-                // difficulty
-                return Ok(Some(td))
-            }
+        if self.chain_spec.is_paris_active_at_block(number) &&
+            let Some(td) = self.chain_spec.final_paris_total_difficulty()
+        {
+            // if this block is higher than the final paris(merge) block, return the final paris
+            // difficulty
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1180,25 +1180,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        if let Some(number) = self.convert_hash_or_number(id)? {
-            if let Some(header) = self.header_by_number(number)? {
-                // If the body indices are not found, this means that the transactions either do not
-                // exist in the database yet, or they do exit but are not indexed.
-                // If they exist but are not indexed, we don't have enough
-                // information to return the block anyways, so we return `None`.
-                let Some(transactions) = self.transactions_by_block(number.into())? else {
-                    return Ok(None)
-                };
+        if let Some(number) = self.convert_hash_or_number(id)? &&
+            let Some(header) = self.header_by_number(number)?
+        {
+            // If the body indices are not found, this means that the transactions either do not
+            // exist in the database yet, or they do exit but are not indexed.
+            // If they exist but are not indexed, we don't have enough
+            // information to return the block anyways, so we return `None`.
+            let Some(transactions) = self.transactions_by_block(number.into())? else {
+                return Ok(None)
+            };
 
-                let body = self
-                    .storage
-                    .reader()
-                    .read_block_bodies(self, vec![(&header, transactions)])?
-                    .pop()
-                    .ok_or(ProviderError::InvalidStorageOutput)?;
+            let body = self
+                .storage
+                .reader()
+                .read_block_bodies(self, vec![(&header, transactions)])?
+                .pop()
+                .ok_or(ProviderError::InvalidStorageOutput)?;
 
-                return Ok(Some(Self::Block::new(header, body)))
-            }
+            return Ok(Some(Self::Block::new(header, body)))
         }
 
         Ok(None)
@@ -1416,34 +1416,31 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        if let Some(transaction_id) = self.transaction_id(tx_hash)? {
-            if let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? {
-                if let Some(block_number) =
-                    transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
-                {
-                    if let Some(sealed_header) = self.sealed_header(block_number)? {
-                        let (header, block_hash) = sealed_header.split();
-                        if let Some(block_body) = self.block_body_indices(block_number)? {
-                            // the index of the tx in the block is the offset:
-                            // len([start..tx_id])
-                            // NOTE: `transaction_id` is always `>=` the block's first
-                            // index
-                            let index = transaction_id - block_body.first_tx_num();
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
+            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
+            let Some(block_number) =
+                transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))? &&
+            let Some(sealed_header) = self.sealed_header(block_number)?
+        {
+            let (header, block_hash) = sealed_header.split();
+            if let Some(block_body) = self.block_body_indices(block_number)? {
+                // the index of the tx in the block is the offset:
+                // len([start..tx_id])
+                // NOTE: `transaction_id` is always `>=` the block's first
+                // index
+                let index = transaction_id - block_body.first_tx_num();
 
-                            let meta = TransactionMeta {
-                                tx_hash,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee: header.base_fee_per_gas(),
-                                excess_blob_gas: header.excess_blob_gas(),
-                                timestamp: header.timestamp(),
-                            };
+                let meta = TransactionMeta {
+                    tx_hash,
+                    index,
+                    block_hash,
+                    block_number,
+                    base_fee: header.base_fee_per_gas(),
+                    excess_blob_gas: header.excess_blob_gas(),
+                    timestamp: header.timestamp(),
+                };
 
-                            return Ok(Some((transaction, meta)))
-                        }
-                    }
-                }
+                return Ok(Some((transaction, meta)))
             }
         }
 
@@ -1461,14 +1458,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
 
-        if let Some(block_number) = self.convert_hash_or_number(id)? {
-            if let Some(body) = self.block_body_indices(block_number)? {
-                let tx_range = body.tx_num_range();
-                return if tx_range.is_empty() {
-                    Ok(Some(Vec::new()))
-                } else {
-                    Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
-                }
+        if let Some(block_number) = self.convert_hash_or_number(id)? &&
+            let Some(body) = self.block_body_indices(block_number)?
+        {
+            let tx_range = body.tx_num_range();
+            return if tx_range.is_empty() {
+                Ok(Some(Vec::new()))
+            } else {
+                Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
             }
         }
         Ok(None)
@@ -1543,14 +1540,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        if let Some(number) = self.convert_hash_or_number(block)? {
-            if let Some(body) = self.block_body_indices(number)? {
-                let tx_range = body.tx_num_range();
-                return if tx_range.is_empty() {
-                    Ok(Some(Vec::new()))
-                } else {
-                    self.receipts_by_tx_range(tx_range).map(Some)
-                }
+        if let Some(number) = self.convert_hash_or_number(block)? &&
+            let Some(body) = self.block_body_indices(number)?
+        {
+            let tx_range = body.tx_num_range();
+            return if tx_range.is_empty() {
+                Ok(Some(Vec::new()))
+            } else {
+                self.receipts_by_tx_range(tx_range).map(Some)
             }
         }
         Ok(None)
@@ -2000,10 +1997,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for entry in storage {
                 tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? {
-                    if db_entry.key == entry.key {
-                        storages_cursor.delete_current()?;
-                    }
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                    db_entry.key == entry.key
+                {
+                    storages_cursor.delete_current()?;
                 }
 
                 if !entry.value.is_zero() {
@@ -2038,11 +2035,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             for (hashed_slot, value) in storage.storage_slots_sorted() {
                 let entry = StorageEntry { key: hashed_slot, value };
                 if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
                 {
-                    if db_entry.key == entry.key {
-                        hashed_storage_cursor.delete_current()?;
-                    }
+                    hashed_storage_cursor.delete_current()?;
                 }
 
                 if !entry.value.is_zero() {

@@ -127,12 +127,12 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         loop {
             match self.new_transaction_receiver.as_mut()?.try_recv() {
                 Ok(tx) => {
-                    if let Some(last_priority) = &self.last_priority {
-                        if &tx.priority > last_priority {
-                            // we skip transactions if we already yielded a transaction with lower
-                            // priority
-                            return None
-                        }
+                    if let Some(last_priority) = &self.last_priority &&
+                        &tx.priority > last_priority
+                    {
+                        // we skip transactions if we already yielded a transaction with lower
+                        // priority
+                        return None
                     }
                     return Some(tx)
                 }

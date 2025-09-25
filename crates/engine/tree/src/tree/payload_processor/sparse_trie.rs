@@ -253,7 +253,7 @@ where
 
     // Remove accounts
     for address in removed_accounts {
-        trace!(target: "trie::sparse", ?address, "Removing account");
+        trace!(target: "engine::root::sparse", ?address, "Removing account");
         let nibbles = Nibbles::unpack(address);
         trie.remove_account_leaf(&nibbles, blinded_provider_factory)?;
     }

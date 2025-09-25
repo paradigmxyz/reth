@@ -382,14 +382,15 @@ impl PeersManager {
 
     /// Bans the peer temporarily with the configured ban timeout
     fn ban_peer(&mut self, peer_id: PeerId) {
-        let mut ban_duration = self.ban_duration;
-        if let Some(peer) = self.peers.get(&peer_id) {
-            if peer.is_trusted() || peer.is_static() {
-                // For misbehaving trusted or static peers, we provide a bit more leeway when
-                // penalizing them.
-                ban_duration = self.backoff_durations.low / 2;
-            }
-        }
+        let ban_duration = if let Some(peer) = self.peers.get(&peer_id) &&
+            (peer.is_trusted() || peer.is_static())
+        {
+            // For misbehaving trusted or static peers, we provide a bit more leeway when
+            // penalizing them.
+            self.backoff_durations.low / 2
+        } else {
+            self.ban_duration
+        };
 
         self.ban_list.ban_peer_until(peer_id, std::time::Instant::now() + ban_duration);
         self.queued_actions.push_back(PeerAction::BanPeer { peer_id });

@@ -71,6 +71,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
+/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp.
 ///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(

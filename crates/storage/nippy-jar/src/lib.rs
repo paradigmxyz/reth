@@ -309,10 +309,10 @@ impl<H: NippyJarHeader> NippyJar<H> {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        if let Some(compression) = &self.compressor {
-            if !compression.is_ready() {
-                return Err(NippyJarError::CompressorNotReady)
-            }
+        if let Some(compression) = &self.compressor &&
+            !compression.is_ready()
+        {
+            return Err(NippyJarError::CompressorNotReady)
         }
 
         Ok(())
