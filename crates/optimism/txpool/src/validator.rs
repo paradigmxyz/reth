@@ -368,6 +368,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        let transactions: Vec<_> = transactions.into_iter().collect();
         let mut provider: Option<StateProviderBox> = None;
         let mut outcomes = Vec::new();
         for transaction in transactions {
