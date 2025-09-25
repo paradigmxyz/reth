@@ -965,26 +965,26 @@ mod tests {
     ) {
         let hook_provider = provider.clone();
         provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
-            if let Some(state) = hook_provider.canonical_in_memory_state.head_state() {
-                if state.anchor().number + 1 == block_number {
-                    let mut lowest_memory_block =
-                        state.parent_state_chain().last().expect("qed").block();
-                    let num_hash = lowest_memory_block.recovered_block().num_hash();
+            if let Some(state) = hook_provider.canonical_in_memory_state.head_state() &&
+                state.anchor().number + 1 == block_number
+            {
+                let mut lowest_memory_block =
+                    state.parent_state_chain().last().expect("qed").block();
+                let num_hash = lowest_memory_block.recovered_block().num_hash();
 
-                    let mut execution_output = (*lowest_memory_block.execution_output).clone();
-                    execution_output.first_block = lowest_memory_block.recovered_block().number;
-                    lowest_memory_block.execution_output = Arc::new(execution_output);
+                let mut execution_output = (*lowest_memory_block.execution_output).clone();
+                execution_output.first_block = lowest_memory_block.recovered_block().number;
+                lowest_memory_block.execution_output = Arc::new(execution_output);
 
-                    // Push to disk
-                    let provider_rw = hook_provider.database_provider_rw().unwrap();
-                    UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
-                        .save_blocks(vec![lowest_memory_block])
-                        .unwrap();
-                    UnifiedStorageWriter::commit(provider_rw).unwrap();
+                // Push to disk
+                let provider_rw = hook_provider.database_provider_rw().unwrap();
+                UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
+                    .save_blocks(vec![lowest_memory_block])
+                    .unwrap();
+                UnifiedStorageWriter::commit(provider_rw).unwrap();
 
-                    // Remove from memory
-                    hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
-                }
+                // Remove from memory
+                hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
             }
         }));
     }
