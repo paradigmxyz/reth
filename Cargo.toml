@@ -1,6 +1,6 @@
 [workspace.package]
 version = "1.8.1"
-edition = "2021"
+edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
