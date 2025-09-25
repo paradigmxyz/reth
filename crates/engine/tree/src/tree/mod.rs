@@ -2038,16 +2038,21 @@ where
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
         // check if the downloaded block is the tracked finalized block
-        let mut exceeds_backfill_threshold = if let Some(buffered_finalized) = sync_target_state
+        let mut exceeds_backfill_threshold = match sync_target_state
             .as_ref()
             .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
         {
-            // if we have buffered the finalized block, we should check how far
-            // we're off
-            self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number())
-        } else {
-            // check if the distance exceeds the threshold for backfill sync
-            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+            Some(buffered_finalized) => {
+                // if we have buffered the finalized block, we should check how far we're off
+                self.exceeds_backfill_run_threshold(
+                    canonical_tip_num,
+                    buffered_finalized.number(),
+                )
+            }
+            None => {
+                // check if the distance exceeds the threshold for backfill sync
+                self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+            }
         };
 
         // If this is invoked after we downloaded a block we can check if this block is the
