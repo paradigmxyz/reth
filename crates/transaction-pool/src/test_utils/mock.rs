@@ -55,7 +55,7 @@ pub fn mock_tx_pool() -> MockTxPool {
 /// Sets the value for the field
 macro_rules! set_value {
     // For mutable references
-    (&mut $this:expr => $field:ident) => {{ 1Code has comments. Press enter to view.
+    (&mut $this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
             &mut MockTransaction::Legacy { ref mut $field, .. } => {
@@ -81,11 +81,11 @@ macro_rules! set_value {
     ($this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { ref mut $field, .. } |
-            MockTransaction::Eip1559 { ref mut $field, .. } |
-            MockTransaction::Eip4844 { ref mut $field, .. } |
-            MockTransaction::Eip2930 { ref mut $field, .. } |
-            MockTransaction::Eip7702 { ref mut $field, .. } => {
+            MockTransaction::Legacy { $field, .. } |
+            MockTransaction::Eip1559 { $field, .. } |
+            MockTransaction::Eip4844 { $field, .. } |
+            MockTransaction::Eip2930 { $field, .. } |
+            MockTransaction::Eip7702 { $field, .. } => {
                 *$field = new_value.into();
             }
         }
