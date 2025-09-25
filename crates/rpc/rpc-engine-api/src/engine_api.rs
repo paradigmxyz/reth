@@ -24,12 +24,15 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload, PayloadOrAttributes,
     PayloadTypes,
 };
-use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 
@@ -753,19 +756,13 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
-        // Check if Osaka fork is active - if so, return unsupported fork error
-        // as per the engine API spec requirement
-        let best_block_number = self
-            .inner
-            .provider
-            .best_block_number()
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-        if let Ok(Some(header)) = self.inner.provider.header_by_number(best_block_number) {
-            if self.inner.chain_spec.is_osaka_active_at_timestamp(header.timestamp()) {
-                return Err(EngineApiError::EngineObjectValidationError(
-                    reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
-                ));
-            }
+        // Only allow this method before Osaka fork
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
         }
 
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
@@ -803,6 +800,15 @@ where
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
+        // Check if Osaka fork is active
+        let current_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+        if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {
+            return Err(EngineApiError::EngineObjectValidationError(
+                reth_payload_primitives::EngineObjectValidationError::UnsupportedFork,
+            ));
+        }
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
