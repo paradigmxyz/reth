@@ -112,7 +112,7 @@ The RPC component mainly lives in [`rpc/rpc`](../../crates/rpc/rpc), which imple
 - `txpool_`
 - `web3_`
 
-These RPC interface is defined in [`rpc/rpc-api`](../../crates/rpc/rpc-api).
+This RPC interface is defined in [`rpc/rpc-api`](../../crates/rpc/rpc-api).
 
 The engine API ([`engine_`][engine-spec]) lives in [`rpc/rpc-engine-api`](../../crates/rpc/rpc-engine-api) (this is *not* an interface crate despite the confusing name).
 
