@@ -752,7 +752,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider: Option<StateProviderBox> = None;
+        let mut provider = None;
         let mut outcomes = Vec::with_capacity(transactions.len());
         for (origin, transaction) in transactions {
             outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
@@ -765,7 +765,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider: Option<StateProviderBox> = None;
+        let mut provider = None;
         let mut outcomes = Vec::new();
         for transaction in transactions {
             outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
