@@ -58,20 +58,20 @@ macro_rules! set_value {
     (&mut $this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
-            &mut MockTransaction::Legacy { ref mut $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Legacy { $field, .. } => {
+                *$field = new_value;
             }
-            &mut MockTransaction::Eip1559 { ref mut $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Eip1559 { $field, .. } => {
+                *$field = new_value;
             }
-            &mut MockTransaction::Eip4844 { ref mut $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Eip4844 { $field, .. } => {
+                *$field = new_value;
             }
-            &mut MockTransaction::Eip2930 { ref mut $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Eip2930 { $field, .. } => {
+                *$field = new_value;
             }
-            &mut MockTransaction::Eip7702 { ref mut $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Eip7702 { $field, .. } => {
+                *$field = new_value;
             }
         }
         // Ensure the tx cost is always correct after each mutation.
@@ -81,12 +81,12 @@ macro_rules! set_value {
     ($this:expr => $field:ident) => {{
         let new_value = $field;
         match $this {
-            MockTransaction::Legacy { $field, .. } |
-            MockTransaction::Eip1559 { $field, .. } |
-            MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } |
-            MockTransaction::Eip7702 { $field, .. } => {
-                *$field = new_value.into();
+            MockTransaction::Legacy { ref mut $field, .. } |
+            MockTransaction::Eip1559 { ref mut $field, .. } |
+            MockTransaction::Eip4844 { ref mut $field, .. } |
+            MockTransaction::Eip2930 { ref mut $field, .. } |
+            MockTransaction::Eip7702 { ref mut $field, .. } => {
+                *$field = new_value;
             }
         }
         // Ensure the tx cost is always correct after each mutation.
@@ -113,7 +113,7 @@ macro_rules! make_setters_getters {
         paste! {$(
             /// Sets the value of the specified field.
             pub fn [<set_ $name>](&mut self, $name: $t) -> &mut Self {
-                set_value!(self => $name);
+                set_value!(&mut self => $name);
                 self
             }
 
