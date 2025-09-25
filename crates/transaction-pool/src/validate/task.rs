@@ -191,6 +191,7 @@ impl<V> TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + 'static,
 {
+    /// Runs validation for a single transaction while reusing the batching helper underneath.
     async fn validate_transaction_internal(
         validator: Arc<V>,
         origin: TransactionOrigin,
@@ -201,6 +202,7 @@ where
         results.pop().expect("transaction result present")
     }
 
+    /// Performs the stateless/stateful split for a batch and reuses one state provider.
     async fn validate_transactions_internal(
         validator: Arc<V>,
         transactions: Vec<(TransactionOrigin, V::Transaction)>,
