@@ -63,7 +63,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV1 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV1: {status:?}");
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid forkchoiceUpdatedV1 status",
+                ));
             }
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
@@ -93,7 +95,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV2 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV2: {status:?}");
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid forkchoiceUpdatedV2 status",
+                ));
             }
             if status.is_syncing() {
                 return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
@@ -123,7 +127,9 @@ where
                     ?payload_attributes,
                     "Invalid forkchoiceUpdatedV3 message",
                 );
-                panic!("Invalid forkchoiceUpdatedV3: {status:?}");
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid forkchoiceUpdatedV3 status",
+                ));
             }
             status =
                 self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
@@ -151,7 +157,8 @@ pub(crate) fn block_to_new_payload(
 
     let (version, params) = match payload {
         ExecutionPayload::V3(payload) => {
-            let cancun = sidecar.cancun().unwrap();
+            let cancun =
+                sidecar.cancun().ok_or_else(|| eyre::eyre!("Missing cancun sidecar data"))?;
 
             if let Some(prague) = sidecar.prague() {
                 if is_optimism {
@@ -160,7 +167,9 @@ pub(crate) fn block_to_new_payload(
                         serde_json::to_value((
                             OpExecutionPayloadV4 {
                                 payload_inner: payload,
-                                withdrawals_root: block.withdrawals_root.unwrap(),
+                                withdrawals_root: block
+                                    .withdrawals_root
+                                    .ok_or_else(|| eyre::eyre!("Missing withdrawals root"))?,
                             },
                             cancun.versioned_hashes.clone(),
                             cancun.parent_beacon_block_root,
@@ -222,7 +231,7 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     while !status.is_valid() {
         if status.is_invalid() {
             error!(?status, ?params, "Invalid {method}",);
-            panic!("Invalid {method}: {status:?}");
+            return Err(alloy_json_rpc::RpcError::UnsupportedFeature("invalid newPayload status"));
         }
         if status.is_syncing() {
             return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
