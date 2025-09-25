@@ -17,7 +17,6 @@ pub trait TableObject: Sized {
         _: *const ffi::MDBX_txn,
         data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
-        // SAFETY: The caller ensures that data_val contains valid pointer and length
         let s = unsafe { slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len) };
         Self::decode(s)
     }
@@ -33,7 +32,6 @@ impl TableObject for Cow<'_, [u8]> {
         _txn: *const ffi::MDBX_txn,
         data_val: ffi::MDBX_val,
     ) -> Result<Self, Error> {
-        // SAFETY: The caller ensures that data_val contains valid pointer and length
         let s = unsafe { slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len) };
 
         #[cfg(feature = "return-borrowed")]
