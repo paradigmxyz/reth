@@ -2050,14 +2050,14 @@ where
             self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
         };
 
-        // If this is invoked after we downloaded a block we can check if this
-        // block is the finalized block
-        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
-            if downloaded_block.hash == state.finalized_block_hash {
-                // we downloaded the finalized block and can now check how far we're off
-                exceeds_backfill_threshold =
-                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
-            }
+        // If this is invoked after we downloaded a block we can check if this block is the
+        // finalized block
+        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) &&
+            downloaded_block.hash == state.finalized_block_hash
+        {
+            // we downloaded the finalized block and can now check how far we're off
+            exceeds_backfill_threshold =
+                self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
         }
 
         // if the number of missing blocks is greater than the max, trigger backfill
