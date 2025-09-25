@@ -697,12 +697,11 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
                 }
             };
 
-            if is_eth68_message {
-                if let Some((actual_ty_byte, _)) = *metadata_ref_mut {
-                    if let Ok(parsed_tx_type) = TxType::try_from(actual_ty_byte) {
-                        tx_types_counter.increase_by_tx_type(parsed_tx_type);
-                    }
-                }
+            if is_eth68_message &&
+                let Some((actual_ty_byte, _)) = *metadata_ref_mut &&
+                let Ok(parsed_tx_type) = TxType::try_from(actual_ty_byte)
+            {
+                tx_types_counter.increase_by_tx_type(parsed_tx_type);
             }
 
             let decision = self

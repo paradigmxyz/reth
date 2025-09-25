@@ -572,11 +572,10 @@ where
 
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
-            if let Ok(best_block) = inner.provider.best_block_number() {
-                if end > best_block {
+            if let Ok(best_block) = inner.provider.best_block_number()
+                && end > best_block {
                     end = best_block;
                 }
-            }
 
             for num in start..=end {
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));

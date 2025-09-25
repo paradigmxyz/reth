@@ -84,17 +84,17 @@ where
     K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
-    pub fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
+    pub const fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::State)
     }
 
     /// Creates a new [`TrieNodeIter`] for the storage trie.
-    pub fn storage_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
+    pub const fn storage_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::Storage)
     }
 
     /// Creates a new [`TrieNodeIter`].
-    fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
+    const fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,

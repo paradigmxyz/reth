@@ -587,15 +587,15 @@ where
         let this = self.get_mut();
 
         // check if there is a better payload before returning the best payload
-        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                this.maybe_better = None;
-                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
-                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
-                {
-                    debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(payload))
-                }
+        if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            this.maybe_better = None;
+            if let Ok(Some(payload)) = res.map(|out| out.into_payload()).inspect_err(
+                |err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"),
+            ) {
+                debug!(target: "payload_builder", "resolving better payload");
+                return Poll::Ready(Ok(payload))
             }
         }
 
@@ -604,20 +604,20 @@ where
             return Poll::Ready(Ok(best))
         }
 
-        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                this.empty_payload = None;
-                return match res {
-                    Ok(res) => {
-                        if let Err(err) = &res {
-                            warn!(target: "payload_builder", %err, "failed to resolve empty payload");
-                        } else {
-                            debug!(target: "payload_builder", "resolving empty payload");
-                        }
-                        Poll::Ready(res)
+        if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            this.empty_payload = None;
+            return match res {
+                Ok(res) => {
+                    if let Err(err) = &res {
+                        warn!(target: "payload_builder", %err, "failed to resolve empty payload");
+                    } else {
+                        debug!(target: "payload_builder", "resolving empty payload");
                     }
-                    Err(err) => Poll::Ready(Err(err.into())),
+                    Poll::Ready(res)
                 }
+                Err(err) => Poll::Ready(Err(err.into())),
             }
         }
 

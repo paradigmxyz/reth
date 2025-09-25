@@ -48,18 +48,17 @@ where
         // data. If the TransactionLookup checkpoint is lagging behind (which can happen e.g. when
         // pre-merge history is dropped and then later tx lookup pruning is enabled) then we can
         // only prune from the tx checkpoint and onwards.
-        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? {
-            if input
+        if let Some(txs_checkpoint) = provider.get_prune_checkpoint(PruneSegment::Transactions)? &&
+            input
                 .previous_checkpoint
                 .is_none_or(|checkpoint| checkpoint.block_number < txs_checkpoint.block_number)
-            {
-                input.previous_checkpoint = Some(txs_checkpoint);
-                debug!(
-                    target: "pruner",
-                    transactions_checkpoint = ?input.previous_checkpoint,
-                    "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
-                );
-            }
+        {
+            input.previous_checkpoint = Some(txs_checkpoint);
+            debug!(
+                target: "pruner",
+                transactions_checkpoint = ?input.previous_checkpoint,
+                "No TransactionLookup checkpoint found, using Transactions checkpoint as fallback"
+            );
         }
 
         let (start, end) = match input.get_next_tx_num_range(provider)? {

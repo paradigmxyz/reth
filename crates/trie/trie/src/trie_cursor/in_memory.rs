@@ -200,10 +200,10 @@ mod tests {
 
         let mut results = Vec::new();
 
-        if let Some(first_expected) = test_case.expected_results.first() {
-            if let Ok(Some(entry)) = cursor.seek(first_expected.0) {
-                results.push(entry);
-            }
+        if let Some(first_expected) = test_case.expected_results.first() &&
+            let Ok(Some(entry)) = cursor.seek(first_expected.0)
+        {
+            results.push(entry);
         }
 
         while let Ok(Some(entry)) = cursor.next() {

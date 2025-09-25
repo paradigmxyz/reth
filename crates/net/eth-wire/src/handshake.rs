@@ -179,18 +179,18 @@ where
                 }
 
                 // Ensure peer's total difficulty is reasonable
-                if let StatusMessage::Legacy(s) = their_status_message {
-                    if s.total_difficulty.bit_len() > 160 {
-                        unauth
-                            .disconnect(DisconnectReason::ProtocolBreach)
-                            .await
-                            .map_err(EthStreamError::from)?;
-                        return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                            got: s.total_difficulty.bit_len(),
-                            maximum: 160,
-                        }
-                        .into());
+                if let StatusMessage::Legacy(s) = their_status_message &&
+                    s.total_difficulty.bit_len() > 160
+                {
+                    unauth
+                        .disconnect(DisconnectReason::ProtocolBreach)
+                        .await
+                        .map_err(EthStreamError::from)?;
+                    return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
+                        got: s.total_difficulty.bit_len(),
+                        maximum: 160,
                     }
+                    .into());
                 }
 
                 // Fork validation
