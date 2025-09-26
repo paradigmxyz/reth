@@ -40,8 +40,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::debug;
-use tracing::trace;
+use tracing::{debug, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
