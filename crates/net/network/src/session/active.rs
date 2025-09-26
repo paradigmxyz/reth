@@ -19,7 +19,8 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
-use alloy_primitives::Sealable;
+use alloy_primitives::{hex, Sealable};
+use alloy_rlp::Decodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
@@ -165,6 +166,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             ($req:ident, $resp_item:ident, $req_item:ident) => {{
                 let RequestPair { request_id, message: request } = $req;
                 dbg!(&request);
+
                 let (tx, response) = oneshot::channel();
                 let received = ReceivedRequest {
                     request_id,
@@ -628,8 +630,21 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
             // Send messages by advancing the sink and queuing in buffered messages
             while this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.queued_outgoing.pop_front() {
+                if let Some(mut msg) = this.queued_outgoing.pop_front() {
                     dbg!("sending", &msg);
+                    match &mut msg {
+                        OutgoingMessage::Eth(msg) => {
+                            match msg {
+                                EthMessage::BlockHeaders(resp) => {
+                                    dbg!("appending header");
+                                    let buf = hex::decode("f9027ba08d38ac5b44b5b45c79b839f8f0c09514a2ed04cf0f69c4f2cb718ff75b250367a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d493479486cf016fb873d50a7b8f31eb154c9234dd31b058a0b1fa8c7a37bf6c01ee15abf25f2b1c2a97cc5379e9a1f5a0568c40758f256f1fa0758ec06bb87f7088d70e3a2a67492e82cde5008a8e892783e00e9b98150460c9a09c4e74e1a25b3e5574df741cd1ff6be25dbf82a6930f9f5231fab5c930696fb2b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000001000000000000000000820000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000080002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000480840160b5c1843b9aca0083029d108468ac312c99d883011003846765746888676f312e32342e36856c696e7578a040b31b9ec483e51d48f2cac50bf8b683eea2e620be84cc61814a319f6a7af24788000000000000000007a0caa083fe00a4ee37928340bad7c9f6d3b1c085ea3123f4241815d92f649cc0e08080a0016aa50b1bb924bfaa9dc763a75e91a08f2ddca5b65251129bc402e640c8641ba0e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap();
+                                    resp.message.0.push(N::BlockHeader::decode(&mut &buf[..]).unwrap());
+                                }
+                                _ => {}
+                            }
+                        }
+                       _ => {}
+                    };
                     progress = true;
                     let res = match msg {
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),

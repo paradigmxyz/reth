@@ -25,6 +25,8 @@ use reth_tracing::init_test_tracing;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::time::Duration;
+use alloy_primitives::hex;
+use alloy_rlp::Encodable;
 use tokio::task;
 use url::Host;
 
@@ -237,15 +239,30 @@ async fn test_connect_with_builder() {
         .request_handler(client)
         .split_with_handle();
 
-    let record : NodeRecord = "enode://d54f2c88dad80719c6f2be2c9925c6c2609f845ed84c9e2f961c2a7e67bfe218a657118a70a45d1b245e96e2678b0276ca2ca869d7aa5688fcb1a52381d6a1e3@157.180.14.230:30303?discport=30303".parse().unwrap();
+    // nethermind
+    // let record : NodeRecord = "enode://d54f2c88dad80719c6f2be2c9925c6c2609f845ed84c9e2f961c2a7e67bfe218a657118a70a45d1b245e96e2678b0276ca2ca869d7aa5688fcb1a52381d6a1e3@157.180.14.230:30303?discport=30303".parse().unwrap();
+
+    // geth
+    // let record : NodeRecord = "enode://62b16e448d6aa6a8ff7a2a25701b43935d956398d7f7bf57fccce281dd989d19cee4d6e2142e11d4be42ffacc394a138b686099885a11d50b4e13db5b8080180@157.180.14.225:30303?discport=30303".parse().unwrap();
+
+    // geth
+    let record : NodeRecord = "enode://62b16e448d6aa6a8ff7a2a25701b43935d956398d7f7bf57fccce281dd989d19cee4d6e2142e11d4be42ffacc394a138b686099885a11d50b4e13db5b8080180@157.180.14.225:30303?discport=30303".parse().unwrap();
 
     handle.add_trusted_peer(record.id, record.tcp_addr());
+
 
     let mut events = handle.event_listener();
 
     tokio::task::spawn(async move {
         tokio::join!(network, requests);
     });
+    // let client = handle.fetch_client().await.unwrap();
+    //
+    // let resp = client.get_header(23115201.into()).await;
+    // let header = resp.unwrap().unwrap();
+    // let mut b = Vec::new();
+    // header.encode(&mut b);
+    // dbg!(hex::encode(&b));
 
     let h = handle.clone();
     task::spawn(async move {
