@@ -224,14 +224,14 @@ where
     pub fn evm_env_for<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
-    ) -> EvmEnvFor<Evm>
+    ) -> Result<EvmEnvFor<Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.evm_config.evm_env_for_payload(payload),
-            BlockOrPayload::Block(block) => self.evm_config.evm_env(block.header()),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
         }
     }
 
@@ -259,14 +259,14 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
-    ) -> ExecutionCtxFor<'a, Evm>
+    ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.evm_config.context_for_payload(payload),
-            BlockOrPayload::Block(block) => self.evm_config.context_for_block(block),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)),
+            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
         }
     }
 
@@ -370,7 +370,7 @@ where
             .into())
         };
 
-        let evm_env = self.evm_env_for(&input);
+        let evm_env = self.evm_env_for(&input).map_err(NewPayloadError::other)?;
 
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
@@ -740,7 +740,8 @@ where
             .build();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
-        let ctx = self.execution_ctx_for(input);
+        let ctx =
+            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
