@@ -33,6 +33,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_db::models::BlockNumberHashedAddressRange;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -2379,6 +2380,61 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 
         Ok(num_entries)
     }
+
+    fn clear_trie_changesets(&self) -> ProviderResult<()> {
+        let tx = self.tx_ref();
+        tx.clear::<tables::AccountsTrieChangeSets>()?;
+        tx.clear::<tables::StoragesTrieChangeSets>()?;
+        Ok(())
+    }
+
+    fn clear_trie_changesets_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<()> {
+        let tx = self.tx_ref();
+
+        {
+            let range_start =
+                if let Bound::Included(v) = range.start_bound() { Some(*v) } else { None };
+
+            let mut cursor = tx.cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
+            let mut walker = cursor.walk(range_start)?;
+
+            while let Some(entry) = walker.next() {
+                let (k, _) = entry?;
+
+                // Check if we're still in range
+                if !range.contains(&k) {
+                    break;
+                }
+
+                walker.delete_current()?;
+            }
+        }
+
+        {
+            let range: BlockNumberHashedAddressRange = range.into();
+            let range_start =
+                if let Bound::Included(v) = range.start_bound() { Some(*v) } else { None };
+
+            let mut cursor = tx.cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
+            let mut walker = cursor.walk(range_start)?;
+
+            while let Some(entry) = walker.next() {
+                let (k, _) = entry?;
+
+                // Check if we're still in range
+                if !range.contains(&k) {
+                    break;
+                }
+
+                walker.delete_current()?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseProvider<TX, N> {
@@ -3687,5 +3743,305 @@ mod tests {
         }
 
         provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_clear_trie_changesets_range() {
+        use alloy_primitives::hex_literal::hex;
+        use reth_db_api::models::BlockNumberHashedAddress;
+        use reth_trie::{BranchNodeCompact, StoredNibblesSubKey, TrieChangeSetsEntry};
+
+        let factory = create_test_provider_factory();
+
+        // Create some test data for different block numbers
+        let block1 = 100u64;
+        let block2 = 101u64;
+        let block3 = 102u64;
+        let block4 = 103u64;
+        let block5 = 104u64;
+
+        // Create test addresses for storage changesets
+        let storage_address1 =
+            B256::from(hex!("1111111111111111111111111111111111111111111111111111111111111111"));
+        let storage_address2 =
+            B256::from(hex!("2222222222222222222222222222222222222222222222222222222222222222"));
+
+        // Create test nibbles
+        let nibbles1 = StoredNibblesSubKey(Nibbles::from_nibbles([0x1, 0x2, 0x3]));
+        let nibbles2 = StoredNibblesSubKey(Nibbles::from_nibbles([0x4, 0x5, 0x6]));
+        let nibbles3 = StoredNibblesSubKey(Nibbles::from_nibbles([0x7, 0x8, 0x9]));
+
+        // Create test nodes
+        let node1 = BranchNodeCompact::new(
+            0b1111_1111_1111_1111,
+            0b1111_1111_1111_1111,
+            0b0000_0000_0000_0001,
+            vec![B256::from(hex!(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+            ))],
+            None,
+        );
+        let node2 = BranchNodeCompact::new(
+            0b1111_1111_1111_1110,
+            0b1111_1111_1111_1110,
+            0b0000_0000_0000_0010,
+            vec![B256::from(hex!(
+                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+            ))],
+            Some(B256::from(hex!(
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            ))),
+        );
+
+        // Populate AccountsTrieChangeSets with data across multiple blocks
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>().unwrap();
+
+            // Block 100: 2 entries (will be kept - before range)
+            cursor
+                .upsert(
+                    block1,
+                    &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(block1, &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: None })
+                .unwrap();
+
+            // Block 101: 3 entries with duplicates (will be deleted - in range)
+            cursor
+                .upsert(
+                    block2,
+                    &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(
+                    block2,
+                    &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap(); // duplicate key
+            cursor
+                .upsert(block2, &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: None })
+                .unwrap();
+
+            // Block 102: 2 entries (will be deleted - in range)
+            cursor
+                .upsert(
+                    block3,
+                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(
+                    block3,
+                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+
+            // Block 103: 1 entry (will be deleted - in range)
+            cursor
+                .upsert(block4, &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: None })
+                .unwrap();
+
+            // Block 104: 2 entries (will be kept - after range)
+            cursor
+                .upsert(
+                    block5,
+                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(block5, &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: None })
+                .unwrap();
+
+            provider_rw.commit().unwrap();
+        }
+
+        // Populate StoragesTrieChangeSets with data across multiple blocks
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>().unwrap();
+
+            // Block 100, address1: 2 entries (will be kept - before range)
+            let key1_block1 = BlockNumberHashedAddress((block1, storage_address1));
+            cursor
+                .upsert(
+                    key1_block1,
+                    &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(key1_block1, &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: None })
+                .unwrap();
+
+            // Block 101, address1: 3 entries with duplicates (will be deleted - in range)
+            let key1_block2 = BlockNumberHashedAddress((block2, storage_address1));
+            cursor
+                .upsert(
+                    key1_block2,
+                    &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(key1_block2, &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: None })
+                .unwrap(); // duplicate key
+            cursor
+                .upsert(
+                    key1_block2,
+                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap();
+
+            // Block 102, address2: 2 entries (will be deleted - in range)
+            let key2_block3 = BlockNumberHashedAddress((block3, storage_address2));
+            cursor
+                .upsert(
+                    key2_block3,
+                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(key2_block3, &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: None })
+                .unwrap();
+
+            // Block 103, address1: 2 entries with duplicate (will be deleted - in range)
+            let key1_block4 = BlockNumberHashedAddress((block4, storage_address1));
+            cursor
+                .upsert(
+                    key1_block4,
+                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node1.clone()) },
+                )
+                .unwrap();
+            cursor
+                .upsert(
+                    key1_block4,
+                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap(); // duplicate key
+
+            // Block 104, address2: 2 entries (will be kept - after range)
+            let key2_block5 = BlockNumberHashedAddress((block5, storage_address2));
+            cursor
+                .upsert(key2_block5, &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: None })
+                .unwrap();
+            cursor
+                .upsert(
+                    key2_block5,
+                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node2.clone()) },
+                )
+                .unwrap();
+
+            provider_rw.commit().unwrap();
+        }
+
+        // Clear the range [101, 103] (inclusive)
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw.clear_trie_changesets_range(block2..=block4).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Verify AccountsTrieChangeSets after clearing
+        {
+            let provider = factory.provider().unwrap();
+            let mut cursor =
+                provider.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+
+            // Block 100 should still exist (before range)
+            let block1_entries = cursor
+                .walk_dup(Some(block1), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(block1_entries.len(), 2, "Block 100 entries should be preserved");
+            assert_eq!(block1_entries[0].0, block1);
+            assert_eq!(block1_entries[1].0, block1);
+
+            // Blocks 101-103 should be deleted
+            let block2_entries = cursor
+                .walk_dup(Some(block2), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block2_entries.is_empty(), "Block 101 entries should be deleted");
+
+            let block3_entries = cursor
+                .walk_dup(Some(block3), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block3_entries.is_empty(), "Block 102 entries should be deleted");
+
+            let block4_entries = cursor
+                .walk_dup(Some(block4), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block4_entries.is_empty(), "Block 103 entries should be deleted");
+
+            // Block 104 should still exist (after range)
+            let block5_entries = cursor
+                .walk_dup(Some(block5), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(block5_entries.len(), 2, "Block 104 entries should be preserved");
+            assert_eq!(block5_entries[0].0, block5);
+            assert_eq!(block5_entries[1].0, block5);
+        }
+
+        // Verify StoragesTrieChangeSets after clearing
+        {
+            let provider = factory.provider().unwrap();
+            let mut cursor =
+                provider.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
+
+            // Block 100 entries should still exist (before range)
+            let key1_block1 = BlockNumberHashedAddress((block1, storage_address1));
+            let block1_entries = cursor
+                .walk_dup(Some(key1_block1), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(block1_entries.len(), 2, "Block 100 storage entries should be preserved");
+
+            // Blocks 101-103 entries should be deleted
+            let key1_block2 = BlockNumberHashedAddress((block2, storage_address1));
+            let block2_entries = cursor
+                .walk_dup(Some(key1_block2), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block2_entries.is_empty(), "Block 101 storage entries should be deleted");
+
+            let key2_block3 = BlockNumberHashedAddress((block3, storage_address2));
+            let block3_entries = cursor
+                .walk_dup(Some(key2_block3), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block3_entries.is_empty(), "Block 102 storage entries should be deleted");
+
+            let key1_block4 = BlockNumberHashedAddress((block4, storage_address1));
+            let block4_entries = cursor
+                .walk_dup(Some(key1_block4), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(block4_entries.is_empty(), "Block 103 storage entries should be deleted");
+
+            // Block 104 entries should still exist (after range)
+            let key2_block5 = BlockNumberHashedAddress((block5, storage_address2));
+            let block5_entries = cursor
+                .walk_dup(Some(key2_block5), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(block5_entries.len(), 2, "Block 104 storage entries should be preserved");
+        }
     }
 }
