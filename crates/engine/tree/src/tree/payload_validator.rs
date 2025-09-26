@@ -35,9 +35,9 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HeaderProvider,
-    ProviderError, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, HeaderProvider, ProviderError, StateProvider,
+    StateProviderFactory, StateReader, StateRootProvider,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
@@ -115,8 +115,8 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
             CurrentPersistenceAction::SavingBlocks { highest } => {
                 // The block being validated can only be a descendant if its number is higher than
                 // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-                if block.block.number > highest.number
-                    && self.state().tree_state.is_descendant(*highest, block)
+                if block.block.number > highest.number &&
+                    self.state().tree_state.is_descendant(*highest, block)
                 {
                     return PersistingKind::PersistingDescendant;
                 }
@@ -405,9 +405,9 @@ where
         //    accounting for the prefix sets.
         let has_ancestors_with_missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-        let mut use_state_root_task = run_parallel_state_root
-            && self.config.use_state_root_task()
-            && !has_ancestors_with_missing_trie_updates;
+        let mut use_state_root_task = run_parallel_state_root &&
+            self.config.use_state_root_task() &&
+            !has_ancestors_with_missing_trie_updates;
 
         debug!(
             target: "engine::tree",
@@ -828,7 +828,9 @@ where
         let last_persisted = ctx.persistence().last_persisted_block;
 
         // If we're in the middle of a reorganization, be more careful
-        if let Some(CurrentPersistenceAction::RemovingBlocks { new_tip_num }) = ctx.persistence().current_action() {
+        if let Some(CurrentPersistenceAction::RemovingBlocks { new_tip_num }) =
+            ctx.persistence().current_action()
+        {
             // During removal, blocks at or below the new tip are being removed
             if block.number() <= *new_tip_num {
                 // Block is being removed or already removed
