@@ -76,7 +76,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
 use tracing::{debug, trace};
@@ -2393,42 +2393,25 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<()> {
         let tx = self.tx_ref();
-
+        let range = (range.start_bound(), range.end_bound()); // avoid clone
+                                                              //
         {
-            let range_start =
-                if let Bound::Included(v) = range.start_bound() { Some(*v) } else { None };
-
             let mut cursor = tx.cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
-            let mut walker = cursor.walk(range_start)?;
+            let mut walker = cursor.walk_range(range)?;
 
             while let Some(entry) = walker.next() {
-                let (k, _) = entry?;
-
-                // Check if we're still in range
-                if !range.contains(&k) {
-                    break;
-                }
-
+                let (_, _) = entry?;
                 walker.delete_current()?;
             }
         }
 
         {
             let range: BlockNumberHashedAddressRange = range.into();
-            let range_start =
-                if let Bound::Included(v) = range.start_bound() { Some(*v) } else { None };
-
             let mut cursor = tx.cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
-            let mut walker = cursor.walk(range_start)?;
+            let mut walker = cursor.walk_range(range)?;
 
             while let Some(entry) = walker.next() {
-                let (k, _) = entry?;
-
-                // Check if we're still in range
-                if !range.contains(&k) {
-                    break;
-                }
-
+                let (_, _) = entry?;
                 walker.delete_current()?;
             }
         }
