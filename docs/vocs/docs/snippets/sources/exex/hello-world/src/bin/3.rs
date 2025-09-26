@@ -30,6 +30,7 @@ async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimi
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(async move |builder, _| {
+        // Use launch_with_debug_capabilities() for --dev mode
         let handle = builder
             .node(EthereumNode::default())
             .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))

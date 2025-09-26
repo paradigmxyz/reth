@@ -72,6 +72,7 @@ fn main() -> eyre::Result<()> {
             }))
             .serve("[::1]:10000".parse().unwrap());
 
+        // Use launch_with_debug_capabilities() for --dev mode
         let handle = builder
             .node(EthereumNode::default())
             .install_exex("remote-exex", |ctx| async move { Ok(remote_exex(ctx, notifications)) })
