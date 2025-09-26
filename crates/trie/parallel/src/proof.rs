@@ -34,7 +34,6 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
-use tracing::debug;
 use tracing::trace;
 
 /// Parallel proof calculator.
