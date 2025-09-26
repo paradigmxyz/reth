@@ -27,7 +27,6 @@ use reth_trie::{root::state_root_unhashed, HashedPostState};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
-    collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex},
 };
@@ -139,21 +138,17 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
 
-        // Convert recovered transactions into plain transactions once and reuse
-        let plain_transactions: Vec<_> =
-            transactions.into_iter().map(|tx| tx.into_inner()).collect();
-
         let header = Header {
             number,
             parent_hash,
-            gas_used: plain_transactions.len() as u64 * MIN_TRANSACTION_GAS,
+            gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
             mix_hash: B256::random(),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            transactions_root: calculate_transaction_root(&plain_transactions),
+            transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
-            state_root: state_root_unhashed(HashMap::from([(
+            state_root: state_root_unhashed([(
                 self.signer,
                 Account {
                     balance: initial_signer_balance - signer_balance_decrease,
@@ -161,7 +156,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     ..Default::default()
                 }
                 .into_trie_account(EMPTY_ROOT_HASH),
-            )])),
+            )]),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
                 EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
@@ -175,7 +170,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block = SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
-                transactions: plain_transactions,
+                transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
