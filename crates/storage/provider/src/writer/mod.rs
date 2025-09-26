@@ -204,21 +204,23 @@ where
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
         self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
 
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
-            .static_file()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
-        //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
-        self.static_file()
-            .get_writer(block_number, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
+        // Get highest static file block for the total block range. If no static file headers
+        // exist on disk, there's nothing to prune from static files.
+        if let Some(highest_static_file_block) =
+            self.static_file().get_highest_static_file_block(StaticFileSegment::Headers)
+        {
+            // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
+            // sure we remove only what is ABOVE the block.
+            //
+            // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+            // will have three blocks to remove, which will be block 8, 7, and 6.
+            debug!(target: "provider::storage_writer", ?block_number, "Removing static file blocks above block_number");
+            self.static_file()
+                .get_writer(block_number, StaticFileSegment::Headers)?
+                .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
+        } else {
+            debug!(target: "provider::storage_writer", ?block_number, "No static file headers found, skipping static file pruning");
+        }
 
         Ok(())
     }
