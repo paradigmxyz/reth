@@ -25,7 +25,7 @@ use std::{
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
-const FB_STATE_ROOT_FROM_INDEX: usize = 8;
+pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 8;
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -51,7 +51,6 @@ pub struct FlashBlockService<
     cached_state: Option<(B256, CachedReads)>,
     metrics: FlashBlockServiceMetrics,
     /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
-    /// Default to false, see [`enable_state_root`]
     calculate_state_root: bool,
 }
 
@@ -90,7 +89,7 @@ where
         }
     }
 
-    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    /// Enable state root calculation from flashblock
     pub const fn enable_state_root(mut self) -> Self {
         self.calculate_state_root = true;
         self
