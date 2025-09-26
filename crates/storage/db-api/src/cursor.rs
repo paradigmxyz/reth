@@ -75,6 +75,7 @@ pub trait DbDupCursorRO<T: DupSort> {
     ///
     /// # Note
     ///
+    /// The key must match exactly, while the subkey can be greater than or equal to.
     /// The position of the cursor might not correspond to the key/subkey pair if the entry does not
     /// exist.
     fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
