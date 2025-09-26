@@ -57,10 +57,10 @@ where
 
         // If the path is ahead of the cursor then seek the cursor forward to catch up. The cursor
         // will seek either to `curr_path` or beyond it.
-        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) {
-            if let Err(err) = self.seek_cursor(curr_path) {
-                return Some(Err(err))
-            }
+        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) &&
+            let Err(err) = self.seek_cursor(curr_path)
+        {
+            return Some(Err(err))
         }
 
         // If there is a path but the cursor is empty then that path has no node.
