@@ -73,6 +73,24 @@ impl TrieUpdates {
         self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
     }
 
+    /// Extends account trie updates using an iterator of paths+nodes. A None node indicates a node
+    /// removal. There should be no duplicate paths produced by the iterator.
+    pub fn extend_accounts_from_iter(
+        &mut self,
+        nodes: impl Iterator<Item = (Nibbles, Option<BranchNodeCompact>)>,
+    ) {
+        for (path, node) in exclude_empty_from_pair(nodes) {
+            if let Some(node) = node {
+                self.account_nodes.insert(path, node);
+                // `account_nodes` takes precedence over `removed_nodes` when the updates are used,
+                // so it's not necessary to remove the path from `removed_nodes`.
+            } else {
+                self.account_nodes.remove(&path);
+                self.removed_nodes.insert(path);
+            }
+        }
+    }
+
     /// Insert storage updates for a given hashed address.
     pub fn insert_storage_updates(
         &mut self,
@@ -251,6 +269,24 @@ impl StorageTrieUpdates {
         }
         self.is_deleted |= other.is_deleted;
         self.storage_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
+    }
+
+    /// Extends storage trie updates using an iterator of paths+nodes. A None node indicates a node
+    /// removal. There should be no duplicate paths produced by the iterator.
+    pub fn extend_from_iter(
+        &mut self,
+        nodes: impl Iterator<Item = (Nibbles, Option<BranchNodeCompact>)>,
+    ) {
+        for (path, node) in exclude_empty_from_pair(nodes) {
+            if let Some(node) = node {
+                self.storage_nodes.insert(path, node);
+                // `storage_nodes` takes precedence over `removed_nodes` when the updates are used,
+                // so it's not necessary to remove the path from `removed_nodes`.
+            } else {
+                self.storage_nodes.remove(&path);
+                self.removed_nodes.insert(path);
+            }
+        }
     }
 
     /// Finalize storage trie updates for by taking updates from walker and hash builder.
