@@ -3913,26 +3913,23 @@ mod tests {
             cursor
                 .upsert(
                     key1_block4,
-                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node1.clone()) },
+                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node1) },
                 )
                 .unwrap();
             cursor
                 .upsert(
                     key1_block4,
-                    &TrieChangeSetsEntry { nibbles: nibbles3.clone(), node: Some(node2.clone()) },
+                    &TrieChangeSetsEntry { nibbles: nibbles3, node: Some(node2.clone()) },
                 )
                 .unwrap(); // duplicate key
 
             // Block 104, address2: 2 entries (will be kept - after range)
             let key2_block5 = BlockNumberHashedAddress((block5, storage_address2));
             cursor
-                .upsert(key2_block5, &TrieChangeSetsEntry { nibbles: nibbles1.clone(), node: None })
+                .upsert(key2_block5, &TrieChangeSetsEntry { nibbles: nibbles1, node: None })
                 .unwrap();
             cursor
-                .upsert(
-                    key2_block5,
-                    &TrieChangeSetsEntry { nibbles: nibbles2.clone(), node: Some(node2.clone()) },
-                )
+                .upsert(key2_block5, &TrieChangeSetsEntry { nibbles: nibbles2, node: Some(node2) })
                 .unwrap();
 
             provider_rw.commit().unwrap();
