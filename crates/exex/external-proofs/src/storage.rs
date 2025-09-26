@@ -1,3 +1,5 @@
+//! Traits for external storage for trie nodes.
+
 #![allow(dead_code, unreachable_pub)]
 use alloy_primitives::{map::HashMap, B256, U256};
 use async_trait::async_trait;
@@ -7,7 +9,10 @@ use reth_trie::{updates::TrieUpdates, BranchNodeCompact, HashedPostState, Nibble
 use std::fmt::Debug;
 
 /// Error type for storage operations
+#[derive(Debug, thiserror::Error)]
 pub enum ExternalStorageError {
+    /// Catch-all for other errors.
+    #[error("Other error: {0}")]
     Other(eyre::Error),
 }
 
@@ -63,8 +68,13 @@ pub struct BlockStateDiff {
 #[async_trait]
 #[auto_impl(Arc)]
 pub trait ExternalStorage: Send + Sync + Debug {
+    /// Cursor for iterating over trie branches.
     type TrieCursor: ExternalTrieCursor;
+
+    /// Cursor for iterating over storage leaves.
     type StorageCursor: ExternalHashedCursor<Value = U256>;
+
+    /// Cursor for iterating over account leaves.
     type AccountHashedCursor: ExternalHashedCursor<Value = Account>;
 
     /// Store a batch of account trie branches. Used for saving existing state. For live state
