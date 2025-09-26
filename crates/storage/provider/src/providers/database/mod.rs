@@ -684,10 +684,10 @@ mod tests {
 
     #[test]
     fn insert_block_with_prune_modes() {
-        let factory = create_test_provider_factory();
-
         let block = TEST_BLOCK.clone();
+
         {
+            let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
             assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(
@@ -706,6 +706,7 @@ mod tests {
                 transaction_lookup: Some(PruneMode::Full),
                 ..PruneModes::none()
             };
+            let factory = create_test_provider_factory();
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
@@ -718,14 +719,13 @@ mod tests {
 
     #[test]
     fn take_block_transaction_range_recover_senders() {
-        let factory = create_test_provider_factory();
-
         let mut rng = generators::rng();
         let block =
             random_block(&mut rng, 0, BlockParams { tx_count: Some(3), ..Default::default() });
 
         let tx_ranges: Vec<RangeInclusive<TxNumber>> = vec![0..=0, 1..=1, 2..=2, 0..=1, 1..=2];
         for range in tx_ranges {
+            let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
 
             assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));

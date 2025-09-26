@@ -3126,6 +3126,12 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
+                crate::OriginalValuesKnown::No,
+            )
+            .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();

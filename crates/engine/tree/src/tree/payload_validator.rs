@@ -769,7 +769,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "xecuted block");
         Ok(output)
     }
 
