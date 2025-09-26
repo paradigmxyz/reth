@@ -184,56 +184,54 @@ fn find_diffs_advanced<T: Table>(
 ) -> eyre::Result<TableDiffResult<T>>
 where
     T::Value: PartialEq,
-    T::Key: Hash,
+    T::Key: Hash + Ord,
 {
-    // initialize the zipped walker
-    let mut primary_zip_cursor =
-        primary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-    let primary_walker = primary_zip_cursor.walk(None)?;
-
-    let mut secondary_zip_cursor =
-        secondary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-    let secondary_walker = secondary_zip_cursor.walk(None)?;
-    let zipped_cursor = primary_walker.zip(secondary_walker);
-
-    // initialize the cursors for seeking when we are cross checking elements
+    // initialize two read cursors and perform a merge-like walk to cover all elements,
+    // including tails present only in one table
     let mut primary_cursor =
         primary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-
     let mut secondary_cursor =
         secondary_tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
 
     let mut result = TableDiffResult::<T>::default();
 
-    // this loop will walk both tables, cross-checking for the element in the other table.
-    // it basically just loops through both tables at the same time. if the keys are different, it
-    // will check each key in the other table. if the keys are the same, it will compare the
-    // values
-    for (primary_entry, secondary_entry) in zipped_cursor {
-        let (primary_key, primary_value) = primary_entry?;
-        let (secondary_key, secondary_value) = secondary_entry?;
+    // current items from each table
+    let mut primary_item = primary_cursor.first()?;
+    let mut secondary_item = secondary_cursor.first()?;
 
-        if primary_key != secondary_key {
-            // if the keys are different, we need to check if the key is in the other table
-            let crossed_secondary =
-                secondary_cursor.seek_exact(primary_key.clone())?.map(|(_, value)| value);
-            result.try_push_discrepancy(
-                primary_key.clone(),
-                Some(primary_value),
-                crossed_secondary,
-            );
-
-            // now do the same for the primary table
-            let crossed_primary =
-                primary_cursor.seek_exact(secondary_key.clone())?.map(|(_, value)| value);
-            result.try_push_discrepancy(
-                secondary_key.clone(),
-                crossed_primary,
-                Some(secondary_value),
-            );
-        } else {
-            // the keys are the same, so we need to compare the values
-            result.try_push_discrepancy(primary_key, Some(primary_value), Some(secondary_value));
+    loop {
+        match (primary_item.take(), secondary_item.take()) {
+            (Some((p_key, p_val)), Some((s_key, s_val))) => {
+                if p_key < s_key {
+                    // present only in primary
+                    result.try_push_discrepancy(p_key, Some(p_val), None);
+                    primary_item = primary_cursor.next()?;
+                    secondary_item = Some((s_key, s_val));
+                } else if s_key < p_key {
+                    // present only in secondary
+                    result.try_push_discrepancy(s_key, None, Some(s_val));
+                    secondary_item = secondary_cursor.next()?;
+                    primary_item = Some((p_key, p_val));
+                } else {
+                    // keys equal: compare values
+                    result.try_push_discrepancy(p_key, Some(p_val), Some(s_val));
+                    primary_item = primary_cursor.next()?;
+                    secondary_item = secondary_cursor.next()?;
+                }
+            }
+            (Some((p_key, p_val)), None) => {
+                // remaining tail in primary
+                result.try_push_discrepancy(p_key, Some(p_val), None);
+                primary_item = primary_cursor.next()?;
+                secondary_item = None;
+            }
+            (None, Some((s_key, s_val))) => {
+                // remaining tail in secondary
+                result.try_push_discrepancy(s_key, None, Some(s_val));
+                secondary_item = secondary_cursor.next()?;
+                primary_item = None;
+            }
+            (None, None) => break,
         }
     }
 
