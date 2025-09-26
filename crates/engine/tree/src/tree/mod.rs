@@ -2930,7 +2930,7 @@ pub enum InsertPayloadOk {
 }
 
 /// Whether or not the blocks are currently persisting and the input block is a descendant.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistingKind {
     /// The blocks are not currently persisting.
     NotPersisting,
