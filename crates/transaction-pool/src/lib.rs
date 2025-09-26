@@ -381,7 +381,12 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        self.pool.validator().validate_transactions_with_origin(origin, transactions).await
+        // Validate transactions one by one since we don't have a provider to pass
+        let mut outcomes = Vec::new();
+        for tx in transactions {
+            outcomes.push(self.pool.validator().validate_transaction(origin, tx).await);
+        }
+        outcomes
     }
 
     /// Validates all transactions with their individual origins.
@@ -396,9 +401,13 @@ where
             let res = self.pool.validator().validate_transaction(origin, tx).await;
             return vec![(origin, res)]
         }
-        let origins: Vec<_> = transactions.iter().map(|(origin, _)| *origin).collect();
-        let tx_outcomes = self.pool.validator().validate_transactions(transactions).await;
-        origins.into_iter().zip(tx_outcomes).collect()
+        // Validate transactions one by one since we don't have a provider to pass
+        let mut results = Vec::new();
+        for (origin, tx) in transactions {
+            let res = self.pool.validator().validate_transaction(origin, tx).await;
+            results.push((origin, res));
+        }
+        results
     }
 
     /// Number of transactions in the entire pool

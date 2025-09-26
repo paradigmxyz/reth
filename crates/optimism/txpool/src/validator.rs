@@ -8,10 +8,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{
-    errors::provider::ProviderResult, BlockReaderIdExt, StateProvider, StateProviderBox,
-    StateProviderFactory,
-};
+use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -347,31 +344,55 @@ where
         self.apply_op_checks(outcome)
     }
 
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
-        self.inner.latest_state_provider()
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validate_one(origin, transaction).await
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider = None;
         let mut outcomes = Vec::with_capacity(transactions.len());
         for (origin, transaction) in transactions {
-            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider).await);
+            // First do stateless validation with Op-specific checks
+            match self.validate_transaction_stateless(origin, transaction).await {
+                Ok(tx) => {
+                    // Then do stateful validation
+                    let outcome = self.validate_transaction_stateful(origin, tx, provider).await;
+                    outcomes.push(outcome);
+                }
+                Err(outcome) => outcomes.push(outcome),
+            }
         }
         outcomes
     }
 
-    async fn validate_transactions_with_origin(
+    async fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider = None;
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
         let mut outcomes = Vec::new();
         for transaction in transactions {
-            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider).await);
+            // First do stateless validation with Op-specific checks
+            match self.validate_transaction_stateless(origin, transaction).await {
+                Ok(tx) => {
+                    // Then do stateful validation
+                    let outcome = self.validate_transaction_stateful(origin, tx, provider).await;
+                    outcomes.push(outcome);
+                }
+                Err(outcome) => outcomes.push(outcome),
+            }
         }
         outcomes
     }

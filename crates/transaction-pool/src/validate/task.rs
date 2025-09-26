@@ -9,7 +9,7 @@ use crate::{
 };
 use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives_traits::{Block, SealedBlock};
-use reth_storage_api::{errors::provider::ProviderResult, StateProvider, StateProviderBox};
+use reth_storage_api::StateProvider;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -191,59 +191,13 @@ impl<V> TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + 'static,
 {
-    /// Runs validation for a single transaction while reusing the batching helper underneath.
+    /// Runs validation for a single transaction.
     async fn validate_transaction_internal(
         validator: Arc<V>,
         origin: TransactionOrigin,
         transaction: V::Transaction,
     ) -> TransactionValidationOutcome<V::Transaction> {
-        let mut results =
-            Self::validate_transactions_internal(validator, vec![(origin, transaction)]).await;
-        results.pop().expect("transaction result present")
-    }
-
-    /// Performs the stateless/stateful split for a batch and reuses one state provider.
-    async fn validate_transactions_internal(
-        validator: Arc<V>,
-        transactions: Vec<(TransactionOrigin, V::Transaction)>,
-    ) -> Vec<TransactionValidationOutcome<V::Transaction>> {
-        let len = transactions.len();
-        let mut outcomes = Vec::with_capacity(len);
-        outcomes.resize_with(len, || None);
-        let mut stateful: Vec<(usize, TransactionOrigin, V::Transaction)> = Vec::new();
-
-        for (idx, (origin, transaction)) in transactions.into_iter().enumerate() {
-            match validator.validate_transaction_stateless(origin, transaction).await {
-                Ok(tx) => stateful.push((idx, origin, tx)),
-                Err(outcome) => outcomes[idx] = Some(outcome),
-            }
-        }
-
-        if stateful.is_empty() {
-            return outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect();
-        }
-
-        let provider = match validator.latest_state_provider() {
-            Ok(provider) => provider,
-            Err(err) => {
-                for (idx, _, tx) in stateful {
-                    let hash = *tx.hash();
-                    outcomes[idx] = Some(TransactionValidationOutcome::Error(
-                        hash,
-                        Box::new(err.clone()) as Box<dyn core::error::Error + Send + Sync>,
-                    ));
-                }
-                return outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect();
-            }
-        };
-
-        for (idx, origin, tx) in stateful {
-            let result =
-                validator.validate_transaction_stateful(origin, tx, provider.as_ref()).await;
-            outcomes[idx] = Some(result);
-        }
-
-        outcomes.into_iter().map(|outcome| outcome.expect("outcome set")).collect()
+        validator.validate_transaction(origin, transaction).await
     }
 }
 
@@ -268,10 +222,6 @@ where
         state: &dyn StateProvider,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         self.validator.validate_transaction_stateful(origin, transaction, state).await
-    }
-
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
-        self.validator.latest_state_provider()
     }
 
     async fn validate_transaction(
@@ -313,52 +263,24 @@ where
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let hashes: Vec<_> = transactions.iter().map(|(_, tx)| *tx.hash()).collect();
-        let (tx, rx) = oneshot::channel();
-        {
-            let res = {
-                let to_validation_task = self.to_validation_task.clone();
-                let validator = self.validator.clone();
-                let fut = Box::pin(async move {
-                    let res = Self::validate_transactions_internal(validator, transactions).await;
-                    let _ = tx.send(res);
-                });
-                let to_validation_task = to_validation_task.lock().await;
-                to_validation_task.send(fut).await
-            };
-            if res.is_err() {
-                return hashes
-                    .into_iter()
-                    .map(|hash| {
-                        TransactionValidationOutcome::Error(
-                            hash,
-                            Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                        )
-                    })
-                    .collect();
-            }
-        }
-        match rx.await {
-            Ok(res) => res,
-            Err(_) => hashes
-                .into_iter()
-                .map(|hash| {
-                    TransactionValidationOutcome::Error(
-                        hash,
-                        Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                    )
-                })
-                .collect(),
-        }
+        // Since we can't send &dyn StateProvider across tasks, we need to validate synchronously
+        // This is acceptable as @klkvr mentioned we can leave TaskExecutor without many changes
+        self.validator.validate_transactions(transactions, provider).await
     }
 
-    async fn validate_transactions_with_origin(
+    async fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect()).await
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        self.validator.validate_transactions_with_origin(origin, transactions, provider).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

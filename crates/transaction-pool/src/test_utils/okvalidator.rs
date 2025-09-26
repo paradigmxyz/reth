@@ -4,10 +4,7 @@ use crate::{
     validate::ValidTransaction, EthPooledTransaction, PoolTransaction, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidator,
 };
-use reth_storage_api::{
-    errors::provider::{ProviderError, ProviderResult},
-    StateProvider, StateProviderBox,
-};
+use reth_storage_api::StateProvider;
 
 /// A transaction validator that determines all transactions to be valid.
 #[derive(Debug)]
@@ -43,19 +40,8 @@ where
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
-        // Always return valid
-        let authorities = transaction.authorization_list().map(|auths| {
-            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
-        });
-        let outcome = TransactionValidationOutcome::Valid {
-            balance: *transaction.cost(),
-            state_nonce: transaction.nonce(),
-            bytecode_hash: None,
-            transaction: ValidTransaction::Valid(transaction),
-            propagate: self.propagate,
-            authorities,
-        };
-        Err(outcome)
+        // Always passes stateless checks
+        Ok(transaction)
     }
 
     async fn validate_transaction_stateful(
@@ -77,7 +63,21 @@ where
         }
     }
 
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
-        Err(ProviderError::UnsupportedProvider)
+    async fn validate_transaction(
+        &self,
+        _origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let authorities = transaction.authorization_list().map(|auths| {
+            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+        });
+        TransactionValidationOutcome::Valid {
+            balance: *transaction.cost(),
+            state_nonce: transaction.nonce(),
+            bytecode_hash: None,
+            transaction: ValidTransaction::Valid(transaction),
+            propagate: self.propagate,
+            authorities,
+        }
     }
 }

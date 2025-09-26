@@ -31,8 +31,7 @@ use reth_primitives_traits::{
     GotExpected, SealedBlock,
 };
 use reth_storage_api::{
-    errors::provider::ProviderResult, AccountInfoReader, BytecodeReader, StateProvider,
-    StateProviderBox, StateProviderFactory,
+    AccountInfoReader, BytecodeReader, StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -213,7 +212,7 @@ where
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
                 if state.is_none() {
-                    match self.latest_state_provider() {
+                    match self.client.latest() {
                         Ok(provider) => *state = Some(provider),
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
@@ -744,31 +743,49 @@ where
         self.validate_one_against_state(origin, transaction, state)
     }
 
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
-        self.client.latest()
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        self.validate_one(origin, transaction)
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider = None;
         let mut outcomes = Vec::with_capacity(transactions.len());
         for (origin, transaction) in transactions {
-            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
+            match self.validate_one_no_state(origin, transaction) {
+                Ok(transaction) => {
+                    outcomes.push(self.validate_one_against_state(origin, transaction, provider));
+                }
+                Err(invalid_outcome) => outcomes.push(invalid_outcome),
+            }
         }
         outcomes
     }
 
-    async fn validate_transactions_with_origin(
+    async fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        let mut provider = None;
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
         let mut outcomes = Vec::new();
         for transaction in transactions {
-            outcomes.push(self.validate_one_with_state(origin, transaction, &mut provider));
+            match self.validate_one_no_state(origin, transaction) {
+                Ok(transaction) => {
+                    outcomes.push(self.validate_one_against_state(origin, transaction, provider));
+                }
+                Err(invalid_outcome) => outcomes.push(invalid_outcome),
+            }
         }
         outcomes
     }
@@ -1692,7 +1709,8 @@ mod tests {
             .collect();
 
         // Validate the batch using our optimized method
-        let outcomes = validator.validate_transactions(transactions).await;
+        let state_provider = validator.client.latest().unwrap();
+        let outcomes = validator.validate_transactions(transactions, state_provider.as_ref()).await;
 
         // Verify we got all outcomes in the correct order
         assert_eq!(outcomes.len(), 5, "Should have outcome for each transaction");
@@ -1724,7 +1742,8 @@ mod tests {
         validator.block_gas_limit.store(1000, Ordering::Relaxed);
 
         // Validate the batch
-        let outcomes = validator.validate_transactions(transactions).await;
+        let state_provider = validator.client.latest().unwrap();
+        let outcomes = validator.validate_transactions(transactions, state_provider.as_ref()).await;
 
         // Verify all are invalid due to gas limit
         assert_eq!(outcomes.len(), 3);

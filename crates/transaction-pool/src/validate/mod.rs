@@ -10,7 +10,7 @@ use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthoriz
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
-use reth_storage_api::{errors::provider::ProviderResult, StateProvider, StateProviderBox};
+use reth_storage_api::StateProvider;
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
@@ -187,9 +187,6 @@ pub trait TransactionValidator: Debug + Send + Sync {
         state: &dyn StateProvider,
     ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
 
-    /// Returns a provider for accessing the latest account state used during validation.
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox>;
-
     /// Validates the transaction and returns a [`TransactionValidationOutcome`] describing the
     /// validity of the given transaction.
     ///
@@ -219,30 +216,7 @@ pub trait TransactionValidator: Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send {
-        async move {
-            match self.validate_transaction_stateless(origin, transaction).await {
-                Ok(transaction) => {
-                    let hash = *transaction.hash();
-                    match self.latest_state_provider() {
-                        Ok(provider) => {
-                            self.validate_transaction_stateful(
-                                origin,
-                                transaction,
-                                provider.as_ref(),
-                            )
-                            .await
-                        }
-                        Err(err) => TransactionValidationOutcome::Error(
-                            hash,
-                            Box::new(err) as Box<dyn core::error::Error + Send + Sync>,
-                        ),
-                    }
-                }
-                Err(outcome) => outcome,
-            }
-        }
-    }
+    ) -> impl Future<Output = TransactionValidationOutcome<Self::Transaction>> + Send;
 
     /// Validates a batch of transactions.
     ///
@@ -252,10 +226,24 @@ pub trait TransactionValidator: Debug + Send + Sync {
     fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+        provider: &dyn StateProvider,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
-        )
+        async move {
+            let mut outcomes = Vec::with_capacity(transactions.len());
+
+            for (origin, transaction) in transactions {
+                match self.validate_transaction_stateless(origin, transaction).await {
+                    Ok(tx) => {
+                        let outcome =
+                            self.validate_transaction_stateful(origin, tx, provider).await;
+                        outcomes.push(outcome);
+                    }
+                    Err(outcome) => outcomes.push(outcome),
+                }
+            }
+
+            outcomes
+        }
     }
 
     /// Validates a batch of transactions with that given origin.
@@ -263,13 +251,32 @@ pub trait TransactionValidator: Debug + Send + Sync {
     /// Must return all outcomes for the given transactions in the same order.
     ///
     /// See also [`Self::validate_transaction`].
-    fn validate_transactions_with_origin(
+    fn validate_transactions_with_origin<I>(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
-    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
-        futures_util::future::join_all(futures)
+        transactions: I,
+        provider: &dyn StateProvider,
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        async move {
+            let mut outcomes = Vec::new();
+
+            for transaction in transactions {
+                match self.validate_transaction_stateless(origin, transaction).await {
+                    Ok(tx) => {
+                        let outcome =
+                            self.validate_transaction_stateful(origin, tx, provider).await;
+                        outcomes.push(outcome);
+                    }
+                    Err(outcome) => outcomes.push(outcome),
+                }
+            }
+
+            outcomes
+        }
     }
 
     /// Invoked when the head block changes.
@@ -312,10 +319,14 @@ where
         }
     }
 
-    fn latest_state_provider(&self) -> ProviderResult<StateProviderBox> {
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
         match self {
-            Self::Left(v) => v.latest_state_provider(),
-            Self::Right(v) => v.latest_state_provider(),
+            Self::Left(v) => v.validate_transaction(origin, transaction).await,
+            Self::Right(v) => v.validate_transaction(origin, transaction).await,
         }
     }
 
