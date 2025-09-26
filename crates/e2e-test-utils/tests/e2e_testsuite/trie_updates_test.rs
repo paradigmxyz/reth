@@ -125,27 +125,7 @@ async fn create_storage_transaction(slot: U256, value: U256, nonce: u64) -> Resu
 
 /// Creates the test environment setup
 fn create_test_setup() -> Setup<EthEngineTypes> {
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(create_test_genesis())
-            .cancun_activated()
-            .build(),
-    );
-
-    Setup::<EthEngineTypes>::default()
-        .with_chain_spec(chain_spec)
-        .with_network(NetworkSetup::single_node())
-        .with_tree_config(
-            TreeConfig::default()
-                .with_persistence_threshold(0) // Persist blocks immediately
-                .with_legacy_state_root(true), // Use legacy state root to ensure trie updates
-        )
-}
-
-/// Creates a genesis state with the storage contract and funded test account
-fn create_test_genesis() -> serde_json::Value {
-    serde_json::json!({
+    let genesis_json = serde_json::json!({
         "config": {
             "chainId": 1,
             "homesteadBlock": 0,
@@ -183,5 +163,22 @@ fn create_test_genesis() -> serde_json::Value {
             }
         },
         "number": "0x0"
-    })
+    });
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_value(genesis_json).unwrap())
+            .cancun_activated()
+            .build(),
+    );
+
+    Setup::<EthEngineTypes>::default()
+        .with_chain_spec(chain_spec)
+        .with_network(NetworkSetup::single_node())
+        .with_tree_config(
+            TreeConfig::default()
+                .with_persistence_threshold(0) // Persist blocks immediately
+                .with_legacy_state_root(true), // Use legacy state root to ensure trie updates
+        )
 }
