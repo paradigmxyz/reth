@@ -606,6 +606,8 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
+                        .to_string()
+                        .replace(' ', "")
                 )
             }
         }
@@ -631,6 +633,6 @@ mod tests {
         }
         .to_string();
 
-        assert_eq!(eta, "13m 37s");
+        assert_eq!(eta, "13m37s");
     }
 }
