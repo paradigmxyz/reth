@@ -18,7 +18,7 @@ use crate::{
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -2443,6 +2443,48 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
+    fn revert_trie(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
+        let tx = self.tx_ref();
+
+        // Start by collecting account nodes, keeping only the oldest version of each node.
+        let mut accounts = HashMap::new();
+        let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        for entry in accounts_cursor.walk_range(from..)? {
+            let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
+            accounts.entry(nibbles.0).or_insert(node);
+        }
+
+        // Similarly for storage tries we only keep the oldest version of each node in each trie.
+        let mut storages = B256Map::<HashMap<_, _>>::default();
+        let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+
+        // Create range for storage trie changesets from the given block onwards
+        let storage_range = BlockNumberHashedAddress((from, B256::ZERO))..;
+
+        for entry in storages_cursor.walk_range(storage_range)? {
+            let (
+                BlockNumberHashedAddress((_, hashed_address)),
+                TrieChangeSetsEntry { nibbles, node },
+            ) = entry?;
+            storages.entry(hashed_address).or_default().entry(nibbles.0).or_insert(node);
+        }
+
+        // Build `TrieUpdates` using our trie node reverts, then convert to sorted.
+        let mut updates = TrieUpdates::default();
+        updates.extend_accounts_from_iter(accounts.into_iter());
+        for (hashed_address, storage_updates) in storages {
+            updates
+                .storage_tries
+                .entry(hashed_address)
+                .or_default()
+                .extend_from_iter(storage_updates.into_iter())
+        }
+
+        Ok(updates.into_sorted())
     }
 }
 
