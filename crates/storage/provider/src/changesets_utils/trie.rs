@@ -83,9 +83,9 @@ where
     }
 }
 
-/// Returns an iterator which produces the values to be inserted into
-/// [`tables::StoragesTrieChangeSets`] for an account whose storage was wiped during a block. It is
-/// expected that this is called prior to inserting the block's trie updates.
+/// Returns an iterator which produces the values to be inserted into the `StoragesTrieChangeSets`
+/// table for an account whose storage was wiped during a block. It is expected that this is called
+/// prior to inserting the block's trie updates.
 ///
 /// ## Arguments
 ///
