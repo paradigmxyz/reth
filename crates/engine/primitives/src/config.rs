@@ -7,7 +7,7 @@ pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 
 /// Default maximum concurrency for proof tasks
-pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
+pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 128;
 
 /// Default number of reserved CPU cores for non-reth processes.
 ///
