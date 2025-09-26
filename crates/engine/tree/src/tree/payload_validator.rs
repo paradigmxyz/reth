@@ -996,7 +996,7 @@ where
         } else {
             let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
-                block_number + 1,
+                block_number + 1..,
             )
             .map_err(ProviderError::from)?;
             debug!(
