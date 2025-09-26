@@ -803,7 +803,8 @@ async fn test_race_condition_fix_during_block_removal() {
         test_block_builder.get_executed_block_with_number(3, fork_block2.recovered_block().hash());
 
     // Insert fork blocks
-    test_harness.tree.state.tree_state.insert_executed(fork_block2.clone());
+    test_harness.tree.state.tree_state.insert_executed(fork_block2);
+    #[allow(clippy::redundant_clone)]
     test_harness.tree.state.tree_state.insert_executed(fork_block3.clone());
 
     // Trigger reorganization by setting new canonical head to fork_block3
