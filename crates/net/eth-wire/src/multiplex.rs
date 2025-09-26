@@ -30,7 +30,7 @@ use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
 /// A Stream and Sink type that wraps a raw rlpx stream [`P2PStream`] and handles message ID
 /// multiplexing.
@@ -86,11 +86,11 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared)
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
-        let (to_wire, from_primary) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) = mpsc::channel(1024);
+        let (to_wire, from_primary) = mpsc::channel(1024);
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
+            from_wire: ReceiverStream::new(from_wire),
             to_wire,
         };
 
@@ -99,7 +99,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
             inner: self.inner,
             primary: PrimaryProtocol {
                 to_primary,
-                from_primary: UnboundedReceiverStream::new(from_primary),
+                from_primary: ReceiverStream::new(from_primary),
                 st,
                 shared_cap,
             },
@@ -154,11 +154,11 @@ impl<St> RlpxProtocolMultiplexer<St> {
             return Err(P2PStreamError::CapabilityNotShared.into())
         };
 
-        let (to_primary, from_wire) = mpsc::unbounded_channel();
-        let (to_wire, mut from_primary) = mpsc::unbounded_channel();
+        let (to_primary, from_wire) = mpsc::channel(1024);
+        let (to_wire, mut from_primary) = mpsc::channel(1024);
         let proxy = ProtocolProxy {
             shared_cap: shared_cap.clone(),
-            from_wire: UnboundedReceiverStream::new(from_wire),
+            from_wire: ReceiverStream::new(from_wire),
             to_wire,
         };
 
@@ -178,8 +178,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
                             if cap == shared_cap {
-                                // delegate to primary
-                                let _ = to_primary.send(msg);
+                                // delegate to primary; drop if the channel is full
+                                let _ = to_primary.try_send(msg);
                             } else {
                                 // delegate to satellite
                                 self.inner.delegate_message(&cap, msg);
@@ -201,7 +201,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                             inner: self.inner,
                             primary: PrimaryProtocol {
                                 to_primary,
-                                from_primary: UnboundedReceiverStream::new(from_primary),
+                                from_primary: ReceiverStream::new(from_primary),
                                 st,
                                 shared_cap,
                             }
@@ -288,9 +288,9 @@ impl<St> MultiplexInner<St> {
 #[derive(Debug)]
 struct PrimaryProtocol<Primary> {
     /// Channel to send messages to the primary protocol.
-    to_primary: UnboundedSender<BytesMut>,
+    to_primary: mpsc::Sender<BytesMut>,
     /// Receiver for messages from the primary protocol.
-    from_primary: UnboundedReceiverStream<Bytes>,
+    from_primary: ReceiverStream<Bytes>,
     /// Shared capability of the primary protocol.
     shared_cap: SharedCapability,
     /// The primary stream.
@@ -304,9 +304,9 @@ struct PrimaryProtocol<Primary> {
 pub struct ProtocolProxy {
     shared_cap: SharedCapability,
     /// Receives _non-empty_ messages from the wire
-    from_wire: UnboundedReceiverStream<BytesMut>,
+    from_wire: ReceiverStream<BytesMut>,
     /// Sends _non-empty_ messages from the wire
-    to_wire: UnboundedSender<Bytes>,
+    to_wire: mpsc::Sender<Bytes>,
 }
 
 impl ProtocolProxy {
@@ -316,7 +316,13 @@ impl ProtocolProxy {
             // message must not be empty
             return Err(io::ErrorKind::InvalidInput.into())
         }
-        self.to_wire.send(self.mask_msg_id(msg)?).map_err(|_| io::ErrorKind::BrokenPipe.into())
+        // Non-async path: if channel is full, return WouldBlock to let caller apply backpressure.
+        self.to_wire
+            .try_send(self.mask_msg_id(msg)?)
+            .map_err(|e| match e {
+                mpsc::error::TrySendError::Full(_) => io::ErrorKind::WouldBlock.into(),
+                mpsc::error::TrySendError::Closed(_) => io::ErrorKind::BrokenPipe.into(),
+            })
     }
 
     /// Masks the message ID of a message to be sent on the wire.
