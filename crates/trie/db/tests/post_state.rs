@@ -227,7 +227,7 @@ fn storage_is_empty() {
         (0..10).map(|key| (B256::with_last_byte(key), U256::from(key))).collect::<BTreeMap<_, _>>();
     db.update(|tx| {
         for (slot, value) in &db_storage {
-            // insert zero value accounts to the database
+            // insert storage entries to the database
             tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
                 .unwrap();
         }
@@ -348,7 +348,7 @@ fn zero_value_storage_entries_are_discarded() {
     let db = create_test_rw_db();
     db.update(|tx| {
         for (slot, value) in db_storage {
-            // insert zero value accounts to the database
+            // insert storage entries to the database
             tx.put::<tables::HashedStorages>(address, StorageEntry { key: slot, value }).unwrap();
         }
     })

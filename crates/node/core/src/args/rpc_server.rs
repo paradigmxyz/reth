@@ -1,12 +1,9 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use std::{
-    collections::HashSet,
-    ffi::OsStr,
-    net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
+use crate::args::{
+    types::{MaxU32, ZeroAsNoneU64},
+    GasPriceOracleArgs, RpcStateCacheArgs,
 };
-
 use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
@@ -14,15 +11,17 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_cli_util::parse_ether_value;
+use reth_cli_util::{parse_duration_from_secs_or_ms, parse_ether_value};
 use reth_rpc_eth_types::builder::config::PendingBlockKind;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
-use url::Url;
-
-use crate::args::{
-    types::{MaxU32, ZeroAsNoneU64},
-    GasPriceOracleArgs, RpcStateCacheArgs,
+use std::{
+    collections::HashSet,
+    ffi::OsStr,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
+    time::Duration,
 };
+use url::Url;
 
 use super::types::MaxOr;
 
@@ -244,6 +243,15 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// Timeout for `send_raw_transaction_sync` RPC method.
+    #[arg(
+        long = "rpc.send-raw-transaction-sync-timeout",
+        value_name = "SECONDS",
+        default_value = "30s",
+        value_parser = parse_duration_from_secs_or_ms,
+    )]
+    pub rpc_send_raw_transaction_sync_timeout: Duration,
 }
 
 impl RpcServerArgs {
@@ -359,6 +367,12 @@ impl RpcServerArgs {
     {
         f(self)
     }
+
+    /// Configures the timeout for send raw transaction sync.
+    pub const fn with_send_raw_transaction_sync_timeout(mut self, timeout: Duration) -> Self {
+        self.rpc_send_raw_transaction_sync_timeout = timeout;
+        self
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -403,6 +417,8 @@ impl Default for RpcServerArgs {
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             rpc_forwarder: None,
             builder_disallow: Default::default(),
+            rpc_send_raw_transaction_sync_timeout:
+                constants::RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
         }
     }
 }

@@ -116,12 +116,12 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Returns `true` if this a newer block
     pub(crate) fn update_peer_block(&mut self, peer_id: &PeerId, hash: B256, number: u64) -> bool {
-        if let Some(peer) = self.peers.get_mut(peer_id) {
-            if number > peer.best_number {
-                peer.best_hash = hash;
-                peer.best_number = number;
-                return true
-            }
+        if let Some(peer) = self.peers.get_mut(peer_id) &&
+            number > peer.best_number
+        {
+            peer.best_hash = hash;
+            peer.best_number = number;
+            return true
         }
         false
     }

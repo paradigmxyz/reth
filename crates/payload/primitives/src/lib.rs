@@ -71,6 +71,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
+/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp.
 ///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
@@ -521,7 +522,7 @@ mod tests {
         let mut requests_valid_reversed = valid_requests;
         requests_valid_reversed.reverse();
         assert_matches!(
-            validate_execution_requests(&requests_with_empty),
+            validate_execution_requests(&requests_valid_reversed),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
 

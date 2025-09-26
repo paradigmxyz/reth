@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
@@ -119,16 +119,9 @@ pub trait StorageTrieWriter: Send + Sync {
     /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates(
+    fn write_storage_trie_updates<'a>(
         &self,
-        storage_tries: &B256Map<StorageTrieUpdates>,
-    ) -> ProviderResult<usize>;
-
-    /// Writes storage trie updates for the given hashed address.
-    fn write_individual_storage_trie_updates(
-        &self,
-        hashed_address: B256,
-        updates: &StorageTrieUpdates,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
     ) -> ProviderResult<usize>;
 
     /// Records the current values of all trie nodes which will be updated using the

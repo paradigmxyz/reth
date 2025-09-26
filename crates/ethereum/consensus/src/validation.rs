@@ -37,17 +37,19 @@ where
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header().number()) {
-        if let Err(error) =
-            verify_receipts(block.header().receipts_root(), block.header().logs_bloom(), receipts)
-        {
-            let receipts = receipts
-                .iter()
-                .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
-                .collect::<Vec<_>>();
-            tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
-        }
+    if chain_spec.is_byzantium_active_at_block(block.header().number()) &&
+        let Err(error) = verify_receipts(
+            block.header().receipts_root(),
+            block.header().logs_bloom(),
+            receipts,
+        )
+    {
+        let receipts = receipts
+            .iter()
+            .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
+            .collect::<Vec<_>>();
+        tracing::debug!(%error, ?receipts, "receipts verification failed");
+        return Err(error)
     }
 
     // Validate that the header requests hash matches the calculated requests hash

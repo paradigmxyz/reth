@@ -314,13 +314,14 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
+        let saved_cache = self.cache_for(env.parent_hash);
+        let cache = saved_cache.cache().clone();
+        let cache_metrics = saved_cache.metrics().clone();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            cache: cache.clone(),
-            cache_metrics: cache_metrics.clone(),
+            saved_cache,
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -357,15 +358,14 @@ where
     /// instance.
     #[instrument(target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        self.execution_cache
-            .get_cache_for(parent_hash)
-            .inspect(|_| debug!("reusing execution cache"))
-            .unwrap_or_else(|| {
-                debug!("creating new execution cache on cache miss");
-                let cache =
-                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-                SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
-            })
+        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
+            debug!("reusing execution cache");
+            cache
+        } else {
+            debug!("creating new execution cache on cache miss");
+            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
+            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+        }
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
@@ -465,6 +465,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
         self.prewarm_handle.cache.clone()
     }
 
+    /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
         self.prewarm_handle.cache_metrics.clone()
     }
@@ -479,7 +480,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// Terminates the entire caching task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
+    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
         self.prewarm_handle.terminate_caching(block_output)
     }
 
@@ -515,10 +516,12 @@ impl CacheTaskHandle {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
-        self.to_prewarm_task
-            .take()
-            .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
+    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
+        if let Some(tx) = self.to_prewarm_task.take() {
+            // Only clone when we have an active task and a state to send
+            let event = PrewarmTaskEvent::Terminate { block_output: block_output.cloned() };
+            let _ = tx.send(event);
+        }
     }
 }
 
@@ -561,12 +564,17 @@ struct ExecutionCache {
 }
 
 impl ExecutionCache {
-    /// Returns the cache if the currently store cache is for the given `parent_hash`
+    /// Returns the cache for `parent_hash` if it's available for use.
+    ///
+    /// A cache is considered available when:
+    /// - It exists and matches the requested parent hash
+    /// - No other tasks are currently using it (checked via Arc reference count)
     pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let cache = self.inner.read();
         cache
             .as_ref()
-            .and_then(|cache| (cache.executed_block_hash() == parent_hash).then(|| cache.clone()))
+            .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
+            .cloned()
     }
 
     /// Clears the tracked cache
@@ -623,7 +631,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::ExecutionCache;
     use crate::tree::{
+        cached_state::{CachedStateMetrics, ExecutionCacheBuilder, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -648,6 +658,77 @@ mod tests {
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
+
+    fn make_saved_cache(hash: B256) -> SavedCache {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1_000);
+        SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
+    }
+
+    #[test]
+    fn execution_cache_allows_single_checkout() {
+        let execution_cache = ExecutionCache::default();
+        let hash = B256::from([1u8; 32]);
+
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+
+        let first = execution_cache.get_cache_for(hash);
+        assert!(first.is_some(), "expected initial checkout to succeed");
+
+        let second = execution_cache.get_cache_for(hash);
+        assert!(second.is_none(), "second checkout should be blocked while guard is active");
+
+        drop(first);
+
+        let third = execution_cache.get_cache_for(hash);
+        assert!(third.is_some(), "third checkout should succeed after guard is dropped");
+    }
+
+    #[test]
+    fn execution_cache_checkout_releases_on_drop() {
+        let execution_cache = ExecutionCache::default();
+        let hash = B256::from([2u8; 32]);
+
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+
+        {
+            let guard = execution_cache.get_cache_for(hash);
+            assert!(guard.is_some(), "expected checkout to succeed");
+            // Guard dropped at end of scope
+        }
+
+        let retry = execution_cache.get_cache_for(hash);
+        assert!(retry.is_some(), "checkout should succeed after guard drop");
+    }
+
+    #[test]
+    fn execution_cache_mismatch_parent_returns_none() {
+        let execution_cache = ExecutionCache::default();
+        let hash = B256::from([3u8; 32]);
+
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(hash)));
+
+        let miss = execution_cache.get_cache_for(B256::from([4u8; 32]));
+        assert!(miss.is_none(), "checkout should fail for different parent hash");
+    }
+
+    #[test]
+    fn execution_cache_update_after_release_succeeds() {
+        let execution_cache = ExecutionCache::default();
+        let initial = B256::from([5u8; 32]);
+
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(initial)));
+
+        let guard =
+            execution_cache.get_cache_for(initial).expect("expected initial checkout to succeed");
+
+        drop(guard);
+
+        let updated = B256::from([6u8; 32]);
+        execution_cache.update_with_guard(|slot| *slot = Some(make_saved_cache(updated)));
+
+        let new_checkout = execution_cache.get_cache_for(updated);
+        assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
+    }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();

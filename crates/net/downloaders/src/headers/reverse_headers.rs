@@ -172,19 +172,16 @@ where
     ///
     /// Returns `None` if no more requests are required.
     fn next_request(&mut self) -> Option<HeadersRequest> {
-        if let Some(local_head) = self.local_block_number() {
-            if self.next_request_block_number > local_head {
-                let request = calc_next_request(
-                    local_head,
-                    self.next_request_block_number,
-                    self.request_limit,
-                );
-                // need to shift the tracked request block number based on the number of requested
-                // headers so follow-up requests will use that as start.
-                self.next_request_block_number -= request.limit;
+        if let Some(local_head) = self.local_block_number() &&
+            self.next_request_block_number > local_head
+        {
+            let request =
+                calc_next_request(local_head, self.next_request_block_number, self.request_limit);
+            // need to shift the tracked request block number based on the number of requested
+            // headers so follow-up requests will use that as start.
+            self.next_request_block_number -= request.limit;
 
-                return Some(request)
-            }
+            return Some(request)
         }
 
         None

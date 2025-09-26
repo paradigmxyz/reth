@@ -38,7 +38,7 @@ macro_rules! regex {
     }};
 }
 
-/// Generate markdown files from help output of commands
+/// Generate markdown files from the help output of commands
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
 struct Args {

@@ -53,9 +53,6 @@ pub trait EstimateCall: Call {
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.cfg_env.disable_base_fee = true;
 
-        // Disable EIP-7825 transaction gas limit to support larger transactions
-        evm_env.cfg_env.tx_gas_limit_cap = Some(u64::MAX);
-
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
 
@@ -91,14 +88,14 @@ pub trait EstimateCall: Call {
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check if this is a basic transfer (no input data to account with no code)
-        let mut is_basic_transfer = false;
-        if tx_env.input().is_empty() {
-            if let TxKind::Call(to) = tx_env.kind() {
-                if let Ok(code) = db.db.account_code(&to) {
-                    is_basic_transfer = code.map(|code| code.is_empty()).unwrap_or(true);
-                }
-            }
-        }
+        let is_basic_transfer = if tx_env.input().is_empty() &&
+            let TxKind::Call(to) = tx_env.kind() &&
+            let Ok(code) = db.db.account_code(&to)
+        {
+            code.map(|code| code.is_empty()).unwrap_or(true)
+        } else {
+            false
+        };
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
@@ -126,10 +123,10 @@ pub trait EstimateCall: Call {
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
             // Reuse the same EVM instance
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) {
-                if res.result.is_success() {
-                    return Ok(U256::from(MIN_TRANSACTION_GAS))
-                }
+            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+                res.result.is_success()
+            {
+                return Ok(U256::from(MIN_TRANSACTION_GAS))
             }
         }
 
