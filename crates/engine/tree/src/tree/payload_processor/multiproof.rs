@@ -18,7 +18,10 @@ use reth_trie::{
     updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
     HashedStorage, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
+use reth_trie_parallel::{
+    proof::ParallelProof,
+    proof_task::{AccountProofInput, ProofTaskKind, ProofTaskManagerHandle},
+};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -315,6 +318,7 @@ impl<Factory> StorageMultiproofInput<Factory> {
 /// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
+    #[allow(dead_code)]
     config: MultiProofConfig<Factory>,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
@@ -502,7 +506,7 @@ where
     /// Spawns a single multiproof calculation task.
     fn spawn_multiproof(&mut self, multiproof_input: MultiproofInput<Factory>) {
         let MultiproofInput {
-            config,
+            config: _,
             source,
             hashed_state_update,
             proof_targets,
@@ -512,6 +516,10 @@ where
         } = multiproof_input;
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
+        // Queue account proof via ProofTaskManager to reuse DB transactions.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let input = AccountProofInput::new(proof_targets.clone(), true, multi_added_removed_keys);
+        let _ = storage_proof_task_handle.queue_task(ProofTaskKind::AccountProof(input, tx));
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
             let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
@@ -523,33 +531,24 @@ where
                 account_targets,
                 storage_targets,
                 ?source,
-                "Starting multiproof calculation",
+                "Starting multiproof calculation via manager",
             );
 
             let start = Instant::now();
-            let result = ParallelProof::new(
-                config.consistent_view,
-                config.nodes_sorted,
-                config.state_sorted,
-                config.prefix_sets,
-                storage_proof_task_handle.clone(),
-            )
-            .with_branch_node_masks(true)
-            .with_multi_added_removed_keys(multi_added_removed_keys)
-            .decoded_multiproof(proof_targets);
+            let result = rx.recv();
             let elapsed = start.elapsed();
-            trace!(
-                target: "engine::root",
-                proof_sequence_number,
-                ?elapsed,
-                ?source,
-                account_targets,
-                storage_targets,
-                "Multiproof calculated",
-            );
 
             match result {
-                Ok(proof) => {
+                Ok(Ok(proof)) => {
+                    trace!(
+                        target: "engine::root",
+                        proof_sequence_number,
+                        ?elapsed,
+                        ?source,
+                        account_targets,
+                        storage_targets,
+                        "Multiproof calculated",
+                    );
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -561,9 +560,17 @@ where
                         }),
                     ));
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     let _ = state_root_message_sender
                         .send(MultiProofMessage::ProofCalculationError(error.into()));
+                }
+                Err(recv_err) => {
+                    let err = reth_trie_parallel::root::ParallelStateRootError::Other(format!(
+                        "account proof channel closed: {}",
+                        recv_err
+                    ));
+                    let _ = state_root_message_sender
+                        .send(MultiProofMessage::ProofCalculationError(err.into()));
                 }
             }
         });
