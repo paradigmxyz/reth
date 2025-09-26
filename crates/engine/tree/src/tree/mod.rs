@@ -602,8 +602,8 @@ where
                         latest_valid_hash = Some(block_hash);
                         PayloadStatusEnum::Valid
                     }
-                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. })
-                    | InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                    InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                    InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                         // not known to be invalid, but we don't know anything else
                         PayloadStatusEnum::Syncing
                     }
@@ -987,8 +987,8 @@ where
             CurrentPersistenceAction::SavingBlocks { highest } => {
                 // The block being validated can only be a descendant if its number is higher than
                 // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-                if block.block.number > highest.number
-                    && self.state.tree_state.is_descendant(*highest, block)
+                if block.block.number > highest.number &&
+                    self.state.tree_state.is_descendant(*highest, block)
                 {
                     return PersistingKind::PersistingDescendant;
                 }
@@ -1083,8 +1083,8 @@ where
 
             // For OpStack, or if explicitly configured, the proposers are allowed to reorg their
             // own chain at will, so we need to always trigger a new payload job if requested.
-            if self.engine_kind.is_opstack()
-                || self.config.always_process_payload_attributes_on_canonical_head()
+            if self.engine_kind.is_opstack() ||
+                self.config.always_process_payload_attributes_on_canonical_head()
             {
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
@@ -1300,8 +1300,8 @@ where
 
                         // if the parent is the canonical head, we can insert the block as the
                         // pending block
-                        if self.state.tree_state.canonical_block_hash()
-                            == block.recovered_block().parent_hash()
+                        if self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash()
                         {
                             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
                             self.canonical_in_memory_state.set_pending_block(block.clone());
@@ -1585,8 +1585,8 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block)
-            > self.config.persistence_threshold()
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
+            self.config.persistence_threshold()
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
@@ -1822,8 +1822,8 @@ where
     fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
-        if let Some(parent) = self.sealed_header_by_hash(parent_hash)?
-            && !parent.difficulty().is_zero()
+        if let Some(parent) = self.sealed_header_by_hash(parent_hash)? &&
+            !parent.difficulty().is_zero()
         {
             parent_hash = B256::ZERO;
         }
@@ -1973,8 +1973,8 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
-                    if self.is_sync_target_head(child_num_hash.hash)
-                        && matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
+                    if self.is_sync_target_head(child_num_hash.hash) &&
+                        matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
                     {
                         self.make_canonical(child_num_hash.hash)?;
                     }
@@ -2685,8 +2685,8 @@ where
                 return Err(OnForkChoiceUpdated::invalid_state());
             }
             Ok(Some(finalized)) => {
-                if Some(finalized.num_hash())
-                    != self.canonical_in_memory_state.get_finalized_num_hash()
+                if Some(finalized.num_hash()) !=
+                    self.canonical_in_memory_state.get_finalized_num_hash()
                 {
                     // we're also persisting the finalized block on disk so we can reload it on
                     // restart this is required by optimism which queries the finalized block: <https://github.com/ethereum-optimism/optimism/blob/c383eb880f307caa3ca41010ec10f30f08396b2e/op-node/rollup/sync/start.go#L65-L65>
