@@ -378,6 +378,10 @@ where
         }
     }
 
+    const fn is_full(&self) -> bool {
+        self.inflight >= self.max_concurrent
+    }
+
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask<Factory>) {
@@ -391,7 +395,7 @@ where
             return
         }
 
-        if self.inflight >= self.max_concurrent {
+        if self.is_full() {
             self.pending.push_back(input);
             self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             return;
@@ -707,13 +711,15 @@ where
 
         // Process proof targets in chunks.
         let mut chunks = 0;
-        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+        let should_chunk = !self.multiproof_manager.is_full();
+
+        let mut spawn = |proof_targets| {
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: None,
                     hashed_state_update: Default::default(),
-                    proof_targets: proof_targets_chunk,
+                    proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
                     multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
@@ -721,7 +727,16 @@ where
                 .into(),
             );
             chunks += 1;
+        };
+
+        if should_chunk {
+            for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+                spawn(proof_targets_chunk);
+            }
+        } else {
+            spawn(proof_targets);
         }
+
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
 
         chunks
@@ -830,17 +845,23 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
+        let should_chunk = !self.multiproof_manager.is_full();
+
         let mut spawned_proof_targets = MultiProofTargets::default();
-        for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            let proof_targets =
-                get_proof_targets(&chunk, &self.fetched_proof_targets, &multi_added_removed_keys);
+
+        let mut spawn = |hashed_state_update| {
+            let proof_targets = get_proof_targets(
+                &hashed_state_update,
+                &self.fetched_proof_targets,
+                &multi_added_removed_keys,
+            );
             spawned_proof_targets.extend_ref(&proof_targets);
 
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: Some(source),
-                    hashed_state_update: chunk,
+                    hashed_state_update,
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
@@ -848,7 +869,16 @@ where
                 }
                 .into(),
             );
+
             chunks += 1;
+        };
+
+        if should_chunk {
+            for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+                spawn(chunk);
+            }
+        } else {
+            spawn(not_fetched_state_update);
         }
 
         self.metrics
