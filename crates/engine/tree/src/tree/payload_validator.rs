@@ -826,10 +826,10 @@ where
     /// The method handles strategy fallbacks if the preferred approach fails, ensuring
     /// block execution always completes with a valid state root.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_payload_processor(
+    fn spawn_payload_processor<T: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
-        txs: impl ExecutableTxIterator<Evm>,
+        txs: T,
         provider_builder: StateProviderBuilder<N, P>,
         persisting_kind: PersistingKind,
         parent_hash: B256,
@@ -837,7 +837,10 @@ where
         block_num_hash: NumHash,
         strategy: &mut StateRootStrategy,
     ) -> Result<
-        PayloadHandle<impl ExecutableTxFor<Evm>, impl core::error::Error + Send + Sync + 'static>,
+        PayloadHandle<
+            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+        >,
         InsertBlockErrorKind,
     > {
         match strategy {
