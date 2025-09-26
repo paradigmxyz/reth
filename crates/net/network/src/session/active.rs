@@ -164,6 +164,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         macro_rules! on_request {
             ($req:ident, $resp_item:ident, $req_item:ident) => {{
                 let RequestPair { request_id, message: request } = $req;
+                dbg!(&request);
                 let (tx, response) = oneshot::channel();
                 let received = ReceivedRequest {
                     request_id,
@@ -628,6 +629,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             // Send messages by advancing the sink and queuing in buffered messages
             while this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
+                    dbg!("sending", &msg);
                     progress = true;
                     let res = match msg {
                         OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),

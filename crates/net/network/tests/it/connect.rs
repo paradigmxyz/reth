@@ -221,7 +221,7 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+// #[ignore]
 async fn test_connect_with_builder() {
     reth_tracing::init_test_tracing();
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
@@ -229,13 +229,17 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
+    let config = NetworkConfigBuilder::eth(secret_key).disable_discovery().build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
         .into_builder()
         .request_handler(client)
         .split_with_handle();
+
+    let record : NodeRecord = "enode://d54f2c88dad80719c6f2be2c9925c6c2609f845ed84c9e2f961c2a7e67bfe218a657118a70a45d1b245e96e2678b0276ca2ca869d7aa5688fcb1a52381d6a1e3@157.180.14.230:30303?discport=30303".parse().unwrap();
+
+    handle.add_trusted_peer(record.id, record.tcp_addr());
 
     let mut events = handle.event_listener();
 
