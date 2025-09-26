@@ -816,7 +816,7 @@ where
     ///
     /// This checks if the block connects to the last persisted block.
     ///
-    /// During reorganization, we use PersistenceState to avoid race conditions
+    /// During reorganization, we use `PersistenceState` to avoid race conditions
     /// between database updates and static file removal.
     fn block_connects_to_last_persisted(
         &self,
