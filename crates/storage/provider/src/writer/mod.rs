@@ -206,9 +206,8 @@ where
 
         // Get highest static file block for the total block range. If no static file headers
         // exist on disk, there's nothing to prune from static files.
-        let Some(highest_static_file_block) = self
-            .static_file()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
+        let Some(highest_static_file_block) =
+            self.static_file().get_highest_static_file_block(StaticFileSegment::Headers)
         else {
             debug!(target: "provider::storage_writer", ?block_number, "No static file headers found, skipping static file pruning");
             return Ok(());
