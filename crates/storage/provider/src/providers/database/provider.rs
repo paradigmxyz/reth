@@ -2394,13 +2394,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     ) -> ProviderResult<()> {
         let tx = self.tx_ref();
         let range = (range.start_bound(), range.end_bound()); // avoid clone
-                                                              //
         {
             let mut cursor = tx.cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
             let mut walker = cursor.walk_range(range)?;
 
-            while let Some(entry) = walker.next() {
-                let (_, _) = entry?;
+            while walker.next().transpose()?.is_some() {
                 walker.delete_current()?;
             }
         }
@@ -2410,8 +2408,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             let mut cursor = tx.cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
             let mut walker = cursor.walk_range(range)?;
 
-            while let Some(entry) = walker.next() {
-                let (_, _) = entry?;
+            while walker.next().transpose()?.is_some() {
                 walker.delete_current()?;
             }
         }
