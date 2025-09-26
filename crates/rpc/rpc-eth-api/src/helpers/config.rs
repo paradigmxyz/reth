@@ -100,6 +100,7 @@ where
 
         let mut fork_timestamps =
             chain_spec.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
+        fork_timestamps.sort();
         fork_timestamps.dedup();
 
         let (current_fork_idx, current_fork_timestamp) = fork_timestamps
@@ -116,26 +117,9 @@ where
 
         let mut config = EthConfig { current, next: None, last: None };
 
-        if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) &&
-            let Some(last_fork_timestamp) = fork_timestamps.get(last_fork_idx).copied()
-        {
-            let fake_header = {
-                let mut header = latest.clone();
-                header.timestamp = last_fork_timestamp;
-                header
-            };
-            let last_precompiles = evm_to_precompiles_map(
-                self.evm_config
-                    .evm_for_block(EmptyDB::default(), &fake_header)
-                    .map_err(RethError::other)?,
-            );
-
-            config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
-        }
-
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
             let fake_header = {
-                let mut header = latest;
+                let mut header = latest.clone();
                 header.timestamp = next_fork_timestamp;
                 header
             };
@@ -146,7 +130,24 @@ where
             );
 
             config.next = self.build_fork_config_at(next_fork_timestamp, next_precompiles);
+        } else {
+            // If there is no fork scheduled, there is no "last" or "final" fork scheduled.
+            return Ok(config);
         }
+
+        let last_fork_timestamp = fork_timestamps.get(fork_timestamps.len() - 1).copied().unwrap();
+        let fake_header = {
+            let mut header = latest;
+            header.timestamp = last_fork_timestamp;
+            header
+        };
+        let last_precompiles = evm_to_precompiles_map(
+            self.evm_config
+                .evm_for_block(EmptyDB::default(), &fake_header)
+                .map_err(RethError::other)?,
+        );
+
+        config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
 
         Ok(config)
     }
@@ -196,7 +197,7 @@ fn precompile_to_str(id: &PrecompileId) -> String {
         PrecompileId::Bls12Pairing => "BLS12_PAIRING_CHECK",
         PrecompileId::Bls12MapFpToGp1 => "BLS12_MAP_FP_TO_G1",
         PrecompileId::Bls12MapFp2ToGp2 => "BLS12_MAP_FP2_TO_G2",
-        PrecompileId::P256Verify => "P256_VERIFY",
+        PrecompileId::P256Verify => "P256VERIFY",
         PrecompileId::Custom(custom) => custom.borrow(),
     };
     str.to_owned()
