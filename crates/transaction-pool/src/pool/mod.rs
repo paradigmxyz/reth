@@ -612,10 +612,10 @@ where
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut added {
-                if let Ok(AddedTransactionOutcome { hash, .. }) = res {
-                    if discarded_hashes.contains(hash) {
-                        *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
-                    }
+                if let Ok(AddedTransactionOutcome { hash, .. }) = res &&
+                    discarded_hashes.contains(hash)
+                {
+                    *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                 }
             }
         }

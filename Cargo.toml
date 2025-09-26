@@ -1,6 +1,6 @@
 [workspace.package]
 version = "1.8.1"
-edition = "2021"
+edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
@@ -188,6 +188,7 @@ rust.missing_docs = "warn"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
+rust.rust_2024_incompatible_pat = "warn"
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 
@@ -667,7 +668,7 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 aes = "0.8.1"
 ahash = "0.8"
 anyhow = "1.0"
-bindgen = { version = "0.70", default-features = false }
+bindgen = { version = "0.71", default-features = false }
 block-padding = "0.3.2"
 cc = "=1.2.15"
 cipher = "0.4.3"

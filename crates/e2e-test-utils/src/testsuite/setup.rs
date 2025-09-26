@@ -234,7 +234,7 @@ where
         let is_dev = self.is_dev;
         let node_count = self.network.node_count;
 
-        let attributes_generator = self.create_attributes_generator::<N>();
+        let attributes_generator = Self::create_static_attributes_generator::<N>();
 
         let result = setup_engine_with_connection::<N>(
             node_count,
@@ -325,10 +325,11 @@ where
         .await
     }
 
-    /// Create the attributes generator function
-    fn create_attributes_generator<N>(
-        &self,
-    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Copy
+    /// Create a static attributes generator that doesn't capture any instance data
+    fn create_static_attributes_generator<N>(
+    ) -> impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes
+           + Copy
+           + use<N, I>
     where
         N: NodeBuilderHelper<Payload = I>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<

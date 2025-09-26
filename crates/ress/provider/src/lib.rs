@@ -120,19 +120,15 @@ where
                     let mut executed = self.pending_state.executed_block(&ancestor_hash);
 
                     // If it's not present, attempt to lookup invalid block.
-                    if executed.is_none() {
-                        if let Some(invalid) =
+                    if executed.is_none() &&
+                        let Some(invalid) =
                             self.pending_state.invalid_recovered_block(&ancestor_hash)
-                        {
-                            trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
-                            executed = Some(ExecutedBlockWithTrieUpdates {
-                                block: ExecutedBlock {
-                                    recovered_block: invalid,
-                                    ..Default::default()
-                                },
-                                trie: ExecutedTrieUpdates::empty(),
-                            });
-                        }
+                    {
+                        trace!(target: "reth::ress_provider", %block_hash, %ancestor_hash, "Using invalid ancestor block for witness construction");
+                        executed = Some(ExecutedBlockWithTrieUpdates {
+                            block: ExecutedBlock { recovered_block: invalid, ..Default::default() },
+                            trie: ExecutedTrieUpdates::empty(),
+                        });
                     }
 
                     let Some(executed) = executed else {
