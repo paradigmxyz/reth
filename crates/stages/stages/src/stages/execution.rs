@@ -1065,9 +1065,7 @@ mod tests {
                 )
                 .unwrap();
 
-            provider.commit().unwrap();
-
-            provider = factory.database_provider_rw().unwrap();
+            provider.static_file_provider().commit().unwrap();
 
             assert_matches!(result, UnwindOutput {
                 checkpoint: StageCheckpoint {
