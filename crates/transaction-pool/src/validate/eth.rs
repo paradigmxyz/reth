@@ -790,6 +790,29 @@ where
         outcomes
     }
 
+    async fn validate_transactions_internal(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>> {
+        // Create provider once for the entire batch
+        let provider = self.client.latest().ok()?;
+        Some(self.validate_transactions(transactions, provider.as_ref()).await)
+    }
+
+    async fn validate_transactions_with_origin_internal<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        // Create provider once for the entire batch
+        let provider = self.client.latest().ok()?;
+        Some(self.validate_transactions_with_origin(origin, transactions, provider.as_ref()).await)
+    }
+
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
         B: Block,

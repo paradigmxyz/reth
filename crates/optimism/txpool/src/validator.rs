@@ -397,6 +397,31 @@ where
         outcomes
     }
 
+    async fn validate_transactions_internal(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>> {
+        // Delegate to inner validator's internal method
+        self.inner.validate_transactions_internal(transactions).await.map(|outcomes| {
+            outcomes.into_iter().map(|outcome| self.apply_op_checks(outcome)).collect()
+        })
+    }
+
+    async fn validate_transactions_with_origin_internal<I>(
+        &self,
+        origin: TransactionOrigin,
+        transactions: I,
+    ) -> Option<Vec<TransactionValidationOutcome<Self::Transaction>>>
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        // Delegate to inner validator's internal method
+        self.inner.validate_transactions_with_origin_internal(origin, transactions).await.map(
+            |outcomes| outcomes.into_iter().map(|outcome| self.apply_op_checks(outcome)).collect(),
+        )
+    }
+
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
         B: Block,

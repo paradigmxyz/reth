@@ -279,6 +279,34 @@ pub trait TransactionValidator: Debug + Send + Sync {
         }
     }
 
+    /// Internal method for batch validation that creates its own provider.
+    ///
+    /// Used by the pool for efficient batch validation without requiring external provider.
+    /// Returns None if the validator cannot create providers internally.
+    fn validate_transactions_internal(
+        &self,
+        _transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> impl Future<Output = Option<Vec<TransactionValidationOutcome<Self::Transaction>>>> + Send
+    {
+        async { None }
+    }
+
+    /// Internal method for batch validation with origin that creates its own provider.
+    ///
+    /// Used by the pool for efficient batch validation without requiring external provider.
+    /// Returns None if the validator cannot create providers internally.
+    fn validate_transactions_with_origin_internal<I>(
+        &self,
+        _origin: TransactionOrigin,
+        _transactions: I,
+    ) -> impl Future<Output = Option<Vec<TransactionValidationOutcome<Self::Transaction>>>> + Send
+    where
+        I: IntoIterator<Item = Self::Transaction> + Send,
+        I::IntoIter: Send,
+    {
+        async { None }
+    }
+
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
