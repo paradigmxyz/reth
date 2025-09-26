@@ -17,6 +17,7 @@ use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
     writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+    TrieWriter,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
@@ -139,6 +140,10 @@ impl<C: ChainSpecParser> Command<C> {
                     StageId::MerkleExecute.to_string(),
                     None,
                 )?;
+            }
+            StageEnum::MerkleChangeSets => {
+                provider_rw.clear_trie_changesets()?;
+                reset_stage_checkpoint(tx, StageId::MerkleChangeSets)?;
             }
             StageEnum::AccountHistory | StageEnum::StorageHistory => {
                 tx.clear::<tables::AccountsHistory>()?;
