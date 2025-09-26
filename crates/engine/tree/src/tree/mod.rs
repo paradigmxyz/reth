@@ -2218,13 +2218,11 @@ where
     /// This reinserts any blocks in the new chain that do not already exist in the tree
     fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlockWithTrieUpdates<N>>) {
         for block in new_chain {
-            if self
-                .state
-                .tree_state
-                .executed_block_by_hash(block.recovered_block().hash())
-                .is_none()
-            {
-                trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
+            let block_hash = block.recovered_block().hash();
+            let block_number = block.recovered_block().number();
+
+            if self.state.tree_state.executed_block_by_hash(block_hash).is_none() {
+                trace!(target: "engine::tree", num=?block_number, hash=?block_hash, "Reinserting block into tree state");
                 self.state.tree_state.insert_executed(block);
             }
         }

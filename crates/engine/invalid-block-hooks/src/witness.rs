@@ -148,6 +148,10 @@ where
     ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
+        // Cache block hash and number to avoid repeated calculations
+        let block_hash = block.hash();
+        let block_number = block.number();
+
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
@@ -214,7 +218,7 @@ where
         let response =
             ExecutionWitness { state, codes, keys: state_preimages, ..Default::default() };
         let re_executed_witness_path = self.save_file(
-            format!("{}_{}.witness.re_executed.json", block.number(), block.hash()),
+            format!("{}_{}.witness.re_executed.json", block_number, block_hash),
             &response,
         )?;
         if let Some(healthy_node_client) = &self.healthy_node_client {
@@ -228,13 +232,13 @@ where
             })?;
 
             let healthy_path = self.save_file(
-                format!("{}_{}.witness.healthy.json", block.number(), block.hash()),
+                format!("{}_{}.witness.healthy.json", block_number, block_hash),
                 &healthy_node_witness,
             )?;
 
             // If the witnesses are different, write the diff to the output directory.
             if response != healthy_node_witness {
-                let filename = format!("{}_{}.witness.diff", block.number(), block.hash());
+                let filename = format!("{}_{}.witness.diff", block_number, block_hash);
                 let diff_path = self.save_diff(filename, &response, &healthy_node_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
@@ -254,15 +258,15 @@ where
         // See: https://github.com/bluealloy/revm/pull/1827
         if bundle_state != output.state {
             let original_path = self.save_file(
-                format!("{}_{}.bundle_state.original.json", block.number(), block.hash()),
+                format!("{}_{}.bundle_state.original.json", block_number, block_hash),
                 &output.state,
             )?;
             let re_executed_path = self.save_file(
-                format!("{}_{}.bundle_state.re_executed.json", block.number(), block.hash()),
+                format!("{}_{}.bundle_state.re_executed.json", block_number, block_hash),
                 &bundle_state,
             )?;
 
-            let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
+            let filename = format!("{}_{}.bundle_state.diff", block_number, block_hash);
             // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
             // have deterministic ordering
             let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
@@ -285,15 +289,14 @@ where
             state_provider.state_root_with_updates(hashed_state)?;
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
-                let filename = format!("{}_{}.state_root.diff", block.number(), block.hash());
+                let filename = format!("{}_{}.state_root.diff", block_number, block_hash);
                 let diff_path = self.save_diff(filename, &re_executed_root, &original_root)?;
                 warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
             }
 
             // If the re-executed state root does not match the _header_ state root, also log that.
             if re_executed_root != block.state_root() {
-                let filename =
-                    format!("{}_{}.header_state_root.diff", block.number(), block.hash());
+                let filename = format!("{}_{}.header_state_root.diff", block_number, block_hash);
                 let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root())?;
                 warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
@@ -303,11 +306,11 @@ where
                 let trie_output_sorted = &trie_output.into_sorted_ref();
                 let original_updates_sorted = &original_updates.into_sorted_ref();
                 let original_path = self.save_file(
-                    format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
+                    format!("{}_{}.trie_updates.original.json", block_number, block_hash),
                     original_updates_sorted,
                 )?;
                 let re_executed_path = self.save_file(
-                    format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
+                    format!("{}_{}.trie_updates.re_executed.json", block_number, block_hash),
                     trie_output_sorted,
                 )?;
                 warn!(
