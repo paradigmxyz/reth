@@ -103,11 +103,18 @@ pub trait TrieWriter: Send + Sync {
     /// The intended usage of this method is to call it _prior_ to calling `write_trie_updates` with
     /// the same [`TrieUpdates`].
     ///
+    /// The `updates_overlay` parameter allows providing additional in-memory trie updates that
+    /// should be considered when looking up current node values. When provided, these overlay
+    /// updates are applied on top of the database state, allowing the method to see a view that
+    /// includes both committed database values and pending in-memory changes. This is useful
+    /// when writing changesets for updates that depend on previous uncommitted trie changes.
+    ///
     /// Returns the number of keys written.
     fn write_trie_changesets(
         &self,
         block_number: BlockNumber,
         trie_updates: &TrieUpdatesSorted,
+        updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize>;
 }
 
@@ -130,10 +137,18 @@ pub trait StorageTrieWriter: Send + Sync {
     /// The intended usage of this method is to call it _prior_ to calling
     /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
     ///
+    /// The `updates_overlay` parameter allows providing additional in-memory trie updates that
+    /// should be considered when looking up current node values. When provided, these overlay
+    /// updates are applied on top of the database state for each storage trie, allowing the
+    /// method to see a view that includes both committed database values and pending in-memory
+    /// changes. This is useful when writing changesets for storage updates that depend on
+    /// previous uncommitted trie changes.
+    ///
     /// Returns the number of keys written.
     fn write_storage_trie_changesets<'a>(
         &self,
         block_number: BlockNumber,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize>;
 }
