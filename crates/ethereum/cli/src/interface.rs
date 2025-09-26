@@ -18,7 +18,10 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{args::LogArgs, version::version_metadata};
+use reth_node_core::{
+    args::{LogArgs, MetricsArgs},
+    version::version_metadata,
+};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::FileWorkerGuard;
@@ -42,6 +45,10 @@ pub struct Cli<
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// The metrics configuration for the CLI.
+    #[command(flatten)]
+    pub metrics: MetricsArgs,
 
     /// Type marker for the RPC module validator
     #[arg(skip)]
@@ -212,8 +219,16 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let guard = self.logs.init_tracing()?;
+        let mut layers = reth_tracing::Layers::new();
+
+        if let Some(endpoint_url) = self.metrics.otlp {
+            let url = format!("http://{endpoint_url}");
+            layers.with_metrics_layer("reth::cli".to_string(), &url)?;
+        }
+
+        let guard = self.logs.init_tracing_with_layers(layers)?;
         Ok(guard)
     }
 }
