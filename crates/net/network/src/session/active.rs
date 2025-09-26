@@ -43,10 +43,15 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
-/// The recommended interval at which a new range update should be sent to the remote peer.
+/// Duration of an epoch in seconds (32 blocks * 12 seconds per block = 384 seconds)
+pub(super) const EPOCH_DURATION_SECS: u64 = 384;
+
+/// The recommended interval at which to check if a new range update should be sent to the remote
+/// peer.
 ///
-/// This is set to 120 seconds (2 minutes) as per the Ethereum specification for eth69.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(120);
+/// Updates are only sent when the block height has advanced by at least 32 blocks since the last
+/// update.
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_DURATION_SECS);
 
 // Constants for timeout updating.
 
@@ -128,6 +133,9 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Optional interval for sending periodic range updates to the remote peer (eth69+)
     /// Recommended frequency is ~2 minutes per spec
     pub(crate) range_update_interval: Option<Interval>,
+    /// The last latest block number we sent in a range update
+    /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
+    pub(crate) last_sent_latest_block: Option<u64>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -738,11 +746,23 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         }
 
         if let Some(interval) = &mut this.range_update_interval {
-            // queue in new range updates if the interval is ready
+            // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
-                this.queued_outgoing.push_back(
-                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                );
+                let current_latest = this.local_range_info.latest();
+                let should_send = match this.last_sent_latest_block {
+                    None => true, // First update, always send
+                    Some(last_sent) => {
+                        // Only send if block height has advanced by at least 32 blocks (one epoch)
+                        current_latest.saturating_sub(last_sent) >= 32
+                    }
+                };
+
+                if should_send {
+                    this.queued_outgoing.push_back(
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                    );
+                    this.last_sent_latest_block = Some(current_latest);
+                }
             }
         }
 
@@ -1054,6 +1074,7 @@ mod tests {
                             alloy_primitives::B256::ZERO,
                         ),
                         range_update_interval: None,
+                        last_sent_latest_block: None,
                     }
                 }
                 ev => {
