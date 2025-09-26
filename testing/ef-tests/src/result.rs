@@ -27,7 +27,8 @@ pub enum Error {
     BlockProcessingFailed {
         /// The block number for the block that failed
         block_number: u64,
-        /// The partial program inputs up to and including the block that failed
+        /// Contains the inputs necessary for the block stateless validation guest program used in
+        /// zkVMs to prove the block is invalid.
         partial_program_inputs: Vec<(RecoveredBlock<Block>, ExecutionWitness)>,
         /// The specific error
         #[source]
