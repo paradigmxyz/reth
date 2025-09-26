@@ -13,7 +13,10 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{
+    noop::NoopProvider, BlockReaderIdExt, StateProviderFactory, StateRootProvider,
+};
+use reth_trie::HashedPostState;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -41,7 +44,10 @@ pub(crate) struct BuildArgs<I> {
     pub base: ExecutionPayloadBaseV1,
     pub transactions: I,
     pub cached_state: Option<(B256, CachedReads)>,
+    pub calculate_state_root: bool,
 }
+
+pub(crate) type BuildResult<N> = (PendingBlock<N>, CachedReads, Option<B256>);
 
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
 where
@@ -63,7 +69,7 @@ where
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
         mut args: BuildArgs<I>,
-    ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
+    ) -> eyre::Result<Option<BuildResult<N>>> {
         trace!("Attempting new pending block from flashblocks");
 
         let latest = self
@@ -110,6 +116,11 @@ where
             vec![execution_result.requests],
         );
 
+        let state_root = args
+            .calculate_state_root
+            .then(|| state.database.as_ref().state_root(HashedPostState::default()))
+            .transpose()?;
+
         Ok(Some((
             PendingBlock::with_executed_block(
                 Instant::now() + Duration::from_secs(1),
@@ -120,6 +131,7 @@ where
                 },
             ),
             request_cache,
+            state_root,
         )))
     }
 }

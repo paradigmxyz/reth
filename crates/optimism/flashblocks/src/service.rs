@@ -1,6 +1,6 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
-    worker::{BuildArgs, FlashBlockBuilder},
+    worker::{BuildArgs, BuildResult, FlashBlockBuilder},
     ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx,
 };
 use alloy_eips::eip2718::WithEncoded;
@@ -25,6 +25,8 @@ use std::{
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
+const FB_STATE_ROOT_FROM_INDEX: usize = 8;
+
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
@@ -48,6 +50,9 @@ pub struct FlashBlockService<
     /// within the same block.
     cached_state: Option<(B256, CachedReads)>,
     metrics: FlashBlockServiceMetrics,
+    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    /// Default to false, see [`enable_state_root`]
+    calculate_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -81,7 +86,14 @@ where
             job: None,
             cached_state: None,
             metrics: FlashBlockServiceMetrics::default(),
+            calculate_state_root: false,
         }
+    }
+
+    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    pub const fn enable_state_root(mut self) -> Self {
+        self.calculate_state_root = true;
+        self
     }
 
     /// Returns a subscriber to the flashblock sequence.
@@ -120,7 +132,7 @@ where
                 "Missing flashblock payload base"
             );
 
-            return None
+            return None;
         };
 
         // attempt an initial consecutive check
@@ -131,10 +143,15 @@ where
             return None;
         }
 
+        // Check if state root must be calculated
+        let calculate_state_root = self.calculate_state_root &&
+            self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
+
         Some(BuildArgs {
             base,
             transactions: self.blocks.ready_transactions().collect::<Vec<_>>(),
             cached_state: self.cached_state.take(),
+            calculate_state_root,
         })
     }
 
@@ -199,7 +216,10 @@ where
 
             if let Some((now, result)) = result {
                 match result {
-                    Ok(Some((new_pending, cached_reads))) => {
+                    Ok(Some((new_pending, cached_reads, state_root))) => {
+                        // update state root of current sequence
+                        this.blocks.set_state_root(state_root);
+
                         // built a new pending block
                         this.current = Some(new_pending.clone());
                         // cache reads
@@ -257,11 +277,11 @@ where
                     "Clearing current flashblock on new canonical block"
                 );
 
-                return Poll::Ready(Some(Ok(None)))
+                return Poll::Ready(Some(Ok(None)));
             }
 
             if !this.rebuild && this.current.is_some() {
-                return Poll::Pending
+                return Poll::Pending;
             }
 
             // try to build a block on top of latest
@@ -277,16 +297,15 @@ where
                 this.job.replace((now, rx));
 
                 // continue and poll the spawned job
-                continue
+                continue;
             }
 
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }
 
-type BuildJob<N> =
-    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
+type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<BuildResult<N>>>>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]
