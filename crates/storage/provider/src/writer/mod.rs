@@ -190,7 +190,7 @@ where
             // `TrieUpdatesSorted`, and then the `trie` field of `ExecutedBlockWithTrieUpdates` to
             // carry a TrieUpdatesSorted.
             let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.database().write_trie_changesets(block_number, &trie_updates_sorted)?;
+            self.database().write_trie_changesets(block_number, &trie_updates_sorted, None)?;
 
             self.database().write_trie_updates(&trie_updates)?;
         }
