@@ -816,6 +816,15 @@ where
     }
 
     /// Spawns a payload processor task based on the state root strategy.
+    ///
+    /// This method determines how to execute the block and compute its state root based on
+    /// the selected strategy:
+    /// - `StateRootTask`: Uses a dedicated task for state root computation with proof generation
+    /// - `Parallel`: Computes state root in parallel with block execution
+    /// - `Synchronous`: Falls back to sequential execution and state root computation
+    ///
+    /// The method handles strategy fallbacks if the preferred approach fails, ensuring
+    /// block execution always completes with a valid state root.
     #[allow(clippy::too_many_arguments)]
     fn spawn_payload_processor(
         &mut self,
@@ -978,6 +987,13 @@ where
             self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
 
         // Decide on the strategy.
+        // Use state root task only if:
+        // 1. No persistence is in progress
+        // 2. Config allows it
+        // 3. No ancestors with missing trie updates. If any exist, it will mean that every state
+        //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
+        //    It's cheaper to run a parallel state root that does one walk over trie tables while
+        //    accounting for the prefix sets.
         let strategy = if can_run_parallel {
             if self.config.use_state_root_task() && !has_ancestors_with_missing_trie_updates {
                 StateRootStrategy::StateRootTask
