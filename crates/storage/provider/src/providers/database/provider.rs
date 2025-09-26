@@ -346,10 +346,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         from_tx: TxNumber,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
-        if self.prune_modes.has_receipts_pruning() {
-            // iterate over block body and remove receipts
-            self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
-        } else {
+        // iterate over block body and remove receipts
+        self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
+
+        if !self.prune_modes.has_receipts_pruning() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -1771,9 +1771,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         //
         // We are writing to database if requested or if there's any kind of receipt pruning
         // configured
-        let mut receipts_cursor = has_receipts_pruning
-            .then(|| self.tx.cursor_write::<tables::Receipts<Self::Receipt>>())
-            .transpose()?;
+        let mut receipts_cursor = self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?;
 
         // Prepare receipts static writer if we are going to write receipts to static files
         //
@@ -1836,9 +1834,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     writer.append_receipt(receipt_idx, receipt)?;
                 }
 
-                if let Some(cursor) = &mut receipts_cursor {
-                    cursor.append(receipt_idx, receipt)?;
-                }
+                receipts_cursor.append(receipt_idx, receipt)?;
             }
         }
 
