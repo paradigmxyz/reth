@@ -6,6 +6,7 @@ use reth_trie_common::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
+use std::ops::RangeBounds;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -109,6 +110,15 @@ pub trait TrieWriter: Send + Sync {
         block_number: BlockNumber,
         trie_updates: &TrieUpdatesSorted,
     ) -> ProviderResult<usize>;
+
+    /// Clears contents of trie changesets completely
+    fn clear_trie_changesets(&self) -> ProviderResult<()>;
+
+    /// Clears contents of trie changesets for the given range of blocks.
+    fn clear_trie_changesets_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<()>;
 }
 
 /// Storage Trie Writer
