@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-//! An ExEx example that installs a new RPC subscription endpoint that emit storage changes for a
+//! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
 #[allow(dead_code)]
 use alloy_primitives::{Address, U256};

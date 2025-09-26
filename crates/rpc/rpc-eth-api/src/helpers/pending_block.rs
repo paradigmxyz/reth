@@ -72,22 +72,25 @@ pub trait LoadPendingBlock:
         >,
         Self::Error,
     > {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? {
-            if let Some(receipts) = self
+        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? &&
+            let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())
                 .map_err(Self::Error::from_eth_err)?
-            {
-                // Note: for the PENDING block we assume it is past the known merge block and
-                // thus this will not fail when looking up the total
-                // difficulty value for the blockenv.
-                let evm_env = self.evm_config().evm_env(block.header());
+        {
+            // Note: for the PENDING block we assume it is past the known merge block and
+            // thus this will not fail when looking up the total
+            // difficulty value for the blockenv.
+            let evm_env = self
+                .evm_config()
+                .evm_env(block.header())
+                .map_err(RethError::other)
+                .map_err(Self::Error::from_eth_err)?;
 
-                return Ok(PendingBlockEnv::new(
-                    evm_env,
-                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
-                ));
-            }
+            return Ok(PendingBlockEnv::new(
+                evm_env,
+                PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
+            ));
         }
 
         // no pending block from the CL yet, so we use the latest block and modify the env
@@ -309,21 +312,21 @@ pub trait LoadPendingBlock:
 
                 // There's only limited amount of blob space available per block, so we need to
                 // check if the EIP-4844 can still fit in the block
-                if let Some(tx_blob_gas) = tx.blob_gas_used() {
-                    if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
-                        // we can't fit this _blob_ transaction into the block, so we mark it as
-                        // invalid, which removes its dependent transactions from
-                        // the iterator. This is similar to the gas limit condition
-                        // for regular transactions above.
-                        best_txs.mark_invalid(
-                            &pool_tx,
-                            InvalidPoolTransactionError::ExceedsGasLimit(
-                                tx_blob_gas,
-                                blob_params.max_blob_gas_per_block(),
-                            ),
-                        );
-                        continue
-                    }
+                if let Some(tx_blob_gas) = tx.blob_gas_used() &&
+                    sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block()
+                {
+                    // we can't fit this _blob_ transaction into the block, so we mark it as
+                    // invalid, which removes its dependent transactions from
+                    // the iterator. This is similar to the gas limit condition
+                    // for regular transactions above.
+                    best_txs.mark_invalid(
+                        &pool_tx,
+                        InvalidPoolTransactionError::ExceedsGasLimit(
+                            tx_blob_gas,
+                            blob_params.max_blob_gas_per_block(),
+                        ),
+                    );
+                    continue
                 }
 
                 let gas_used = match builder.execute_transaction(tx.clone()) {

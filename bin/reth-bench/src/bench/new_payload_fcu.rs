@@ -15,7 +15,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
-use eyre::Context;
+use eyre::{Context, OptionExt};
 use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
@@ -56,10 +56,22 @@ impl Command {
                     .full()
                     .await
                     .wrap_err_with(|| format!("Failed to fetch block by number {next_block}"));
-                let block = block_res.unwrap().unwrap();
+                let block = match block_res.and_then(|opt| opt.ok_or_eyre("Block not found")) {
+                    Ok(block) => block,
+                    Err(e) => {
+                        tracing::error!("Failed to fetch block {next_block}: {e}");
+                        break;
+                    }
+                };
                 let header = block.header.clone();
 
-                let (version, params) = block_to_new_payload(block, is_optimism).unwrap();
+                let (version, params) = match block_to_new_payload(block, is_optimism) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        tracing::error!("Failed to convert block to new payload: {e}");
+                        break;
+                    }
+                };
                 let head_block_hash = header.hash;
                 let safe_block_hash =
                     block_provider.get_block_by_number(header.number.saturating_sub(32).into());
@@ -69,12 +81,18 @@ impl Command {
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
-                let safe_block_hash = safe.unwrap().expect("finalized block exists").header.hash;
-                let finalized_block_hash =
-                    finalized.unwrap().expect("finalized block exists").header.hash;
+                let safe_block_hash = match safe {
+                    Ok(Some(block)) => block.header.hash,
+                    Ok(None) | Err(_) => head_block_hash,
+                };
+
+                let finalized_block_hash = match finalized {
+                    Ok(Some(block)) => block.header.hash,
+                    Ok(None) | Err(_) => head_block_hash,
+                };
 
                 next_block += 1;
-                sender
+                if let Err(e) = sender
                     .send((
                         header,
                         version,
@@ -84,7 +102,10 @@ impl Command {
                         finalized_block_hash,
                     ))
                     .await
-                    .unwrap();
+                {
+                    tracing::error!("Failed to send block data: {e}");
+                    break;
+                }
             }
         });
 
@@ -169,7 +190,7 @@ impl Command {
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(gas_output_results);
+        let gas_output = TotalGasOutput::new(gas_output_results)?;
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

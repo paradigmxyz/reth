@@ -15,7 +15,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
 pub(crate) type Cache<K, V> =
@@ -520,16 +520,16 @@ pub(crate) struct SavedCache {
 
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
+
+    /// A guard to track in-flight usage of this cache.
+    /// The cache is considered available if the strong count is 1.
+    usage_guard: Arc<()>,
 }
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) const fn new(
-        hash: B256,
-        caches: ExecutionCache,
-        metrics: CachedStateMetrics,
-    ) -> Self {
-        Self { hash, caches, metrics }
+    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -542,9 +542,19 @@ impl SavedCache {
         (self.caches, self.metrics)
     }
 
+    /// Returns true if the cache is available for use (no other tasks are currently using it).
+    pub(crate) fn is_available(&self) -> bool {
+        Arc::strong_count(&self.usage_guard) == 1
+    }
+
     /// Returns the [`ExecutionCache`] belonging to the tracked hash.
     pub(crate) const fn cache(&self) -> &ExecutionCache {
         &self.caches
+    }
+
+    /// Returns the metrics associated with this cache.
+    pub(crate) const fn metrics(&self) -> &CachedStateMetrics {
+        &self.metrics
     }
 
     /// Updates the metrics for the [`ExecutionCache`].
@@ -552,6 +562,13 @@ impl SavedCache {
         self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
         self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
         self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
+    }
+}
+
+#[cfg(test)]
+impl SavedCache {
+    fn clone_guard_for_test(&self) -> Arc<()> {
+        self.usage_guard.clone()
     }
 }
 
@@ -647,7 +664,7 @@ mod tests {
 
         unsafe impl GlobalAlloc for TrackingAllocator {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                let ret = self.inner.alloc(layout);
+                let ret = unsafe { self.inner.alloc(layout) };
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
                     self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
@@ -657,7 +674,7 @@ mod tests {
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
                 self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
-                self.inner.dealloc(ptr, layout)
+                unsafe { self.inner.dealloc(ptr, layout) }
             }
         }
     }
@@ -745,7 +762,7 @@ mod tests {
         let state_provider =
             CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
 
-        // check that the storage is empty
+        // check that the storage returns the expected value
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
@@ -762,7 +779,7 @@ mod tests {
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
-        // check that the storage is empty
+        // check that the storage returns the cached value
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Value(storage_value));
     }
@@ -776,7 +793,7 @@ mod tests {
         // just create empty caches
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
 
-        // check that the storage is empty
+        // check that the storage is not cached
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::NotCached);
     }
@@ -795,5 +812,46 @@ mod tests {
         // check that the storage is empty
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Empty);
+    }
+
+    // Tests for SavedCache locking mechanism
+    #[test]
+    fn test_saved_cache_is_available() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+
+        // Initially, the cache should be available (only one reference)
+        assert!(cache.is_available(), "Cache should be available initially");
+
+        // Clone the usage guard (simulating it being handed out)
+        let _guard = cache.clone_guard_for_test();
+
+        // Now the cache should not be available (two references)
+        assert!(!cache.is_available(), "Cache should not be available with active guard");
+    }
+
+    #[test]
+    fn test_saved_cache_multiple_references() {
+        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let cache =
+            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+
+        // Create multiple references to the usage guard
+        let guard1 = cache.clone_guard_for_test();
+        let guard2 = cache.clone_guard_for_test();
+        let guard3 = guard1.clone();
+
+        // Cache should not be available with multiple guards
+        assert!(!cache.is_available());
+
+        // Drop guards one by one
+        drop(guard1);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard2);
+        assert!(!cache.is_available()); // Still not available
+
+        drop(guard3);
+        assert!(cache.is_available()); // Now available
     }
 }

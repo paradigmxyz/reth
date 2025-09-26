@@ -468,6 +468,11 @@ Gas Price Oracle:
       --gpo.default-suggested-fee <DEFAULT_SUGGESTED_FEE>
           The default gas price to use if there are no blocks to use
 
+      --rpc.send-raw-transaction-sync-timeout <SECONDS>
+          Timeout for `send_raw_transaction_sync` RPC method
+
+          [default: 30s]
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
@@ -832,6 +837,14 @@ Engine:
 
           [default: 256]
 
+      --engine.multiproof-chunking
+          Whether multiproof task should chunk proof targets
+
+      --engine.multiproof-chunk-size <MULTIPROOF_CHUNK_SIZE>
+          Multiproof task chunk size for proof targets
+
+          [default: 10]
+
       --engine.reserved-cpu-cores <RESERVED_CPU_CORES>
           Configure the number of reserved CPU cores for non-reth processes
 
@@ -847,6 +860,9 @@ Engine:
           Always process payload attributes and begin a payload build process even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See `TreeConfig::always_process_payload_attributes_on_canonical_head` for more details.
 
           Note: This is a no-op on OP Stack.
+
+      --engine.allow-unwind-canonical-header
+          Allow unwinding canonical header to ancestor during forkchoice updates. See `TreeConfig::unwind_canonical_header` for more details
 
 ERA:
       --era.enable

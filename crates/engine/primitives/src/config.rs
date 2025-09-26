@@ -9,6 +9,9 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// Default maximum concurrency for proof tasks
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// The size of proof targets chunk to spawn in one multiproof calculation.
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
+
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
@@ -75,6 +78,10 @@ pub struct TreeConfig {
     has_enough_parallelism: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
+    /// Whether multiproof task should chunk proof targets.
+    multiproof_chunking_enabled: bool,
+    /// Multiproof task chunk size for proof targets.
+    multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
     /// Whether to disable the precompile cache
@@ -95,6 +102,8 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
+    /// Whether to unwind canonical header to ancestor during forkchoice updates.
+    allow_unwind_canonical_header: bool,
 }
 
 impl Default for TreeConfig {
@@ -113,10 +122,13 @@ impl Default for TreeConfig {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            multiproof_chunking_enabled: true,
+            multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            allow_unwind_canonical_header: false,
         }
     }
 }
@@ -138,10 +150,13 @@ impl TreeConfig {
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
+        multiproof_chunking_enabled: bool,
+        multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
+        allow_unwind_canonical_header: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -157,10 +172,13 @@ impl TreeConfig {
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
+            multiproof_chunking_enabled,
+            multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
+            allow_unwind_canonical_header,
         }
     }
 
@@ -192,6 +210,16 @@ impl TreeConfig {
     /// Return the maximum proof task concurrency.
     pub const fn max_proof_task_concurrency(&self) -> u64 {
         self.max_proof_task_concurrency
+    }
+
+    /// Return whether the multiproof task chunking is enabled.
+    pub const fn multiproof_chunking_enabled(&self) -> bool {
+        self.multiproof_chunking_enabled
+    }
+
+    /// Return the multiproof task chunk size.
+    pub const fn multiproof_chunk_size(&self) -> usize {
+        self.multiproof_chunk_size
     }
 
     /// Return the number of reserved CPU cores for non-reth processes
@@ -255,6 +283,11 @@ impl TreeConfig {
     /// canonical.
     pub const fn always_process_payload_attributes_on_canonical_head(&self) -> bool {
         self.always_process_payload_attributes_on_canonical_head
+    }
+
+    /// Returns true if canonical header should be unwound to ancestor during forkchoice updates.
+    pub const fn unwind_canonical_header(&self) -> bool {
+        self.allow_unwind_canonical_header
     }
 
     /// Setter for persistence threshold.
@@ -357,6 +390,21 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for whether multiproof task should chunk proof targets.
+    pub const fn with_multiproof_chunking_enabled(
+        mut self,
+        multiproof_chunking_enabled: bool,
+    ) -> Self {
+        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
+        self
+    }
+
+    /// Setter for multiproof task chunk size for proof targets.
+    pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
+        self.multiproof_chunk_size = multiproof_chunk_size;
+        self
+    }
+
     /// Setter for the number of reserved CPU cores for any non-reth processes
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
@@ -372,6 +420,12 @@ impl TreeConfig {
     /// Setter for whether to use state root fallback, useful for testing.
     pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
         self.state_root_fallback = state_root_fallback;
+        self
+    }
+
+    /// Setter for whether to unwind canonical header to ancestor during forkchoice updates.
+    pub const fn with_unwind_canonical_header(mut self, unwind_canonical_header: bool) -> Self {
+        self.allow_unwind_canonical_header = unwind_canonical_header;
         self
     }
 

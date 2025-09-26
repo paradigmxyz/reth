@@ -48,7 +48,7 @@ jobs:
           name: hive_assets
           path: ./hive_assets
   test:
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
