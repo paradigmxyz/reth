@@ -209,6 +209,7 @@ where
             proof_task.handle(),
             to_sparse_trie,
             max_multi_proof_task_concurrency,
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
         // wire the multiproof task to the prewarm task
