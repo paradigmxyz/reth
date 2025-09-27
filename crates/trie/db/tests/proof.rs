@@ -107,8 +107,8 @@ fn testspec_empty_storage_proof() {
     let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
     let provider = factory.provider().unwrap();
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
-        let account_proof = proof.account_proof(target, &slots).unwrap();
+    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let account_proof = proof.account_proof(target, &slots).unwrap();
     assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
     assert_eq!(slots.len(), account_proof.storage_proofs.len());
@@ -143,8 +143,8 @@ fn mainnet_genesis_account_proof() {
     ]);
 
     let provider = factory.provider().unwrap();
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
-        let account_proof = proof.account_proof(target, &[]).unwrap();
+    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let account_proof = proof.account_proof(target, &[]).unwrap();
     similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     assert_eq!(account_proof.verify(root), Ok(()));
 }
@@ -167,8 +167,8 @@ fn mainnet_genesis_account_proof_nonexistent() {
     ]);
 
     let provider = factory.provider().unwrap();
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
-        let account_proof = proof.account_proof(target, &[]).unwrap();
+    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let account_proof = proof.account_proof(target, &[]).unwrap();
     similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
     assert_eq!(account_proof.verify(root), Ok(()));
 }
@@ -263,8 +263,8 @@ fn holesky_deposit_contract_proof() {
     };
 
     let provider = factory.provider().unwrap();
-        let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
-        let account_proof = proof.account_proof(target, &slots).unwrap();
+    let proof = <Proof<_, _> as DatabaseProof>::from_tx(provider.tx_ref());
+    let account_proof = proof.account_proof(target, &slots).unwrap();
     similar_asserts::assert_eq!(account_proof, expected);
     assert_eq!(account_proof.verify(root), Ok(()));
 }
