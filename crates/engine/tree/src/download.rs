@@ -13,7 +13,6 @@ use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
-    fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
 };
