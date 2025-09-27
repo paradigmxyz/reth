@@ -8,7 +8,7 @@
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
-use crate::root::ParallelStateRootError;
+use crate::{root::ParallelStateRootError, storage_root_targets::StorageRootTargets};
 use alloy_primitives::{map::B256Set, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
@@ -17,16 +17,19 @@ use reth_provider::{
     ProviderResult,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSetsMut,
     proof::{ProofTrieNodeProviderFactory, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
+    proof::DecodedProofNodes,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
@@ -46,6 +49,7 @@ use tracing::{debug, trace};
 use crate::proof_task_metrics::ProofTaskMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
+type AccountProofResult = Result<DecodedMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -157,9 +161,14 @@ where
         };
 
         let tx_sender = self.tx_sender.clone();
+        let active_handles = self.active_handles.clone();
         self.executor.spawn_blocking(move || match task {
             ProofTaskKind::StorageProof(input, sender) => {
                 proof_task_tx.storage_proof(input, sender, tx_sender);
+            }
+            ProofTaskKind::AccountProof(input, sender) => {
+                let handle = ProofTaskManagerHandle::new(tx_sender.clone(), active_handles.clone());
+                proof_task_tx.account_proof(input, sender, tx_sender, handle);
             }
             ProofTaskKind::BlindedAccountNode(path, sender) => {
                 proof_task_tx.blinded_account_node(path, sender, tx_sender);
@@ -426,6 +435,217 @@ where
         // send the tx back
         let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
+
+    /// Calculates an account multiproof for the given targets, reusing this tx and delegating
+    /// storage proofs back to the task manager.
+    fn account_proof(
+        self,
+        input: AccountProofInput,
+        result_sender: Sender<AccountProofResult>,
+        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        storage_proof_task_handle: ProofTaskManagerHandle<Tx>,
+    ) {
+        trace!(
+            target: "trie::proof_task",
+            targets = ?input.targets.len(),
+            branch_masks = input.with_branch_node_masks,
+            "Starting account multiproof task calculation",
+        );
+
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
+
+        // Extend prefix sets with targets
+        let mut prefix_sets = (*self.task_ctx.prefix_sets).clone();
+        prefix_sets.extend(TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from(
+                input.targets.keys().copied().map(reth_trie::Nibbles::unpack),
+            ),
+            storage_prefix_sets: input
+                .targets
+                .iter()
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
+                .map(|(hashed_address, slots)| {
+                    (
+                        *hashed_address,
+                        PrefixSetMut::from(slots.iter().map(reth_trie::Nibbles::unpack)),
+                    )
+                })
+                .collect(),
+            destroyed_accounts: Default::default(),
+        });
+        let prefix_sets = prefix_sets.freeze();
+
+        let storage_root_targets = StorageRootTargets::new(
+            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
+            prefix_sets.storage_prefix_sets.clone(),
+        );
+
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        let mut storage_proof_receivers = alloy_primitives::map::B256Map::with_capacity_and_hasher(
+            storage_root_targets.len(),
+            Default::default(),
+        );
+
+        for (hashed_address, prefix_set) in storage_root_targets {
+            let target_slots = input.targets.get(&hashed_address).cloned().unwrap_or_default();
+
+            let storage_input = StorageProofInput::new(
+                hashed_address,
+                prefix_set,
+                target_slots,
+                input.with_branch_node_masks,
+                input.multi_added_removed_keys.clone(),
+            );
+
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let _ = storage_proof_task_handle
+                .queue_task(ProofTaskKind::StorageProof(storage_input, sender));
+            storage_proof_receivers.insert(hashed_address, receiver);
+        }
+
+        let accounts_added_removed_keys =
+            input.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
+        // Create the walker.
+        let walker = reth_trie::walker::TrieWalker::<_>::state_trie(
+            trie_cursor_factory.account_trie_cursor().expect("db cursor"),
+            prefix_sets.account_prefix_set,
+        )
+        .with_added_removed_keys(accounts_added_removed_keys)
+        .with_deletions_retained(true);
+
+        // Create a hash builder to rebuild the root node since it is not available in the database.
+        let retainer = input
+            .targets
+            .keys()
+            .map(reth_trie::Nibbles::unpack)
+            .collect::<reth_trie_common::proof::ProofRetainer>()
+            .with_added_removed_keys(accounts_added_removed_keys);
+        let mut hash_builder = reth_trie::HashBuilder::default()
+            .with_proof_retainer(retainer)
+            .with_updates(input.with_branch_node_masks);
+
+        // Initialize all storage multiproofs as empty.
+        let mut collected_decoded_storages: alloy_primitives::map::B256Map<
+            DecodedStorageMultiProof,
+        > = input.targets.keys().map(|key| (*key, DecodedStorageMultiProof::empty())).collect();
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+        let mut account_node_iter = TrieNodeIter::state_trie(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().expect("db cursor"),
+        );
+
+        while let Some(account_node) = account_node_iter.try_next().ok().flatten() {
+            match account_node {
+                TrieElement::Branch(node) => {
+                    hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+                }
+                TrieElement::Leaf(hashed_address, account) => {
+                    let decoded_storage_multiproof = match storage_proof_receivers
+                        .remove(&hashed_address)
+                    {
+                        Some(rx) => match rx.recv() {
+                            Ok(res) => match res {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    let _ = result_sender.send(Err(e));
+                                    let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+                                    return;
+                                }
+                            },
+                            Err(e) => {
+                                let _ = result_sender.send(Err(ParallelStateRootError::Other(
+                                    format!("channel closed for {hashed_address}: {}", e),
+                                )));
+                                let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+                                return;
+                            }
+                        },
+                        None => {
+                            // Fallback to direct calculation using this tx if no receiver present
+                            let raw_fallback_proof = StorageProof::new_hashed(
+                                trie_cursor_factory.clone(),
+                                hashed_cursor_factory.clone(),
+                                hashed_address,
+                            )
+                            .with_prefix_set_mut(Default::default())
+                            .storage_multiproof(
+                                input.targets.get(&hashed_address).cloned().unwrap_or_default(),
+                            )
+                            .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+                            match raw_fallback_proof.and_then(|p| {
+                                p.try_into().map_err(|e: alloy_rlp::Error| {
+                                    ParallelStateRootError::Other(e.to_string())
+                                })
+                            }) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    let _ = result_sender.send(Err(e));
+                                    let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+                                    return;
+                                }
+                            }
+                        }
+                    };
+
+                    // Encode account
+                    account_rlp.clear();
+                    let account = account.into_trie_account(decoded_storage_multiproof.root);
+                    {
+                        use alloy_rlp::Encodable as _;
+                        account.encode(&mut account_rlp as &mut dyn alloy_rlp::BufMut);
+                    }
+
+                    hash_builder.add_leaf(reth_trie::Nibbles::unpack(hashed_address), &account_rlp);
+
+                    // Only retain storage proofs for target accounts
+                    if input.targets.contains_key(&hashed_address) {
+                        collected_decoded_storages
+                            .insert(hashed_address, decoded_storage_multiproof);
+                    }
+                }
+            }
+        }
+        let _ = hash_builder.root();
+
+        // Build decoded proof nodes
+        let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
+        let decoded_account_subtree = match DecodedProofNodes::try_from(account_subtree_raw_nodes) {
+            Ok(nodes) => nodes,
+            Err(err) => {
+                let _ = result_sender.send(Err(ParallelStateRootError::Other(err.to_string())));
+                let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+                return;
+            }
+        };
+
+        let (branch_node_hash_masks, branch_node_tree_masks) = if input.with_branch_node_masks {
+            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+            (
+                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
+                updated_branch_nodes
+                    .into_iter()
+                    .map(|(path, node)| (path, node.tree_mask))
+                    .collect(),
+            )
+        } else {
+            (Default::default(), Default::default())
+        };
+
+        let result = DecodedMultiProof {
+            account_subtree: decoded_account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+            storages: collected_decoded_storages,
+        };
+
+        // send the result back
+        let _ = result_sender.send(Ok(result));
+
+        // return the tx to the pool
+        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+    }
 }
 
 /// This represents an input for a storage proof.
@@ -460,6 +680,28 @@ impl StorageProofInput {
             with_branch_node_masks,
             multi_added_removed_keys,
         }
+    }
+}
+
+/// Input for an account multiproof task.
+#[derive(Debug)]
+pub struct AccountProofInput {
+    /// The targets to include in the multiproof.
+    pub targets: MultiProofTargets,
+    /// Whether or not to collect branch node masks.
+    pub with_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+}
+
+impl AccountProofInput {
+    /// Create new account multiproof input.
+    pub const fn new(
+        targets: MultiProofTargets,
+        with_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    ) -> Self {
+        Self { targets, with_branch_node_masks, multi_added_removed_keys }
     }
 }
 
@@ -507,6 +749,8 @@ pub enum ProofTaskMessage<Tx> {
 pub enum ProofTaskKind {
     /// A storage proof request.
     StorageProof(StorageProofInput, Sender<StorageProofResult>),
+    /// An account multiproof request.
+    AccountProof(AccountProofInput, Sender<AccountProofResult>),
     /// A blinded account node request.
     BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
     /// A blinded storage node request.
