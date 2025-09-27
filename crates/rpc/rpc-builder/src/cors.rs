@@ -26,7 +26,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             .allow_methods([Method::GET, Method::POST])
             .allow_origin(Any)
             .allow_headers(Any),
-       list => {
+        list => {
             // Normalize the comma-separated list: trim each token and drop empties
             // This makes common inputs like "https://a.com, https://b.com" robust.
             let items: Vec<&str> = list
@@ -37,7 +37,9 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
 
             // After normalization, wildcard is not allowed as part of a list
             if items.iter().any(|o| *o == "*") {
-                return Err(CorsDomainError::WildCardNotAllowed { input: http_cors_domains.to_string() })
+                return Err(CorsDomainError::WildCardNotAllowed {
+                    input: http_cors_domains.to_string(),
+                    })
             }
 
             let origins = items
