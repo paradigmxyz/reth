@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
+    ffi::OsString,
     fs::{self, File, OpenOptions, ReadDir},
     io::{self, BufWriter, Error, Write},
     path::{Path, PathBuf},
@@ -39,7 +40,7 @@ pub enum FsPathError {
     },
 
     /// Error variant for failed read link operation with additional path context.
-    #[error("failed to read from {path:?}: {source}")]
+    #[error("failed to read link {path:?}: {source}")]
     ReadLink {
         /// The source `io::Error`.
         source: io::Error,
@@ -313,11 +314,17 @@ where
     F: FnOnce(&mut File) -> std::result::Result<(), E>,
     E: Into<Box<dyn core::error::Error + Send + Sync>>,
 {
-    #[cfg(windows)]
-    use std::os::windows::fs::OpenOptionsExt;
+    let tmp_file_name = file_path
+        .file_name()
+        .map(|name| {
+            let mut tmp = OsString::from(name);
+            tmp.push(".tmp");
+            tmp
+        })
+        .unwrap_or_else(|| OsString::from(".tmp"));
 
     let mut tmp_path = file_path.to_path_buf();
-    tmp_path.set_extension("tmp");
+    tmp_path.set_file_name(&tmp_file_name);
 
     // Write to the temporary file
     let mut file =
@@ -347,6 +354,9 @@ where
 
     // fsync() directory
     if let Some(parent) = file_path.parent() {
+        #[cfg(windows)]
+        use std::os::windows::fs::OpenOptionsExt;
+
         #[cfg(windows)]
         OpenOptions::new()
             .read(true)
