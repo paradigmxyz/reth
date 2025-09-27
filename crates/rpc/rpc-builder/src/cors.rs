@@ -26,18 +26,24 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             .allow_methods([Method::GET, Method::POST])
             .allow_origin(Any)
             .allow_headers(Any),
-        _ => {
-            let iter = http_cors_domains.split(',');
-            if iter.clone().any(|o| o == "*") {
-                return Err(CorsDomainError::WildCardNotAllowed {
-                    input: http_cors_domains.to_string(),
-                })
+       list => {
+            // Normalize the comma-separated list: trim each token and drop empties
+            // This makes common inputs like "https://a.com, https://b.com" robust.
+            let items: Vec<&str> = list
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            // After normalization, wildcard is not allowed as part of a list
+            if items.iter().any(|o| *o == "*") {
+                return Err(CorsDomainError::WildCardNotAllowed { input: http_cors_domains.to_string() })
             }
 
-            let origins = iter
+            let origins = items
+                .into_iter()
                 .map(|domain| {
-                    domain
-                        .parse::<HeaderValue>()
+                    HeaderValue::from_str(domain)
                         .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
                 })
                 .collect::<Result<Vec<HeaderValue>, _>>()?;
