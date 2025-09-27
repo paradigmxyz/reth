@@ -33,7 +33,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
                 list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
 
             // After normalization, wildcard is not allowed as part of a list
-            if items.iter().any(|o| *o == "*") {
+            if items.contains(&"*") {
                 return Err(CorsDomainError::WildCardNotAllowed {
                     input: http_cors_domains.to_string(),
                 })
