@@ -29,17 +29,14 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
         list => {
             // Normalize the comma-separated list: trim each token and drop empties
             // This makes common inputs like "https://a.com, https://b.com" robust.
-            let items: Vec<&str> = list
-                .split(',')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect();
-
+            let items: Vec<&str> =
+                list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    
             // After normalization, wildcard is not allowed as part of a list
             if items.iter().any(|o| *o == "*") {
                 return Err(CorsDomainError::WildCardNotAllowed {
                     input: http_cors_domains.to_string(),
-                    })
+                })
             }
 
             let origins = items
