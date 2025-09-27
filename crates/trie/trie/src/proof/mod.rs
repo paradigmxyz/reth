@@ -82,12 +82,12 @@ impl<T, H> Proof<T, H> {
     }
 
     /// Get a reference to the trie cursor factory.
-    pub fn trie_cursor_factory(&self) -> &T {
+    pub const fn trie_cursor_factory(&self) -> &T {
         &self.trie_cursor_factory
     }
 
     /// Get a reference to the hashed cursor factory.
-    pub fn hashed_cursor_factory(&self) -> &H {
+    pub const fn hashed_cursor_factory(&self) -> &H {
         &self.hashed_cursor_factory
     }
 }
