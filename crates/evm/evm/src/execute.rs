@@ -132,6 +132,11 @@ pub trait Executor<DB: Database>: Sized {
 }
 
 /// Helper type for the output of executing a block.
+///
+/// Deprecated: this type is unused within reth and will be removed in the next
+/// major release. Use `reth_execution_types::BlockExecutionResult` or
+/// `reth_execution_types::BlockExecutionOutput`.
+#[deprecated(note = "Use reth_execution_types::BlockExecutionResult or BlockExecutionOutput")]
 #[derive(Debug, Clone)]
 pub struct ExecuteOutput<R> {
     /// Receipts obtained after executing a block.
