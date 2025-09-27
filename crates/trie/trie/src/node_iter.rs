@@ -122,16 +122,16 @@ where
     ///
     /// If `metrics` feature is enabled, also updates the metrics.
     fn seek_hashed_entry(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
-        if let Some((last_key, last_value)) = self.last_next_result {
-            if last_key == key {
-                trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
-                self.last_next_result = None; // Consume the cached value
+        if let Some((last_key, last_value)) = self.last_next_result &&
+            last_key == key
+        {
+            trace!(target: "trie::node_iter", seek_key = ?key, "reusing result from last next() call instead of seeking");
+            self.last_next_result = None; // Consume the cached value
 
-                let result = Some((last_key, last_value));
-                self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
+            let result = Some((last_key, last_value));
+            self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
-                return Ok(result);
-            }
+            return Ok(result);
         }
 
         if let Some(entry) = self

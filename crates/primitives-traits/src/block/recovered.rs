@@ -659,7 +659,8 @@ mod rpc_compat {
     use crate::{block::error::BlockRecoveryError, SealedHeader};
     use alloc::vec::Vec;
     use alloy_consensus::{
-        transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
+        transaction::{Recovered, TxHashRef},
+        Block as CBlock, BlockBody, BlockHeader, Sealable,
     };
     use alloy_rpc_types_eth::{Block, BlockTransactions, BlockTransactionsKind, TransactionInfo};
 

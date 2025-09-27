@@ -171,28 +171,14 @@ fn load_field_from_segments(
 ///
 /// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
-    if ftype == "Vec" || ftype == "Option" {
-        if let syn::PathArguments::AngleBracketed(ref args) = segment.arguments {
-            if let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() {
-                if let (Some(path), 1) =
-                    (arg_path.path.segments.first(), arg_path.path.segments.len())
-                {
-                    if [
-                        "B256",
-                        "Address",
-                        "Address",
-                        "Bloom",
-                        "TxHash",
-                        "BlockHash",
-                        "CompactPlaceholder",
-                    ]
-                    .contains(&path.ident.to_string().as_str())
-                    {
-                        return true
-                    }
-                }
-            }
-        }
+    if (ftype == "Vec" || ftype == "Option") &&
+        let syn::PathArguments::AngleBracketed(ref args) = segment.arguments &&
+        let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() &&
+        let (Some(path), 1) = (arg_path.path.segments.first(), arg_path.path.segments.len()) &&
+        ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash", "CompactPlaceholder"]
+            .contains(&path.ident.to_string().as_str())
+    {
+        return true
     }
     false
 }

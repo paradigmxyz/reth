@@ -702,11 +702,10 @@ mod tests {
 
                         // Validate sequentiality only after prev progress,
                         // since the data before is mocked and can contain gaps
-                        if number > prev_progress {
-                            if let Some(prev_key) = prev_number {
+                        if number > prev_progress
+                            && let Some(prev_key) = prev_number {
                                 assert_eq!(prev_key + 1, number, "Body entries must be sequential");
                             }
-                        }
 
                         // Validate that the current entry is below or equals to the highest allowed block
                         assert!(

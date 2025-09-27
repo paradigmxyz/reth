@@ -70,8 +70,15 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
 
 /// A type that knows how to convert a consensus header into an RPC header.
 pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+    /// An associated RPC conversion error.
+    type Err: error::Error;
+
     /// Converts a consensus header into an RPC header.
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err>;
 }
 
 /// Default implementation of [`HeaderConverter`] that uses [`FromConsensusHeader`] to convert
@@ -80,8 +87,14 @@ impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
 where
     Rpc: FromConsensusHeader<Consensus>,
 {
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc {
-        Rpc::from_consensus_header(header, block_size)
+    type Err = Infallible;
+
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err> {
+        Ok(Rpc::from_consensus_header(header, block_size))
     }
 }
 
@@ -205,10 +218,12 @@ pub trait IntoRpcTx<T> {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `self` with `signer` and `tx_info`. See [`IntoRpcTx`]
     /// for details.
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> T;
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<T, Self::Err>;
 }
 
 /// Converts `T` into `self`. It is reciprocal of [`IntoRpcTx`].
@@ -222,23 +237,30 @@ pub trait IntoRpcTx<T> {
 /// Prefer using [`IntoRpcTx`] over using [`FromConsensusTx`] when specifying trait bounds on a
 /// generic function. This way, types that directly implement [`IntoRpcTx`] can be used as arguments
 /// as well.
-pub trait FromConsensusTx<T> {
+pub trait FromConsensusTx<T>: Sized {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `tx` with `signer` and `tx_info`. See [`FromConsensusTx`]
     /// for details.
-    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Result<Self, Self::Err>;
 }
 
 impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<TxIn>>
     FromConsensusTx<TxIn> for Transaction<T>
 {
     type TxInfo = TransactionInfo;
+    type Err = Infallible;
 
-    fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
+    fn from_consensus_tx(
+        tx: TxIn,
+        signer: Address,
+        tx_info: Self::TxInfo,
+    ) -> Result<Self, Self::Err> {
+        Ok(Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
     }
 }
 
@@ -246,10 +268,12 @@ impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
 where
     ConsensusTx: alloy_consensus::Transaction,
     RpcTx: FromConsensusTx<Self>,
+    <RpcTx as FromConsensusTx<ConsensusTx>>::Err: Debug,
 {
     type TxInfo = RpcTx::TxInfo;
+    type Err = <RpcTx as FromConsensusTx<ConsensusTx>>::Err;
 
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> RpcTx {
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<RpcTx, Self::Err> {
         RpcTx::from_consensus_tx(self, signer, tx_info)
     }
 }
@@ -285,7 +309,7 @@ impl<Tx, RpcTx> RpcTxConverter<Tx, RpcTx, Tx::TxInfo> for ()
 where
     Tx: IntoRpcTx<RpcTx>,
 {
-    type Err = Infallible;
+    type Err = Tx::Err;
 
     fn convert_rpc_tx(
         &self,
@@ -293,7 +317,7 @@ where
         signer: Address,
         tx_info: Tx::TxInfo,
     ) -> Result<RpcTx, Self::Err> {
-        Ok(tx.into_rpc_tx(signer, tx_info))
+        tx.into_rpc_tx(signer, tx_info)
     }
 }
 
@@ -893,6 +917,7 @@ where
                        + From<TxEnv::Error>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
                        + From<RpcTx::Err>
+                       + From<Header::Err>
                        + Error
                        + Unpin
                        + Sync
@@ -924,7 +949,7 @@ where
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
-        Ok(self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info)?)
+        self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info).map_err(Into::into)
     }
 
     fn build_simulate_v1_transaction(
@@ -966,7 +991,7 @@ where
         header: SealedHeaderFor<Self::Primitives>,
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error> {
-        Ok(self.header_converter.convert_header(header, block_size))
+        Ok(self.header_converter.convert_header(header, block_size)?)
     }
 }
 
@@ -1016,9 +1041,14 @@ pub mod op {
         for op_alloy_rpc_types::Transaction<T>
     {
         type TxInfo = OpTransactionInfo;
+        type Err = Infallible;
 
-        fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
-            Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
+        fn from_consensus_tx(
+            tx: T,
+            signer: Address,
+            tx_info: Self::TxInfo,
+        ) -> Result<Self, Self::Err> {
+            Ok(Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info))
         }
     }
 
@@ -1124,35 +1154,59 @@ mod transaction_response_tests {
     }
 
     #[cfg(feature = "op")]
-    #[test]
-    fn test_optimism_transaction_conversion() {
-        use op_alloy_consensus::OpTxEnvelope;
-        use op_alloy_network::Optimism;
-        use reth_optimism_primitives::OpTransactionSigned;
+    mod op {
+        use super::*;
+        use crate::transaction::TryIntoTxEnv;
+        use revm_context::{BlockEnv, CfgEnv};
 
-        let signed_tx = Signed::new_unchecked(
-            TxLegacy::default(),
-            Signature::new(U256::ONE, U256::ONE, false),
-            B256::ZERO,
-        );
-        let envelope = OpTxEnvelope::Legacy(signed_tx);
+        #[test]
+        fn test_optimism_transaction_conversion() {
+            use op_alloy_consensus::OpTxEnvelope;
+            use op_alloy_network::Optimism;
+            use reth_optimism_primitives::OpTransactionSigned;
 
-        let inner_tx = Transaction {
-            inner: Recovered::new_unchecked(envelope, Address::ZERO),
-            block_hash: None,
-            block_number: None,
-            transaction_index: None,
-            effective_gas_price: None,
-        };
+            let signed_tx = Signed::new_unchecked(
+                TxLegacy::default(),
+                Signature::new(U256::ONE, U256::ONE, false),
+                B256::ZERO,
+            );
+            let envelope = OpTxEnvelope::Legacy(signed_tx);
 
-        let tx_response = op_alloy_rpc_types::Transaction {
-            inner: inner_tx,
-            deposit_nonce: None,
-            deposit_receipt_version: None,
-        };
+            let inner_tx = Transaction {
+                inner: Recovered::new_unchecked(envelope, Address::ZERO),
+                block_hash: None,
+                block_number: None,
+                transaction_index: None,
+                effective_gas_price: None,
+            };
 
-        let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+            let tx_response = op_alloy_rpc_types::Transaction {
+                inner: inner_tx,
+                deposit_nonce: None,
+                deposit_receipt_version: None,
+            };
 
-        assert!(result.is_ok());
+            let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn test_op_into_tx_env() {
+            use op_alloy_rpc_types::OpTransactionRequest;
+            use op_revm::{transaction::OpTxTr, OpSpecId};
+            use revm_context::Transaction;
+
+            let s = r#"{"from":"0x0000000000000000000000000000000000000000","to":"0x6d362b9c3ab68c0b7c79e8a714f1d7f3af63655f","input":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","data":"0x1626ba7ec8ee0d506e864589b799a645ddb88b08f5d39e8049f9f702b3b61fa15e55fc73000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000550000002d6db27c52e3c11c1cf24072004ac75cba49b25bf45f513902e469755e1f3bf2ca8324ad16930b0a965c012a24bb1101f876ebebac047bd3b6bf610205a27171eaaeffe4b5e5589936f4e542d637b627311b0000000000000000000000","chainId":"0x7a69"}"#;
+
+            let req: OpTransactionRequest = serde_json::from_str(s).unwrap();
+
+            let cfg = CfgEnv::<OpSpecId>::default();
+            let block_env = BlockEnv::default();
+            let tx_env = req.try_into_tx_env(&cfg, &block_env).unwrap();
+            assert_eq!(tx_env.gas_limit(), block_env.gas_limit);
+            assert_eq!(tx_env.gas_price(), 0);
+            assert!(tx_env.enveloped_tx().unwrap().is_empty());
+        }
     }
 }

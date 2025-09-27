@@ -96,10 +96,11 @@ where
         }
 
         // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2 {
-            if let Some(first_node) = nodes.first_mut() {
-                node.connect(first_node).await;
-            }
+        if idx + 1 == num_nodes &&
+            num_nodes > 2 &&
+            let Some(first_node) = nodes.first_mut()
+        {
+            node.connect(first_node).await;
         }
 
         nodes.push(node);
@@ -207,10 +208,11 @@ where
             }
 
             // Connect last node with the first if there are more than two
-            if idx + 1 == num_nodes && num_nodes > 2 {
-                if let Some(first_node) = nodes.first_mut() {
-                    node.connect(first_node).await;
-                }
+            if idx + 1 == num_nodes &&
+                num_nodes > 2 &&
+                let Some(first_node) = nodes.first_mut()
+            {
+                node.connect(first_node).await;
             }
         }
 

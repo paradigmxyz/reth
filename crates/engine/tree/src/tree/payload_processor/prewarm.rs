@@ -12,9 +12,7 @@
 //! 3. When actual block execution happens, it benefits from the warmed cache
 
 use crate::tree::{
-    cached_state::{
-        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache, SavedCache,
-    },
+    cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage,
         ExecutionCache as PayloadExecutionCache,
@@ -23,12 +21,13 @@ use crate::tree::{
     ExecutionEnv, StateProviderBuilder,
 };
 use alloy_eips::Typed2718;
+use alloy_consensus::transaction::TxHashRef;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
@@ -235,37 +234,43 @@ where
     /// It should only be called after ensuring that:
     /// 1. All prewarming tasks have completed execution
     /// 2. No other concurrent operations are accessing the cache
-    /// 3. The prewarming phase has finished (typically signaled by `FinishedTxExecution`)
     ///
-    /// This method is called from `run()` only after all execution tasks are complete,
+    /// Saves the warmed caches back into the shared slot after prewarming completes.
+    ///
+    /// This consumes the `SavedCache` held by the task, which releases its usage guard and allows
+    /// the new, warmed cache to be inserted.
+    ///
+    /// This method is called from `run()` only after all execution tasks are complete.
     fn save_cache(self, state: BundleState) {
         let start = Instant::now();
 
-        // Precompute outside the lock
-        let hash = self.ctx.env.hash;
-        let caches = self.ctx.cache.clone();
-        let metrics = self.ctx.cache_metrics.clone();
+        let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
+            self;
+        let hash = env.hash;
 
         // Perform all cache operations atomically under the lock
-        self.execution_cache.update_with_guard(|cached| {
-            let cache = SavedCache::new(hash, caches, metrics);
+        execution_cache.update_with_guard(|cached| {
+
+            // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
+            let (caches, cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
             // Insert state into cache while holding the lock
-            if cache.cache().insert_state(&state).is_err() {
+            if new_cache.cache().insert_state(&state).is_err() {
                 // Clear the cache on error to prevent having a polluted cache
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
             }
 
-            cache.update_metrics();
-            debug!(target: "engine::caching", parent_hash=?cache.executed_block_hash(), "Updated execution cache");
+            new_cache.update_metrics();
+            debug!(target: "engine::caching", parent_hash=?new_cache.executed_block_hash(), "Updated execution cache");
 
             // Replace the shared cache with the new one; the previous cache (if any) is dropped.
-            *cached = Some(cache);
+            *cached = Some(new_cache);
         });
 
-        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
+        metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
@@ -334,8 +339,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) cache: StateExecutionCache,
-    pub(super) cache_metrics: CachedStateMetrics,
+    pub(super) saved_cache: SavedCache,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -357,8 +361,7 @@ where
         let Self {
             env,
             evm_config,
-            cache: caches,
-            cache_metrics,
+            saved_cache,
             provider,
             metrics,
             terminate_execution,
@@ -379,6 +382,8 @@ where
         };
 
         // Use the caches to create a new provider with caching
+        let caches = saved_cache.cache().clone();
+        let cache_metrics = saved_cache.metrics().clone();
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 

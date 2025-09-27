@@ -1,4 +1,4 @@
-//! Example for how hook into the polygon p2p network
+//! Example for how to hook into the polygon p2p network
 //!
 //! Run with
 //!
@@ -67,13 +67,13 @@ async fn main() {
     let net_handle = net_manager.handle();
     let mut events = net_handle.event_listener();
 
-    // NetworkManager is a long running task, let's spawn it
+    // NetworkManager is a long-running task, let's spawn it
     tokio::spawn(net_manager);
     info!("Looking for Polygon peers...");
 
     while let Some(evt) = events.next().await {
         // For the sake of the example we only print the session established event
-        // with the chain specific details
+        // with the chain-specific details
         if let NetworkEvent::ActivePeerSession { info, .. } = evt {
             let SessionInfo { status, client_version, .. } = info;
             let chain = status.chain;
@@ -81,5 +81,5 @@ async fn main() {
         }
         // More events here
     }
-    // We will be disconnected from peers since we are not able to answer to network requests
+    // We will be disconnected from peers since we are not able to respond to network requests
 }
