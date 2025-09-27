@@ -31,7 +31,7 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
             // This makes common inputs like "https://a.com, https://b.com" robust.
             let items: Vec<&str> =
                 list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-    
+
             // After normalization, wildcard is not allowed as part of a list
             if items.iter().any(|o| *o == "*") {
                 return Err(CorsDomainError::WildCardNotAllowed {
