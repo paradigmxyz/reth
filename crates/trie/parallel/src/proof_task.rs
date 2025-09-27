@@ -10,11 +10,11 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
+use crossbeam_channel::{unbounded, Receiver, SendError, Sender};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderResult,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -32,14 +32,14 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     collections::VecDeque,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
     },
+    thread,
     time::Instant,
 };
-use tokio::runtime::Handle;
 use tracing::{debug, trace};
 
 #[cfg(feature = "metrics")]
@@ -48,34 +48,84 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
+/// Thread pool where each worker maintains its own database transaction
+#[derive(Debug)]
+struct ProofThreadPool<Factory> {
+    work_sender: Sender<ProofTaskKind>,
+    _workers: Vec<thread::JoinHandle<()>>,
+    _phantom: PhantomData<Factory>,
+}
+
+impl<Factory> ProofThreadPool<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync + 'static,
+{
+    fn new(
+        num_workers: usize,
+        view: ConsistentDbView<Factory>,
+        task_ctx: ProofTaskCtx,
+    ) -> ProviderResult<Self> {
+        let (work_sender, work_receiver) = unbounded();
+        let mut workers = Vec::with_capacity(num_workers);
+
+        for worker_id in 0..num_workers {
+            // Each worker gets its own dedicated database transaction
+            let provider_ro = view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let work_receiver = work_receiver.clone();
+
+            let worker = thread::spawn(move || {
+                // Worker loop - each thread processes tasks with its dedicated transaction
+                while let Ok(task) = work_receiver.recv() {
+                    match task {
+                        ProofTaskKind::StorageProof(input, result_sender) => {
+                            proof_task_tx.storage_proof(input, result_sender);
+                        }
+                        ProofTaskKind::BlindedAccountNode(path, result_sender) => {
+                            proof_task_tx.blinded_account_node(path, result_sender);
+                        }
+                        ProofTaskKind::BlindedStorageNode(account, path, result_sender) => {
+                            proof_task_tx.blinded_storage_node(account, path, result_sender);
+                        }
+                    }
+                }
+            });
+
+            workers.push(worker);
+        }
+
+        Ok(Self { work_sender, _workers: workers, _phantom: PhantomData })
+    }
+
+    fn dispatch_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskKind>> {
+        self.work_sender.send(task)
+    }
+}
+
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
 /// database transactions
 #[derive(Debug)]
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Max number of database transactions to create
+    /// Max number of worker threads to create
     max_concurrency: usize,
-    /// Number of database transactions created
-    total_transactions: usize,
     /// Consistent view provider used for creating transactions on-demand
     view: ConsistentDbView<Factory>,
     /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
     /// Proof tasks pending execution
     pending_tasks: VecDeque<ProofTaskKind>,
-    /// The underlying handle from which to spawn proof tasks
-    executor: Handle,
-    /// The proof task transactions, containing owned cursor factories that are reused for proof
-    /// calculation.
-    proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
     /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
-    /// A sender for sending back transactions.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    proof_task_rx: Receiver<ProofTaskMessage>,
+    /// A sender for control messages.
+    control_sender: Sender<ProofTaskMessage>,
     /// The number of active handles.
     ///
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
     /// [`ProofTaskManagerHandle::drop`].
     active_handles: Arc<AtomicUsize>,
+    /// Thread pool where each worker maintains its own database transaction
+    thread_pool: Option<ProofThreadPool<Factory>>,
     /// Metrics tracking blinded node fetches.
     #[cfg(feature = "metrics")]
     metrics: ProofTaskMetrics,
@@ -87,92 +137,73 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
     ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
-        executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
         max_concurrency: usize,
     ) -> Self {
-        let (tx_sender, proof_task_rx) = channel();
+        let (control_sender, proof_task_rx) = unbounded();
         Self {
             max_concurrency,
-            total_transactions: 0,
             view,
             task_ctx,
             pending_tasks: VecDeque::new(),
-            executor,
-            proof_task_txs: Vec::new(),
             proof_task_rx,
-            tx_sender,
+            control_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
+            thread_pool: None,
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
         }
     }
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
+    pub fn handle(&self) -> ProofTaskManagerHandle {
+        ProofTaskManagerHandle::new(self.control_sender.clone(), self.active_handles.clone())
     }
 }
 
 impl<Factory> ProofTaskManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync + Clone + 'static,
 {
     /// Inserts the task into the pending tasks queue.
     pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
         self.pending_tasks.push_back(task);
     }
 
-    /// Gets either the next available transaction, or creates a new one if all are in use and the
-    /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
-        if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Ok(Some(proof_task_tx));
+    /// Gets or creates the thread pool
+    fn get_or_create_thread_pool(&mut self) -> ProviderResult<&ProofThreadPool<Factory>> {
+        if self.thread_pool.is_none() {
+            let thread_pool = ProofThreadPool::new(
+                self.max_concurrency,
+                self.view.clone(),
+                self.task_ctx.clone(),
+            )?;
+            self.thread_pool = Some(thread_pool);
         }
-
-        // if we can create a new tx within our concurrency limits, create one on-demand
-        if self.total_transactions < self.max_concurrency {
-            let provider_ro = self.view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
-        }
-
-        Ok(None)
+        Ok(self.thread_pool.as_ref().unwrap())
     }
 
-    /// Spawns the next queued proof task on the executor with the given input, if there are any
-    /// transactions available.
+    /// Spawns the next queued proof task on the thread pool with the given input.
     ///
-    /// This will return an error if a transaction must be created on-demand and the consistent view
-    /// provider fails.
+    /// This will return an error if the thread pool must be created on-demand and the consistent
+    /// view provider fails.
     pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
         let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
 
-        let Some(proof_task_tx) = self.get_or_create_tx()? else {
-            // if there are no txs available, requeue the proof task
-            self.pending_tasks.push_front(task);
-            return Ok(())
-        };
+        // Get or create the thread pool
+        let thread_pool = self.get_or_create_thread_pool()?;
 
-        let tx_sender = self.tx_sender.clone();
-        self.executor.spawn_blocking(move || match task {
-            ProofTaskKind::StorageProof(input, sender) => {
-                proof_task_tx.storage_proof(input, sender, tx_sender);
-            }
-            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                proof_task_tx.blinded_account_node(path, sender, tx_sender);
-            }
-            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
-            }
-        });
+        // Dispatch the task to the thread pool
+        if let Err(send_error) = thread_pool.dispatch_task(task) {
+            // If dispatch fails, requeue the task that failed to send
+            self.pending_tasks.push_front(send_error.0);
+        }
 
         Ok(())
     }
 
-    /// Loops, managing the proof tasks, and sending new tasks to the executor.
+    /// Loops, managing the proof tasks, and sending new tasks to the thread pool.
     pub fn run(mut self) -> ProviderResult<()> {
         loop {
             match self.proof_task_rx.recv() {
@@ -191,10 +222,6 @@ where
                         }
                         // queue the task
                         self.queue_proof_task(task)
-                    }
-                    ProofTaskMessage::Transaction(tx) => {
-                        // return the transaction to the pool
-                        self.proof_task_txs.push(tx);
                     }
                     ProofTaskMessage::Terminate => {
                         // Record metrics before terminating
@@ -260,12 +287,7 @@ where
     }
 
     /// Calculates a storage proof for the given hashed address, and desired prefix set.
-    fn storage_proof(
-        self,
-        input: StorageProofInput,
-        result_sender: Sender<StorageProofResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
+    fn storage_proof(&self, input: StorageProofInput, result_sender: Sender<StorageProofResult>) {
         trace!(
             target: "trie::proof_task",
             hashed_address=?input.hashed_address,
@@ -332,18 +354,10 @@ where
                 "Storage proof receiver is dropped, discarding the result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 
     /// Retrieves blinded account node by path.
-    fn blinded_account_node(
-        self,
-        path: Nibbles,
-        result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
+    fn blinded_account_node(&self, path: Nibbles, result_sender: Sender<TrieNodeProviderResult>) {
         trace!(
             target: "trie::proof_task",
             ?path,
@@ -375,18 +389,14 @@ where
                 "Failed to send blinded account node result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 
     /// Retrieves blinded storage node of the given account by path.
     fn blinded_storage_node(
-        self,
+        &self,
         account: B256,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -422,9 +432,6 @@ where
                 "Failed to send blinded storage node result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 }
 
@@ -490,11 +497,9 @@ impl ProofTaskCtx {
 
 /// Message used to communicate with [`ProofTaskManager`].
 #[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
+pub enum ProofTaskMessage {
     /// A request to queue a proof task.
     QueueTask(ProofTaskKind),
-    /// A returned database transaction.
-    Transaction(ProofTaskTx<Tx>),
     /// A request to terminate the proof task manager.
     Terminate,
 }
@@ -516,22 +521,22 @@ pub enum ProofTaskKind {
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
 /// number of active handles went to zero.
 #[derive(Debug)]
-pub struct ProofTaskManagerHandle<Tx> {
+pub struct ProofTaskManagerHandle {
     /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
+    sender: Sender<ProofTaskMessage>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
 }
 
-impl<Tx> ProofTaskManagerHandle<Tx> {
+impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(sender: Sender<ProofTaskMessage>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self { sender, active_handles }
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage>> {
         self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
@@ -541,13 +546,13 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
+impl Clone for ProofTaskManagerHandle {
     fn clone(&self) -> Self {
         Self::new(self.sender.clone(), self.active_handles.clone())
     }
 }
 
-impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
+impl Drop for ProofTaskManagerHandle {
     fn drop(&mut self) {
         // Decrement the number of active handles and terminate the manager if it was the last
         // handle.
@@ -557,9 +562,9 @@ impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
+impl TrieNodeProviderFactory for ProofTaskManagerHandle {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
@@ -572,24 +577,24 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskMessage>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskMessage>,
     },
 }
 
-impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let (tx, rx) = channel();
+        let (tx, rx) = unbounded();
         match self {
             Self::AccountNode { sender } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(

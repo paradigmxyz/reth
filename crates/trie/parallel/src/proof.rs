@@ -10,11 +10,11 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use crossbeam_channel::Receiver;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -33,7 +33,7 @@ use reth_trie_common::{
     proof::{DecodedProofNodes, ProofRetainer},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
+use std::sync::Arc;
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -58,7 +58,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -70,7 +70,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
     ) -> Self {
         Self {
             view,
@@ -121,7 +121,7 @@ where
             self.multi_added_removed_keys.clone(),
         );
 
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = crossbeam_channel::unbounded();
         let _ =
             self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
         receiver
@@ -445,8 +445,7 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task = ProofTaskManager::new(consistent_view.clone(), task_ctx, 1);
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors
