@@ -17,7 +17,7 @@ use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StorageLocation,
+    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{validation::stateless_validation, ExecutionWitness};
@@ -202,8 +202,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     .try_recover()
     .unwrap();
 
+    provider.insert_block(genesis_block.clone()).map_err(|err| Error::block_failed(0, err))?;
+
+    // Increment block number for receipts static file
     provider
-        .insert_block(genesis_block.clone(), StorageLocation::Database)
+        .static_file_provider()
+        .latest_writer(StaticFileSegment::Receipts)
+        .and_then(|mut writer| writer.increment_block(0))
         .map_err(|err| Error::block_failed(0, err))?;
 
     let genesis_state = case.pre.clone().into_genesis_state();
@@ -227,7 +232,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Insert the block into the database
         provider
-            .insert_block(block.clone(), StorageLocation::Database)
+            .insert_block(block.clone())
+            .map_err(|err| Error::block_failed(block_number, err))?;
+        // Commit static files, so we can query the headers for stateless execution below
+        provider
+            .static_file_provider()
+            .commit()
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks before block execution
@@ -293,11 +303,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
         // Commit the post state/state diff to the database
         provider
-            .write_state(
-                &ExecutionOutcome::single(block.number, output),
-                OriginalValuesKnown::Yes,
-                StorageLocation::Database,
-            )
+            .write_state(&ExecutionOutcome::single(block.number, output), OriginalValuesKnown::Yes)
             .map_err(|err| Error::block_failed(block_number, err))?;
 
         provider

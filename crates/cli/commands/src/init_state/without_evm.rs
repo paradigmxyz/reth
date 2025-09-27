@@ -6,7 +6,7 @@ use reth_node_builder::NodePrimitives;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SealedHeaderFor};
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, ProviderResult, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter, StorageLocation,
+    StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -81,7 +81,6 @@ where
         )
         .try_recover()
         .expect("no senders or txes"),
-        StorageLocation::Database,
     )?;
 
     let sf_provider = provider_rw.static_file_provider();

@@ -1,7 +1,7 @@
 use crate::{
     providers::{StaticFileProvider, StaticFileWriter as SfWriter},
     BlockExecutionWriter, BlockWriter, HistoryWriter, StateWriter, StaticFileProviderFactory,
-    StorageLocation, TrieWriter,
+    TrieWriter,
 };
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
@@ -166,16 +166,11 @@ where
         } in blocks
         {
             let block_hash = recovered_block.hash();
-            self.database()
-                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
+            self.database().insert_block(Arc::unwrap_or_clone(recovered_block))?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
-            self.database().write_state(
-                &execution_output,
-                OriginalValuesKnown::No,
-                StorageLocation::StaticFiles,
-            )?;
+            self.database().write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
             self.database()
@@ -202,7 +197,7 @@ where
     pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
         // IMPORTANT: we use `block_number+1` to make sure we remove only what is ABOVE the block
         debug!(target: "provider::storage_writer", ?block_number, "Removing blocks from database above block_number");
-        self.database().remove_block_and_execution_above(block_number, StorageLocation::Both)?;
+        self.database().remove_block_and_execution_above(block_number)?;
 
         // Get highest static file block for the total block range
         let highest_static_file_block = self
@@ -507,7 +502,7 @@ mod tests {
 
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -607,7 +602,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 2, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -675,7 +670,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -834,7 +829,7 @@ mod tests {
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1000,7 +995,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1049,7 +1044,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

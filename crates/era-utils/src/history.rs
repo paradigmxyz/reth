@@ -27,7 +27,7 @@ use reth_stages_types::{
 };
 use reth_storage_api::{
     errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
-    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+    NodePrimitivesProvider, StageCheckpointWriter,
 };
 use std::{
     collections::Bound,
@@ -318,11 +318,7 @@ where
         writer.append_header(&header, *total_difficulty, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(
-            vec![(header.number(), Some(body))],
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
-        )?;
+        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
 
         hash_collector.insert(hash, number)?;
     }
