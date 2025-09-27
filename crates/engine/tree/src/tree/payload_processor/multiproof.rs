@@ -7,6 +7,7 @@ use alloy_primitives::{
     map::{B256Set, HashSet},
     B256,
 };
+use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -350,6 +351,17 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Cached storage proof roots for missed leaves.
+    ///
+    /// It is important to cache these. Otherwise, a common account
+    /// (popular ERC-20, etc.) having missed leaves in its path would
+    /// repeatedly calculate these proofs per interacting transaction
+    /// (same account different slots).
+    ///
+    /// This also works well with chunking multiproofs, which may break
+    /// a big account change into different chunks, which may repeatedly
+    /// revisit missed leaves.
+    missed_leaf_roots: Arc<DashMap<B256, B256>>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -372,6 +384,7 @@ where
             inflight: 0,
             metrics,
             storage_proof_task_handle,
+            missed_leaf_roots: Default::default(),
         }
     }
 
@@ -440,6 +453,7 @@ where
         } = storage_multiproof_input;
 
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+        let missed_leaf_roots = self.missed_leaf_roots.clone();
 
         self.executor.spawn_blocking(move || {
             let storage_targets = proof_targets.len();
@@ -457,6 +471,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
+                missed_leaf_roots,
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
@@ -511,6 +526,7 @@ where
             multi_added_removed_keys,
         } = multiproof_input;
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+        let missed_leaf_roots = self.missed_leaf_roots.clone();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -532,6 +548,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
+                missed_leaf_roots,
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)

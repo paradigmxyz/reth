@@ -30,6 +30,7 @@ alloy-primitives.workspace = true
 tracing.workspace = true
 
 # misc
+dashmap.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 rayon.workspace = true
