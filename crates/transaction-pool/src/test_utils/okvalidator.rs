@@ -4,6 +4,7 @@ use crate::{
     validate::ValidTransaction, EthPooledTransaction, PoolTransaction, TransactionOrigin,
     TransactionValidationOutcome, TransactionValidator,
 };
+use reth_storage_api::StateProvider;
 
 /// A transaction validator that determines all transactions to be valid.
 #[derive(Debug)]
@@ -34,12 +35,39 @@ where
 {
     type Transaction = T;
 
+    async fn validate_transaction_stateless(
+        &self,
+        _origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> Result<Self::Transaction, TransactionValidationOutcome<Self::Transaction>> {
+        // Always passes stateless checks
+        Ok(transaction)
+    }
+
+    async fn validate_transaction_stateful(
+        &self,
+        _origin: TransactionOrigin,
+        transaction: Self::Transaction,
+        _state: &dyn StateProvider,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        let authorities = transaction.authorization_list().map(|auths| {
+            auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
+        });
+        TransactionValidationOutcome::Valid {
+            balance: *transaction.cost(),
+            state_nonce: transaction.nonce(),
+            bytecode_hash: None,
+            transaction: ValidTransaction::Valid(transaction),
+            propagate: self.propagate,
+            authorities,
+        }
+    }
+
     async fn validate_transaction(
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        // Always return valid
         let authorities = transaction.authorization_list().map(|auths| {
             auths.iter().flat_map(|auth| auth.recover_authority()).collect::<Vec<_>>()
         });
