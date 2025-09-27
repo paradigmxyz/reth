@@ -1015,23 +1015,71 @@ where
         version: EngineApiMessageVersion,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         trace!(target: "engine::tree", ?attrs, "invoked forkchoice update");
+
+        // Record metrics
+        self.record_forkchoice_metrics(&attrs);
+
+        // Pre-validation of forkchoice state
+        if let Some(early_result) = self.validate_forkchoice_state(state)? {
+            return Ok(TreeOutcome::new(early_result));
+        }
+
+        // Case 1: Check if head is already canonical
+        if let Some(result) = self.handle_canonical_head(state, attrs.clone(), version)? {
+            return Ok(result);
+        }
+
+        // Case 2 Apply chain update if head is not canonical
+        if let Some(result) = self.apply_chain_update(state, attrs, version)? {
+            return Ok(result);
+        }
+
+        // Case 3 Handle missing block scenario
+        self.handle_missing_block(state)
+    }
+
+    /// Records metrics for forkchoice updated calls
+    fn record_forkchoice_metrics(&self, attrs: &Option<T::PayloadAttributes>) {
         self.metrics.engine.forkchoice_updated_messages.increment(1);
         if attrs.is_some() {
             self.metrics.engine.forkchoice_with_attributes_updated_messages.increment(1);
         }
         self.canonical_in_memory_state.on_forkchoice_update_received();
+    }
 
-        if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
-            return Ok(TreeOutcome::new(on_updated))
+    /// Pre-validates the forkchoice state and returns early if validation fails.
+    fn validate_forkchoice_state(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
+        if state.head_block_hash.is_zero() {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
 
-        let valid_outcome = |head| {
-            TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                PayloadStatusEnum::Valid,
-                Some(head),
-            )))
-        };
+        // Check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)));
+        }
 
+        if !self.backfill_sync_state.is_idle() {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
+            trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
+            return Ok(Some(OnForkChoiceUpdated::syncing()));
+        }
+
+        Ok(None)
+    }
+
+    /// Handles the case where the forkchoice head is already canonical.
+    fn handle_canonical_head(
+        &self,
+        state: ForkchoiceState,
+        attrs: Option<T::PayloadAttributes>,
+        version: EngineApiMessageVersion,
+    ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Process the forkchoice update by trying to make the head block canonical
         //
         // We can only process this forkchoice update if:
@@ -1046,34 +1094,47 @@ where
         // - emitting a canonicalization event for the new chain (including reorg)
         // - if we have payload attributes, delegate them to the payload service
 
-        // 1. ensure we have a new head block
-        if self.state.tree_state.canonical_block_hash() == state.head_block_hash {
-            trace!(target: "engine::tree", "fcu head hash is already canonical");
-
-            // update the safe and finalized blocks and ensure their values are valid
-            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-                // safe or finalized hashes are invalid
-                return Ok(TreeOutcome::new(outcome))
-            }
-
-            // we still need to process payload attributes if the head is already canonical
-            if let Some(attr) = attrs {
-                let tip = self
-                    .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
-                    .ok_or_else(|| {
-                        // If we can't find the canonical block, then something is wrong and we need
-                        // to return an error
-                        ProviderError::HeaderNotFound(state.head_block_hash.into())
-                    })?;
-                let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated))
-            }
-
-            // the head block is already canonical
-            return Ok(valid_outcome(state.head_block_hash))
+        if self.state.tree_state.canonical_block_hash() != state.head_block_hash {
+            return Ok(None);
         }
 
-        // 2. check if the head is already part of the canonical chain
+        trace!(target: "engine::tree", "fcu head hash is already canonical");
+
+        // Update the safe and finalized blocks and ensure their values are valid
+        if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+            // safe or finalized hashes are invalid
+            return Ok(Some(TreeOutcome::new(outcome)));
+        }
+
+        // Process payload attributes if the head is already canonical
+        if let Some(attr) = attrs {
+            let tip = self
+                .sealed_header_by_hash(self.state.tree_state.canonical_block_hash())?
+                .ok_or_else(|| {
+                    // If we can't find the canonical block, then something is wrong and we need
+                    // to return an error
+                    ProviderError::HeaderNotFound(state.head_block_hash.into())
+                })?;
+            let updated = self.process_payload_attributes(attr, &tip, state, version);
+            return Ok(Some(TreeOutcome::new(updated)));
+        }
+
+        // The head block is already canonical
+        let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+            PayloadStatusEnum::Valid,
+            Some(state.head_block_hash),
+        )));
+        Ok(Some(outcome))
+    }
+
+    /// Applies chain update for the new head block and processes payload attributes.
+    fn apply_chain_update(
+        &mut self,
+        state: ForkchoiceState,
+        attrs: Option<T::PayloadAttributes>,
+        version: EngineApiMessageVersion,
+    ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
+        // Check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
@@ -1086,7 +1147,7 @@ where
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     let updated =
                         self.process_payload_attributes(attr, &canonical_header, state, version);
-                    return Ok(TreeOutcome::new(updated))
+                    return Ok(Some(TreeOutcome::new(updated)));
                 }
 
                 // At this point, no alternative block has been triggered, so we need effectively
@@ -1095,6 +1156,7 @@ where
                 // canonical ancestor. This ensures that state providers and the
                 // transaction pool operate with the correct chain state after
                 // forkchoice update processing.
+
                 if self.config.unwind_canonical_header() {
                     self.update_latest_block_to_canonical_ancestor(&canonical_header)?;
                 }
@@ -1109,28 +1171,45 @@ where
 
             // the head block is already canonical, so we're not triggering a payload job and can
             // return right away
-            return Ok(valid_outcome(state.head_block_hash))
+
+            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(state.head_block_hash),
+            )));
+            return Ok(Some(outcome));
         }
 
-        // 3. ensure we can apply a new chain update for the head block
+        // Ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
-            // update the safe and finalized blocks and ensure their values are valid
+            // Update the safe and finalized blocks and ensure their values are valid
             if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
                 // safe or finalized hashes are invalid
-                return Ok(TreeOutcome::new(outcome))
+                return Ok(Some(TreeOutcome::new(outcome)));
             }
 
             if let Some(attr) = attrs {
                 let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated))
+                return Ok(Some(TreeOutcome::new(updated)));
             }
 
-            return Ok(valid_outcome(state.head_block_hash))
+            let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(state.head_block_hash),
+            )));
+            return Ok(Some(outcome));
         }
 
+        Ok(None)
+    }
+
+    /// Handles the case where the head block is missing and needs to be downloaded.
+    fn handle_missing_block(
+        &self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         // 4. we don't have the block to perform the update
         // we assume the FCU is valid and at least the head is missing,
         // so we need to start syncing to it
@@ -2751,35 +2830,6 @@ where
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
         self.update_safe_block(state.safe_block_hash)
-    }
-
-    /// Pre-validate forkchoice update and check whether it can be processed.
-    ///
-    /// This method returns the update outcome if validation fails or
-    /// the node is syncing and the update cannot be processed at the moment.
-    fn pre_validate_forkchoice_update(
-        &mut self,
-        state: ForkchoiceState,
-    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
-        if state.head_block_hash.is_zero() {
-            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
-        }
-
-        // check if the new head hash is connected to any ancestor that we previously marked as
-        // invalid
-        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
-            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
-        }
-
-        if !self.backfill_sync_state.is_idle() {
-            // We can only process new forkchoice updates if the pipeline is idle, since it requires
-            // exclusive access to the database
-            trace!(target: "engine::tree", "Pipeline is syncing, skipping forkchoice update");
-            return Ok(Some(OnForkChoiceUpdated::syncing()))
-        }
-
-        Ok(None)
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
