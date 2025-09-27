@@ -108,4 +108,40 @@ mod tests {
         c.cancel();
         assert!(cloned_cancel.is_cancelled());
     }
+
+    #[test]
+    fn test_cancelondrop_clone_behavior() {
+        let cancel = CancelOnDrop::default();
+        assert!(!cancel.is_cancelled());
+
+        // Clone the CancelOnDrop
+        let cloned_cancel = cancel.clone();
+        assert!(!cloned_cancel.is_cancelled());
+
+        // Drop the original - this should set the cancelled flag
+        drop(cancel);
+
+        // The cloned instance should now see the cancelled flag as true
+        assert!(cloned_cancel.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancelondrop_multiple_clones() {
+        let cancel = CancelOnDrop::default();
+        let clone1 = cancel.clone();
+        let clone2 = cancel.clone();
+        let clone3 = cancel.clone();
+
+        assert!(!cancel.is_cancelled());
+        assert!(!clone1.is_cancelled());
+        assert!(!clone2.is_cancelled());
+        assert!(!clone3.is_cancelled());
+
+        // Drop one clone - this should cancel all instances
+        drop(clone1);
+
+        assert!(cancel.is_cancelled());
+        assert!(clone2.is_cancelled());
+        assert!(clone3.is_cancelled());
+    }
 }
