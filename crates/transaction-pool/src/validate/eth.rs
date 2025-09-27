@@ -745,6 +745,10 @@ where
             self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if self.chain_spec().is_amsterdam_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.amsterdam.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
         if let Some(blob_params) =
             self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
         {
@@ -811,6 +815,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     prague: bool,
     /// Fork indicator whether we are in the Osaka hardfork.
     osaka: bool,
+    /// Fork indicator whether we are in the Amsterdam hardfork.
+    amsterdam: bool,
     /// Max blob count at the block's timestamp.
     max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
@@ -884,6 +890,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // osaka not yet activated
             osaka: false,
+
+            // amsterdam not yet activated
+            amsterdam: true,
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blobs_per_tx,
@@ -1072,6 +1081,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun,
             prague,
             osaka,
+            amsterdam,
             eip2718,
             eip1559,
             eip4844,
@@ -1094,6 +1104,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
             osaka: AtomicBool::new(osaka),
+            amsterdam: AtomicBool::new(amsterdam),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
@@ -1173,6 +1184,8 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
+    /// Tracks if amsterdam is activated at the block's timestamp.
+    pub amsterdam: AtomicBool,
     /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
 }
@@ -1196,6 +1209,11 @@ impl ForkTracker {
     /// Returns `true` if Osaka fork is activated.
     pub fn is_osaka_activated(&self) -> bool {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns `true` if Amsterdam fork is activated.
+    pub fn is_amsterdam_activated(&self) -> bool {
+        self.amsterdam.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns the max allowed blob count per transaction.
@@ -1272,6 +1290,7 @@ mod tests {
             cancun: false.into(),
             prague: false.into(),
             osaka: false.into(),
+            amsterdam: false.into(),
             max_blob_count: 0.into(),
         };
 
