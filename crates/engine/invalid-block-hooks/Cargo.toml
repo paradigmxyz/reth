@@ -24,6 +24,7 @@ reth-tracing.workspace = true
 reth-trie.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-debug.workspace = true
@@ -38,3 +39,13 @@ jsonrpsee.workspace = true
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"] }
+revm-state.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
+reth-ethereum-primitives.workspace = true
+reth-chainspec.workspace = true
+reth-testing-utils.workspace = true
