@@ -94,7 +94,7 @@ where
     }
 
     /// Creates a new [`TrieNodeIter`].
-    fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
+    const fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
