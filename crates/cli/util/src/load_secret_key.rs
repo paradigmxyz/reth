@@ -5,10 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+use rand_08::rngs::OsRng;
 
 /// Convenience function to create a new random [`SecretKey`]
+/// Note: Use OS-backed CSPRNG for generating long-term node identity.
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand_08::thread_rng())
+    SecretKey::new(&mut OsRng)
 }
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.
