@@ -87,7 +87,7 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
-    "alloy-trie/ethereum"
+    "alloy-trie/ethereum",
 ]
 
 [[bench]]
