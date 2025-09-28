@@ -6,7 +6,8 @@ pub use alloy_trie::root::{
     storage_root, storage_root_unhashed, storage_root_unhashed as storage_root_prehashed,
 };
 
-/// Compute the state root of a given set of accounts using [`triehash::sec_trie_root`].
+/// Compute the state root of a given set of accounts using
+/// [`alloy_trie::root::state_root_unhashed`].
 pub fn state_root<I, S>(accounts: I) -> B256
 where
     I: IntoIterator<Item = (Address, (Account, S))>,
@@ -21,7 +22,7 @@ where
 }
 
 /// Compute the state root of a given set of accounts with prehashed keys using
-/// [`triehash::trie_root`].
+/// [`alloy_trie::root::state_root`].
 pub fn state_root_prehashed<I, S>(accounts: I) -> B256
 where
     I: IntoIterator<Item = (B256, (Account, S))>,
