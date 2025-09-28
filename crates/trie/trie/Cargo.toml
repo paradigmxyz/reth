@@ -40,9 +40,6 @@ itertools.workspace = true
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
-# `test-utils` feature
-triehash = { workspace = true, optional = true }
-
 [dev-dependencies]
 # reth
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
@@ -85,12 +82,12 @@ serde = [
     "reth-ethereum-primitives/serde",
 ]
 test-utils = [
-    "triehash",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
+    "alloy-trie/ethereum"
 ]
 
 [[bench]]

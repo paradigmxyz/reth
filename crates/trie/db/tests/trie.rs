@@ -19,7 +19,7 @@ use reth_provider::{
 };
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+    test_utils::{state_root, state_root_prehashed, storage_root, storage_root_unhashed},
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
@@ -321,7 +321,7 @@ fn storage_root_regression() {
     let tx = factory.provider_rw().unwrap();
 
     let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
-    let expected_root = storage_root_prehashed(storage);
+    let expected_root = storage_root_unhashed(storage);
     assert_eq!(expected_root, account3_storage_root);
 }
 

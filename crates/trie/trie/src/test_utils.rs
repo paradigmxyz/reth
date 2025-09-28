@@ -1,10 +1,10 @@
 use alloy_primitives::{Address, B256, U256};
-use alloy_rlp::encode_fixed_size;
 use reth_primitives_traits::Account;
-use reth_trie_common::triehash::KeccakHasher;
 
-/// Re-export of [triehash].
-pub use triehash;
+// Re-export alloy-trie functions
+pub use alloy_trie::root::{
+    storage_root, storage_root_unhashed, storage_root_unhashed as storage_root_prehashed,
+};
 
 /// Compute the state root of a given set of accounts using [`triehash::sec_trie_root`].
 pub fn state_root<I, S>(accounts: I) -> B256
@@ -12,18 +12,12 @@ where
     I: IntoIterator<Item = (Address, (Account, S))>,
     S: IntoIterator<Item = (B256, U256)>,
 {
-    let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
+    let accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root(storage);
         let account = account.into_trie_account(storage_root);
-        (address, alloy_rlp::encode(account))
+        (address, account)
     });
-    triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
-}
-
-/// Compute the storage root for a given account using [`triehash::sec_trie_root`].
-pub fn storage_root<I: IntoIterator<Item = (B256, U256)>>(storage: I) -> B256 {
-    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v)));
-    triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage)
+    alloy_trie::root::state_root_unhashed(accounts)
 }
 
 /// Compute the state root of a given set of accounts with prehashed keys using
@@ -33,17 +27,11 @@ where
     I: IntoIterator<Item = (B256, (Account, S))>,
     S: IntoIterator<Item = (B256, U256)>,
 {
-    let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
-        let storage_root = storage_root_prehashed(storage);
+    let accounts = accounts.into_iter().map(|(address, (account, storage))| {
+        let storage_root = storage_root_unhashed(storage);
         let account = account.into_trie_account(storage_root);
-        (address, alloy_rlp::encode(account))
+        (address, account)
     });
 
-    triehash::trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
-}
-
-/// Compute the storage root for a given account with prehashed slots using [`triehash::trie_root`].
-pub fn storage_root_prehashed<I: IntoIterator<Item = (B256, U256)>>(storage: I) -> B256 {
-    let encoded_storage = storage.into_iter().map(|(k, v)| (k, encode_fixed_size(&v)));
-    triehash::trie_root::<KeccakHasher, _, _, _>(encoded_storage)
+    alloy_trie::root::state_root(accounts)
 }
