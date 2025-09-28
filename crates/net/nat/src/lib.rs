@@ -25,7 +25,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::net_if::resolve_net_if_ip;
 #[cfg(feature = "serde")]
