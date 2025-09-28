@@ -15,7 +15,7 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use rand_08::{thread_rng as rng, Rng};
+use rand_08::{thread_rng as rng, Rng, RngCore};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -312,9 +312,10 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        // TODO(rand): use rng for nonce
         let mut rng = rng();
-        let nonce = B256::random();
+        let mut nonce_bytes = [0u8; 32];
+        rng.fill_bytes(&mut nonce_bytes);
+        let nonce = B256::from(nonce_bytes);
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
@@ -356,7 +357,10 @@ impl ECIES {
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let mut rng = rng();
-        let nonce = B256::random();
+        // NOTE: use the same RNG for nonce to avoid mixing randomness sources
+        let mut nonce_bytes = [0u8; 32];
+        rng.fill_bytes(&mut nonce_bytes);
+        let nonce = B256::from(nonce_bytes);
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
