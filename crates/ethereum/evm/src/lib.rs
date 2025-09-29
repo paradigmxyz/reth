@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use alloc::{borrow::Cow, sync::Arc};
+use alloy_consensus::HeaderInfo;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 pub use alloy_evm::EthEvm;
@@ -124,6 +125,41 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     }
 }
 
+impl<ChainSpec, EvmF> EthEvmConfig<ChainSpec, EvmF> {
+    /// Extract essential header information for BlockEnv creation
+    fn header_info_from_header(header: &Header) -> HeaderInfo {
+        HeaderInfo {
+            number: header.number(),
+            beneficiary: header.beneficiary(),
+            timestamp: header.timestamp(),
+            gas_limit: header.gas_limit(),
+            base_fee_per_gas: header.base_fee_per_gas(),
+            excess_blob_gas: header.excess_blob_gas(),
+            blob_gas_used: header.blob_gas_used(),
+            difficulty: header.difficulty(),
+            mix_hash: header.mix_hash(),
+        }
+    }
+
+    /// Create BlockEnv from HeaderInfo and additional context
+    fn block_env_from_header_info(
+        header_info: &HeaderInfo,
+        spec: SpecId,
+        blob_excess_gas_and_price: Option<BlobExcessGasAndPrice>,
+    ) -> BlockEnv {
+        BlockEnv {
+            number: U256::from(header_info.number),
+            beneficiary: header_info.beneficiary,
+            timestamp: U256::from(header_info.timestamp),
+            difficulty: if spec >= SpecId::MERGE { U256::ZERO } else { header_info.difficulty },
+            prevrandao: if spec >= SpecId::MERGE { header_info.mix_hash } else { None },
+            gas_limit: header_info.gas_limit,
+            basefee: header_info.base_fee_per_gas.unwrap_or_default(),
+            blob_excess_gas_and_price,
+        }
+    }
+}
+
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
     ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
@@ -178,18 +214,11 @@ where
                 BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
             });
 
-        let block_env = BlockEnv {
-            number: U256::from(header.number()),
-            beneficiary: header.beneficiary(),
-            timestamp: U256::from(header.timestamp()),
-            difficulty: if spec >= SpecId::MERGE { U256::ZERO } else { header.difficulty() },
-            prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
-            gas_limit: header.gas_limit(),
-            basefee: header.base_fee_per_gas().unwrap_or_default(),
-            blob_excess_gas_and_price,
-        };
+        let header_info = Self::header_info_from_header(header);
+        let block_env =
+            Self::block_env_from_header_info(&header_info, spec, blob_excess_gas_and_price);
 
-        EvmEnv { cfg_env, block_env }
+        (cfg_env, block_env).into()
     }
 
     fn next_evm_env(
@@ -249,18 +278,20 @@ where
             basefee = Some(INITIAL_BASE_FEE)
         }
 
-        let block_env = BlockEnv {
-            number: U256::from(parent.number + 1),
+        let header_info = HeaderInfo {
+            number: parent.number + 1,
             beneficiary: attributes.suggested_fee_recipient,
-            timestamp: U256::from(attributes.timestamp),
-            difficulty: U256::ZERO,
-            prevrandao: Some(attributes.prev_randao),
+            timestamp: attributes.timestamp,
             gas_limit,
-            // calculate basefee based on parent block's gas usage
-            basefee: basefee.unwrap_or_default(),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
+            base_fee_per_gas: basefee,
+            excess_blob_gas: blob_excess_gas_and_price.map(|b| b.excess_blob_gas),
+            blob_gas_used: None,
+            difficulty: U256::ZERO,
+            mix_hash: Some(attributes.prev_randao),
         };
+
+        let block_env =
+            Self::block_env_from_header_info(&header_info, spec_id, blob_excess_gas_and_price);
 
         Ok((cfg, block_env).into())
     }
@@ -332,20 +363,25 @@ where
                 BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
             });
 
-        let block_env = BlockEnv {
-            number: U256::from(block_number),
+        // Create HeaderInfo for the payload
+        let payload_header_info = HeaderInfo {
+            number: block_number,
             beneficiary: payload.payload.fee_recipient(),
-            timestamp: U256::from(timestamp),
+            timestamp,
+            gas_limit: payload.payload.gas_limit(),
+            base_fee_per_gas: Some(payload.payload.saturated_base_fee_per_gas()),
+            excess_blob_gas: payload.payload.excess_blob_gas(),
+            blob_gas_used: None, // Extract from payload if available
             difficulty: if spec >= SpecId::MERGE {
                 U256::ZERO
             } else {
                 payload.payload.as_v1().prev_randao.into()
             },
-            prevrandao: (spec >= SpecId::MERGE).then(|| payload.payload.as_v1().prev_randao),
-            gas_limit: payload.payload.gas_limit(),
-            basefee: payload.payload.saturated_base_fee_per_gas(),
-            blob_excess_gas_and_price,
+            mix_hash: Some(payload.payload.as_v1().prev_randao),
         };
+
+        let block_env =
+            Self::block_env_from_header_info(&payload_header_info, spec, blob_excess_gas_and_price);
 
         EvmEnv { cfg_env, block_env }
     }
