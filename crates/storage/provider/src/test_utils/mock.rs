@@ -18,6 +18,7 @@ use alloy_primitives::{
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
+use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -264,6 +265,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
 
     fn into_tx(self) -> Self::Tx {
         self.tx
+    }
+
+    fn commit(self) -> ProviderResult<bool> {
+        Ok(self.tx.commit()?)
     }
 
     fn prune_modes_ref(&self) -> &PruneModes {
