@@ -536,10 +536,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         // If the transaction number is less than the first in-memory transaction number, make a
         // database lookup
-        if let HashOrNumber::Number(id) = id {
-            if id < in_memory_tx_num {
-                return fetch_from_db(provider)
-            }
+        if let HashOrNumber::Number(id) = id &&
+            id < in_memory_tx_num
+        {
+            return fetch_from_db(provider)
         }
 
         // Iterate from the lowest block to the highest
@@ -816,14 +816,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if matches!(source, BlockSource::Canonical | BlockSource::Any) {
-            if let Some(block) = self.get_in_memory_or_storage_by_block(
+        if matches!(source, BlockSource::Canonical | BlockSource::Any) &&
+            let Some(block) = self.get_in_memory_or_storage_by_block(
                 hash.into(),
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
                 |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-            )? {
-                return Ok(Some(block))
-            }
+            )?
+        {
+            return Ok(Some(block))
         }
 
         if matches!(source, BlockSource::Pending | BlockSource::Any) {
@@ -1133,14 +1133,14 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
-                if receipts.is_none() && !rpc_block_hash.require_canonical.unwrap_or(false) {
-                    if let Some(state) = self
+                if receipts.is_none() &&
+                    !rpc_block_hash.require_canonical.unwrap_or(false) &&
+                    let Some(state) = self
                         .head_block
                         .as_ref()
                         .and_then(|b| b.block_on_chain(rpc_block_hash.block_hash.into()))
-                    {
-                        receipts = Some(state.executed_block_receipts());
-                    }
+                {
+                    receipts = Some(state.executed_block_receipts());
                 }
                 Ok(receipts)
             }

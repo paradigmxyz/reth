@@ -122,14 +122,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     if let Some(block_overrides) = block_overrides {
                         // ensure we don't allow uncapped gas limit per block
-                        if let Some(gas_limit_override) = block_overrides.gas_limit {
-                            if gas_limit_override > evm_env.block_env.gas_limit &&
-                                gas_limit_override > this.call_gas_limit()
-                            {
-                                return Err(
-                                    EthApiError::other(EthSimulateError::GasLimitReached).into()
-                                )
-                            }
+                        if let Some(gas_limit_override) = block_overrides.gas_limit &&
+                            gas_limit_override > evm_env.block_env.gas_limit &&
+                            gas_limit_override > this.call_gas_limit()
+                        {
+                            return Err(EthApiError::other(EthSimulateError::GasLimitReached).into())
                         }
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
@@ -163,7 +160,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let ctx = this
                         .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
+                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs

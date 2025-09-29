@@ -67,10 +67,10 @@ where
         //
         // To ensure this doesn't happen, we just have to make sure that we fetch from the same
         // data source that we used during initialization. In this case, that is static files
-        if let Some((hash, number)) = self.tip {
-            if provider_ro.sealed_header(number)?.is_none_or(|header| header.hash() != hash) {
-                return Err(ConsistentViewError::Reorged { block: hash }.into())
-            }
+        if let Some((hash, number)) = self.tip &&
+            provider_ro.sealed_header(number)?.is_none_or(|header| header.hash() != hash)
+        {
+            return Err(ConsistentViewError::Reorged { block: hash }.into())
         }
 
         Ok(provider_ro)

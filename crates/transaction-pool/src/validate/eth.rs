@@ -344,10 +344,10 @@ where
         }
 
         // Check whether the init code size has been exceeded.
-        if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
-                return Err(TransactionValidationOutcome::Invalid(transaction, err))
-            }
+        if self.fork_tracker.is_shanghai_activated() &&
+            let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE)
+        {
+            return Err(TransactionValidationOutcome::Invalid(transaction, err))
         }
 
         // Checks for gas limit
@@ -364,16 +364,16 @@ where
         }
 
         // Check individual transaction gas limit if configured
-        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit {
-            if transaction_gas_limit > max_tx_gas_limit {
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::MaxTxGasLimitExceeded(
-                        transaction_gas_limit,
-                        max_tx_gas_limit,
-                    ),
-                ))
-            }
+        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit &&
+            transaction_gas_limit > max_tx_gas_limit
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                    transaction_gas_limit,
+                    max_tx_gas_limit,
+                ),
+            ))
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -427,13 +427,13 @@ where
         }
 
         // Checks for chainid
-        if let Some(chain_id) = transaction.chain_id() {
-            if chain_id != self.chain_id() {
-                return Err(TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidTransactionError::ChainIdMismatch.into(),
-                ))
-            }
+        if let Some(chain_id) = transaction.chain_id() &&
+            chain_id != self.chain_id()
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::ChainIdMismatch.into(),
+            ))
         }
 
         if transaction.is_eip7702() {
@@ -1056,7 +1056,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     }
 
     /// Adds a custom transaction type to the validator.
-    pub fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
+    pub const fn with_custom_tx_type(mut self, tx_type: u8) -> Self {
         self.other_tx_types.set_bit(tx_type as usize, true);
         self
     }

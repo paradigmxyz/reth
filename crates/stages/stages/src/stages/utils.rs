@@ -156,12 +156,11 @@ where
 
             // If it's not the first sync, there might an existing shard already, so we need to
             // merge it with the one coming from the collector
-            if !append_only {
-                if let Some((_, last_database_shard)) =
+            if !append_only &&
+                let Some((_, last_database_shard)) =
                     write_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
-                {
-                    current_list.extend(last_database_shard.iter());
-                }
+            {
+                current_list.extend(last_database_shard.iter());
             }
         }
 
@@ -265,10 +264,10 @@ where
     // To be extra safe, we make sure that the last tx num matches the last block from its indices.
     // If not, get it.
     loop {
-        if let Some(indices) = provider.block_body_indices(last_block)? {
-            if indices.last_tx_num() <= last_tx_num {
-                break
-            }
+        if let Some(indices) = provider.block_body_indices(last_block)? &&
+            indices.last_tx_num() <= last_tx_num
+        {
+            break
         }
         if last_block == 0 {
             break

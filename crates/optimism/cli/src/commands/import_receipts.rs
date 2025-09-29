@@ -141,11 +141,10 @@ where
 
     // Ensure that receipts hasn't been initialized apart from `init_genesis`.
     if let Some(num_receipts) =
-        static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts)
+        static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts) &&
+        num_receipts > 0
     {
-        if num_receipts > 0 {
-            eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
-        }
+        eyre::bail!("Expected no receipts in storage, but found {num_receipts}.");
     }
     match static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts) {
         Some(receipts_block) => {
@@ -305,8 +304,9 @@ mod test {
         f.flush().await.unwrap();
         f.seek(SeekFrom::Start(0)).await.unwrap();
 
-        let reader =
-            ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE).await.unwrap();
+        let reader = ChunkedFileReader::from_file(f, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE, false)
+            .await
+            .unwrap();
 
         let db = TestStageDB::default();
         init_genesis(&db.factory).unwrap();
