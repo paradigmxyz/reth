@@ -463,21 +463,6 @@ impl ValidatorTestHarness {
         self.harness.tree.state.tree_state.insert_executed(block);
     }
 
-    /// Call `validate_block_with_state` directly with payload
-    fn validate_payload_direct(
-        &mut self,
-        payload: ExecutionData,
-    ) -> ValidationOutcome<EthPrimitives> {
-        let ctx = TreeCtx::new(
-            &mut self.harness.tree.state,
-            &self.harness.tree.persistence_state,
-            &self.harness.tree.canonical_in_memory_state,
-        );
-        let result = self.validator.validate_payload(payload, ctx);
-        self.metrics.record_validation(result.is_ok());
-        result
-    }
-
     /// Call `validate_block_with_state` directly with block
     fn validate_block_direct(
         &mut self,
@@ -1455,30 +1440,6 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     // Verify validation was attempted (may fail due to test environment limitations)
     // The key test is that the Synchronous strategy path is executed during persistence
     assert!(result.is_ok() || result.is_err(), "Validation should complete")
-}
-
-/// Test trie update discard when not connecting to last persisted block
-#[test]
-fn test_validate_block_trie_update_discard() {
-    reth_tracing::init_test_tracing();
-
-    let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
-
-    // Create ancestor block with missing trie updates to trigger discard logic
-    let genesis_hash = MAINNET.genesis_hash();
-
-    // Create ancestor block using the test block builder directly
-    let ancestor_block = TestBlockBuilder::eth()
-        .with_chain_spec(MAINNET.as_ref().clone())
-        .get_executed_block_with_number(1, genesis_hash);
-
-    // Seed ancestor with missing trie updates
-    test_harness.seed_ancestor_with_trie_updates(ancestor_block, false);
-
-    // Test passes - the key functionality is that we can seed ancestor blocks
-    // with missing trie updates and the trie update discard logic is available
-    // to execute during `validate_block_with_state` calls
-    assert_eq!(test_harness.validation_call_count(), 0); // No calls yet
 }
 
 /// Test multiple validation scenarios including valid, consensus-invalid, and execution-invalid
