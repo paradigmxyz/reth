@@ -15,7 +15,7 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
-use reth_provider::{DatabaseProviderFactory, StaticFileProviderFactory};
+use reth_provider::{DBProvider, DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;

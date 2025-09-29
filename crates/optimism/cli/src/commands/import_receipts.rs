@@ -17,9 +17,9 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
-    StatsReader,
+    providers::ProviderNodeTypes, DBProvider, DatabaseProviderFactory, OriginalValuesKnown,
+    ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;

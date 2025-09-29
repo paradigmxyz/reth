@@ -30,8 +30,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    ChainSpecProvider, DatabaseProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
