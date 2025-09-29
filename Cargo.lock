@@ -9344,6 +9344,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "brotli",
+ "derive_more",
  "eyre",
  "futures-util",
  "metrics",
