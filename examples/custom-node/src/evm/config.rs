@@ -62,7 +62,7 @@ impl ConfigureEvm for CustomEvmConfig {
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &CustomHeader) -> EvmEnv<OpSpecId> {
+    fn evm_env(&self, header: &CustomHeader) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         self.inner.evm_env(header)
     }
 
@@ -74,30 +74,33 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, &attributes.inner)
     }
 
-    fn context_for_block(&self, block: &SealedBlock<Block>) -> CustomBlockExecutionCtx {
-        CustomBlockExecutionCtx {
+    fn context_for_block(
+        &self,
+        block: &SealedBlock<Block>,
+    ) -> Result<CustomBlockExecutionCtx, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
             inner: OpBlockExecutionCtx {
                 parent_hash: block.header().parent_hash(),
                 parent_beacon_block_root: block.header().parent_beacon_block_root(),
                 extra_data: block.header().extra_data().clone(),
             },
             extension: block.extension,
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader<CustomHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> CustomBlockExecutionCtx {
-        CustomBlockExecutionCtx {
+    ) -> Result<CustomBlockExecutionCtx, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
             inner: OpBlockExecutionCtx {
                 parent_hash: parent.hash(),
                 parent_beacon_block_root: attributes.inner.parent_beacon_block_root,
                 extra_data: attributes.inner.extra_data,
             },
             extension: attributes.extension,
-        }
+        })
     }
 }
 
