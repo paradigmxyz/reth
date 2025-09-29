@@ -147,7 +147,14 @@ where
             // Initialize worker handles container
             let mut handles = Vec::with_capacity(max_concurrency);
 
-            let workers_needed = transaction_count_hint.max(1).min(max_concurrency);
+            // When transaction_count_hint is 0, it means the count is unknown. In this case, spawn
+            // max workers to handle potentially many transactions in parallel rather
+            // than bottlenecking on a single worker.
+            let workers_needed = if transaction_count_hint == 0 {
+                max_concurrency
+            } else {
+                transaction_count_hint.min(max_concurrency)
+            };
 
             // Only spawn initial workers as needed
             for _ in 0..workers_needed {
