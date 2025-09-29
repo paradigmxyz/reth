@@ -63,11 +63,12 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
+    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorIter},
     updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles, StoredNibblesSubKey,
-    TrieChangeSetsEntry,
+    BranchNodeCompact, HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
+    StoredNibblesSubKey, TrieChangeSetsEntry,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
+use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -2355,16 +2356,32 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         &self,
         block_number: BlockNumber,
         trie_updates: &TrieUpdatesSorted,
+        updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
 
         let mut changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
-        let mut curr_values_cursor = self.tx_ref().cursor_read::<tables::AccountsTrie>()?;
+        let curr_values_cursor = self.tx_ref().cursor_read::<tables::AccountsTrie>()?;
+
+        // Wrap the cursor in DatabaseAccountTrieCursor
+        let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
+
+        // Static empty array for when updates_overlay is None
+        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+
+        // Get the overlay updates for account trie, or use an empty array
+        let account_overlay_updates = updates_overlay
+            .map(|overlay| overlay.account_nodes_ref())
+            .unwrap_or(&EMPTY_ACCOUNT_UPDATES);
+
+        // Wrap the cursor in InMemoryTrieCursor with the overlay
+        let mut in_memory_account_cursor =
+            InMemoryTrieCursor::new(Some(&mut db_account_cursor), account_overlay_updates);
 
         for (path, _) in trie_updates.account_nodes_ref() {
             num_entries += 1;
-            let node = curr_values_cursor.seek_exact(StoredNibbles(*path))?.map(|e| e.1);
+            let node = in_memory_account_cursor.seek_exact(*path)?.map(|(_, node)| node);
             changeset_cursor.append_dup(
                 block_number,
                 TrieChangeSetsEntry { nibbles: StoredNibblesSubKey(*path), node },
@@ -2374,8 +2391,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut storage_updates = trie_updates.storage_tries.iter().collect::<Vec<_>>();
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
-        num_entries +=
-            self.write_storage_trie_changesets(block_number, storage_updates.into_iter())?;
+        num_entries += self.write_storage_trie_changesets(
+            block_number,
+            storage_updates.into_iter(),
+            updates_overlay,
+        )?;
 
         Ok(num_entries)
     }
@@ -2449,6 +2469,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         &self,
         block_number: BlockNumber,
         storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize> {
         let mut num_written = 0;
 
@@ -2458,23 +2479,60 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         // We hold two cursors to the same table because we use them simultaneously when an
         // account's storage is wiped. We keep them outside the for-loop so they can be re-used
         // between accounts.
-        let mut changed_curr_values_cursor =
-            self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
-        let mut wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+        let changed_curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+        let wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+
+        // DatabaseStorageTrieCursor requires ownership of the cursor. The easiest way to deal with
+        // this is to create this outer variable with an initial dummy account, and overwrite it on
+        // every loop for every real account.
+        let mut changed_curr_values_cursor = DatabaseStorageTrieCursor::new(
+            changed_curr_values_cursor,
+            B256::default(), // Will be set per iteration
+        );
+        let mut wiped_nodes_cursor = DatabaseStorageTrieCursor::new(
+            wiped_nodes_cursor,
+            B256::default(), // Will be set per iteration
+        );
+
+        // Static empty array for when updates_overlay is None
+        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
 
+            // Update the hashed address for the cursors
+            changed_curr_values_cursor =
+                DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
+
+            // Get the overlay updates for this storage trie, or use an empty array
+            let overlay_updates = updates_overlay
+                .and_then(|overlay| overlay.storage_tries.get(hashed_address))
+                .map(|updates| updates.storage_nodes_ref())
+                .unwrap_or(&EMPTY_UPDATES);
+
+            // Wrap the cursor in InMemoryTrieCursor with the overlay
+            let mut in_memory_changed_cursor =
+                InMemoryTrieCursor::new(Some(&mut changed_curr_values_cursor), overlay_updates);
+
             // Create an iterator which produces the current values of all updated paths, or None if
             // they are currently unset.
             let curr_values_of_changed = StorageTrieCurrentValuesIter::new(
-                *hashed_address,
                 storage_trie_updates.storage_nodes.iter().map(|e| e.0),
-                &mut changed_curr_values_cursor,
+                &mut in_memory_changed_cursor,
             )?;
 
             if storage_trie_updates.is_deleted() {
-                let all_nodes = wiped_nodes_cursor.walk_dup(Some(*hashed_address), None)?;
+                // Create an iterator that starts from the beginning of the storage trie for this
+                // account
+                wiped_nodes_cursor =
+                    DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
+
+                // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
+                let mut in_memory_wiped_cursor =
+                    InMemoryTrieCursor::new(Some(&mut wiped_nodes_cursor), overlay_updates);
+
+                let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
+
                 for wiped in storage_trie_wiped_changeset_iter(curr_values_of_changed, all_nodes)? {
                     let (path, node) = wiped?;
                     num_written += 1;
@@ -3611,7 +3669,8 @@ mod tests {
         let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
 
         // Write the changesets
-        let num_written = provider_rw.write_trie_changesets(block_number, &trie_updates).unwrap();
+        let num_written =
+            provider_rw.write_trie_changesets(block_number, &trie_updates, None).unwrap();
 
         // Verify number of entries written
         // Account changesets: 2 (one update, one removal)
@@ -3712,6 +3771,253 @@ mod tests {
                         TrieChangeSetsEntry {
                             nibbles: StoredNibblesSubKey(storage_nibbles3),
                             node: Some(storage_node2), // Existing node in wiped storage
+                        }
+                    ),
+                ]
+            );
+        }
+
+        provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_write_trie_changesets_with_overlay() {
+        use reth_db_api::models::BlockNumberHashedAddress;
+        use reth_trie::BranchNodeCompact;
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let block_number = 1u64;
+
+        // Create some test nibbles and nodes
+        let account_nibbles1 = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+        let account_nibbles2 = Nibbles::from_nibbles([0x5, 0x6, 0x7, 0x8]);
+
+        let node1 = BranchNodeCompact::new(
+            0b1111_1111_1111_1111, // state_mask
+            0b0000_0000_0000_0000, // tree_mask
+            0b0000_0000_0000_0000, // hash_mask
+            vec![],                // hashes
+            None,                  // root hash
+        );
+
+        // NOTE: Unlike the previous test, we're NOT pre-populating the database
+        // All node values will come from the overlay
+
+        // Create the overlay with existing values that would normally be in the DB
+        let node1_old = BranchNodeCompact::new(
+            0b1010_1010_1010_1010, // Different mask to show it's the overlay "existing" value
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Create overlay account nodes
+        let overlay_account_nodes = vec![
+            (account_nibbles1, Some(node1_old.clone())), // This simulates existing node in overlay
+        ];
+
+        // Create account trie updates: one Some (update) and one None (removal)
+        let account_nodes = vec![
+            (account_nibbles1, Some(node1)), // This will update overlay node
+            (account_nibbles2, None),        // This will be a removal (no existing node)
+        ];
+
+        // Create storage trie updates
+        let storage_address1 = B256::from([1u8; 32]); // Normal storage trie
+        let storage_address2 = B256::from([2u8; 32]); // Wiped storage trie
+
+        let storage_nibbles1 = Nibbles::from_nibbles([0xa, 0xb]);
+        let storage_nibbles2 = Nibbles::from_nibbles([0xc, 0xd]);
+        let storage_nibbles3 = Nibbles::from_nibbles([0xe, 0xf]);
+
+        let storage_node1 = BranchNodeCompact::new(
+            0b1111_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let storage_node2 = BranchNodeCompact::new(
+            0b0000_1111_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Create old versions for overlay
+        let storage_node1_old = BranchNodeCompact::new(
+            0b1010_0000_0000_0000, // Different mask to show it's an old value
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Create overlay storage nodes
+        let mut overlay_storage_tries = B256Map::default();
+
+        // Overlay for normal storage (storage_address1)
+        let overlay_storage_trie1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1_old.clone())), /* Simulates existing in
+                                                                      * overlay */
+            ],
+        };
+
+        // Overlay for wiped storage (storage_address2)
+        let overlay_storage_trie2 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1.clone())), // Existing in overlay
+                (storage_nibbles3, Some(storage_node2.clone())), // Also existing in overlay
+            ],
+        };
+
+        overlay_storage_tries.insert(storage_address1, overlay_storage_trie1);
+        overlay_storage_tries.insert(storage_address2, overlay_storage_trie2);
+
+        let overlay = TrieUpdatesSorted {
+            account_nodes: overlay_account_nodes,
+            storage_tries: overlay_storage_tries,
+        };
+
+        // Normal storage trie: one Some (update) and one None (new)
+        let storage_trie1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1.clone())), // This will update overlay node
+                (storage_nibbles2, None),                        // This is a new node
+            ],
+        };
+
+        // Wiped storage trie
+        let storage_trie2 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (storage_nibbles1, Some(storage_node1.clone())), // Updated node from overlay
+                (storage_nibbles2, Some(storage_node2.clone())), /* Updated node not in overlay
+                                                                  * storage_nibbles3 is in
+                                                                  * overlay
+                                                                  * but not updated */
+            ],
+        };
+
+        let mut storage_tries = B256Map::default();
+        storage_tries.insert(storage_address1, storage_trie1);
+        storage_tries.insert(storage_address2, storage_trie2);
+
+        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+
+        // Write the changesets WITH OVERLAY
+        let num_written =
+            provider_rw.write_trie_changesets(block_number, &trie_updates, Some(&overlay)).unwrap();
+
+        // Verify number of entries written
+        // Account changesets: 2 (one update from overlay, one removal)
+        // Storage changesets:
+        //   - Normal storage: 2 (one update from overlay, one new)
+        //   - Wiped storage: 3 (two updated, one existing from overlay not updated)
+        // Total: 2 + 2 + 3 = 7
+        assert_eq!(num_written, 7);
+
+        // Verify account changesets were written correctly
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::AccountsTrieChangeSets>().unwrap();
+
+            // Get all entries for this block to see what was written
+            let all_entries = cursor
+                .walk_dup(Some(block_number), None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            // Assert the full value of all_entries in a single assert_eq
+            assert_eq!(
+                all_entries,
+                vec![
+                    (
+                        block_number,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(account_nibbles1),
+                            node: Some(node1_old), // Value from overlay, not DB
+                        }
+                    ),
+                    (
+                        block_number,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(account_nibbles2),
+                            node: None,
+                        }
+                    ),
+                ]
+            );
+        }
+
+        // Verify storage changesets were written correctly
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_read::<tables::StoragesTrieChangeSets>().unwrap();
+
+            // Check normal storage trie changesets
+            let key1 = BlockNumberHashedAddress((block_number, storage_address1));
+            let entries1 =
+                cursor.walk_dup(Some(key1), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+            assert_eq!(
+                entries1,
+                vec![
+                    (
+                        key1,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles1),
+                            node: Some(storage_node1_old), // Old value from overlay
+                        }
+                    ),
+                    (
+                        key1,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles2),
+                            node: None, // New node, no previous value
+                        }
+                    ),
+                ]
+            );
+
+            // Check wiped storage trie changesets
+            let key2 = BlockNumberHashedAddress((block_number, storage_address2));
+            let entries2 =
+                cursor.walk_dup(Some(key2), None).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+            assert_eq!(
+                entries2,
+                vec![
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles1),
+                            node: Some(storage_node1), // Value from overlay
+                        }
+                    ),
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles2),
+                            node: None, // Was not in overlay
+                        }
+                    ),
+                    (
+                        key2,
+                        TrieChangeSetsEntry {
+                            nibbles: StoredNibblesSubKey(storage_nibbles3),
+                            node: Some(storage_node2), /* Existing node from overlay in wiped
+                                                        * storage */
                         }
                     ),
                 ]
