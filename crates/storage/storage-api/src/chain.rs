@@ -1,4 +1,4 @@
-use crate::{DBProvider, StorageLocation};
+use crate::DBProvider;
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
@@ -29,7 +29,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         bodies: Vec<(BlockNumber, Option<Body>)>,
-        write_to: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -37,7 +36,6 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
         &self,
         provider: &Provider,
         block: BlockNumber,
-        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 }
 
@@ -105,7 +103,6 @@ where
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
@@ -134,7 +131,6 @@ where
         &self,
         provider: &Provider,
         block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         provider.tx_ref().unwind_table_by_num::<tables::BlockWithdrawals>(block)?;
         provider.tx_ref().unwind_table_by_num::<tables::BlockOmmers<H>>(block)?;
@@ -218,7 +214,6 @@ where
         &self,
         _provider: &Provider,
         _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         // noop
         Ok(())
@@ -228,7 +223,6 @@ where
         &self,
         _provider: &Provider,
         _block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         // noop
         Ok(())

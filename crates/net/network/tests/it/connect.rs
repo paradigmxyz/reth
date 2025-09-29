@@ -428,7 +428,7 @@ async fn test_trusted_peer_only() {
     let outgoing_peer_id1 = event_stream.next_session_established().await.unwrap();
     assert_eq!(outgoing_peer_id1, *handle1.peer_id());
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 
     // check that handle0 and handle1 both have peers.

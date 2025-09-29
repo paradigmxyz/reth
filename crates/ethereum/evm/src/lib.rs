@@ -12,7 +12,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -190,7 +190,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &Header) -> EvmEnv {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnv, Self::Error> {
         let blob_params = self.chain_spec().blob_params_at_timestamp(header.timestamp);
         let spec = config::revm_spec(self.chain_spec(), header);
 
@@ -296,26 +296,29 @@ where
         Ok((cfg, block_env).into())
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
-        EthBlockExecutionCtx {
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<Block>,
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error> {
+        Ok(EthBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> EthBlockExecutionCtx<'_> {
-        EthBlockExecutionCtx {
+    ) -> Result<EthBlockExecutionCtx<'_>, Self::Error> {
+        Ok(EthBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals.map(Cow::Owned),
-        }
+        })
     }
 }
 
@@ -437,7 +440,7 @@ mod tests {
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env, .. } =
-            EthEvmConfig::new(Arc::new(chain_spec.clone())).evm_env(&header);
+            EthEvmConfig::new(Arc::new(chain_spec.clone())).evm_env(&header).unwrap();
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
