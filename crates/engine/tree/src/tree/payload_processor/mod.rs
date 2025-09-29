@@ -194,7 +194,6 @@ where
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = ProofTaskManager::new(
-            self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,

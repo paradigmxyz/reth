@@ -52,13 +52,15 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 #[derive(Debug)]
 struct ProofThreadPool<Factory> {
     work_sender: Sender<ProofTaskKind>,
-    _workers: Vec<thread::JoinHandle<()>>,
     _phantom: PhantomData<Factory>,
 }
 
+/// Thread pool with self-recovering workers, each maintaining its own database transaction.
+///
+/// Workers automatically respawn on panic with fresh transactions.
 impl<Factory> ProofThreadPool<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Send + Sync + Clone + 'static,
 {
     fn new(
         num_workers: usize,
@@ -66,36 +68,83 @@ where
         task_ctx: ProofTaskCtx,
     ) -> ProviderResult<Self> {
         let (work_sender, work_receiver) = unbounded();
-        let mut workers = Vec::with_capacity(num_workers);
 
         for worker_id in 0..num_workers {
-            // Each worker gets its own dedicated database transaction
-            let provider_ro = view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-            let work_receiver = work_receiver.clone();
-
-            let worker = thread::spawn(move || {
-                // Worker loop - each thread processes tasks with its dedicated transaction
-                while let Ok(task) = work_receiver.recv() {
-                    match task {
-                        ProofTaskKind::StorageProof(input, result_sender) => {
-                            proof_task_tx.storage_proof(input, result_sender);
-                        }
-                        ProofTaskKind::BlindedAccountNode(path, result_sender) => {
-                            proof_task_tx.blinded_account_node(path, result_sender);
-                        }
-                        ProofTaskKind::BlindedStorageNode(account, path, result_sender) => {
-                            proof_task_tx.blinded_storage_node(account, path, result_sender);
-                        }
-                    }
-                }
-            });
-
-            workers.push(worker);
+            Self::spawn_worker(
+                worker_id,
+                view.clone(),
+                task_ctx.clone(),
+                work_receiver.clone(),
+            )?;
         }
 
-        Ok(Self { work_sender, _workers: workers, _phantom: PhantomData })
+        Ok(Self { work_sender, _phantom: PhantomData })
+    }
+
+    /// Spawns a resilient worker that will respawn itself on panic
+    fn spawn_worker(
+        worker_id: usize,
+        view: ConsistentDbView<Factory>,
+        task_ctx: ProofTaskCtx,
+        work_receiver: Receiver<ProofTaskKind>,
+    ) -> ProviderResult<()> {
+        thread::spawn(move || {
+            loop {
+                let provider_ro = match view.provider_ro() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            error = ?e,
+                            "Failed to create provider for worker, supervisor exiting"
+                        );
+                        break;
+                    }
+                };
+
+                let tx = provider_ro.into_tx();
+                let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+                let receiver = work_receiver.clone();
+
+                let worker_handle = thread::spawn(move || {
+                    while let Ok(task) = receiver.recv() {
+                        match task {
+                            ProofTaskKind::StorageProof(input, result_sender) => {
+                                proof_task_tx.storage_proof(input, result_sender);
+                            }
+                            ProofTaskKind::BlindedAccountNode(path, result_sender) => {
+                                proof_task_tx.blinded_account_node(path, result_sender);
+                            }
+                            ProofTaskKind::BlindedStorageNode(account, path, result_sender) => {
+                                proof_task_tx.blinded_storage_node(account, path, result_sender);
+                            }
+                        }
+                    }
+                });
+
+                match worker_handle.join() {
+                    Ok(_) => {
+                        debug!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            "Worker terminated normally"
+                        );
+                        break;
+                    }
+                    Err(panic_payload) => {
+                        tracing::warn!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            panic = ?panic_payload,
+                            "Worker panicked, respawning with fresh transaction"
+                        );
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 
     fn dispatch_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskKind>> {

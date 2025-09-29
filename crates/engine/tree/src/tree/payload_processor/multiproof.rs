@@ -349,7 +349,7 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -362,7 +362,7 @@ where
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -660,7 +660,7 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        proof_task_handle: ProofTaskManagerHandle,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
@@ -1213,12 +1213,7 @@ mod tests {
             config.state_sorted.clone(),
             config.prefix_sets.clone(),
         );
-        let proof_task = ProofTaskManager::new(
-            executor.handle().clone(),
-            config.consistent_view.clone(),
-            task_ctx,
-            1,
-        );
+        let proof_task = ProofTaskManager::new(config.consistent_view.clone(), task_ctx, 1);
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
