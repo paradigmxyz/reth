@@ -107,7 +107,6 @@ impl Decode for BlockNumberHashedAddress {
     }
 }
 
-
 /// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.

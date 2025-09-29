@@ -72,11 +72,10 @@ use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
-    ops::RangeFrom,
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::{mpsc, Arc},
 };
 use tracing::{debug, trace};
@@ -2391,7 +2390,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let tx = self.tx_ref();
         {
-            let range: RangeFrom<BlockNumberHashedAddress> = (from, B256::ZERO).into()..;
+            let range = from..;
             let mut cursor = tx.cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
             let mut walker = cursor.walk_range(range)?;
 
