@@ -1030,12 +1030,12 @@ where
         }
 
         // Attempt to apply a chain update when the head differs from our canonical chain.
-	  // This handles reorgs and chain extensions by making the specified head canonical.
+        // This handles reorgs and chain extensions by making the specified head canonical.
         if let Some(result) = self.apply_chain_update(state, attrs, version)? {
             return Ok(result);
         }
 
-	// Fallback that ensures to catch up to the network's state.
+        // Fallback that ensures to catch up to the network's state.
         self.handle_missing_block(state)
     }
 
@@ -1129,6 +1129,13 @@ where
     }
 
     /// Applies chain update for the new head block and processes payload attributes.
+    ///
+    /// This method handles the case where the forkchoice head differs from our current canonical
+    /// head. It attempts to make the specified head block canonical by:
+    /// - Checking if the head is already part of the canonical chain
+    /// - Applying chain reorganizations (reorgs) if necessary
+    /// - Processing payload attributes if provided
+    /// - Returning the appropriate forkchoice update response
     fn apply_chain_update(
         &mut self,
         state: ForkchoiceState,
@@ -1163,15 +1170,16 @@ where
                 }
             }
 
-            // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
-            //    payload build process if `forkchoiceState.headBlockHash` references a `VALID`
-            //    ancestor of the head of canonical chain, i.e. the ancestor passed payload
-            //    validation process and deemed `VALID`. In the case of such an event, client
-            //    software MUST return `{payloadStatus: {status: VALID, latestValidHash:
-            //    forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
+            // According to the Engine API specification, client software MAY skip an update of the
+            // forkchoice state and MUST NOT begin a payload build process if
+            // `forkchoiceState.headBlockHash` references a `VALID` ancestor of the head
+            // of canonical chain, i.e. the ancestor passed payload validation process
+            // and deemed `VALID`. In the case of such an event, client software MUST
+            // return `{payloadStatus: {status: VALID, latestValidHash:
+            // forkchoiceState.headBlockHash, validationError: null}, payloadId: null}`
 
-            // the head block is already canonical, so we're not triggering a payload job and can
-            // return right away
+            // The head block is already canonical and we're not processing payload attributes,
+            // so we're not triggering a payload job and can return right away
 
             let outcome = TreeOutcome::new(OnForkChoiceUpdated::valid(PayloadStatus::new(
                 PayloadStatusEnum::Valid,
@@ -1211,8 +1219,8 @@ where
         &self,
         state: ForkchoiceState,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
-        // 4. we don't have the block to perform the update
-        // we assume the FCU is valid and at least the head is missing,
+        // We don't have the block to perform the forkchoice update
+        // We assume the FCU is valid and at least the head is missing,
         // so we need to start syncing to it
         //
         // find the appropriate target to sync to, if we don't have the safe block hash then we
