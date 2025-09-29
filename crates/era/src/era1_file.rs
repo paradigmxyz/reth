@@ -242,11 +242,7 @@ impl<R: Read + Seek> Era1Reader<R> {
 
         let count = u32::try_from(block_index.offsets().len())
             .map_err(|_| E2sError::Ssz("Too many offsets: exceeds u32::MAX".to_string()))?;
-        let id = Era1Id::new(
-            network_name,
-            block_index.starting_number(),
-            count,
-        );
+        let id = Era1Id::new(network_name, block_index.starting_number(), count);
 
         Ok(Era1File::new(group, id))
     }
