@@ -1511,34 +1511,6 @@ fn test_validate_block_trie_update_discard() {
     assert_eq!(test_harness.validation_call_count(), 0); // No calls yet
 }
 
-/// Test `validate_block_with_state` with payload input (`ExecutionData`)
-#[test]
-fn test_validate_payload_with_state_direct() {
-    reth_tracing::init_test_tracing();
-
-    // Use real test data
-    let s = include_str!("../../test-data/holesky/1.rlp");
-    let data = Bytes::from_str(s).unwrap();
-    let block = Block::decode(&mut data.as_ref()).unwrap();
-    let sealed = block.seal_slow();
-    let hash = sealed.hash();
-    let block = sealed.into_block();
-    let payload = ExecutionPayloadV1::from_block_unchecked(hash, &block);
-
-    let mut test_harness = ValidatorTestHarness::new(HOLESKY.clone());
-
-    // Call validate_payload directly (which calls `validate_block_with_state`)
-    let result = test_harness.validate_payload_direct(ExecutionData {
-        payload: payload.into(),
-        sidecar: ExecutionPayloadSidecar::none(),
-    });
-
-    // Verify that validate_block_with_state was executed for the payload
-    // The result may be an error due to test environment limitations,
-    // but the key test is that the validation logic executes properly
-    assert!(result.is_ok() || result.is_err(), "Validation should complete for payload input")
-}
-
 /// Test multiple validation scenarios including valid, consensus-invalid, and execution-invalid
 /// blocks with proper result validation
 #[test]
