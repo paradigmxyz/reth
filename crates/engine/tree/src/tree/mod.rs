@@ -1024,17 +1024,18 @@ where
             return Ok(TreeOutcome::new(early_result));
         }
 
-        // Case 1: Check if head is already canonical
+        // Return early if we are on the correct fork
         if let Some(result) = self.handle_canonical_head(state, attrs.clone(), version)? {
             return Ok(result);
         }
 
-        // Case 2 Apply chain update if head is not canonical
+        // Attempt to apply a chain update when the head differs from our canonical chain.
+	  // This handles reorgs and chain extensions by making the specified head canonical.
         if let Some(result) = self.apply_chain_update(state, attrs, version)? {
             return Ok(result);
         }
 
-        // Case 3 Handle missing block scenario
+	// Fallback that ensures to catch up to the network's state.
         self.handle_missing_block(state)
     }
 
