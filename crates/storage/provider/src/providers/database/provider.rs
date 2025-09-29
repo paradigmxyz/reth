@@ -33,7 +33,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_db::models::BlockNumberHashedAddressRange;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -73,6 +72,7 @@ use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
+    ops::RangeFrom,
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -2390,8 +2390,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 
     fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let tx = self.tx_ref();
-        let range = from..;
         {
+            let range: RangeFrom<BlockNumberHashedAddress> = (from, B256::ZERO).into()..;
             let mut cursor = tx.cursor_dup_write::<tables::AccountsTrieChangeSets>()?;
             let mut walker = cursor.walk_range(range)?;
 
@@ -2401,7 +2401,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         {
-            let range: BlockNumberHashedAddressRange = (from..).into();
+            let range: RangeFrom<BlockNumberHashedAddress> = (from, B256::ZERO).into()..;
             let mut cursor = tx.cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
             let mut walker = cursor.walk_range(range)?;
 
