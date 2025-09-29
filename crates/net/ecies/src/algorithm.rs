@@ -357,7 +357,6 @@ impl ECIES {
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let mut rng = rng();
-        // NOTE: use the same RNG for nonce to avoid mixing randomness sources
         let mut nonce_bytes = [0u8; 32];
         rng.fill_bytes(&mut nonce_bytes);
         let nonce = B256::from(nonce_bytes);
