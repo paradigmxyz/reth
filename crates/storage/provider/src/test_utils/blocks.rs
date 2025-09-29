@@ -85,7 +85,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
                     )
                     .into(),
                     difficulty: U256::from(131_072),
-                    number: 1,
+                    number: 0,
                     gas_limit: 1_000_000,
                     gas_used: 14_352,
                     timestamp: 1_000,

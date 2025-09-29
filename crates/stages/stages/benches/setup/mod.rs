@@ -9,7 +9,8 @@ use reth_db_api::{
 };
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
-    test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
+    test_utils::MockNodeTypesWithDB, DBProvider, DatabaseProvider, DatabaseProviderFactory,
+    TrieWriter,
 };
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
