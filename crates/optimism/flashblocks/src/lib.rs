@@ -1,7 +1,8 @@
 //! A downstream integration of Flashblocks.
 
 pub use payload::{
-    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashBlock, Metadata,
+    ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashBlock, FlashBlockDecoder,
+    Metadata,
 };
 use reth_rpc_eth_types::PendingBlock;
 pub use service::FlashBlockService;
