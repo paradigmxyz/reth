@@ -151,7 +151,7 @@ pub struct DownloadArgs<C: ChainSpecParser> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
+        default_value = C::default_value(),
         value_parser = C::parser()
     )]
     chain: Arc<C::ChainSpec>,

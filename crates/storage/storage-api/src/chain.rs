@@ -120,11 +120,10 @@ where
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals {
-                if !withdrawals.is_empty() {
-                    withdrawals_cursor
-                        .append(block_number, &StoredBlockWithdrawals { withdrawals })?;
-                }
+            if let Some(withdrawals) = body.withdrawals &&
+                !withdrawals.is_empty()
+            {
+                withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
             }
         }
 

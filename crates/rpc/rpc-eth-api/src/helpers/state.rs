@@ -221,10 +221,10 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         async move {
-            if at.is_pending() {
-                if let Ok(Some(state)) = self.local_pending_state().await {
-                    return Ok(state)
-                }
+            if at.is_pending() &&
+                let Ok(Some(state)) = self.local_pending_state().await
+            {
+                return Ok(state)
             }
 
             self.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)
@@ -281,7 +281,11 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_env = self.evm_config().evm_env(&header);
+                let evm_env = self
+                    .evm_config()
+                    .evm_env(&header)
+                    .map_err(RethError::other)
+                    .map_err(Self::Error::from_eth_err)?;
 
                 Ok((evm_env, block_hash.into()))
             }

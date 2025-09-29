@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
@@ -1063,16 +1063,13 @@ impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
         {
             Ok(None)
         } else {
-            let bytecode = if account_info.code.is_empty() {
-                None
-            } else {
-                Some(Bytecode::new_raw(account_info.code))
-            };
+            let bytecode_hash =
+                if account_info.code.is_empty() { None } else { Some(account_info.code_hash()) };
 
             Ok(Some(Account {
                 balance: account_info.balance,
                 nonce: account_info.nonce,
-                bytecode_hash: bytecode.as_ref().map(|b| b.hash_slow()),
+                bytecode_hash,
             }))
         }
     }

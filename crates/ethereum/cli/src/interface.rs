@@ -312,6 +312,7 @@ mod tests {
     use super::*;
     use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
+    use reth_chainspec::SEPOLIA;
     use reth_node_core::args::ColorMode;
 
     #[test]
@@ -477,5 +478,52 @@ mod tests {
             "Error should mention the module name: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn parse_unwind_chain() {
+        let cli = Cli::try_parse_args_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
+    }
+
+    #[test]
+    fn parse_empty_supported_chains() {
+        #[derive(Debug, Clone, Default)]
+        struct FileChainSpecParser;
+
+        impl ChainSpecParser for FileChainSpecParser {
+            type ChainSpec = ChainSpec;
+
+            const SUPPORTED_CHAINS: &'static [&'static str] = &[];
+
+            fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+                EthereumChainSpecParser::parse(s)
+            }
+        }
+
+        let cli = Cli::<FileChainSpecParser>::try_parse_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
     }
 }

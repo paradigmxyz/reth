@@ -209,6 +209,7 @@ where
             proof_task.handle(),
             to_sparse_trie,
             max_multi_proof_task_concurrency,
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
         // wire the multiproof task to the prewarm task
@@ -480,7 +481,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// Terminates the entire caching task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
+    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
         self.prewarm_handle.terminate_caching(block_output)
     }
 
@@ -516,10 +517,12 @@ impl CacheTaskHandle {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
-        self.to_prewarm_task
-            .take()
-            .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
+    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
+        if let Some(tx) = self.to_prewarm_task.take() {
+            // Only clone when we have an active task and a state to send
+            let event = PrewarmTaskEvent::Terminate { block_output: block_output.cloned() };
+            let _ = tx.send(event);
+        }
     }
 }
 
