@@ -801,7 +801,6 @@ pub struct BlockRangeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{b256, hex, Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
