@@ -34,7 +34,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
-use tracing::debug;
+use tracing::trace;
 
 /// Parallel proof calculator.
 ///
@@ -137,7 +137,7 @@ where
         let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
         let prefix_set = prefix_set.freeze();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
@@ -151,7 +151,7 @@ where
             )))
         })?;
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
@@ -199,7 +199,7 @@ where
         );
         let storage_root_targets_len = storage_root_targets.len();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
@@ -343,7 +343,7 @@ where
             (HashMap::default(), HashMap::default())
         };
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             duration = ?stats.duration(),
