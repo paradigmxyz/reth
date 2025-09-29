@@ -500,6 +500,17 @@ where
     }
 
     /// Spawns a single multiproof calculation task.
+    ///
+    /// What we have rn:
+    ///   - Proof Task: pooled db transactions, spawns blocking tasks/work on demand (work == ProofTaskKind)
+    ///   - Multi Proof: schedules proof work by sending work to Proof Task and then computing the proof (regular multiproof); currently a regular multiproof `decoded_multiproof` requires a new db tx
+    ///
+    ///
+    ///
+    ///
+    /// 1. pool of storage proofs task <-- "Get me this storage Proof"
+    /// 2. pool of account/regular proof task <-- "Get me this multiproof"
+    ///      --> also needs storage proofs
     fn spawn_multiproof(&mut self, multiproof_input: MultiproofInput<Factory>) {
         let MultiproofInput {
             config,
@@ -512,6 +523,7 @@ where
         } = multiproof_input;
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
+        // self.multiproof_handles[x].send();
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
             let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
@@ -950,6 +962,12 @@ where
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
+    ///
+    ///
+    /// |main execution|--MultiProofMessage -->| multiproof |-->ProofTaskMessage--> | proof task|
+    ///
+    ///
+    /// | prewarming |--MultiProofMessage-->|multiproof|-->ProofTaskMessage-->| proof task|
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;

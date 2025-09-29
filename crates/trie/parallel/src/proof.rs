@@ -36,6 +36,11 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
 use tracing::trace;
 
+// One single task
+pub struct ParallelProofTask<Factory: DatabaseProviderFactory> {
+    rx: Receiver<MultiproofInput>,
+
+}
 /// Parallel proof calculator.
 ///
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
@@ -107,6 +112,7 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
+    /// TODO: this doesnt spawn anything
     fn spawn_storage_proof(
         &self,
         hashed_address: B256,
