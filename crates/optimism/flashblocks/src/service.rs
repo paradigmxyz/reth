@@ -24,7 +24,7 @@ use std::{
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
-/// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
+/// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
@@ -42,9 +42,9 @@ pub struct FlashBlockService<
     spawner: TaskExecutor,
     job: Option<BuildJob<N>>,
     /// Cached state reads for the current block.
-    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
-    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
-    /// within the same block.
+    /// Current `PendingFlashBlock` is built out of a sequence of `FlashBlocks`, and executed again
+    /// when fb received on top of the same block. Avoid redundant I/O across multiple
+    /// executions within the same block.
     cached_state: Option<(B256, CachedReads)>,
     metrics: FlashBlockServiceMetrics,
 }
