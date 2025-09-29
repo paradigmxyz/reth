@@ -570,7 +570,9 @@ mod tests {
                 Ok(BranchNode::Storage(account, path, _)) => {
                     storage_paths_by_account.entry(account).or_default().push(path);
                 }
-                Err(e) => panic!("Unexpected error: {:?}", e),
+                Err(e) => {
+                    panic!("StateRootBranchNodesIter should not fail in test: {:?}", e)
+                }
             }
         }
 
@@ -652,7 +654,9 @@ mod tests {
                 Ok(BranchNode::Account(_, _)) => {
                     // Account nodes are fine
                 }
-                Err(e) => panic!("Unexpected error: {:?}", e),
+                Err(e) => {
+                    panic!("StateRootBranchNodesIter should not fail in test: {:?}", e)
+                }
             }
         }
 
