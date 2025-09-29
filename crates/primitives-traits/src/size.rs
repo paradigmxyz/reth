@@ -97,7 +97,7 @@ impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::BlockBo
         self.transactions.iter().map(T::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<T>() +
             self.ommers.iter().map(H::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.ommers.capacity() * core::mem::size_of::<H>() +
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
