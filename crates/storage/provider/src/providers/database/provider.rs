@@ -253,7 +253,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    /// Writes executed blocks and receipts to storage.
+    /// Writes executed blocks and state to storage.
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
@@ -311,33 +311,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Removes all block, transaction and receipt data above the given block number from the
-    /// database and static files. This is exclusive, i.e., it only removes blocks above
-    /// `block_number`, and does not remove `block_number`.
-    pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
-        // IMPORTANT: `remove_block_and_execution_above` uses `block_number+1` to make sure we
-        // remove only what is ABOVE the block
-        debug!(target: "providers::db", ?block_number, "Removing blocks from database above block_number");
-        self.remove_block_and_execution_above(block_number)?;
-
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
-        //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "providers::db", ?block_number, "Removing static file blocks above block_number");
-        self.static_file_provider()
-            .get_writer(block_number, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
-
-        Ok(())
-    }
     /// Unwinds trie state for the given range.
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
@@ -2860,15 +2833,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
-            self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
-        }
+        // Get highest static file block for the total block range
+        let highest_static_file_block = self
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
 
-        // Only prune canonical headers after we've removed the block hashes as we rely on data from
-        // this table in `canonical_hashes_range`.
-        self.remove::<tables::CanonicalHeaders>(block + 1..)?;
-        self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
-        self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
+        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
+        // we remove only what is ABOVE the block.
+        //
+        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+        // will have three blocks to remove, which will be block 8, 7, and 6.
+        debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
+        self.static_file_provider()
+            .get_writer(block, StaticFileSegment::Headers)?
+            .prune_headers(highest_static_file_block.saturating_sub(block))?;
 
         // First transaction to be removed
         let unwind_tx_from = self

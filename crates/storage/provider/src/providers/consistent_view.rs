@@ -83,20 +83,21 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{test_utils::create_test_provider_factory_with_chain_spec, BlockWriter};
+    use crate::{test_utils::create_test_provider_factory, BlockWriter};
     use alloy_primitives::Bytes;
     use assert_matches::assert_matches;
-    use reth_chainspec::{EthChainSpec, MAINNET};
+    use reth_chainspec::{ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::{Block, BlockBody};
     use reth_primitives_traits::{block::TestBlock, RecoveredBlock, SealedBlock};
 
     #[test]
     fn test_consistent_view_extend() {
-        let provider_factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let provider_factory = create_test_provider_factory();
 
-        let genesis_header = MAINNET.genesis_header();
-        let genesis_block =
-            SealedBlock::<Block>::seal_parts(genesis_header.clone(), BlockBody::default());
+        let genesis_block = SealedBlock::<Block>::seal_parts(
+            provider_factory.chain_spec().genesis_header().clone(),
+            BlockBody::default(),
+        );
         let genesis_hash: B256 = genesis_block.hash();
         let genesis_block = RecoveredBlock::new_sealed(genesis_block, vec![]);
 
@@ -144,11 +145,12 @@ mod tests {
 
     #[test]
     fn test_consistent_view_remove() {
-        let provider_factory = create_test_provider_factory_with_chain_spec(MAINNET.clone());
+        let provider_factory = create_test_provider_factory();
 
-        let genesis_header = MAINNET.genesis_header();
-        let genesis_block =
-            SealedBlock::<Block>::seal_parts(genesis_header.clone(), BlockBody::default());
+        let genesis_block = SealedBlock::<Block>::seal_parts(
+            provider_factory.chain_spec().genesis_header().clone(),
+            BlockBody::default(),
+        );
         let genesis_hash: B256 = genesis_block.hash();
         let genesis_block = RecoveredBlock::new_sealed(genesis_block, vec![]);
 

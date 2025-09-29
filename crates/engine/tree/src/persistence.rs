@@ -6,8 +6,8 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockHashReader, ChainStateBlockWriter, DBProvider,
-    DatabaseProviderFactory, ProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
+    DBProvider, DatabaseProviderFactory, ProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -130,7 +130,7 @@ where
         let provider_rw = self.provider.database_provider_rw()?;
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        provider_rw.remove_blocks_above(new_tip_num)?;
+        provider_rw.remove_block_and_execution_above(new_tip_num)?;
         provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
