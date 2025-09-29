@@ -9,7 +9,6 @@ use crate::{
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
-    writer::UnifiedStorageWriter,
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
@@ -31,6 +30,7 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -253,6 +253,91 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Writes executed blocks and receipts to storage.
+    pub fn save_blocks(
+        &self,
+        blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            debug!(target: "providers::db", "Attempted to write empty block range");
+            return Ok(())
+        }
+
+        // NOTE: checked non-empty above
+        let first_block = blocks.first().unwrap().recovered_block();
+
+        let last_block = blocks.last().unwrap().recovered_block();
+        let first_number = first_block.number();
+        let last_block_number = last_block.number();
+
+        debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
+
+        // TODO: Do performant / batched writes for each type of object
+        // instead of a loop over all blocks,
+        // meaning:
+        //  * blocks
+        //  * state
+        //  * hashed state
+        //  * trie updates (cannot naively extend, need helper)
+        //  * indices (already done basically)
+        // Insert the blocks
+        for ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock { recovered_block, execution_output, hashed_state },
+            trie,
+        } in blocks
+        {
+            let block_hash = recovered_block.hash();
+            self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
+
+            // Write state and changesets to the database.
+            // Must be written after blocks because of the receipt lookup.
+            self.write_state(&execution_output, OriginalValuesKnown::No)?;
+
+            // insert hashes and intermediate merkle nodes
+            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.write_trie_updates(
+                trie.as_ref().ok_or(ProviderError::MissingTrieUpdates(block_hash))?,
+            )?;
+        }
+
+        // update history indices
+        self.update_history_indices(first_number..=last_block_number)?;
+
+        // Update pipeline progress
+        self.update_pipeline_stages(last_block_number, false)?;
+
+        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
+    }
+
+    /// Removes all block, transaction and receipt data above the given block number from the
+    /// database and static files. This is exclusive, i.e., it only removes blocks above
+    /// `block_number`, and does not remove `block_number`.
+    pub fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<()> {
+        // IMPORTANT: `remove_block_and_execution_above` uses `block_number+1` to make sure we
+        // remove only what is ABOVE the block
+        debug!(target: "providers::db", ?block_number, "Removing blocks from database above block_number");
+        self.remove_block_and_execution_above(block_number)?;
+
+        // Get highest static file block for the total block range
+        let highest_static_file_block = self
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
+
+        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
+        // we remove only what is ABOVE the block.
+        //
+        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+        // will have three blocks to remove, which will be block 8, 7, and 6.
+        debug!(target: "providers::db", ?block_number, "Removing static file blocks above block_number");
+        self.static_file_provider()
+            .get_writer(block_number, StaticFileSegment::Headers)?
+            .prune_headers(highest_static_file_block.saturating_sub(block_number))?;
+
+        Ok(())
+    }
     /// Unwinds trie state for the given range.
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
@@ -760,9 +845,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Commit database transaction and static file if it exists.
+    /// Commit database transaction and static files.
     pub fn commit(self) -> ProviderResult<()> {
-        UnifiedStorageWriter::commit(self)
+        // For unwinding it makes more sense to commit the database first, since if
+        // it is interrupted before the static files commit, we can just
+        // truncate the static files according to the
+        // checkpoints on the next start-up.
+        if self.static_file_provider.has_unwind_queued() {
+            self.tx.commit()?;
+            self.static_file_provider.commit()?;
+        } else {
+            self.static_file_provider.commit()?;
+            self.tx.commit()?;
+        }
+
+        Ok(())
     }
 
     /// Load shard and remove it. If list is empty, last shard was full or

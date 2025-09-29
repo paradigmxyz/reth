@@ -19,8 +19,8 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
-    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
@@ -102,14 +102,14 @@ where
 
         save_stage_checkpoints(&provider, from, height, height, height)?;
 
-        UnifiedStorageWriter::commit(provider)?;
+        provider.commit()?;
     }
 
     let provider = provider_factory.database_provider_rw()?;
 
     build_index(&provider, hash_collector)?;
 
-    UnifiedStorageWriter::commit(provider)?;
+    provider.commit()?;
 
     Ok(height)
 }
