@@ -10,6 +10,7 @@ mod new_payload_fcu;
 mod new_payload_only;
 mod output;
 mod send_payload;
+mod trie;
 
 /// `reth bench` command
 #[derive(Debug, Parser)]
@@ -41,6 +42,9 @@ pub enum Subcommands {
     /// `cast block latest --full --json | reth-bench send-payload --rpc-url localhost:5000
     /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex)`
     SendPayload(send_payload::Command),
+
+    /// Benchmark different trie calculation methods.
+    Trie(trie::Command),
 }
 
 impl BenchmarkCommand {
@@ -53,6 +57,7 @@ impl BenchmarkCommand {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
+            Subcommands::Trie(command) => command.execute(ctx).await,
         }
     }
 

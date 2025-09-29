@@ -124,6 +124,10 @@ where
             disable_parallel_sparse_trie: config.disable_parallel_sparse_trie(),
         }
     }
+
+    pub fn executor(&self) -> &WorkloadExecutor {
+        &self.executor
+    }
 }
 
 impl<N, Evm> PayloadProcessor<Evm>
@@ -370,7 +374,7 @@ where
     }
 
     /// Spawns the [`SparseTrieTask`] for this payload processor.
-    fn spawn_sparse_trie_task<BPF>(
+    pub fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_task_handle: BPF,

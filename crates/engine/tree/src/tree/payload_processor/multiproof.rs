@@ -61,7 +61,7 @@ impl SparseTrieUpdate {
 
 /// Common configuration for multi proof tasks
 #[derive(Debug, Clone)]
-pub(super) struct MultiProofConfig<Factory> {
+pub struct MultiProofConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -80,7 +80,7 @@ impl<Factory> MultiProofConfig<Factory> {
     ///
     /// This returns a cleared [`TrieInput`] so that we can reuse any allocated space in the
     /// [`TrieInput`].
-    pub(super) fn new_from_input(
+    pub fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
         mut input: TrieInput,
     ) -> (TrieInput, Self) {
@@ -96,7 +96,7 @@ impl<Factory> MultiProofConfig<Factory> {
 
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub(super) enum MultiProofMessage {
+pub enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
@@ -627,7 +627,7 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
-pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
+pub struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// The size of proof targets chunk to spawn in one calculation.
     ///
     /// If [`None`], then chunking is disabled.
@@ -657,7 +657,7 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Creates a new multi proof task with the unified message channel
-    pub(super) fn new(
+    pub fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
@@ -688,7 +688,7 @@ where
     }
 
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
-    pub(super) fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
+    pub fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
         self.tx.clone()
     }
 
@@ -950,7 +950,7 @@ where
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
-    pub(crate) fn run(mut self) {
+    pub fn run(mut self) {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;
         let mut state_update_proofs_requested = 0;
