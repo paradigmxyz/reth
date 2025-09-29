@@ -446,23 +446,6 @@ impl ValidatorTestHarness {
         self.harness.tree.persistence_state.in_progress()
     }
 
-    /// Seed in-memory ancestor blocks with `ExecutedTrieUpdates` markers
-    fn seed_ancestor_with_trie_updates(
-        &mut self,
-        block: ExecutedBlockWithTrieUpdates,
-        has_updates: bool,
-    ) {
-        let mut block = block;
-        if has_updates {
-            // Keep existing trie updates
-        } else {
-            // Mark as missing
-            block.trie = ExecutedTrieUpdates::Missing;
-        }
-
-        self.harness.tree.state.tree_state.insert_executed(block);
-    }
-
     /// Call `validate_block_with_state` directly with block
     fn validate_block_direct(
         &mut self,
