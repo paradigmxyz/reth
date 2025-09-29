@@ -88,28 +88,27 @@ where
                 )
             })
             .transpose()?
-            .flatten()
+            .flatten() &&
+            target_prunable_block > input.checkpoint().block_number
         {
-            if target_prunable_block > input.checkpoint().block_number {
-                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
-                // Save prune checkpoint only if we don't have one already.
-                // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() {
-                    let target_prunable_tx_number = provider
-                        .block_body_indices(target_prunable_block)?
-                        .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
-                        .last_tx_num();
+            // Save prune checkpoint only if we don't have one already.
+            // Otherwise, pruner may skip the unpruned range of blocks.
+            if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() {
+                let target_prunable_tx_number = provider
+                    .block_body_indices(target_prunable_block)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
+                    .last_tx_num();
 
-                    provider.save_prune_checkpoint(
-                        PruneSegment::TransactionLookup,
-                        PruneCheckpoint {
-                            block_number: Some(target_prunable_block),
-                            tx_number: Some(target_prunable_tx_number),
-                            prune_mode,
-                        },
-                    )?;
-                }
+                provider.save_prune_checkpoint(
+                    PruneSegment::TransactionLookup,
+                    PruneCheckpoint {
+                        block_number: Some(target_prunable_block),
+                        tx_number: Some(target_prunable_tx_number),
+                        prune_mode,
+                    },
+                )?;
             }
         }
         if input.target_reached() {
@@ -213,10 +212,10 @@ where
             // Delete all transactions that belong to this block
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
-                if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
-                    if tx_hash_number_cursor.seek_exact(transaction.trie_hash())?.is_some() {
-                        tx_hash_number_cursor.delete_current()?;
-                    }
+                if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? &&
+                    tx_hash_number_cursor.seek_exact(transaction.trie_hash())?.is_some()
+                {
+                    tx_hash_number_cursor.delete_current()?;
                 }
             }
         }
@@ -538,11 +537,10 @@ mod tests {
                         })
                         .transpose()
                         .expect("prune target block for transaction lookup")
-                        .flatten()
+                        .flatten() &&
+                        target_prunable_block > input.checkpoint().block_number
                     {
-                        if target_prunable_block > input.checkpoint().block_number {
-                            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
-                        }
+                        input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
                     }
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;

@@ -656,13 +656,11 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
-            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut())
+            dns_discovery_config.as_mut().and_then(|c| c.bootstrap_dns_networks.as_mut()) &&
+            dns_networks.is_empty() &&
+            let Some(link) = chain_spec.chain().public_dns_network_protocol()
         {
-            if dns_networks.is_empty() {
-                if let Some(link) = chain_spec.chain().public_dns_network_protocol() {
-                    dns_networks.insert(link.parse().expect("is valid DNS link entry"));
-                }
-            }
+            dns_networks.insert(link.parse().expect("is valid DNS link entry"));
         }
 
         NetworkConfig {

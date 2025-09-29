@@ -664,7 +664,7 @@ mod tests {
 
         unsafe impl GlobalAlloc for TrackingAllocator {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                let ret = self.inner.alloc(layout);
+                let ret = unsafe { self.inner.alloc(layout) };
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
                     self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
@@ -674,7 +674,7 @@ mod tests {
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
                 self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
-                self.inner.dealloc(ptr, layout)
+                unsafe { self.inner.dealloc(ptr, layout) }
             }
         }
     }
@@ -762,7 +762,7 @@ mod tests {
         let state_provider =
             CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
 
-        // check that the storage is empty
+        // check that the storage returns the expected value
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
@@ -779,7 +779,7 @@ mod tests {
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
-        // check that the storage is empty
+        // check that the storage returns the cached value
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Value(storage_value));
     }
@@ -793,7 +793,7 @@ mod tests {
         // just create empty caches
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
 
-        // check that the storage is empty
+        // check that the storage is not cached
         let slot_status = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::NotCached);
     }

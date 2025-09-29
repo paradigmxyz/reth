@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Entrypoint for running commands.
 
@@ -15,7 +15,6 @@ use std::{
     future::Future,
     pin::pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         mpsc,
     },
     time::Duration,
@@ -220,14 +219,7 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime] with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name_fn(|| {
-            static IDX: AtomicUsize = AtomicUsize::new(0);
-            let id = IDX.fetch_add(1, Ordering::Relaxed);
-            format!("tokio-{id}")
-        })
-        .build()
+    tokio::runtime::Builder::new_multi_thread().enable_all().build()
 }
 
 /// Runs the given future to completion or until a critical task panicked.

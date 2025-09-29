@@ -40,7 +40,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::debug;
+use tracing::{debug, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
@@ -266,7 +266,7 @@ where
         result_sender: Sender<StorageProofResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             "Starting storage proof task calculation"
@@ -313,7 +313,7 @@ where
             })
         });
 
-        debug!(
+        trace!(
             target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             prefix_set = ?input.prefix_set.len(),
@@ -344,7 +344,7 @@ where
         result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?path,
             "Starting blinded account node retrieval"
@@ -360,7 +360,7 @@ where
 
         let start = Instant::now();
         let result = blinded_provider_factory.account_node_provider().trie_node(&path);
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?path,
             elapsed = ?start.elapsed(),
@@ -388,7 +388,7 @@ where
         result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?account,
             ?path,
@@ -405,7 +405,7 @@ where
 
         let start = Instant::now();
         let result = blinded_provider_factory.storage_node_provider(account).trie_node(&path);
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?account,
             ?path,

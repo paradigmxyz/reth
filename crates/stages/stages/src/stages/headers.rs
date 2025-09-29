@@ -145,19 +145,18 @@ where
 
         let mut cursor_header_numbers =
             provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
-        let mut first_sync = false;
-
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
         // add it to the collector and use tx.append on all hashes.
-        if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 {
-            if let Some((hash, block_number)) = cursor_header_numbers.last()? {
-                if block_number.value()? == 0 {
-                    self.hash_collector.insert(hash.key()?, 0)?;
-                    cursor_header_numbers.delete_current()?;
-                    first_sync = true;
-                }
-            }
-        }
+        let first_sync = if provider.tx_ref().entries::<RawTable<tables::HeaderNumbers>>()? == 1 &&
+            let Some((hash, block_number)) = cursor_header_numbers.last()? &&
+            block_number.value()? == 0
+        {
+            self.hash_collector.insert(hash.key()?, 0)?;
+            cursor_header_numbers.delete_current()?;
+            true
+        } else {
+            false
+        };
 
         // Since ETL sorts all entries by hashes, we are either appending (first sync) or inserting
         // in order (further syncs).

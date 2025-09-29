@@ -95,7 +95,7 @@ where
     fn is_create(&self) -> bool {
         match self {
             Self::BuiltIn(tx) => tx.is_create(),
-            Self::Other(_tx) => false,
+            Self::Other(tx) => tx.is_create(),
         }
     }
 
