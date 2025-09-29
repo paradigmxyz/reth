@@ -159,6 +159,11 @@ impl TestHarness {
         Self::with_persistence_channel(chain_spec, action_tx, action_rx)
     }
 
+    #[expect(dead_code)]
+    fn with_test_channel(chain_spec: Arc<ChainSpec>) -> (Self, TestChannelHandle) {
+        let (action_tx, action_rx, handle) = TestChannel::spawn_channel();
+        (Self::with_persistence_channel(chain_spec, action_tx, action_rx), handle)
+    }
 
     fn with_persistence_channel(
         chain_spec: Arc<ChainSpec>,
