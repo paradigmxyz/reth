@@ -1,18 +1,15 @@
-use alloy_primitives::B256;
 use itertools::{merge_join_by, EitherOrBoth};
-use reth_db_api::{cursor::DbDupCursorRO, tables, DatabaseError};
-use reth_trie::{BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibblesSubKey};
+use reth_db_api::DatabaseError;
+use reth_trie::{trie_cursor::TrieCursor, BranchNodeCompact, Nibbles};
 use std::cmp::{Ord, Ordering};
 
-/// Combines a sorted iterator of trie node paths and a [`tables::StoragesTrie`] cursor into a new
+/// Combines a sorted iterator of trie node paths and a storage trie cursor into a new
 /// iterator which produces the current values of all given paths in the same order.
 #[derive(Debug)]
 pub struct StorageTrieCurrentValuesIter<'cursor, P, C> {
-    /// The address of the account whose storage is being iterated.
-    hashed_address: B256,
     /// Sorted iterator of node paths which we want the values of.
     paths: P,
-    /// Cursor over [`tables::StoragesTrie`].
+    /// Storage trie cursor.
     cursor: &'cursor mut C,
     /// Current value at the cursor, allows us to treat the cursor as a peekable iterator.
     cursor_current: Option<(Nibbles, BranchNodeCompact)>,
@@ -20,24 +17,18 @@ pub struct StorageTrieCurrentValuesIter<'cursor, P, C> {
 
 impl<'cursor, P, C> StorageTrieCurrentValuesIter<'cursor, P, C>
 where
-    C: DbDupCursorRO<tables::StoragesTrie>,
+    P: Iterator<Item = Nibbles>,
+    C: TrieCursor,
 {
     /// Instantiate a [`StorageTrieCurrentValuesIter`] from a sorted paths iterator and a cursor.
-    pub fn new(
-        hashed_address: B256,
-        paths: P,
-        cursor: &'cursor mut C,
-    ) -> Result<Self, DatabaseError> {
-        let mut new_self = Self { hashed_address, paths, cursor, cursor_current: None };
+    pub fn new(paths: P, cursor: &'cursor mut C) -> Result<Self, DatabaseError> {
+        let mut new_self = Self { paths, cursor, cursor_current: None };
         new_self.seek_cursor(Nibbles::default())?;
         Ok(new_self)
     }
 
     fn seek_cursor(&mut self, path: Nibbles) -> Result<(), DatabaseError> {
-        self.cursor_current = self
-            .cursor
-            .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(path))?
-            .map(|e| (e.nibbles.0, e.node));
+        self.cursor_current = self.cursor.seek(path)?;
         Ok(())
     }
 }
@@ -45,7 +36,7 @@ where
 impl<'cursor, P, C> Iterator for StorageTrieCurrentValuesIter<'cursor, P, C>
 where
     P: Iterator<Item = Nibbles>,
-    C: DbDupCursorRO<tables::StoragesTrie>,
+    C: TrieCursor,
 {
     type Item = Result<(Nibbles, Option<BranchNodeCompact>), DatabaseError>;
 
@@ -57,10 +48,10 @@ where
 
         // If the path is ahead of the cursor then seek the cursor forward to catch up. The cursor
         // will seek either to `curr_path` or beyond it.
-        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) {
-            if let Err(err) = self.seek_cursor(curr_path) {
-                return Some(Err(err))
-            }
+        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) &&
+            let Err(err) = self.seek_cursor(curr_path)
+        {
+            return Some(Err(err))
         }
 
         // If there is a path but the cursor is empty then that path has no node.
@@ -92,9 +83,9 @@ where
     }
 }
 
-/// Returns an iterator which produces the values to be inserted into
-/// [`tables::StoragesTrieChangeSets`] for an account whose storage was wiped during a block. It is
-/// expected that this is called prior to inserting the block's trie updates.
+/// Returns an iterator which produces the values to be inserted into the `StoragesTrieChangeSets`
+/// table for an account whose storage was wiped during a block. It is expected that this is called
+/// prior to inserting the block's trie updates.
 ///
 /// ## Arguments
 ///
@@ -111,12 +102,12 @@ pub fn storage_trie_wiped_changeset_iter(
     curr_values_of_changed: impl Iterator<
         Item = Result<(Nibbles, Option<BranchNodeCompact>), DatabaseError>,
     >,
-    all_nodes: impl Iterator<Item = Result<(B256, StorageTrieEntry), DatabaseError>>,
+    all_nodes: impl Iterator<Item = Result<(Nibbles, BranchNodeCompact), DatabaseError>>,
 ) -> Result<
     impl Iterator<Item = Result<(Nibbles, Option<BranchNodeCompact>), DatabaseError>>,
     DatabaseError,
 > {
-    let all_nodes = all_nodes.map(|e| e.map(|e| (e.1.nibbles.0, Some(e.1.node))));
+    let all_nodes = all_nodes.map(|e| e.map(|(nibbles, node)| (nibbles, Some(node))));
 
     let merged = merge_join_by(curr_values_of_changed, all_nodes, |a, b| match (a, b) {
         (Err(_), _) => Ordering::Less,
