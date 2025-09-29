@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 /// - Prometheus: serves metrics over http.
 /// - OTLP: pushes metrics to an `OpenTelemetry` collector via http.
 #[derive(Debug, Clone, Default, Parser)]
-pub struct MetricsArgs {
+pub struct MetricArgs {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
