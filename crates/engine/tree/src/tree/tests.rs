@@ -397,27 +397,6 @@ impl ValidatorTestHarness {
         Self { harness, validator, metrics: TestMetrics::default() }
     }
 
-    /// Create with custom tree config for strategy control
-    #[allow(dead_code)]
-    fn with_config(mut self, config: TreeConfig, chain_spec: Arc<ChainSpec>) -> Self {
-        // Recreate validator with custom config
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
-        let provider = self.harness.provider.clone();
-        let payload_validator = MockEngineValidator;
-        let evm_config = MockEvmConfig::default();
-
-        self.validator = BasicEngineValidator::new(
-            provider,
-            consensus,
-            evm_config,
-            payload_validator,
-            config,
-            Box::new(NoopInvalidBlockHook::default()),
-        );
-
-        self
-    }
-
     /// Configure `PersistenceState` for specific `PersistingKind` scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         use crate::tree::persistence_state::CurrentPersistenceAction;
