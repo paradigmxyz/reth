@@ -150,11 +150,9 @@ impl Entry {
 
     /// Write the entry to [`Entry`] writer
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
-        let data_len = u32::try_from(self.data.len())
-            .map_err(|_| io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Entry data too large: exceeds u32::MAX"
-            ))?;
+        let data_len = u32::try_from(self.data.len()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "Entry data too large: exceeds u32::MAX")
+        })?;
         let header = Header::new(self.entry_type, data_len);
         header.write(writer)?;
         writer.write_all(&self.data)
