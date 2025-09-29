@@ -1457,36 +1457,6 @@ fn test_validate_block_synchronous_strategy_during_persistence() {
     assert!(result.is_ok() || result.is_err(), "Validation should complete")
 }
 
-/// Test trie updates are preserved when block connects to persisted ancestor
-#[test]
-fn test_validate_block_preserves_trie_updates_when_connected_to_persisted() {
-    reth_tracing::init_test_tracing();
-
-    let mut test_harness = ValidatorTestHarness::new(MAINNET.clone());
-
-    // Set up a chain where the block connects to last persisted
-    let mut block_factory = TestBlockFactory::new(MAINNET.as_ref().clone());
-    let genesis_hash = MAINNET.genesis_hash();
-
-    // Create a block that should retain trie updates
-    let valid_block = block_factory.create_valid_block(genesis_hash);
-
-    // Call validate_block_with_state
-    let result = test_harness.validate_block_direct(valid_block);
-
-    // Check trie update retention logic
-    match result {
-        Ok(executed_block) => {
-            // Trie updates should be present when connecting to persisted block
-            // (may be Missing due to test environment, but logic should execute)
-            assert!(executed_block.trie.is_present() || executed_block.trie.is_missing());
-        }
-        Err(_) => {
-            // May fail due to environment, but retention logic should execute
-        }
-    }
-}
-
 /// Test trie update discard when not connecting to last persisted block
 #[test]
 fn test_validate_block_trie_update_discard() {
