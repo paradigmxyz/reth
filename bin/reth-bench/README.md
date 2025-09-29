@@ -80,7 +80,7 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --no-default-fe
 ### Run the Benchmark:
 First, start the reth node. Here is an example that runs `reth` compiled with the `profiling` profile, runs `samply`, and configures `reth` to run with metrics enabled:
 ```bash
-samply record -p 3001 target/profiling/reth node --metrics.prometheus localhost:9001 --authrpc.jwt-secret <jwt_file_path>
+samply record -p 3001 target/profiling/reth node --metrics localhost:9001 --authrpc.jwt-secret <jwt_file_path>
 ```
 
 ```bash

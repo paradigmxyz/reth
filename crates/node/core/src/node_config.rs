@@ -32,7 +32,7 @@ use std::{
 };
 use tracing::*;
 
-use crate::args::{EraArgs, MetricsArgs};
+use crate::args::{EraArgs, MetricArgs};
 pub use reth_engine_primitives::{
     DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
     DEFAULT_RESERVED_CPU_CORES,
@@ -103,7 +103,7 @@ pub struct NodeConfig<ChainSpec> {
     pub chain: Arc<ChainSpec>,
 
     /// Enable to configure metrics export to endpoints
-    pub metrics: MetricsArgs,
+    pub metrics: MetricArgs,
 
     /// Add a new instance of a node.
     ///
@@ -168,7 +168,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         Self {
             config: None,
             chain,
-            metrics: MetricsArgs::default(),
+            metrics: MetricArgs::default(),
             instance: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
@@ -222,7 +222,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the metrics address for the node
-    pub const fn with_metrics(mut self, metrics: MetricsArgs) -> Self {
+    pub const fn with_metrics(mut self, metrics: MetricArgs) -> Self {
         self.metrics = metrics;
         self
     }

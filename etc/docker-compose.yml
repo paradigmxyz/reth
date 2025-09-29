@@ -24,7 +24,7 @@ services:
     command: >
       node
       --chain mainnet
-      --metrics.prometheus 0.0.0.0:9001
+      --metrics 0.0.0.0:9001
       --log.file.directory /root/logs
       --authrpc.addr 0.0.0.0
       --authrpc.port 8551

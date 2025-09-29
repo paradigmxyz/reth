@@ -24,7 +24,7 @@ pub use database::DatabaseArgs;
 mod log;
 pub use log::{ColorMode, LogArgs, Verbosity};
 
-/// `MetricsArgs` to configure telemetry metrics.
+/// `MetricArgs` to configure telemetry metrics.
 mod metric;
 pub use metric::MetricArgs;
 

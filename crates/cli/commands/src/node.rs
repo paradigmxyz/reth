@@ -9,7 +9,7 @@ use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricsArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
         NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
@@ -40,7 +40,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
 
     /// Enable metrics export.
     #[command(flatten)]
-    pub metrics: MetricsArgs,
+    pub metrics: MetricArgs,
 
     /// Add a new instance of a node.
     ///
@@ -281,26 +281,40 @@ mod tests {
     #[test]
     fn parse_metrics_port() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics.prometheus", "9001"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--metrics", "9001"]).unwrap();
         assert_eq!(
             cmd.metrics.prometheus,
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
         );
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics.prometheus", ":9001"]).unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--metrics", ":9001"]).unwrap();
         assert_eq!(
             cmd.metrics.prometheus,
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
         );
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics.prometheus", "localhost:9001"])
-                .unwrap();
+            NodeCommand::try_parse_args_from(["reth", "--metrics", "localhost:9001"]).unwrap();
         assert_eq!(
             cmd.metrics.prometheus,
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001))
         );
+    }
+
+    #[test]
+    fn parse_metrics_otlp_port() {
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", "4318"]).unwrap();
+        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
+
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", ":4318"]).unwrap();
+        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
+
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", "localhost:4318"]).unwrap();
+        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
     }
 
     #[test]

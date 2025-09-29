@@ -11,12 +11,12 @@ pub struct MetricArgs {
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
-    #[arg(long, alias = "metrics.prometheus", value_name = "PROMETHEUS", value_parser = parse_socket_address, help_heading = "Metrics")]
+    #[arg(long="metrics", alias = "metrics.prometheus", value_name = "PROMETHEUS", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub prometheus: Option<SocketAddr>,
 
     /// Enable OTLP export.
     ///
     /// The metrics will be exported at the given endpoint - interface and port.
-    #[arg(long, alias = "metrics.otlp", value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
+    #[arg(long="metrics-otlp", alias = "metrics.otlp", value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub otlp: Option<SocketAddr>,
 }
