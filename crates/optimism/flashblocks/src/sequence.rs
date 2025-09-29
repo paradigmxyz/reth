@@ -143,7 +143,7 @@ where
 pub struct FlashBlockCompleteSequence {
     inner: Vec<FlashBlock>,
     /// Optional state root for the current sequence
-    pub state_root: Option<B256>,
+    state_root: Option<B256>,
 }
 
 impl FlashBlockCompleteSequence {
@@ -188,6 +188,11 @@ impl FlashBlockCompleteSequence {
     /// Returns the last flashblock in the sequence.
     pub fn last(&self) -> &FlashBlock {
         self.inner.last().unwrap()
+    }
+
+    /// Returns the state root for the current sequence
+    pub const fn state_root(&self) -> Option<B256> {
+        self.state_root
     }
 }
 

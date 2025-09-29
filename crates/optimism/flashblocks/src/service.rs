@@ -25,7 +25,7 @@ use std::{
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
-pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 8;
+pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
 
 /// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
@@ -90,8 +90,8 @@ where
     }
 
     /// Enable state root calculation from flashblock
-    pub const fn enable_state_root(mut self) -> Self {
-        self.calculate_state_root = true;
+    pub const fn calculate_state_root(mut self, enable_state_root: bool) -> Self {
+        self.calculate_state_root = enable_state_root;
         self
     }
 
@@ -131,7 +131,7 @@ where
                 "Missing flashblock payload base"
             );
 
-            return None;
+            return None
         };
 
         // attempt an initial consecutive check
@@ -216,7 +216,7 @@ where
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads, state_root))) => {
-                        // update state root of current sequence
+                        // update state root of the current sequence
                         this.blocks.set_state_root(state_root);
 
                         // built a new pending block
@@ -276,11 +276,11 @@ where
                     "Clearing current flashblock on new canonical block"
                 );
 
-                return Poll::Ready(Some(Ok(None)));
+                return Poll::Ready(Some(Ok(None)))
             }
 
             if !this.rebuild && this.current.is_some() {
-                return Poll::Pending;
+                return Poll::Pending
             }
 
             // try to build a block on top of latest
@@ -296,10 +296,10 @@ where
                 this.job.replace((now, rx));
 
                 // continue and poll the spawned job
-                continue;
+                continue
             }
 
-            return Poll::Pending;
+            return Poll::Pending
         }
     }
 }
