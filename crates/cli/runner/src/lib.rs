@@ -11,14 +11,7 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::{
-    future::Future,
-    pin::pin,
-    sync::{
-        mpsc,
-    },
-    time::Duration,
-};
+use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tokio::runtime::{Handle, Runtime};
 use tracing::{debug, error, trace};
 
