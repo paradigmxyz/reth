@@ -39,6 +39,8 @@ reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-log-index.workspace = true
+reth-log-index-common.workspace = true
 
 reth-testing-utils = { workspace = true, optional = true }
 
@@ -115,6 +117,8 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-log-index/test-utils",
+    "reth-log-index-common/test-utils",
 ]
 
 [[bench]]
