@@ -133,7 +133,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number)?)
+        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.

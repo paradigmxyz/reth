@@ -94,9 +94,21 @@ In the meantime, consider setting up [observability](/run/monitoring) to monitor
 
 ## Running without a Consensus Layer
 
-We provide a method for running Reth without a Consensus Layer via the `--debug.tip <HASH>` parameter. If you provide that to your node, it will simulate sending an `engine_forkchoiceUpdated` message _once_ and will trigger syncing to the provided block hash. This is useful for testing and debugging purposes, but in order to have a node that can keep up with the tip you'll need to run a CL alongside it. At the moment we have no plans of including a Consensus Layer implementation in Reth, and we are open to including light clients and other methods of syncing like importing Lighthouse as a library.
+We provide several methods for running Reth without a Consensus Layer for testing and debugging purposes:
 
-## Running with Etherscan as Block Source
+### Manual Chain Tip Setting
+
+Use the `--debug.tip <HASH>` parameter to set the chain tip manually. If you provide this to your node, it will simulate sending an `engine_forkchoiceUpdated` message _once_ and will trigger syncing to the provided block hash. This is useful for testing and debugging purposes, but in order to have a node that can keep up with the tip you'll need to run a CL alongside with it.
+
+Example, sync up to block https://etherscan.io/block/23450000:
+
+```bash
+reth node --debug.tip 0x9ba680d8479f936f84065ce94f58c5f0cc1adb128945167e0875ba41a36cd93b 
+```
+
+Note: This is a temporary flag for testing purposes. At the moment we have no plans of including a Consensus Layer implementation in Reth, and we are open to including light clients and other methods of syncing like importing Lighthouse as a library.
+
+### Running with Etherscan as Block Source
 
 You can use `--debug.etherscan` to run Reth with a fake consensus client that advances the chain using recent blocks on Etherscan. This requires an Etherscan API key (set via `ETHERSCAN_API_KEY` environment variable). Optionally, specify a custom API URL with `--debug.etherscan <URL>`.
 
@@ -106,3 +118,31 @@ Example:
 export ETHERSCAN_API_KEY=your_api_key_here
 reth node --debug.etherscan
 ```
+
+Or with a custom Etherscan API URL:
+
+```bash
+export ETHERSCAN_API_KEY=your_api_key_here
+reth node --debug.etherscan https://api.etherscan.io/api
+```
+
+### Running with RPC Consensus
+
+Use `--debug.rpc-consensus-url` to run Reth with a fake consensus client that fetches blocks from an existing RPC endpoint. This supports both HTTP and WebSocket endpoints:
+
+- **WebSocket endpoints**: Will use subscriptions for real-time block updates
+- **HTTP endpoints**: Will poll for new blocks periodically
+
+Example with HTTP RPC:
+
+```bash
+reth node --debug.rpc-consensus-url https://eth-mainnet.g.alchemy.com/v2/your-api-key
+```
+
+Example with WebSocket RPC:
+
+```bash
+reth node --debug.rpc-consensus-url wss://eth-mainnet.g.alchemy.com/v2/your-api-key
+```
+
+Note: The `--debug.tip`, `--debug.etherscan`, and `--debug.rpc-consensus-url` flags are mutually exclusive and cannot be used together.

@@ -1,7 +1,5 @@
 //! Account related models and types.
 
-use std::ops::{Range, RangeInclusive};
-
 use crate::{
     impl_fixed_arbitrary,
     table::{Decode, Encode},
@@ -9,6 +7,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, StorageKey, B256};
 use serde::{Deserialize, Serialize};
+use std::ops::{Bound, Range, RangeBounds, RangeInclusive};
 
 /// [`BlockNumber`] concatenated with [`Address`].
 ///
@@ -68,6 +67,44 @@ impl Decode for BlockNumberAddress {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
         Ok(Self((num, hash)))
+    }
+}
+
+/// A [`RangeBounds`] over a range of [`BlockNumberAddress`]s. Used to conveniently convert from a
+/// range of [`BlockNumber`]s.
+#[derive(Debug)]
+pub struct BlockNumberAddressRange {
+    /// Starting bound of the range.
+    pub start: Bound<BlockNumberAddress>,
+    /// Ending bound of the range.
+    pub end: Bound<BlockNumberAddress>,
+}
+
+impl RangeBounds<BlockNumberAddress> for BlockNumberAddressRange {
+    fn start_bound(&self) -> Bound<&BlockNumberAddress> {
+        self.start.as_ref()
+    }
+
+    fn end_bound(&self) -> Bound<&BlockNumberAddress> {
+        self.end.as_ref()
+    }
+}
+
+impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberAddressRange {
+    fn from(r: R) -> Self {
+        let start = match r.start_bound() {
+            Bound::Included(n) => Bound::Included(BlockNumberAddress((*n, Address::ZERO))),
+            Bound::Excluded(n) => Bound::Included(BlockNumberAddress((n + 1, Address::ZERO))),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        let end = match r.end_bound() {
+            Bound::Included(n) => Bound::Excluded(BlockNumberAddress((n + 1, Address::ZERO))),
+            Bound::Excluded(n) => Bound::Excluded(BlockNumberAddress((*n, Address::ZERO))),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        Self { start, end }
     }
 }
 
