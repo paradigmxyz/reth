@@ -10,22 +10,22 @@ use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageC
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug)]
-pub struct DatabaseHashedCursorFactory<'a, TX>(&'a TX);
+pub struct DatabaseHashedCursorFactory<T>(T);
 
-impl<TX> Clone for DatabaseHashedCursorFactory<'_, TX> {
+impl<T: Clone> Clone for DatabaseHashedCursorFactory<T> {
     fn clone(&self) -> Self {
-        Self(self.0)
+        Self(self.0.clone())
     }
 }
 
-impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
+impl<T> DatabaseHashedCursorFactory<T> {
     /// Create new database hashed cursor factory.
-    pub const fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: T) -> Self {
         Self(tx)
     }
 }
 
-impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
+impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
     type AccountCursor = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;

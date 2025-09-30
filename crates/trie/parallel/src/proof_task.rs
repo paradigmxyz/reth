@@ -243,8 +243,8 @@ where
     fn create_factories(
         &self,
     ) -> (
-        InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
+        InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&Tx>, &Arc<TrieUpdatesSorted>>,
+        HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&Tx>, &Arc<HashedPostStateSorted>>,
     ) {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),

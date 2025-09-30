@@ -13,23 +13,27 @@ use reth_trie::{
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug)]
-pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+pub struct DatabaseTrieCursorFactory<T>(T);
 
-impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
+impl<T: Clone> Clone for DatabaseTrieCursorFactory<T> {
     fn clone(&self) -> Self {
-        Self(self.0)
+        Self(self.0.clone())
     }
 }
 
-impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
+impl<T> DatabaseTrieCursorFactory<T> {
     /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: T) -> Self {
         Self(tx)
     }
 }
 
-/// Implementation of the trie cursor factory for a database transaction.
-impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
+/// Implementation for DatabaseTrieCursorFactory holding a reference to a DbTx.
+/// The factory uses AsRef internally to access the transaction.
+impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
+where
+    TX: DbTx,
+{
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
