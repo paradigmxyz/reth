@@ -161,16 +161,6 @@ where
         proof_result
     }
 
-    /// Generate a [`DecodedStorageMultiProof`] for the given proof by first calling
-    /// `storage_proof`, then decoding the proof nodes.
-    pub fn decoded_storage_proof(
-        self,
-        hashed_address: B256,
-        target_slots: B256Set,
-    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
-        self.storage_proof(hashed_address, target_slots)
-    }
-
     /// Generate a state multiproof according to specified targets.
     pub fn decoded_multiproof(
         self,
