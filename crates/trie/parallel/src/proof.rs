@@ -106,8 +106,8 @@ impl<Factory> ParallelProof<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
-    /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
-    fn spawn_storage_proof(
+    /// Queues a storage proof task and returns a receiver for the result.
+    fn queue_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -144,7 +144,7 @@ where
             "Starting storage proof generation"
         );
 
-        let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
@@ -207,7 +207,7 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
-            let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+            let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
