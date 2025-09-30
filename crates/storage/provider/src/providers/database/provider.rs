@@ -18,7 +18,7 @@ use crate::{
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
     StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter,
+    TransactionsProviderExt, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -33,7 +33,6 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_db::models::BlockNumberHashedAddressRange;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -77,7 +76,6 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::{mpsc, Arc},
 };
