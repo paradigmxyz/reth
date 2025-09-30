@@ -621,7 +621,10 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 "Stage is missing static file data."
             );
 
-            Ok(Some(ControlFlow::Unwind { target: block.block.number - 1, bad_block: block }))
+            Ok(Some(ControlFlow::Unwind {
+                target: block.block.number.saturating_sub(1),
+                bad_block: block,
+            }))
         } else if err.is_fatal() {
             error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
             Err(err.into())

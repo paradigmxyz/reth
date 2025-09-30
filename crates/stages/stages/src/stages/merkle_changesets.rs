@@ -3,7 +3,10 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
-use reth_provider::{ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, TrieWriter};
+use reth_provider::{
+    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
+    TrieWriter,
+};
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, ExecInput, ExecOutput, MerkleChangeSetsCheckpoint, Stage,
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -86,7 +89,11 @@ impl MerkleChangeSets {
         target_end: BlockNumber, // inclusive
     ) -> Result<(), StageError>
     where
-        Provider: StageCheckpointReader + TrieWriter + DBProvider + HeaderProvider + ChainStateBlockReader,
+        Provider: StageCheckpointReader
+            + TrieWriter
+            + DBProvider
+            + HeaderProvider
+            + ChainStateBlockReader,
     {
         let target_range = target_start..=target_end;
         debug!(
@@ -198,8 +205,9 @@ impl MerkleChangeSets {
         Ok(())
     }
 
-    /// Determines the target range for changeset computation based on the checkpoint and provider state.
-    /// 
+    /// Determines the target range for changeset computation based on the checkpoint and provider
+    /// state.
+    ///
     /// Returns the target range (inclusive) to compute changesets for.
     fn determine_target_range<Provider>(
         checkpoint: Option<StageCheckpoint>,
@@ -233,8 +241,7 @@ impl MerkleChangeSets {
         //                    |--actual--|
         //
         // However, if the target start is less than the previously computed start, we don't want to
-        // do this, as it would leave a gap of data at `target_start..=computed_range.start`. This
-        // could occur if the finalized block moves backward.
+        // do this, as it would leave a gap of data at `target_start..=computed_range.start`.
         //
         // ------------------------------> Block #
         //           |---prev---|
@@ -257,7 +264,8 @@ impl Default for MerkleChangeSets {
 
 impl<Provider> Stage<Provider> for MerkleChangeSets
 where
-    Provider: StageCheckpointReader + TrieWriter + DBProvider + HeaderProvider + ChainStateBlockReader,
+    Provider:
+        StageCheckpointReader + TrieWriter + DBProvider + HeaderProvider + ChainStateBlockReader,
 {
     fn id(&self) -> StageId {
         StageId::MerkleChangeSets
@@ -276,18 +284,17 @@ where
 
         // Determine the target range for changeset computation
         let target_range = Self::determine_target_range(input.checkpoint, provider)?;
-        
-        // Get the previously computed range and determine how to update it
-        let mut computed_range = Self::computed_range(input.checkpoint);
         let target_start = *target_range.start();
         let target_end = *target_range.end();
 
-        // Determine if we need to clear all changesets or just the target range
+        // Get the previously computed range and determine how to update it
+        let mut computed_range = Self::computed_range(input.checkpoint);
+
+        // Determine if we need to clear all changesets or just from target_start onwards
         if target_start >= computed_range.start {
-            // There should not be any data already present in the target range, but as a precaution
-            // we clear it anyway.
-            provider.clear_trie_changesets_range(target_range.clone())?;
-            
+            // Clear from target_start onwards to ensure no stale data exists
+            provider.clear_trie_changesets_from(target_start)?;
+
             computed_range.end = target_end + 1;
             if computed_range.start == 0 {
                 computed_range.start = target_start;
@@ -322,7 +329,7 @@ where
         provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        provider.clear_trie_changesets_range(input.unwind_to + 1..)?;
+        provider.clear_trie_changesets_from(input.unwind_to + 1)?;
 
         let mut computed_range = Self::computed_range(Some(input.checkpoint));
         computed_range.end = input.unwind_to + 1;
@@ -338,7 +345,7 @@ where
 
         // Get the finalized block to determine if we need to recompute
         let finalized_block = provider.last_finalized_block_number()?.unwrap_or(0);
-        
+
         // We will set the checkpoint block range to be "correct" regardless, but if reth needs to
         // recompute some range of changesets on startup we set the checkpoint block to 0 to force
         // the execute stage to run.

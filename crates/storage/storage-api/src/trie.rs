@@ -136,11 +136,8 @@ pub trait TrieWriter: Send + Sync {
     /// Clears contents of trie changesets completely
     fn clear_trie_changesets(&self) -> ProviderResult<()>;
 
-    /// Clears contents of trie changesets for the given range of blocks.
-    fn clear_trie_changesets_range(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<()>;
+    /// Clears contents of trie changesets starting from the given block number onwards.
+    fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()>;
 }
 
 /// Storage Trie Writer

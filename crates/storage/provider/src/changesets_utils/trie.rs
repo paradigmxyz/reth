@@ -48,8 +48,8 @@ where
 
         // If the path is ahead of the cursor then seek the cursor forward to catch up. The cursor
         // will seek either to `curr_path` or beyond it.
-        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path)
-            && let Err(err) = self.seek_cursor(curr_path)
+        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) &&
+            let Err(err) = self.seek_cursor(curr_path)
         {
             return Some(Err(err))
         }
@@ -83,9 +83,9 @@ where
     }
 }
 
-/// Returns an iterator which produces the values to be inserted into
-/// [`tables::StoragesTrieChangeSets`] for an account whose storage was wiped during a block. It is
-/// expected that this is called prior to inserting the block's trie updates.
+/// Returns an iterator which produces the values to be inserted into the `StoragesTrieChangeSets`
+/// table for an account whose storage was wiped during a block. It is expected that this is called
+/// prior to inserting the block's trie updates.
 ///
 /// ## Arguments
 ///
