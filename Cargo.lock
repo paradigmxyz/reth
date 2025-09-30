@@ -3719,6 +3719,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "external-proofs"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "futures-util",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-types",
+ "reth-provider",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
