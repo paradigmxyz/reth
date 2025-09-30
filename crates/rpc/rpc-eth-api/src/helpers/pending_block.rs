@@ -81,7 +81,11 @@ pub trait LoadPendingBlock:
             // Note: for the PENDING block we assume it is past the known merge block and
             // thus this will not fail when looking up the total
             // difficulty value for the blockenv.
-            let evm_env = self.evm_config().evm_env(block.header());
+            let evm_env = self
+                .evm_config()
+                .evm_env(block.header())
+                .map_err(RethError::other)
+                .map_err(Self::Error::from_eth_err)?;
 
             return Ok(PendingBlockEnv::new(
                 evm_env,

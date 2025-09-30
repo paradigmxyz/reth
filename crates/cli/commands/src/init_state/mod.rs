@@ -10,7 +10,8 @@ use reth_db_common::init::init_from_state_dump;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockHeader, SealedHeader};
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
+    BlockNumReader, DBProvider, DatabaseProviderFactory, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use std::{io::BufReader, path::PathBuf, str::FromStr, sync::Arc};
 use tracing::info;

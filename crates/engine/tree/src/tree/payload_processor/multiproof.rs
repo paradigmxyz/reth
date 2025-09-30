@@ -30,9 +30,6 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-/// The size of proof targets chunk to spawn in one calculation.
-const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
-
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -455,7 +452,7 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -464,7 +461,7 @@ where
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
-            .decoded_storage_proof(hashed_address, proof_targets);
+            .storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -475,7 +472,7 @@ where
                 "Storage multiproofs calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
@@ -530,7 +527,7 @@ where
             );
 
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -551,7 +548,7 @@ where
                 "Multiproof calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
@@ -631,6 +628,10 @@ pub(crate) struct MultiProofTaskMetrics {
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
 pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
+    /// The size of proof targets chunk to spawn in one calculation.
+    ///
+    /// If [`None`], then chunking is disabled.
+    chunk_size: Option<usize>,
     /// Task configuration.
     config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
@@ -662,11 +663,13 @@ where
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
+        chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
+            chunk_size,
             config,
             rx,
             tx,
@@ -729,8 +732,8 @@ where
             chunks += 1;
         };
 
-        if should_chunk {
-            for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
+            for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 spawn(proof_targets_chunk);
             }
         } else {
@@ -873,8 +876,8 @@ where
             chunks += 1;
         };
 
-        if should_chunk {
-            for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
+            for chunk in not_fetched_state_update.chunks(chunk_size) {
                 spawn(chunk);
             }
         } else {
@@ -1218,7 +1221,7 @@ mod tests {
         );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
     }
 
     #[test]

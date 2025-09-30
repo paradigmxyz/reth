@@ -5,7 +5,9 @@ use alloy_primitives::BlockNumber;
 use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
-use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory};
+use reth_provider::{
+    test_utils::MockNodeTypesWithDB, DBProvider, DatabaseProvider, DatabaseProviderFactory,
+};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
