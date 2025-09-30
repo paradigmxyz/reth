@@ -85,7 +85,7 @@ impl ExecutionPayload for ExecutionData {
     }
 
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
-        self.sidecar.il()
+        self.sidecar.inclusion_list_transactions()
     }
 }
 

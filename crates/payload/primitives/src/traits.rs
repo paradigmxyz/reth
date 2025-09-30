@@ -133,7 +133,7 @@ impl PayloadAttributes for EthPayloadAttributes {
     }
 
     fn il(&self) -> Option<&Vec<Bytes>> {
-        self.il.as_ref()
+        self.inclusion_list_transactions.as_ref()
     }
 }
 

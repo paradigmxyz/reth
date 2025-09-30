@@ -348,7 +348,7 @@ impl EthPayloadBuilderAttributes {
         let id = payload_id(&parent, &attributes);
 
         // if the IL is present, then attempt to decode each transaction in the IL.
-        let il = attributes.il.map(|il| {
+        let il = attributes.inclusion_list_transactions.map(|il| {
             il.into_iter().map(|tx| Recovered::decode(&mut tx.0.as_ref()).ok()).collect()
         });
 
@@ -419,7 +419,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
             suggested_fee_recipient: self.suggested_fee_recipient,
             withdrawals: Some(self.withdrawals.0.clone()),
             parent_beacon_block_root: self.parent_beacon_block_root,
-            il: Some(il),
+            inclusion_list_transactions: Some(il),
         };
         Self::new(self.parent, attributes)
     }
@@ -445,7 +445,7 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
         hasher.update(parent_beacon_block);
     }
 
-    if let Some(il) = &attributes.il {
+    if let Some(il) = &attributes.inclusion_list_transactions {
         // NOTE
         //
         // perhaps we want to only update the digest a single time after flattening the IL
@@ -490,7 +490,7 @@ mod tests {
             withdrawals: None,
             parent_beacon_block_root: None,
             // TODO: add a dummy IL
-            il: Some(vec![]),
+            inclusion_list_transactions: Some(vec![]),
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -529,7 +529,7 @@ mod tests {
             ]),
             parent_beacon_block_root: None,
             // TODO: add a dummy IL
-            il: None,
+            inclusion_list_transactions: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -563,7 +563,7 @@ mod tests {
                 .unwrap(),
             ),
             // TODO: add a dummy IL
-            il: None,
+            inclusion_list_transactions: None,
         };
 
         // Verify that the generated payload ID matches the expected value

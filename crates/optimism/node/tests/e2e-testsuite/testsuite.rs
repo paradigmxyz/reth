@@ -41,7 +41,7 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
                     withdrawals: None,
                     parent_beacon_block_root: None,
                     // TODO: add a dummy IL
-                    il: Some(vec![]),
+                    inclusion_list_transactions: Some(vec![]),
                 },
                 transactions: None,
                 no_tx_pool: None,

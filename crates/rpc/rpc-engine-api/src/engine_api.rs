@@ -1008,7 +1008,7 @@ where
             sidecar: ExecutionPayloadSidecar::v5(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests },
-                AmsterdamPayloadFields { il: inclusion_list_transactions },
+                AmsterdamPayloadFields { inclusion_list_transactions },
             ),
         };
 
