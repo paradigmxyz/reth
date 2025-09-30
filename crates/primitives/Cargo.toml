@@ -25,7 +25,6 @@ alloy-consensus.workspace = true
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
-once_cell.workspace = true
 
 [dev-dependencies]
 # eth
@@ -51,7 +50,6 @@ std = [
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-genesis/std",
-    "once_cell/std",
     "reth-ethereum-forks/std",
     "reth-ethereum-primitives/std",
     "alloy-rlp/std",
