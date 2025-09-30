@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::Args;
-use reth_engine_primitives::TreeConfig;
+use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -67,6 +67,14 @@ pub struct EngineArgs {
     #[arg(long = "engine.max-proof-task-concurrency", default_value_t = DEFAULT_MAX_PROOF_TASK_CONCURRENCY)]
     pub max_proof_task_concurrency: u64,
 
+    /// Whether multiproof task should chunk proof targets.
+    #[arg(long = "engine.multiproof-chunking", default_value = "true")]
+    pub multiproof_chunking_enabled: bool,
+
+    /// Multiproof task chunk size for proof targets.
+    #[arg(long = "engine.multiproof-chunk-size", default_value_t = DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE)]
+    pub multiproof_chunk_size: usize,
+
     /// Configure the number of reserved CPU cores for non-reth processes
     #[arg(long = "engine.reserved-cpu-cores", default_value_t = DEFAULT_RESERVED_CPU_CORES)]
     pub reserved_cpu_cores: usize,
@@ -118,6 +126,8 @@ impl Default for EngineArgs {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            multiproof_chunking_enabled: true,
+            multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_enabled: true,
             precompile_cache_disabled: false,
@@ -141,6 +151,8 @@ impl EngineArgs {
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
+            .with_multiproof_chunking_enabled(self.multiproof_chunking_enabled)
+            .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)

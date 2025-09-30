@@ -26,7 +26,6 @@ use revm::context_interface::result::{
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
-use tracing::error;
 
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
@@ -269,18 +268,12 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex | EthApiError::TransactionNotFound => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
-            // TODO(onbjerg): We rewrite the error message here because op-node does string matching
-            // on the error message.
-            //
-            // Until https://github.com/ethereum-optimism/optimism/pull/11759 is released, this must be kept around.
-            EthApiError::HeaderNotFound(id) => rpc_error_with_code(
-                EthRpcErrorCode::ResourceNotFound.code(),
-                format!("block not found: {}", block_id_to_str(id)),
-            ),
-            EthApiError::ReceiptsNotFound(id) => rpc_error_with_code(
-                EthRpcErrorCode::ResourceNotFound.code(),
-                format!("{error}: {}", block_id_to_str(id)),
-            ),
+            EthApiError::HeaderNotFound(id) | EthApiError::ReceiptsNotFound(id) => {
+                rpc_error_with_code(
+                    EthRpcErrorCode::ResourceNotFound.code(),
+                    format!("block not found: {}", block_id_to_str(id)),
+                )
+            }
             EthApiError::HeaderRangeNotFound(start_id, end_id) => rpc_error_with_code(
                 EthRpcErrorCode::ResourceNotFound.code(),
                 format!(
@@ -1089,6 +1082,47 @@ mod tests {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
+    }
+
+    #[test]
+    fn receipts_not_found_message() {
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::hash(b256!(
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+            )))
+            .into();
+        assert_eq!(
+            err.message(),
+            "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        );
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::hash_canonical(b256!(
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+            )))
+            .into();
+        assert_eq!(
+            err.message(),
+            "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        );
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::number(100000)).into();
+        assert_eq!(err.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(err.message(), "block not found: 0x186a0");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::latest()).into();
+        assert_eq!(err.message(), "block not found: latest");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::safe()).into();
+        assert_eq!(err.message(), "block not found: safe");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::finalized()).into();
+        assert_eq!(err.message(), "block not found: finalized");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::pending()).into();
+        assert_eq!(err.message(), "block not found: pending");
+        let err: jsonrpsee_types::error::ErrorObject<'static> =
+            EthApiError::ReceiptsNotFound(BlockId::earliest()).into();
+        assert_eq!(err.message(), "block not found: earliest");
     }
 
     #[test]
