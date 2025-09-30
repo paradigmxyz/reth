@@ -49,6 +49,7 @@ members = [
     "crates/exex/exex/",
     "crates/exex/test-utils/",
     "crates/exex/types/",
+    "crates/exex/external-proofs/",
     "crates/metrics/",
     "crates/net/banlist/",
     "crates/net/discv4/",
