@@ -10,11 +10,11 @@ exclude.workspace = true
 
 [dependencies]
 # obs
-opentelemetry_sdk.workspace = true
-opentelemetry.workspace = true
-opentelemetry-otlp.workspace = true
-opentelemetry-semantic-conventions.workspace = true
-tracing-opentelemetry.workspace = true
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tracing.workspace = true
 
@@ -23,3 +23,14 @@ eyre.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+default = ["otlp"]
+
+otlp = [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "opentelemetry-semantic-conventions",
+    "tracing-opentelemetry",
+]

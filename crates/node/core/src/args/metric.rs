@@ -18,5 +18,6 @@ pub struct MetricArgs {
     ///
     /// The metrics will be exported at the given endpoint - interface and port.
     #[arg(long="metrics-otlp", alias = "metrics.otlp", value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
+    #[cfg(feature = "otlp")]
     pub otlp: Option<SocketAddr>,
 }

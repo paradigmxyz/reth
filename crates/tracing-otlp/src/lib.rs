@@ -1,3 +1,5 @@
+#![cfg(feature = "otlp")]
+
 //! Provides a tracing layer for `OpenTelemetry` that exports spans to an OTLP endpoint.
 //!
 //! This module simplifies the integration of `OpenTelemetry` tracing with OTLP export in Rust

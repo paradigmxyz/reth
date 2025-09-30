@@ -1,4 +1,5 @@
 use crate::formatter::LogFormat;
+#[cfg(feature = "otlp")]
 use reth_tracing_otlp::create_metrics_provider;
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
@@ -6,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing_appender::non_blocking::WorkerGuard;
+#[cfg(feature = "otlp")]
 use tracing_opentelemetry::MetricsLayer;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
@@ -125,6 +127,7 @@ impl Layers {
     }
 
     /// Add OTLP metrics layer to the layer collection
+    #[cfg(feature = "otlp")]
     pub fn with_metrics_layer(&mut self, service_name: String, endpoint: &str) -> eyre::Result<()> {
         // Create the metrics provider
         let meter_provider = create_metrics_provider(service_name, endpoint).map_err(|e| {
