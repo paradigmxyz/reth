@@ -394,7 +394,7 @@ where
         let persisting_kind = state_root_plan.persisting_kind;
         let has_ancestors_with_missing_trie_updates =
             state_root_plan.has_ancestors_with_missing_trie_updates;
-        let mut strategy = state_root_plan.strategy;
+        let strategy = state_root_plan.strategy;
 
         debug!(
             target: "engine::tree",
@@ -408,7 +408,7 @@ where
         let txs = self.tx_iterator_for(&input)?;
 
         // Spawn the appropriate processor based on strategy
-        let mut handle = ensure_ok!(self.spawn_payload_processor(
+        let (mut handle, strategy) = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
             provider_builder,
@@ -416,7 +416,7 @@ where
             parent_hash,
             ctx.state(),
             block_num_hash,
-            &mut strategy,
+            strategy,
         ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -835,12 +835,15 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         block_num_hash: NumHash,
-        strategy: &mut StateRootStrategy,
+        strategy: StateRootStrategy,
     ) -> Result<
-        PayloadHandle<
-            impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
-            impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
-        >,
+        (
+            PayloadHandle<
+                impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
+                impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            >,
+            StateRootStrategy,
+        ),
         InsertBlockErrorKind,
     > {
         match strategy {
@@ -869,14 +872,17 @@ where
                 // Use state root task only if prefix sets are empty, otherwise proof generation is
                 // too expensive because it requires walking all paths in every proof.
                 let spawn_start = Instant::now();
-                let handle = if trie_input.prefix_sets.is_empty() {
-                    self.payload_processor.spawn(
-                        env,
-                        txs,
-                        provider_builder,
-                        consistent_view,
-                        trie_input,
-                        &self.config,
+                let (handle, strategy) = if trie_input.prefix_sets.is_empty() {
+                    (
+                        self.payload_processor.spawn(
+                            env,
+                            txs,
+                            provider_builder,
+                            consistent_view,
+                            trie_input,
+                            &self.config,
+                        ),
+                        StateRootStrategy::StateRootTask,
                     )
                 // if prefix sets are not empty, we spawn a task that exclusively handles cache
                 // prewarming for transaction execution
@@ -886,8 +892,10 @@ where
                         block=?block_num_hash,
                         "Disabling state root task due to non-empty prefix sets"
                     );
-                    *strategy = StateRootStrategy::Parallel;
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder)
+                    (
+                        self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder),
+                        StateRootStrategy::Parallel,
+                    )
                 };
 
                 // record prewarming initialization duration
@@ -896,9 +904,9 @@ where
                     .spawn_payload_processor
                     .record(spawn_start.elapsed().as_secs_f64());
 
-                Ok(handle)
+                Ok((handle, strategy))
             }
-            StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
+            strategy @ (StateRootStrategy::Parallel | StateRootStrategy::Synchronous) => {
                 let start = Instant::now();
                 let handle =
                     self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
@@ -909,7 +917,7 @@ where
                     .spawn_payload_processor
                     .record(start.elapsed().as_secs_f64());
 
-                Ok(handle)
+                Ok((handle, strategy))
             }
         }
     }
