@@ -9697,7 +9697,6 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "codspeed-criterion-compat",
- "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs",
