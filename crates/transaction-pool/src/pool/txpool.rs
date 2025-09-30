@@ -2110,7 +2110,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
         assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
-        assert!(self.auths.len() <= self.txs.len(), "auths > txs.len()");
+        assert!(self.auths.len() <= self.txs.len(), "auths.len() > txs.len()");
     }
 }
 
