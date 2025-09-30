@@ -1374,13 +1374,13 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvider<N> {
     type Header = N::BlockHeader;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderWithHashMask<Self::Header>>(block_hash.into())?
+                .get_two::<HeaderWithHashMask<Self::Header>>((&block_hash).into())?
                 .and_then(|(header, hash)| {
-                    if &hash == block_hash {
+                    if hash == block_hash {
                         return Some(header)
                     }
                     None
@@ -1400,12 +1400,12 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
             })
     }
 
-    fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<TDWithHashMask>(block_hash.into())?
-                .and_then(|(td, hash)| (&hash == block_hash).then_some(td.0)))
+                .get_two::<TDWithHashMask>((&block_hash).into())?
+                .and_then(|(td, hash)| (hash == block_hash).then_some(td.0)))
         })
     }
 
@@ -1468,7 +1468,15 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
 
 impl<N: NodePrimitives> BlockHashReader for StaticFileProvider<N> {
     fn block_hash(&self, num: u64) -> ProviderResult<Option<B256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?.block_hash(num)
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+            .and_then(|provider| provider.block_hash(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn canonical_hashes_range(
@@ -1712,8 +1720,6 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     }
 }
 
-/* Cannot be successfully implemented but must exist for trait requirements */
-
 impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         // Required data not present in static_files
@@ -1726,8 +1732,7 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
+        Ok(self.get_highest_static_file_block(StaticFileSegment::Headers).unwrap_or_default())
     }
 
     fn block_number(&self, _hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1735,6 +1740,8 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
         Err(ProviderError::UnsupportedProvider)
     }
 }
+
+/* Cannot be successfully implemented but must exist for trait requirements */
 
 impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>> BlockReader
     for StaticFileProvider<N>
@@ -1801,6 +1808,10 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

@@ -22,7 +22,7 @@ use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
     BlockHeader, TxReceipt,
 };
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -42,7 +42,7 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
+    BlockNumberList, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -74,7 +74,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeInclusive},
-    sync::{mpsc, Arc},
+    sync::Arc,
 };
 use tracing::{debug, trace};
 
@@ -563,23 +563,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    fn transactions_by_tx_range_with_cursor<C>(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-        cursor: &mut C,
-    ) -> ProviderResult<Vec<TxTy<N>>>
-    where
-        C: DbCursorRO<tables::Transactions<TxTy<N>>>,
-    {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            to_range(range),
-            |static_file, range, _| static_file.transactions_by_tx_range(range),
-            |range, _| self.cursor_collect(cursor, range),
-            |_| true,
-        )
-    }
-
     fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
@@ -649,7 +632,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         let mut blocks = Vec::with_capacity(len);
 
         let headers = headers_range(range.clone())?;
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
 
         // If the body indices are not found, this means that the transactions either do
         // not exist in the database yet, or they do exit but are
@@ -668,7 +650,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                self.transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                self.transactions_by_tx_range(tx_range.clone())?
             };
 
             inputs.push((header.as_ref(), transactions));
@@ -1007,8 +989,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabaseProvider<TX, N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
-        if let Some(num) = self.block_number(*block_hash)? {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
+        if let Some(num) = self.block_number(block_hash)? {
             Ok(self.header_by_number(num)?)
         } else {
             Ok(None)
@@ -1016,16 +998,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            num,
-            |static_file| static_file.header_by_number(num),
-            || Ok(self.tx.get::<tables::Headers<Self::Header>>(num)?),
-        )
+        self.static_file_provider.header_by_number(num)
     }
 
-    fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(*block_hash)? {
+    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
+        if let Some(num) = self.block_number(block_hash)? {
             self.header_td_by_number(num)
         } else {
             Ok(None)
@@ -1041,46 +1018,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
             return Ok(Some(td))
         }
 
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.header_td_by_number(number),
-            || Ok(self.tx.get::<tables::HeaderTerminalDifficulties>(number)?.map(|td| td.0)),
-        )
+        self.static_file_provider.header_td_by_number(number)
     }
 
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Self::Header>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            to_range(range),
-            |static_file, range, _| static_file.headers_range(range),
-            |range, _| self.cursor_read_collect::<tables::Headers<Self::Header>>(range),
-            |_| true,
-        )
+        self.static_file_provider.headers_range(range)
     }
 
     fn sealed_header(
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.sealed_header(number),
-            || {
-                if let Some(header) = self.header_by_number(number)? {
-                    let hash = self
-                        .block_hash(number)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-                    Ok(Some(SealedHeader::new(header, hash)))
-                } else {
-                    Ok(None)
-                }
-            },
-        )
+        self.static_file_provider.sealed_header(number)
     }
 
     fn sealed_headers_while(
@@ -1088,40 +1040,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         range: impl RangeBounds<BlockNumber>,
         predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            to_range(range),
-            |static_file, range, predicate| static_file.sealed_headers_while(range, predicate),
-            |range, mut predicate| {
-                let mut headers = vec![];
-                for entry in
-                    self.tx.cursor_read::<tables::Headers<Self::Header>>()?.walk_range(range)?
-                {
-                    let (number, header) = entry?;
-                    let hash = self
-                        .block_hash(number)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(number.into()))?;
-                    let sealed = SealedHeader::new(header, hash);
-                    if !predicate(&sealed) {
-                        break
-                    }
-                    headers.push(sealed);
-                }
-                Ok(headers)
-            },
-            predicate,
-        )
+        self.static_file_provider.sealed_headers_while(range, predicate)
     }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            number,
-            |static_file| static_file.block_hash(number),
-            || Ok(self.tx.get::<tables::CanonicalHeaders>(number)?),
-        )
+        self.static_file_provider.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -1129,13 +1054,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Headers,
-            start..end,
-            |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
-            |range, _| self.cursor_read_collect::<tables::CanonicalHeaders>(range),
-            |_| true,
-        )
+        self.static_file_provider.canonical_hashes_range(start, end)
     }
 }
 
@@ -1156,15 +1075,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::CanonicalHeaders>()?
-            .last()?
-            .map(|(num, _)| num)
-            .max(
-                self.static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers),
-            )
-            .unwrap_or_default())
+        self.static_file_provider.last_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1216,6 +1127,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
         Ok(None)
     }
+
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
@@ -1313,6 +1225,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             },
         )
     }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::TransactionBlocks>()?
+            .seek(id)
+            .map(|b| b.map(|(_, bn)| bn))?)
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
@@ -1324,66 +1244,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProviderExt
         &self,
         tx_range: Range<TxNumber>,
     ) -> ProviderResult<Vec<(TxHash, TxNumber)>> {
-        self.static_file_provider.get_range_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            tx_range,
-            |static_file, range, _| static_file.transaction_hashes_by_range(range),
-            |tx_range, _| {
-                let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<TxTy<N>>>()?;
-                let tx_range_size = tx_range.clone().count();
-                let tx_walker = tx_cursor.walk_range(tx_range)?;
-
-                let chunk_size = (tx_range_size / rayon::current_num_threads()).max(1);
-                let mut channels = Vec::with_capacity(chunk_size);
-                let mut transaction_count = 0;
-
-                #[inline]
-                fn calculate_hash<T>(
-                    entry: Result<(TxNumber, T), DatabaseError>,
-                    rlp_buf: &mut Vec<u8>,
-                ) -> Result<(B256, TxNumber), Box<ProviderError>>
-                where
-                    T: Encodable2718,
-                {
-                    let (tx_id, tx) = entry.map_err(|e| Box::new(e.into()))?;
-                    tx.encode_2718(rlp_buf);
-                    Ok((keccak256(rlp_buf), tx_id))
-                }
-
-                for chunk in &tx_walker.chunks(chunk_size) {
-                    let (tx, rx) = mpsc::channel();
-                    channels.push(rx);
-
-                    // Note: Unfortunate side-effect of how chunk is designed in itertools (it is
-                    // not Send)
-                    let chunk: Vec<_> = chunk.collect();
-                    transaction_count += chunk.len();
-
-                    // Spawn the task onto the global rayon pool
-                    // This task will send the results through the channel after it has calculated
-                    // the hash.
-                    rayon::spawn(move || {
-                        let mut rlp_buf = Vec::with_capacity(128);
-                        for entry in chunk {
-                            rlp_buf.clear();
-                            let _ = tx.send(calculate_hash(entry, &mut rlp_buf));
-                        }
-                    });
-                }
-                let mut tx_list = Vec::with_capacity(transaction_count);
-
-                // Iterate over channels and append the tx hashes unsorted
-                for channel in channels {
-                    while let Ok(tx) = channel.recv() {
-                        let (tx_hash, tx_id) = tx.map_err(|boxed| *boxed)?;
-                        tx_list.push((tx_hash, tx_id));
-                    }
-                }
-
-                Ok(tx_list)
-            },
-            |_| true,
-        )
+        self.static_file_provider.transaction_hashes_by_range(tx_range)
     }
 }
 
@@ -1396,24 +1257,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            id,
-            |static_file| static_file.transaction_by_id(id),
-            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?),
-        )
+        self.static_file_provider.transaction_by_id(id)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         id: TxNumber,
     ) -> ProviderResult<Option<Self::Transaction>> {
-        self.static_file_provider.get_with_static_file_or_database(
-            StaticFileSegment::Transactions,
-            id,
-            |static_file| static_file.transaction_by_id_unhashed(id),
-            || Ok(self.tx.get::<tables::Transactions<Self::Transaction>>(id)?),
-        )
+        self.static_file_provider.transaction_by_id_unhashed(id)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
@@ -1428,11 +1279,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        let mut transaction_cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
         if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
             let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
-            let Some(block_number) =
-                transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))? &&
+            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
             let Some(sealed_header) = self.sealed_header(block_number)?
         {
             let (header, block_hash) = sealed_header.split();
@@ -1469,8 +1318,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
-
         if let Some(block_number) = self.convert_hash_or_number(id)? &&
             let Some(body) = self.block_body_indices(block_number)?
         {
@@ -1478,7 +1325,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
             } else {
-                Ok(Some(self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?))
+                self.transactions_by_tx_range(tx_range).map(Some)
             }
         }
         Ok(None)
@@ -1489,7 +1336,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         let range = to_range(range);
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions<Self::Transaction>>()?;
 
         self.block_body_indices_range(range.start..=range.end.saturating_sub(1))?
             .into_iter()
@@ -1498,10 +1344,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                 if tx_num_range.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    Ok(self
-                        .transactions_by_tx_range_with_cursor(tx_num_range, &mut tx_cursor)?
-                        .into_iter()
-                        .collect())
+                    self.transactions_by_tx_range(tx_num_range)
                 }
             })
             .collect()
@@ -1511,10 +1354,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Transaction>> {
-        self.transactions_by_tx_range_with_cursor(
-            range,
-            &mut self.tx.cursor_read::<tables::Transactions<_>>()?,
-        )
+        self.static_file_provider.transactions_by_tx_range(range)
     }
 
     fn senders_by_tx_range(
@@ -2698,16 +2538,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     type Block = BlockTy<N>;
     type Receipt = ReceiptTy<N>;
 
-    /// Inserts the block into the database, always modifying the following tables:
-    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
-    /// * [`Headers`](tables::Headers)
-    /// * [`HeaderNumbers`](tables::HeaderNumbers)
-    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
-    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    /// Inserts the block into the database, always modifying the following static file segments and
+    /// tables:
+    /// * [`StaticFileSegment::Headers`]
+    /// * [`tables::HeaderNumbers`]
+    /// * [`tables::HeaderTerminalDifficulties`]
+    /// * [`tables::BlockBodyIndices`]
     ///
-    /// If there are transactions in the block, the following tables will be modified:
-    /// * [`Transactions`](tables::Transactions)
-    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    /// If there are transactions in the block, the following static file segments and tables will
+    /// be modified:
+    /// * [`StaticFileSegment::Transactions`]
+    /// * [`tables::TransactionBlocks`]
     ///
     /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
     /// If withdrawals are not empty, this will modify
