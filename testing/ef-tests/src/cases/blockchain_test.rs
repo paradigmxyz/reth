@@ -214,7 +214,9 @@ fn run_case(
     .try_recover()
     .unwrap();
 
-    provider.insert_block(genesis_block.clone()).map_err(|err| Error::block_failed(0, err))?;
+    provider
+        .insert_block(genesis_block.clone())
+        .map_err(|err| Error::block_failed(0, Default::default(), err))?;
 
     // Increment block number for receipts static file
     provider
