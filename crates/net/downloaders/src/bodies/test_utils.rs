@@ -4,11 +4,13 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, tables, transaction::DbTxMut};
 use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
+use reth_provider::{
+    test_utils::MockNodeTypesWithDB, HeaderProvider, ProviderFactory, StaticFileProviderFactory,
+    StaticFileSegment, StaticFileWriter,
+};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a, B: Block>(
@@ -42,12 +44,29 @@ pub(crate) fn create_raw_bodies(
 }
 
 #[inline]
-pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
-    db.update(|tx| {
-        for header in headers {
-            tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
-            tx.put::<tables::Headers>(header.number, header.clone_header()).unwrap();
-        }
-    })
-    .expect("failed to commit")
+pub(crate) fn insert_headers(
+    factory: &ProviderFactory<MockNodeTypesWithDB>,
+    headers: &[SealedHeader],
+) {
+    let provider_rw = factory.provider_rw().expect("failed to create provider");
+    let static_file_provider = provider_rw.static_file_provider();
+    let mut writer = static_file_provider
+        .latest_writer(StaticFileSegment::Headers)
+        .expect("failed to create writer");
+
+    for header in headers {
+        let ttd = if header.number() == 0 {
+            header.difficulty()
+        } else {
+            let parent_block_number = header.number() - 1;
+            let parent_ttd =
+                provider_rw.header_td_by_number(parent_block_number).unwrap().unwrap_or_default();
+            parent_ttd + header.difficulty()
+        };
+
+        writer
+            .append_header(header.header(), ttd, &header.hash())
+            .expect("failed to append header");
+    }
+    provider_rw.commit().expect("failed to commit");
 }

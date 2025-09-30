@@ -22,9 +22,8 @@ reth-storage-api.workspace = true
 reth-tasks.workspace = true
 
 # optional deps for the test-utils feature
-reth-db = { workspace = true, optional = true }
-reth-db-api = { workspace = true, optional = true }
 reth-ethereum-primitives = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum
@@ -58,11 +57,8 @@ itertools.workspace = true
 async-compression = { workspace = true, features = ["gzip", "tokio"] }
 reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
-reth-db = { workspace = true, features = ["test-utils"] }
-reth-db-api.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
@@ -76,13 +72,10 @@ default = []
 file-client = ["dep:async-compression", "dep:alloy-rlp"]
 test-utils = [
     "tempfile",
-    "reth-db-api",
-    "reth-db/test-utils",
     "reth-consensus/test-utils",
     "reth-network-p2p/test-utils",
     "reth-testing-utils",
     "reth-chainspec/test-utils",
-    "reth-db-api?/test-utils",
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
     "dep:reth-ethereum-primitives",
