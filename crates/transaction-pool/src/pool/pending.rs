@@ -571,16 +571,16 @@ impl<T: TransactionOrdering> PendingPool<T> {
     pub(crate) fn assert_invariants(&self) {
         assert!(
             self.independent_transactions.len() <= self.by_id.len(),
-            "independent.len() > all.len()"
+            "independent_transactions.len() > by_id.len()"
         );
         assert!(
             self.highest_nonces.len() <= self.by_id.len(),
-            "independent_descendants.len() > all.len()"
+            "highest_nonces.len() > by_id.len()"
         );
         assert_eq!(
             self.highest_nonces.len(),
             self.independent_transactions.len(),
-            "independent.len() = independent_descendants.len()"
+            "highest_nonces.len() != independent_transactions.len()"
         );
     }
 }
