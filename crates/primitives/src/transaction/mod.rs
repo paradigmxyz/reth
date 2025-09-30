@@ -2,7 +2,6 @@
 
 use crate::Recovered;
 pub use alloy_consensus::transaction::PooledTransaction;
-use once_cell as _;
 #[expect(deprecated)]
 pub use pooled::PooledTransactionsElementEcRecovered;
 pub use reth_primitives_traits::{
