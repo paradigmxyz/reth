@@ -4,7 +4,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
-use eyre::Ok;
+
 use futures_util::Future;
 use jsonrpsee::http_client::HttpClient;
 use reth_chainspec::EthereumHardforks;
@@ -117,7 +117,7 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
         // ensure we're also receiving the built payload as event
-        Ok(self.payload.expect_built_payload().await?)
+        self.payload.expect_built_payload().await
     }
 
     /// Triggers payload building job and submits it to the engine.

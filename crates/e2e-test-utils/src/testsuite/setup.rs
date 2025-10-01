@@ -279,6 +279,7 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
+                inclusion_list_transactions: None,
             };
             EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
         };
@@ -312,6 +313,7 @@ where
                 suggested_fee_recipient: alloy_primitives::Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
+                inclusion_list_transactions: None,
             };
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
