@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{
     proofs::{self, calculate_receipt_root},
-    Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
+    Block, BlockBody, BlockHeader, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
@@ -47,7 +47,7 @@ where
             execution_ctx: ctx,
             parent,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used },
+            output: BlockExecutionResult { receipts, requests, gas_used, blob_gas_used },
             state_root,
             ..
         } = input;
@@ -73,12 +73,11 @@ where
             .then(|| requests.requests_hash());
 
         let mut excess_blob_gas = None;
-        let mut blob_gas_used = None;
+        let mut block_blob_gas_used = None;
 
         // only determine cancun fields when active
         if self.chain_spec.is_cancun_active_at_timestamp(timestamp) {
-            blob_gas_used =
-                Some(transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum());
+            block_blob_gas_used = Some(*blob_gas_used);
             excess_blob_gas = if self.chain_spec.is_cancun_active_at_timestamp(parent.timestamp) {
                 parent.maybe_next_block_excess_blob_gas(
                     self.chain_spec.blob_params_at_timestamp(timestamp),
@@ -112,7 +111,7 @@ where
             gas_used: *gas_used,
             extra_data: self.extra_data.clone(),
             parent_beacon_block_root: ctx.parent_beacon_block_root,
-            blob_gas_used,
+            blob_gas_used: block_blob_gas_used,
             excess_blob_gas,
             requests_hash,
         };
