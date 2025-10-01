@@ -131,6 +131,11 @@ where
         self.inner.len()
     }
 
+    /// Returns the reference to the last flashblock.
+    pub(crate) fn last_flashblock(&self) -> Option<&FlashBlock> {
+        self.inner.last_key_value().map(|(_, b)| &b.block)
+    }
+
     /// Returns the current/latest flashblock index in the sequence
     pub(crate) fn index(&self) -> Option<u64> {
         Some(self.inner.values().last()?.block().index)

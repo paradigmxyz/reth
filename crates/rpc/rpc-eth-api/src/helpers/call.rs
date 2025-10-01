@@ -160,7 +160,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let ctx = this
                         .evm_config()
-                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
+                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
+                        .map_err(RethError::other)
+                        .map_err(Self::Error::from_eth_err)?;
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs

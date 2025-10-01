@@ -247,7 +247,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert_eq!(
             self.last_sender_submission.len(),
             self.sender_transaction_count.len(),
-            "last_sender_transaction.len() != sender_to_last_transaction.len()"
+            "last_sender_submission.len() != sender_transaction_count.len()"
         );
     }
 }

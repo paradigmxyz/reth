@@ -101,7 +101,7 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_provider::{
-        DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
         StaticFileProviderFactory,
     };
     use reth_prune_types::{

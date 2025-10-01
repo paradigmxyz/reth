@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// A configurable App on top of the cli parser.
 pub mod app;
@@ -40,7 +40,7 @@ use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use std::{ffi::OsString, fmt, marker::PhantomData, sync::Arc};
 
 use chainspec::OpChainSpecParser;
-use clap::{command, Parser};
+use clap::Parser;
 use commands::Commands;
 use futures_util::Future;
 use reth_cli::chainspec::ChainSpecParser;

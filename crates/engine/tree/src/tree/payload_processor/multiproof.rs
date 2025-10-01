@@ -30,9 +30,6 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-/// The size of proof targets chunk to spawn in one calculation.
-const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
-
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -378,6 +375,10 @@ where
         }
     }
 
+    const fn is_full(&self) -> bool {
+        self.inflight >= self.max_concurrent
+    }
+
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: PendingMultiproofTask<Factory>) {
@@ -391,7 +392,7 @@ where
             return
         }
 
-        if self.inflight >= self.max_concurrent {
+        if self.is_full() {
             self.pending.push_back(input);
             self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             return;
@@ -451,7 +452,7 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -460,7 +461,7 @@ where
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
-            .decoded_storage_proof(hashed_address, proof_targets);
+            .storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -471,7 +472,7 @@ where
                 "Storage multiproofs calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
@@ -526,7 +527,7 @@ where
             );
 
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -547,7 +548,7 @@ where
                 "Multiproof calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
@@ -627,6 +628,10 @@ pub(crate) struct MultiProofTaskMetrics {
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
 pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
+    /// The size of proof targets chunk to spawn in one calculation.
+    ///
+    /// If [`None`], then chunking is disabled.
+    chunk_size: Option<usize>,
     /// Task configuration.
     config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
@@ -658,11 +663,13 @@ where
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
+        chunk_size: Option<usize>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
+            chunk_size,
             config,
             rx,
             tx,
@@ -707,13 +714,15 @@ where
 
         // Process proof targets in chunks.
         let mut chunks = 0;
-        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+        let should_chunk = !self.multiproof_manager.is_full();
+
+        let mut spawn = |proof_targets| {
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: None,
                     hashed_state_update: Default::default(),
-                    proof_targets: proof_targets_chunk,
+                    proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
                     multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
@@ -721,7 +730,16 @@ where
                 .into(),
             );
             chunks += 1;
+        };
+
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
+            for proof_targets_chunk in proof_targets.chunks(chunk_size) {
+                spawn(proof_targets_chunk);
+            }
+        } else {
+            spawn(proof_targets);
         }
+
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
 
         chunks
@@ -830,17 +848,23 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
+        let should_chunk = !self.multiproof_manager.is_full();
+
         let mut spawned_proof_targets = MultiProofTargets::default();
-        for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            let proof_targets =
-                get_proof_targets(&chunk, &self.fetched_proof_targets, &multi_added_removed_keys);
+
+        let mut spawn = |hashed_state_update| {
+            let proof_targets = get_proof_targets(
+                &hashed_state_update,
+                &self.fetched_proof_targets,
+                &multi_added_removed_keys,
+            );
             spawned_proof_targets.extend_ref(&proof_targets);
 
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
                     config: self.config.clone(),
                     source: Some(source),
-                    hashed_state_update: chunk,
+                    hashed_state_update,
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
@@ -848,7 +872,16 @@ where
                 }
                 .into(),
             );
+
             chunks += 1;
+        };
+
+        if should_chunk && let Some(chunk_size) = self.chunk_size {
+            for chunk in not_fetched_state_update.chunks(chunk_size) {
+                spawn(chunk);
+            }
+        } else {
+            spawn(not_fetched_state_update);
         }
 
         self.metrics
@@ -1188,7 +1221,7 @@ mod tests {
         );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
     }
 
     #[test]

@@ -82,11 +82,6 @@ impl<I> Setup<I>
 where
     I: EngineTypes,
 {
-    /// Create a new setup with default values
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the chain specification
     pub fn with_chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
         self.chain_spec = Some(chain_spec);
