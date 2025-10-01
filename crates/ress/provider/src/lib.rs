@@ -165,7 +165,10 @@ where
             if let Some(trie_updates) = block.trie.as_ref() {
                 trie_input.append_cached_ref(trie_updates, &block.hashed_state);
             } else {
-                trace!(target: "reth::ress_provider", ancestor = ?block.recovered_block().num_hash(), "Skipping missing trie updates");
+                trace!(target: "reth::ress_provider", ancestor = ?block.recovered_block().num_hash(), "Missing trie updates for ancestor block");
+                return Err(ProviderError::TrieWitnessError(
+                    "missing trie updates for ancestor".to_owned(),
+                ));
             }
         }
         let mut hashed_state = db.into_state();
