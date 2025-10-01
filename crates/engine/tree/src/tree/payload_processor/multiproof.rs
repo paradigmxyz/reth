@@ -11,7 +11,7 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
-use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx};
+use reth_provider::{providers::ConsistentDbView, BlockReader, DatabaseProviderFactory};
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, prefix_set::TriePrefixSetsMut,
