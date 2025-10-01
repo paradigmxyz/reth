@@ -487,7 +487,7 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	--show-type-layout \
 	--generate-link-to-definition \
 	--enable-index-page -Zunstable-options -D warnings" \
-	cargo +nightly docs \
+	cargo +nightly doc \
 	--document-private-items
 
 cargo-test:
@@ -509,7 +509,7 @@ test:
 pr:
 	make lint && \
 	make update-book-cli && \
-	cargo docs --document-private-items && \
+	cargo doc --document-private-items && \
 	make test
 
 check-features:
