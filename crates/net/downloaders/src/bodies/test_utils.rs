@@ -55,17 +55,8 @@ pub(crate) fn insert_headers(
         .expect("failed to create writer");
 
     for header in headers {
-        let ttd = if header.number() == 0 {
-            header.difficulty()
-        } else {
-            let parent_block_number = header.number() - 1;
-            let parent_ttd =
-                provider_rw.header_td_by_number(parent_block_number).unwrap().unwrap_or_default();
-            parent_ttd + header.difficulty()
-        };
-
         writer
-            .append_header(header.header(), ttd, &header.hash())
+            .append_header(header.header(), U256::ZERO, &header.hash())
             .expect("failed to append header");
     }
     drop(writer);
