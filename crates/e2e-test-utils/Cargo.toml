@@ -22,7 +22,7 @@ reth-rpc-eth-api.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-payload-builder-primitives.workspace = true
-reth-payload-primitives.workspace = true
+reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-provider.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
@@ -41,6 +41,7 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 tempfile.workspace = true
@@ -71,4 +72,4 @@ derive_more.workspace = true
 
 [[test]]
 name = "e2e_testsuite"
-path = "tests/e2e-testsuite/main.rs"
+path = "tests/e2e_testsuite/main.rs"

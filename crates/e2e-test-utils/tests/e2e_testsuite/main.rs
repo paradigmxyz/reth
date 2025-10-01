@@ -1,5 +1,7 @@
 //! Example tests using the test suite framework.
 
+mod trie_updates_test;
+
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
@@ -37,7 +39,7 @@ async fn test_apply_with_import() -> Result<()> {
                 .unwrap(),
             )
             .london_activated()
-            .shanghai_activated()
+            .cancun_activated()
             .cancun_activated()
             .build(),
     );
@@ -139,6 +141,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .unwrap(),
                 )
                 .paris_activated()
+                .cancun_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -156,7 +159,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .as_secs(),
                 prev_randao: B256::random(),
                 suggested_fee_recipient: Address::random(),
-                withdrawals: None,
+                withdrawals: Some(vec![]),
                 parent_beacon_block_root: None,
             },
         ));
