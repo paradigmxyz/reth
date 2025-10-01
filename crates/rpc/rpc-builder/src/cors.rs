@@ -39,10 +39,10 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
                 })
             }
 
-            let origins = items
-                .into_iter()
+            let origins = iter
                 .map(|domain| {
-                    HeaderValue::from_str(domain)
+                    domain
+                        .parse::<HeaderValue>()
                         .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
                 })
                 .collect::<Result<Vec<HeaderValue>, _>>()?;
