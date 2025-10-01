@@ -418,7 +418,7 @@ mod tests {
             .collect::<Vec<_>>();
         runner
             .db
-            .insert_blocks(blocks.iter(), StorageKind::StaticFile)
+            .insert_blocks(blocks.iter(), StorageKind::Static)
             .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
@@ -458,7 +458,7 @@ mod tests {
         ); // set tx count range high enough to hit the threshold
         runner
             .db
-            .insert_blocks(seed.iter(), StorageKind::StaticFile)
+            .insert_blocks(seed.iter(), StorageKind::Static)
             .expect("failed to seed execution");
 
         let total_transactions = runner
@@ -530,7 +530,7 @@ mod tests {
             0..=100,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..10, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::StaticFile).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -647,7 +647,7 @@ mod tests {
                 stage_progress..=end,
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
             );
-            self.db.insert_blocks(blocks.iter(), StorageKind::StaticFile)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             Ok(blocks)
         }
 

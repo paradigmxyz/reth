@@ -653,7 +653,7 @@ mod tests {
                         ..Default::default()
                     },
                 ));
-                self.db.insert_blocks(preblocks.iter(), StorageKind::StaticFile)?;
+                self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
             }
 
             let num_of_accounts = 31;
@@ -692,7 +692,7 @@ mod tests {
                 BlockRangeParams { parent: Some(head_hash), tx_count: 0..3, ..Default::default() },
             ));
             let last_block = blocks.last().cloned().unwrap();
-            self.db.insert_blocks(blocks.iter(), StorageKind::StaticFile)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,

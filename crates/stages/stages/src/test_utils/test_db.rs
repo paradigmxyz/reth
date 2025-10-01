@@ -344,7 +344,7 @@ impl TestStageDB {
                     Ok(())
                 })
             }),
-            StorageKind::StaticFile => {
+            StorageKind::Static => {
                 let provider = self.factory.static_file_provider();
                 let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
                 let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
@@ -474,7 +474,7 @@ impl TestStageDB {
 #[derive(Debug)]
 pub enum StorageKind {
     Database(Option<u64>),
-    StaticFile,
+    Static,
 }
 
 impl StorageKind {
@@ -484,7 +484,7 @@ impl StorageKind {
     }
 
     const fn is_static(&self) -> bool {
-        matches!(self, Self::StaticFile)
+        matches!(self, Self::Static)
     }
 
     fn tx_offset(&self) -> u64 {

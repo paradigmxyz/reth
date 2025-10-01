@@ -270,7 +270,7 @@ mod tests {
             0..=tip,
             BlockRangeParams { parent: Some(genesis_hash), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::StaticFile)?;
+        db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
         let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
@@ -282,7 +282,7 @@ mod tests {
             }
             receipts.push((block.number, block_receipts));
         }
-        db.insert_receipts_by_block(receipts, StorageKind::StaticFile)?;
+        db.insert_receipts_by_block(receipts, StorageKind::Static)?;
 
         // simulate pipeline by setting all checkpoints to inserted height.
         let provider_rw = db.factory.provider_rw()?;

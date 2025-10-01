@@ -197,7 +197,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             cloned_last.into_body(),
         );
 
-        db.insert_blocks(blocks.iter(), StorageKind::StaticFile).unwrap();
+        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 
         // initialize TD
         db.commit(|tx| {
