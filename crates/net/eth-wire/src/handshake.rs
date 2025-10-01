@@ -3,6 +3,7 @@ use crate::{
     ethstream::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
+use alloy_primitives::FixedBytes;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
@@ -203,6 +204,20 @@ where
                         .await
                         .map_err(EthStreamError::from)?;
                     return Err(err.into());
+                }
+
+                if let StatusMessage::Eth69(s) = their_status_message {
+                    if s.earliest > s.latest {
+                        return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
+                            got: s.earliest,
+                            latest: s.latest,
+                        }
+                        .into());
+                    }
+
+                    if s.blockhash == FixedBytes::<32>::ZERO {
+                        return Err(EthHandshakeError::BlockhashZero.into());
+                    }
                 }
 
                 Ok(UnifiedStatus::from_message(their_status_message))
