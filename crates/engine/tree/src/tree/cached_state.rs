@@ -447,25 +447,9 @@ impl ExecutionCacheBuilder {
             .build_with_hasher(DefaultHashBuilder::default());
 
         let account_cache = CacheBuilder::new(self.account_cache_entries)
-            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
-                match value {
-                    Some(account) => {
-                        let mut weight = 40;
-                        if account.nonce != 0 {
-                            weight += 32;
-                        }
-                        if !account.balance.is_zero() {
-                            weight += 32;
-                        }
-                        if account.bytecode_hash.is_some() {
-                            weight += 33; // size of Option<B256>
-                        } else {
-                            weight += 8; // size of None variant
-                        }
-                        weight as u32
-                    }
-                    None => 8, // size of None variant
-                }
+            .weigher(|_key: &Address, _value: &Option<Account>| -> u32 {
+                // Account has a fixed size (none, balance,code_hash)
+                size_of::<Option<Account>>() as u32
             })
             .max_capacity(account_cache_size)
             .time_to_live(EXPIRY_TIME)
