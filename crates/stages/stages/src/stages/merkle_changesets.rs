@@ -159,8 +159,8 @@ impl MerkleChangeSets {
         // state_revert(N) = state_revert(N + 1).extend(per_block_state_revert(N))
         // ```
         //
-        // We need per-block reverts to the prefix set for each individual block. By using the
-        // per-block reverts to calculate full reverts on-the-fly we can save a bunch of memory.
+        // We need per-block reverts to calculate the prefix set for each individual block. By using
+        // the per-block reverts to calculate full reverts on-the-fly we can save a bunch of memory.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?target_range,
@@ -194,7 +194,7 @@ impl MerkleChangeSets {
         // To get (1) for `target_start` we need to do a big state root calculation which takes into
         // account all changes between that block and db tip. For each block after the
         // `target_start` we can update (1) using the TrieUpdates which were output by the previous
-        // block only targetting the state changes of that block.
+        // block only targeting the state changes of that block.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?target_start,
@@ -332,7 +332,7 @@ where
 
         let checkpoint_block_range = CheckpointBlockRange {
             from: computed_range.start,
-            // CheckpoingBlockRange is inclusive
+            // CheckpointBlockRange is inclusive
             to: computed_range.end.saturating_sub(1),
         };
 

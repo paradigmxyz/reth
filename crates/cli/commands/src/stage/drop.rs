@@ -16,8 +16,7 @@ use reth_db_common::{
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
-    TrieWriter,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory, TrieWriter,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
