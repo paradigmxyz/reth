@@ -136,7 +136,7 @@ pub trait TrieWriter: Send + Sync {
     /// Clears contents of trie changesets completely
     fn clear_trie_changesets(&self) -> ProviderResult<()>;
 
-    /// Clears contents of trie changesets starting from the given block number onwards.
+    /// Clears contents of trie changesets starting from the given block number (inclusive) onwards.
     fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()>;
 }
 
