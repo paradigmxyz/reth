@@ -74,7 +74,10 @@ impl InMemorySize for alloy_consensus::Receipt {
         let Self { status, cumulative_gas_used, logs } = self;
         core::mem::size_of_val(status) +
             core::mem::size_of_val(cumulative_gas_used) +
-            logs.capacity() * core::mem::size_of::<Log>()
+            // logs data
+            logs.capacity() * core::mem::size_of::<Log>() + logs.iter().map(|log| {
+             log.data.data.len() +  core::mem::size_of_val(log.topics())
+        }).sum::<usize>()
     }
 }
 
@@ -95,9 +98,7 @@ impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::BlockBo
     #[inline]
     fn size(&self) -> usize {
         self.transactions.iter().map(T::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<T>() +
             self.ommers.iter().map(H::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<H>() +
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
