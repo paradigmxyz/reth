@@ -67,8 +67,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, ProviderError,
-    ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    BlockHashReader, BlockNumReader, BlockReaderIdExt, ProviderError,
+    ProviderFactory, ProviderResult, StageCheckpointReader,
     StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
