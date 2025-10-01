@@ -60,7 +60,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AddedTransactionOutcome, AllTransactionsEvents,
 };
-use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
+use alloy_consensus::{error::ValueError, transaction::TxHashRef, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,

@@ -975,14 +975,14 @@ impl SparseTrieInterface for SerialSparseTrie {
             expected_value: Option<&Vec<u8>>,
             path: &Nibbles,
         ) -> Result<(), LeafLookupError> {
-            if let Some(expected) = expected_value {
-                if actual_value != expected {
-                    return Err(LeafLookupError::ValueMismatch {
-                        path: *path,
-                        expected: Some(expected.clone()),
-                        actual: actual_value.clone(),
-                    });
-                }
+            if let Some(expected) = expected_value &&
+                actual_value != expected
+            {
+                return Err(LeafLookupError::ValueMismatch {
+                    path: *path,
+                    expected: Some(expected.clone()),
+                    actual: actual_value.clone(),
+                });
             }
             Ok(())
         }

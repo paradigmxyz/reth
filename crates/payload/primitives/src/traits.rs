@@ -1,6 +1,7 @@
 //! Core traits for working with execution payloads.
 
-use alloc::vec::Vec;
+use crate::PayloadBuilderError;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -11,8 +12,6 @@ use core::fmt;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock, SealedHeader};
-
-use crate::PayloadBuilderError;
 
 /// Represents a successfully built execution payload (block).
 ///
@@ -163,6 +162,38 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Constructs new payload attributes for the given timestamp.
     fn build(&self, timestamp: u64) -> Attributes;
+}
+
+impl<Attributes, F> PayloadAttributesBuilder<Attributes> for F
+where
+    F: Fn(u64) -> Attributes + Send + Sync + 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self(timestamp)
+    }
+}
+
+impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for either::Either<L, R>
+where
+    L: PayloadAttributesBuilder<Attributes>,
+    R: PayloadAttributesBuilder<Attributes>,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        match self {
+            Self::Left(l) => l.build(timestamp),
+            Self::Right(r) => r.build(timestamp),
+        }
+    }
+}
+
+impl<Attributes> PayloadAttributesBuilder<Attributes>
+    for Box<dyn PayloadAttributesBuilder<Attributes>>
+where
+    Attributes: 'static,
+{
+    fn build(&self, timestamp: u64) -> Attributes {
+        self.as_ref().build(timestamp)
+    }
 }
 
 /// Trait to build the EVM environment for the next block from the given payload attributes.

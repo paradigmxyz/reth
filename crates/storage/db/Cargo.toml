@@ -39,7 +39,6 @@ derive_more.workspace = true
 rustc-hash = { workspace = true, optional = true, features = ["std"] }
 sysinfo = { workspace = true, features = ["system"] }
 parking_lot = { workspace = true, optional = true }
-dashmap.workspace = true
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
@@ -92,7 +91,6 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-prune-types/arbitrary",
-    "dashmap/arbitrary",
 ]
 op = [
     "reth-db-api/op",
@@ -112,5 +110,10 @@ harness = false
 
 [[bench]]
 name = "get"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "put"
 required-features = ["test-utils"]
 harness = false

@@ -197,8 +197,10 @@ impl TransactionOutcome {
 pub(crate) enum Operation {
     /// Database get operation.
     Get,
-    /// Database put operation.
-    Put,
+    /// Database put upsert operation.
+    PutUpsert,
+    /// Database put append operation.
+    PutAppend,
     /// Database delete operation.
     Delete,
     /// Database cursor upsert operation.
@@ -220,7 +222,8 @@ impl Operation {
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Self::Get => "get",
-            Self::Put => "put",
+            Self::PutUpsert => "put-upsert",
+            Self::PutAppend => "put-append",
             Self::Delete => "delete",
             Self::CursorUpsert => "cursor-upsert",
             Self::CursorInsert => "cursor-insert",

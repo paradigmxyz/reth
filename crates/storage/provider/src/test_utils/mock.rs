@@ -5,7 +5,11 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
     TransactionsProvider,
 };
-use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{
+    constants::EMPTY_ROOT_HASH,
+    transaction::{TransactionMeta, TxHashRef},
+    BlockHeader,
+};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
@@ -14,6 +18,7 @@ use alloy_primitives::{
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
+use reth_db::transaction::DbTx;
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
@@ -22,7 +27,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignedTransaction, SignerRecoverable,
+    SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -260,6 +265,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
 
     fn into_tx(self) -> Self::Tx {
         self.tx
+    }
+
+    fn commit(self) -> ProviderResult<bool> {
+        Ok(self.tx.commit()?)
     }
 
     fn prune_modes_ref(&self) -> &PruneModes {

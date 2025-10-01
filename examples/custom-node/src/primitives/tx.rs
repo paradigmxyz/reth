@@ -1,6 +1,8 @@
 use super::TxPayment;
 use alloy_consensus::{
-    crypto::RecoveryError, transaction::SignerRecoverable, Signed, TransactionEnvelope,
+    crypto::RecoveryError,
+    transaction::{SignerRecoverable, TxHashRef},
+    Signed, TransactionEnvelope,
 };
 use alloy_eips::Encodable2718;
 use alloy_primitives::{Sealed, Signature, B256};
@@ -121,14 +123,16 @@ impl SignerRecoverable for CustomTransaction {
     }
 }
 
-impl SignedTransaction for CustomTransaction {
+impl TxHashRef for CustomTransaction {
     fn tx_hash(&self) -> &B256 {
         match self {
-            CustomTransaction::Op(tx) => SignedTransaction::tx_hash(tx),
+            CustomTransaction::Op(tx) => TxHashRef::tx_hash(tx),
             CustomTransaction::Payment(tx) => tx.hash(),
         }
     }
 }
+
+impl SignedTransaction for CustomTransaction {}
 
 impl InMemorySize for CustomTransaction {
     fn size(&self) -> usize {

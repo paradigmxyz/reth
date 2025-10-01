@@ -950,12 +950,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
-            if let Some((db_last_entry, _)) = db_cursor.last()? {
-                if highest_static_file_entry
+            if let Some((db_last_entry, _)) = db_cursor.last()? &&
+                highest_static_file_entry
                     .is_none_or(|highest_entry| db_last_entry > highest_entry)
-                {
-                    return Ok(None)
-                }
+            {
+                return Ok(None)
             }
         }
 
@@ -1281,16 +1280,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             self.get_highest_static_file_block(segment)
         } else {
             self.get_highest_static_file_tx(segment)
-        } {
-            if block_or_tx_range.start <= static_file_upper_bound {
-                let end = block_or_tx_range.end.min(static_file_upper_bound + 1);
-                data.extend(fetch_from_static_file(
-                    self,
-                    block_or_tx_range.start..end,
-                    &mut predicate,
-                )?);
-                block_or_tx_range.start = end;
-            }
+        } && block_or_tx_range.start <= static_file_upper_bound
+        {
+            let end = block_or_tx_range.end.min(static_file_upper_bound + 1);
+            data.extend(fetch_from_static_file(
+                self,
+                block_or_tx_range.start..end,
+                &mut predicate,
+            )?);
+            block_or_tx_range.start = end;
         }
 
         if block_or_tx_range.end > block_or_tx_range.start {
@@ -1334,6 +1332,9 @@ pub trait StaticFileWriter {
 
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
+
+    /// Returns `true` if the static file provider has unwind queued.
+    fn has_unwind_queued(&self) -> bool;
 }
 
 impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
@@ -1363,6 +1364,10 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn commit(&self) -> ProviderResult<()> {
         self.writers.commit()
+    }
+
+    fn has_unwind_queued(&self) -> bool {
+        self.writers.has_unwind_queued()
     }
 }
 

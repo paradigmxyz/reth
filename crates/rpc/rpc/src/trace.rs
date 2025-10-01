@@ -490,14 +490,14 @@ where
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                traces.extend(self.extract_reward_traces(
-                    block.header(),
-                    block.body().ommers(),
-                    base_block_reward,
-                ));
-            }
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) &&
+            let Some(base_block_reward) = self.calculate_base_block_reward(block.header())?
+        {
+            traces.extend(self.extract_reward_traces(
+                block.header(),
+                block.body().ommers(),
+                base_block_reward,
+            ));
         }
 
         Ok(maybe_traces)

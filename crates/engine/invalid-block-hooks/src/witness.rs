@@ -5,7 +5,7 @@ use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -135,7 +135,7 @@ impl<P, E> InvalidBlockWitnessHook<P, E> {
 
 impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
+    P: StateProviderFactory + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
     N: NodePrimitives,
 {
@@ -145,10 +145,7 @@ where
         block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
-    ) -> eyre::Result<()>
-    where
-        N: NodePrimitives,
-    {
+    ) -> eyre::Result<()> {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
@@ -349,7 +346,7 @@ where
 
 impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    P: StateProviderFactory + ChainSpecProvider + Send + Sync + 'static,
+    P: StateProviderFactory + Send + Sync + 'static,
     E: ConfigureEvm<Primitives = N> + 'static,
 {
     fn on_invalid_block(

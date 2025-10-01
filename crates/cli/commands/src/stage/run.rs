@@ -30,8 +30,8 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    ChainSpecProvider, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -342,7 +342,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 }
 
                 if self.commit {
-                    UnifiedStorageWriter::commit_unwind(provider_rw)?;
+                    provider_rw.commit()?;
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
@@ -365,7 +365,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                UnifiedStorageWriter::commit(provider_rw)?;
+                provider_rw.commit()?;
                 provider_rw = provider_factory.database_provider_rw()?;
             }
 
