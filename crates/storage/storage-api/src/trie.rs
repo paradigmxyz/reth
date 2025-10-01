@@ -116,6 +116,12 @@ pub trait TrieWriter: Send + Sync {
         trie_updates: &TrieUpdatesSorted,
         updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize>;
+
+    /// Clears contents of trie changesets completely
+    fn clear_trie_changesets(&self) -> ProviderResult<()>;
+
+    /// Clears contents of trie changesets starting from the given block number (inclusive) onwards.
+    fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()>;
 }
 
 /// Storage Trie Writer
