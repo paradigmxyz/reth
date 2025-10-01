@@ -13,10 +13,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_storage_api::{
-    noop::NoopProvider, BlockReaderIdExt, StateProviderFactory, StateRootProvider,
-};
-use reth_trie::HashedPostState;
+use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -41,14 +38,13 @@ impl<EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider> {
 }
 
 pub(crate) struct BuildArgs<I> {
-    pub base: ExecutionPayloadBaseV1,
-    pub transactions: I,
-    pub cached_state: Option<(B256, CachedReads)>,
-    pub last_flashblock_index: u64,
-    pub last_flashblock_hash: B256,
-    pub calculate_state_root: bool,
+    pub(crate) base: ExecutionPayloadBaseV1,
+    pub(crate) transactions: I,
+    pub(crate) cached_state: Option<(B256, CachedReads)>,
+    pub(crate) last_flashblock_index: u64,
+    pub(crate) last_flashblock_hash: B256,
+    pub(crate) compute_state_root: bool,
 }
-
 
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
 where
@@ -70,7 +66,7 @@ where
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
         mut args: BuildArgs<I>,
-    ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
+    ) -> eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>> {
         trace!("Attempting new pending block from flashblocks");
 
         let latest = self
@@ -107,12 +103,13 @@ where
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } = if args.calculate_state_root {
-            builder.finish(&state_provider)?
-        } else {
-
-            builder.finish(NoopProvider::default())?
-        };
+        // if the real state root should be computed
+        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
+            if args.compute_state_root {
+                builder.finish(&state_provider)?
+            } else {
+                builder.finish(NoopProvider::default())?
+            };
 
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
@@ -133,7 +130,7 @@ where
             pending_block,
             args.last_flashblock_index,
             args.last_flashblock_hash,
-            args.calculate_state_root
+            args.compute_state_root,
         );
 
         Ok(Some((pending_flashblock, request_cache)))

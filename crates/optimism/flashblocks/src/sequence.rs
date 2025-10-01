@@ -21,7 +21,7 @@ pub(crate) struct FlashBlockPendingSequence<T> {
     inner: BTreeMap<u64, PreparedFlashBlock<T>>,
     /// Broadcasts flashblocks to subscribers.
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
-    /// Optional state root
+    /// Optional properly computed state root for the current sequence.
     state_root: Option<B256>,
 }
 

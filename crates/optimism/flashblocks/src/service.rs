@@ -23,7 +23,6 @@ use std::{
 };
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
-use reth_rpc_eth_types::PendingBlock;
 
 pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
 
@@ -51,7 +50,7 @@ pub struct FlashBlockService<
     cached_state: Option<(B256, CachedReads)>,
     metrics: FlashBlockServiceMetrics,
     /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
-    calculate_state_root: bool,
+    compute_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -85,13 +84,13 @@ where
             job: None,
             cached_state: None,
             metrics: FlashBlockServiceMetrics::default(),
-            calculate_state_root: false,
+            compute_state_root: false,
         }
     }
 
     /// Enable state root calculation from flashblock
-    pub const fn calculate_state_root(mut self, enable_state_root: bool) -> Self {
-        self.calculate_state_root = enable_state_root;
+    pub const fn compute_state_root(mut self, enable_state_root: bool) -> Self {
+        self.compute_state_root = enable_state_root;
         self
     }
 
@@ -147,9 +146,9 @@ where
             return None
         };
 
-        // Check if state root must be calculated
-        let calculate_state_root = self.calculate_state_root &&
-            self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
+        // Check if state root must be computed
+        let compute_state_root =
+            self.compute_state_root && self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
 
         Some(BuildArgs {
             base,
@@ -157,7 +156,7 @@ where
             cached_state: self.cached_state.take(),
             last_flashblock_index: last_flashblock.index,
             last_flashblock_hash: last_flashblock.diff.block_hash,
-            calculate_state_root,
+            compute_state_root,
         })
     }
 
@@ -224,7 +223,7 @@ where
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
                         // update state root of the current sequence
-                        this.blocks.set_state_root(new_pending.block().state_root());
+                        this.blocks.set_state_root(new_pending.computed_state_root());
 
                         // built a new pending block
                         this.current = Some(new_pending.clone());
@@ -311,7 +310,8 @@ where
     }
 }
 
-type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
+type BuildJob<N> =
+    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>>>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]
