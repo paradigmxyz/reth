@@ -1067,19 +1067,6 @@ where
     }
 }
 
-impl<T, CB>
-    LaunchContextWith<
-        Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
-    >
-where
-    T: FullNodeTypes<
-        Provider: StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypesForProvider,
-    >,
-    CB: NodeComponentsBuilder<T>,
-{
-}
-
 /// Joins two attachments together, preserving access to both values.
 ///
 /// This type enables the launch process to accumulate state while maintaining
