@@ -139,7 +139,7 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StatsReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -157,7 +157,7 @@ mod tests {
             1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::StaticFile).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
@@ -170,11 +170,11 @@ mod tests {
         db.insert_tx_hash_numbers(tx_hash_numbers).expect("insert tx hash numbers");
 
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.count_entries::<tables::Transactions>().unwrap(),
             blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.count_entries::<tables::Transactions>().unwrap(),
             db.table::<tables::TransactionHashNumbers>().unwrap().len()
         );
 

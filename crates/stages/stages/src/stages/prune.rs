@@ -218,7 +218,7 @@ mod tests {
                 input.checkpoint().block_number..=input.target(),
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..3, ..Default::default() },
             );
-            self.db.insert_blocks(blocks.iter(), StorageKind::Database(None))?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
             self.db.insert_transaction_senders(
                 blocks.iter().flat_map(|block| block.body().transactions.iter()).enumerate().map(
                     |(i, tx)| (i as u64, tx.recover_signer().expect("failed to recover signer")),
