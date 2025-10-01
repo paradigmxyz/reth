@@ -1995,9 +1995,9 @@ mod tests {
             $(
                 // Since data moves for each tried method, need to recalculate everything
                 let db_tx_count =
-                    database_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
+                    database_blocks.iter().map(|b| b.transaction_count() as u64).sum::<u64>();
                 let in_mem_tx_count =
-                    in_memory_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
+                    in_memory_blocks.iter().map(|b| b.transaction_count() as u64).sum::<u64>();
 
                 let db_range = 0..=(db_tx_count - 1);
                 let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
@@ -2241,8 +2241,8 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.transaction_count())
-                    .sum::<usize>() as u64
+                    .map(|b| b.transaction_count() as u64)
+                    .sum::<u64>()
             };
 
             // Ensure that the first generated in-memory block exists
@@ -2262,8 +2262,8 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.transaction_count())
-                    .sum::<usize>() as u64
+                    .map(|b| b.transaction_count() as u64)
+                    .sum::<u64>()
             };
 
             // Invalid/Non-existent argument should return `None`
