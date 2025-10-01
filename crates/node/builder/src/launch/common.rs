@@ -67,9 +67,8 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReaderIdExt, ProviderError,
-    ProviderFactory, ProviderResult, StageCheckpointReader,
-    StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, BlockReaderIdExt, ProviderError, ProviderFactory,
+    ProviderResult, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
