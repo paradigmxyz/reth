@@ -215,7 +215,7 @@ where
                         .into());
                     }
 
-                    if s.blockhash == FixedBytes::<32>::ZERO {
+                    if s.blockhash.is_zero() {
                         return Err(EthHandshakeError::BlockhashZero.into());
                     }
                 }
