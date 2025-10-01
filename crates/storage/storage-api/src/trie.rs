@@ -6,7 +6,6 @@ use reth_trie_common::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
-use std::ops::RangeBounds;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -88,21 +87,6 @@ pub trait StateProofProvider: Send + Sync {
 
     /// Get trie witness for provided state.
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;
-}
-
-/// Trie Reader
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait TrieReader: Send + Sync {
-    /// Extends the [`TrieUpdates`] such that the trie updates of the given range of blocks is
-    /// reverted.
-    ///
-    /// When called on a non-empty [`TrieUpdates`], the given range's upper bound _must_ be one less
-    /// than the lower bound used to previously populate the [`TrieUpdates`].
-    fn extend_trie_updates_from_reverts(
-        &self,
-        updates: &mut TrieUpdates,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<()>;
 }
 
 /// Trie Writer
