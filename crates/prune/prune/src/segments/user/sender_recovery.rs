@@ -91,9 +91,9 @@ mod tests {
     };
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StatsReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
 
@@ -107,7 +107,7 @@ mod tests {
             1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut transaction_senders = Vec::new();
         for block in &blocks {
@@ -123,11 +123,11 @@ mod tests {
         db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
 
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.table::<tables::Transactions>().unwrap().len(),
             blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.table::<tables::Transactions>().unwrap().len(),
             db.table::<tables::TransactionSenders>().unwrap().len()
         );
 

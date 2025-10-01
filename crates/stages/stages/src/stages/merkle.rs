@@ -442,8 +442,8 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
@@ -653,7 +653,7 @@ mod tests {
                         ..Default::default()
                     },
                 ));
-                self.db.insert_blocks(preblocks.iter(), 0)?;
+                self.db.insert_blocks(preblocks.iter(), StorageKind::StaticFile)?;
             }
 
             let num_of_accounts = 31;
@@ -692,7 +692,7 @@ mod tests {
                 BlockRangeParams { parent: Some(head_hash), tx_count: 0..3, ..Default::default() },
             ));
             let last_block = blocks.last().cloned().unwrap();
-            self.db.insert_blocks(blocks.iter(), 0)?;
+            self.db.insert_blocks(blocks.iter(), StorageKind::StaticFile)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,

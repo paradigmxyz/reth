@@ -89,11 +89,11 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader, StatsReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
@@ -109,7 +109,7 @@ mod tests {
             1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {
@@ -125,11 +125,11 @@ mod tests {
         db.insert_receipts(receipts).expect("insert receipts");
 
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.table::<tables::Transactions>().unwrap().len(),
             blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            db.table::<tables::Transactions>().unwrap().len(),
             db.table::<tables::Receipts>().unwrap().len()
         );
 

@@ -216,19 +216,19 @@ mod tests {
         static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
         SegmentOutput,
     };
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{BlockNumber, B256, U256};
     use assert_matches::assert_matches;
-    use reth_db_api::tables;
+    use reth_db_api::{tables, transaction::DbTx};
     use reth_provider::{
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
-        StaticFileProviderFactory, StatsReader,
+        StaticFileProviderFactory,
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
         SegmentOutputCheckpoint,
     };
     use reth_stages::test_utils::TestStageDB;
-    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+    use reth_testing_utils::{generators, generators::random_header_range};
     use tracing::trace;
 
     #[test]
@@ -238,17 +238,16 @@ mod tests {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(
-            &mut rng,
-            0..=99,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
-        );
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        let headers = random_header_range(&mut rng, 0..100, B256::ZERO);
+        let tx = db.factory.provider_rw().unwrap().into_tx();
+        for header in &headers {
+            TestStageDB::insert_header(None, &tx, header, U256::ZERO).unwrap();
+        }
+        tx.commit().unwrap();
 
-        assert_eq!(
-            db.factory.provider().unwrap().count_entries::<tables::Headers>().unwrap(),
-            blocks.len()
-        );
+        assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
+        assert_eq!(db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(), headers.len());
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Headers::new(db.factory.static_file_provider());
@@ -305,10 +304,17 @@ mod tests {
             );
 
             assert_eq!(
-                db.factory.provider().unwrap().count_entries::<tables::Headers>().unwrap(),
-                blocks.len() - (last_pruned_block_number + 1) as usize
+                db.table::<tables::CanonicalHeaders>().unwrap().len(),
+                headers.len() - (last_pruned_block_number + 1) as usize
             );
-
+            assert_eq!(
+                db.table::<tables::Headers>().unwrap().len(),
+                headers.len() - (last_pruned_block_number + 1) as usize
+            );
+            assert_eq!(
+                db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(),
+                headers.len() - (last_pruned_block_number + 1) as usize
+            );
             assert_eq!(
                 db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
                 Some(PruneCheckpoint {

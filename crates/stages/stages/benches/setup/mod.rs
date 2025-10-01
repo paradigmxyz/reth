@@ -14,7 +14,7 @@ use reth_provider::{
 };
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
-    test_utils::TestStageDB,
+    test_utils::{StorageKind, TestStageDB},
 };
 use reth_testing_utils::generators::{
     self, random_block_range, random_changeset_range, random_contract_account_range,
@@ -197,7 +197,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             cloned_last.into_body(),
         );
 
-        db.insert_blocks(blocks.iter(), 0).unwrap();
+        db.insert_blocks(blocks.iter(), StorageKind::StaticFile).unwrap();
 
         // initialize TD
         db.commit(|tx| {

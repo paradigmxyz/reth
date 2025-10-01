@@ -262,7 +262,7 @@ mod tests {
         ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
@@ -279,7 +279,7 @@ mod tests {
             0..=3,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
         let static_file_provider = db.factory.static_file_provider();
@@ -290,7 +290,7 @@ mod tests {
         static_file_writer.commit().expect("prune headers");
         drop(static_file_writer);
 
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {

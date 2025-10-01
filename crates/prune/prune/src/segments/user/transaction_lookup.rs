@@ -143,7 +143,7 @@ mod tests {
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
-    use reth_stages::test_utils::TestStageDB;
+    use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
 
@@ -157,7 +157,7 @@ mod tests {
             1..=10,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), StorageKind::StaticFile).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {
