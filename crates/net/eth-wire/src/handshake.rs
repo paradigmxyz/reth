@@ -1,6 +1,6 @@
 use crate::{
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
-    ethstream::MAX_STATUS_SIZE,
+    ethstream::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
 use bytes::{Bytes, BytesMut};
@@ -110,7 +110,7 @@ where
             }
         };
 
-        if their_msg.len() > MAX_STATUS_SIZE {
+        if their_msg.len() > MAX_MESSAGE_SIZE {
             unauth
                 .disconnect(DisconnectReason::ProtocolBreach)
                 .await
