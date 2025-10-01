@@ -337,6 +337,25 @@ impl ExecutionCache {
         account_cache.insert_storage(key, value);
     }
 
+    /// Insert multiple storage values into hierarchical cache for a single account
+    ///
+    /// This method is optimized for inserting multiple storage values for the same address
+    /// by doing the account cache lookup only once instead of for each key-value pair.
+    pub(crate) fn insert_storage_bulk<I>(&self, address: Address, storage_entries: I)
+    where
+        I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
+    {
+        let account_cache = self.storage_cache.get(&address).unwrap_or_else(|| {
+            let account_cache = AccountStorageCache::default();
+            self.storage_cache.insert(address, account_cache.clone());
+            account_cache
+        });
+
+        for (key, value) in storage_entries {
+            account_cache.insert_storage(key, value);
+        }
+    }
+
     /// Invalidate storage for specific account
     pub(crate) fn invalidate_account_storage(&self, address: &Address) {
         self.storage_cache.invalidate(address);
@@ -396,11 +415,14 @@ impl ExecutionCache {
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
-            for (storage_key, slot) in &account.storage {
+            // Use bulk insertion to optimize cache lookups - only lookup the account cache once
+            // instead of for each storage key
+            let storage_entries = account.storage.iter().map(|(storage_key, slot)| {
                 // We convert the storage key from U256 to B256 because that is how it's represented
                 // in the cache
-                self.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
-            }
+                ((*storage_key).into(), Some(slot.present_value))
+            });
+            self.insert_storage_bulk(*addr, storage_entries);
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
