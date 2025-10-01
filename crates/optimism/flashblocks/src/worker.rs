@@ -49,7 +49,6 @@ pub(crate) struct BuildArgs<I> {
     pub calculate_state_root: bool,
 }
 
-pub(crate) type BuildResult<N> = (PendingBlock<N>, CachedReads, Option<B256>);
 
 impl<N, EvmConfig, Provider> FlashBlockBuilder<EvmConfig, Provider>
 where
@@ -71,7 +70,7 @@ where
     pub(crate) fn execute<I: IntoIterator<Item = WithEncoded<Recovered<N::SignedTx>>>>(
         &self,
         mut args: BuildArgs<I>,
-    ) -> eyre::Result<Option<BuildResult<N>>> {
+    ) -> eyre::Result<Option<(PendingBlock<N>, CachedReads)>> {
         trace!("Attempting new pending block from flashblocks");
 
         let latest = self
@@ -108,8 +107,12 @@ where
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(NoopProvider::default())?;
+        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } = if args.calculate_state_root {
+            builder.finish(&state_provider)?
+        } else {
+
+            builder.finish(NoopProvider::default())?
+        };
 
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
@@ -117,11 +120,6 @@ where
             block.number(),
             vec![execution_result.requests],
         );
-
-        let state_root = args
-            .calculate_state_root
-            .then(|| state.database.as_ref().state_root(HashedPostState::default()))
-            .transpose()?;
 
         let pending_block = PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),
@@ -135,7 +133,7 @@ where
             pending_block,
             args.last_flashblock_index,
             args.last_flashblock_hash,
-            state_root
+            args.calculate_state_root
         );
 
         Ok(Some((pending_flashblock, request_cache)))

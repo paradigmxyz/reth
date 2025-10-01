@@ -147,6 +147,8 @@ pub struct PendingFlashBlock<N: NodePrimitives> {
     pub last_flashblock_index: u64,
     /// The last Flashblock block hash,
     pub last_flashblock_hash: B256,
+    /// Whether the [`PendingBlock`] has a properly calculated stateroot.
+    pub has_caluculated_state_root: bool,
 }
 
 impl<N: NodePrimitives> PendingFlashBlock<N> {
@@ -155,7 +157,8 @@ impl<N: NodePrimitives> PendingFlashBlock<N> {
         pending: PendingBlock<N>,
         last_flashblock_index: u64,
         last_flashblock_hash: B256,
+        has_caluculated_state_root: bool
     ) -> Self {
-        Self { pending, last_flashblock_index, last_flashblock_hash }
+        Self { pending, last_flashblock_index, last_flashblock_hash, has_caluculated_state_root }
     }
 }

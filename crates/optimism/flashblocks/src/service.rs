@@ -1,6 +1,6 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
-    worker::{BuildArgs, FlashBlockBuilder, BuildResult},
+    worker::{BuildArgs, FlashBlockBuilder},
     ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx, PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
@@ -23,6 +23,7 @@ use std::{
 };
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
+use reth_rpc_eth_types::PendingBlock;
 
 pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
 
@@ -221,9 +222,9 @@ where
 
             if let Some((now, result)) = result {
                 match result {
-                    Ok(Some((new_pending, cached_reads, state_root))) => {
+                    Ok(Some((new_pending, cached_reads))) => {
                         // update state root of the current sequence
-                        this.blocks.set_state_root(state_root);
+                        this.blocks.set_state_root(new_pending.block().state_root());
 
                         // built a new pending block
                         this.current = Some(new_pending.clone());
@@ -310,7 +311,7 @@ where
     }
 }
 
-type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<BuildResult<N>>>>);
+type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]
