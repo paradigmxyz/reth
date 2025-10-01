@@ -59,6 +59,7 @@ reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 
