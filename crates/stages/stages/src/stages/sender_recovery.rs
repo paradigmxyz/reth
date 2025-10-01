@@ -369,8 +369,8 @@ struct FailedSenderRecoveryError {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
@@ -416,10 +416,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        runner
-            .db
-            .insert_blocks(blocks.iter(), StorageKind::Static)
-            .expect("failed to insert blocks");
+        runner.db.insert_blocks(blocks.iter(), 0).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -456,10 +453,7 @@ mod tests {
             stage_progress + 1..=previous_stage,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..4, ..Default::default() },
         ); // set tx count range high enough to hit the threshold
-        runner
-            .db
-            .insert_blocks(seed.iter(), StorageKind::Static)
-            .expect("failed to seed execution");
+        runner.db.insert_blocks(seed.iter(), 0).expect("failed to seed execution");
 
         let total_transactions = runner
             .db
@@ -530,7 +524,7 @@ mod tests {
             0..=100,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..10, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -647,7 +641,7 @@ mod tests {
                 stage_progress..=end,
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
             );
-            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+            self.db.insert_blocks(blocks.iter(), 0)?;
             Ok(blocks)
         }
 

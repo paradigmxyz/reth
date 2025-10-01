@@ -270,7 +270,7 @@ mod tests {
             0..=tip,
             BlockRangeParams { parent: Some(genesis_hash), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+        db.insert_blocks(blocks.iter(), 0)?;
 
         let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;

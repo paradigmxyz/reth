@@ -102,13 +102,13 @@ mod tests {
     use reth_db_api::tables;
     use reth_provider::{
         DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
-        StaticFileProviderFactory,
+        StaticFileProviderFactory, StatsReader,
     };
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
         SegmentOutput,
     };
-    use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_stages::test_utils::TestStageDB;
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
 
@@ -122,12 +122,15 @@ mod tests {
             1..=100,
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
 
         let transactions =
             blocks.iter().flat_map(|block| &block.body().transactions).collect::<Vec<_>>();
 
-        assert_eq!(db.table::<tables::Transactions>().unwrap().len(), transactions.len());
+        assert_eq!(
+            db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
+            transactions.len()
+        );
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Transactions::new(db.factory.static_file_provider());
@@ -199,7 +202,7 @@ mod tests {
                 .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
-                db.table::<tables::Transactions>().unwrap().len(),
+                db.factory.provider().unwrap().count_entries::<tables::Transactions>().unwrap(),
                 transactions.len() - (last_pruned_tx_number + 1)
             );
             assert_eq!(

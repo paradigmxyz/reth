@@ -171,8 +171,8 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
     use reth_ethereum_primitives::Block;
@@ -218,7 +218,7 @@ mod tests {
                 input.checkpoint().block_number..=input.target(),
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..3, ..Default::default() },
             );
-            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+            self.db.insert_blocks(blocks.iter(), 0)?;
             self.db.insert_transaction_senders(
                 blocks.iter().flat_map(|block| block.body().transactions.iter()).enumerate().map(
                     |(i, tx)| (i as u64, tx.recover_signer().expect("failed to recover signer")),
