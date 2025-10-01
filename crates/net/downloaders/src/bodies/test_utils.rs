@@ -68,5 +68,6 @@ pub(crate) fn insert_headers(
             .append_header(header.header(), ttd, &header.hash())
             .expect("failed to append header");
     }
+    drop(writer);
     provider_rw.commit().expect("failed to commit");
 }
