@@ -3,7 +3,6 @@ use crate::{
     ethstream::MAX_MESSAGE_SIZE,
     CanDisconnect,
 };
-use alloy_primitives::FixedBytes;
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream};
 use reth_eth_wire_types::{
