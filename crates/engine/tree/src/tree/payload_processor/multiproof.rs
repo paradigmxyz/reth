@@ -452,7 +452,7 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -461,7 +461,7 @@ where
             )
             .with_branch_node_masks(true)
             .with_multi_added_removed_keys(Some(multi_added_removed_keys))
-            .decoded_storage_proof(hashed_address, proof_targets);
+            .storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -472,7 +472,7 @@ where
                 "Storage multiproofs calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
@@ -527,7 +527,7 @@ where
             );
 
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let proof_result = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
@@ -548,7 +548,7 @@ where
                 "Multiproof calculated",
             );
 
-            match result {
+            match proof_result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
