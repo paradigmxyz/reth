@@ -1118,7 +1118,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
-        let mut provider = get_provider(range.start)?;
+        let mut provider = match get_provider(range.start) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(vec![]),
+            Err(err) => return Err(err),
+        };
         let mut cursor = provider.cursor()?;
 
         // advances number in range
@@ -1160,7 +1164,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // before requesting the next one.
                         drop(cursor);
                         drop(provider);
-                        provider = get_provider(number)?;
+                        provider = match get_provider(number) {
+                            Ok(provider) => provider,
+                            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(result),
+                            Err(err) => return Err(err),
+                        };
                         cursor = provider.cursor()?;
                         retrying = true;
                     }
