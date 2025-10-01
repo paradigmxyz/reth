@@ -626,6 +626,12 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
+
+    fn commit(self) -> ProviderResult<bool> {
+        use reth_db_api::transaction::DbTx;
+
+        Ok(self.tx.commit()?)
+    }
 }
 
 #[cfg(feature = "db-api")]

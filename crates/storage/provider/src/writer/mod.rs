@@ -229,7 +229,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
@@ -243,7 +242,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
+    use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider, StateWriter};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
@@ -253,7 +252,7 @@ mod tests {
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
         },
-        BundleState, State,
+        BundleState, OriginalValuesKnown, State,
     };
     use revm_database_interface::{DatabaseCommit, EmptyDB};
     use revm_state::{
@@ -510,7 +509,7 @@ mod tests {
 
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -610,7 +609,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 2, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -678,7 +677,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -837,7 +836,7 @@ mod tests {
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1003,7 +1002,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1052,7 +1051,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
         let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

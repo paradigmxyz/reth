@@ -34,7 +34,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
-use tracing::debug;
+use tracing::trace;
 
 /// Parallel proof calculator.
 ///
@@ -106,8 +106,8 @@ impl<Factory> ParallelProof<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
-    /// Spawns a storage proof on the storage proof task and returns a receiver for the result.
-    fn spawn_storage_proof(
+    /// Queues a storage proof task and returns a receiver for the result.
+    fn queue_storage_proof(
         &self,
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -137,21 +137,21 @@ where
         let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
         let prefix_set = prefix_set.freeze();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
             "Starting storage proof generation"
         );
 
-        let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+        let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
         let proof_result = receiver.recv().map_err(|_| {
             ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
                 format!("channel closed for {hashed_address}"),
             )))
         })?;
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets,
             ?hashed_address,
@@ -159,16 +159,6 @@ where
         );
 
         proof_result
-    }
-
-    /// Generate a [`DecodedStorageMultiProof`] for the given proof by first calling
-    /// `storage_proof`, then decoding the proof nodes.
-    pub fn decoded_storage_proof(
-        self,
-        hashed_address: B256,
-        target_slots: B256Set,
-    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
-        self.storage_proof(hashed_address, target_slots)
     }
 
     /// Generate a state multiproof according to specified targets.
@@ -199,7 +189,7 @@ where
         );
         let storage_root_targets_len = storage_root_targets.len();
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
@@ -217,7 +207,7 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
-            let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+            let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
@@ -343,7 +333,7 @@ where
             (HashMap::default(), HashMap::default())
         };
 
-        debug!(
+        trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             duration = ?stats.duration(),

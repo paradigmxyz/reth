@@ -22,7 +22,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
@@ -1367,6 +1367,10 @@ where
     fn disable_long_read_transaction_safety(self) -> Self {
         // No-op for RPC provider
         self
+    }
+
+    fn commit(self) -> ProviderResult<bool> {
+        unimplemented!("commit not supported for RPC provider")
     }
 
     fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {

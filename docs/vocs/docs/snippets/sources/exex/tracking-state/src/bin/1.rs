@@ -51,7 +51,7 @@ fn main() -> eyre::Result<()> {
         let handle = builder
             .node(EthereumNode::default())
             .install_exex("my-exex", async move |ctx| Ok(MyExEx { ctx }))
-            .launch()
+            .launch_with_debug_capabilities()
             .await?;
 
         handle.wait_for_node_exit().await
