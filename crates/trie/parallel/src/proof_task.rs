@@ -48,24 +48,31 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
+/// Proof job dispatched to the storage worker pool.
+struct ProofJob {
+    input: StorageProofInput,
+    result_tx: Sender<StorageProofResult>,
+}
+
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
 /// database transactions
 #[derive(Debug)]
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Max number of database transactions to create
+    /// Channel for dispatching storage proof work to workers
+    storage_work_tx: crossbeam_channel::Sender<ProofJob>,
+    /// Max number of database transactions to create (for blinded nodes)
     max_concurrency: usize,
-    /// Number of database transactions created
+    /// Number of database transactions created (for blinded nodes)
     total_transactions: usize,
     /// Consistent view provider used for creating transactions on-demand
     view: ConsistentDbView<Factory>,
     /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
-    /// Proof tasks pending execution
+    /// Proof tasks pending execution (blinded nodes only)
     pending_tasks: VecDeque<ProofTaskKind>,
     /// The underlying handle from which to spawn proof tasks
     executor: Handle,
-    /// The proof task transactions, containing owned cursor factories that are reused for proof
-    /// calculation.
+    /// The proof task transactions for blinded node requests
     proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
     /// A receiver for new proof tasks.
     proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
@@ -81,19 +88,53 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     metrics: ProofTaskMetrics,
 }
 
-impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
-    /// Creates a new [`ProofTaskManager`] with the given max concurrency, creating that number of
-    /// cursor factories.
+impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
+{
+    /// Creates a new [`ProofTaskManager`] with the given number of workers and max concurrency.
+    ///
+    /// Spawns `num_workers` storage proof workers upfront that reuse database transactions
+    /// for the entire block lifetime (prewarm.rs pattern).
     ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
+        num_workers: usize,
         max_concurrency: usize,
-    ) -> Self {
+    ) -> ProviderResult<Self> {
         let (tx_sender, proof_task_rx) = channel();
-        Self {
+        let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
+
+        // Spawn workers upfront (prewarm.rs pattern)
+        for worker_id in 0..num_workers {
+            let provider = view.provider_ro()?;
+            let tx = provider.into_tx();
+            let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let storage_work_rx = storage_work_rx.clone();
+
+            executor.spawn_blocking(move || {
+                debug!(target: "trie::proof_pool", worker_id, "Storage proof worker started");
+
+                // Worker loop - reuse transaction for entire block
+                loop {
+                    let ProofJob { input, result_tx } = match storage_work_rx.recv() {
+                        Ok(item) => item,
+                        Err(_) => break, // Channel closed, shutdown
+                    };
+
+                    let result = proof_tx.storage_proof_internal(&input);
+                    let _ = result_tx.send(result);
+                }
+
+                debug!(target: "trie::proof_pool", worker_id, "Storage proof worker shutdown");
+            });
+        }
+
+        Ok(Self {
+            storage_work_tx,
             max_concurrency,
             total_transactions: 0,
             view,
@@ -106,7 +147,7 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             active_handles: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
-        }
+        })
     }
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
@@ -178,37 +219,61 @@ where
             match self.proof_task_rx.recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::QueueTask(task) => {
-                        // Track metrics for blinded node requests
-                        #[cfg(feature = "metrics")]
-                        match &task {
+                        match task {
+                            ProofTaskKind::StorageProof(input, result_sender) => {
+                                // Dispatch to worker pool (non-blocking)
+                                if self
+                                    .storage_work_tx
+                                    .send(ProofJob { input, result_tx: result_sender })
+                                    .is_err()
+                                {
+                                    trace!(target: "trie::proof_task", "Storage proof worker pool shut down");
+                                }
+                            }
                             ProofTaskKind::BlindedAccountNode(_, _) => {
-                                self.metrics.account_nodes += 1;
+                                // Track metrics for blinded node requests
+                                #[cfg(feature = "metrics")]
+                                {
+                                    self.metrics.account_nodes += 1;
+                                }
+                                // Queue blinded node task for spawn-per-task
+                                self.queue_proof_task(task);
                             }
                             ProofTaskKind::BlindedStorageNode(_, _, _) => {
-                                self.metrics.storage_nodes += 1;
+                                // Track metrics for blinded node requests
+                                #[cfg(feature = "metrics")]
+                                {
+                                    self.metrics.storage_nodes += 1;
+                                }
+                                // Queue blinded node task for spawn-per-task
+                                self.queue_proof_task(task);
                             }
-                            _ => {}
                         }
-                        // queue the task
-                        self.queue_proof_task(task)
                     }
                     ProofTaskMessage::Transaction(tx) => {
-                        // return the transaction to the pool
+                        // return the transaction to the pool (for blinded nodes)
                         self.proof_task_txs.push(tx);
                     }
                     ProofTaskMessage::Terminate => {
                         // Record metrics before terminating
                         #[cfg(feature = "metrics")]
                         self.metrics.record();
-                        return Ok(())
+
+                        // Shutdown: drop work_tx, workers will exit when channel closes
+                        drop(self.storage_work_tx);
+                        return Ok(());
                     }
                 },
                 // All senders are disconnected, so we can terminate
                 // However this should never happen, as this struct stores a sender
-                Err(_) => return Ok(()),
+                Err(_) => {
+                    // Shutdown workers
+                    drop(self.storage_work_tx);
+                    return Ok(());
+                }
             };
 
-            // try spawning the next task
+            // try spawning the next blinded node task
             self.try_spawn_next()?;
         }
     }
@@ -260,6 +325,43 @@ where
         (trie_cursor_factory, hashed_cursor_factory)
     }
 
+    /// Generates a storage multiproof using this worker's long-lived transaction.
+    ///
+    /// This helper is used by the storage worker pool so each worker can service many requests
+    /// without recreating database transactions or cursor factories.
+    pub fn storage_proof_internal(
+        &self,
+        input: &StorageProofInput,
+    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
+
+        let multi_added_removed_keys = input
+            .multi_added_removed_keys
+            .clone()
+            .unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
+        let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
+
+        let raw_proof_result = StorageProof::new_hashed(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            input.hashed_address,
+        )
+        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
+        .with_branch_node_masks(input.with_branch_node_masks)
+        .with_added_removed_keys(added_removed_keys)
+        .storage_multiproof(input.target_slots.clone())
+        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+        raw_proof_result.and_then(|raw_proof| {
+            raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to decode storage proof for {}: {}",
+                    input.hashed_address, e
+                ))
+            })
+        })
+    }
+
     /// Calculates a storage proof for the given hashed address, and desired prefix set.
     fn storage_proof(
         self,
@@ -272,12 +374,6 @@ where
             hashed_address=?input.hashed_address,
             "Starting storage proof task calculation"
         );
-
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-        let multi_added_removed_keys = input
-            .multi_added_removed_keys
-            .unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
-        let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
 
         let span = tracing::trace_span!(
             target: "trie::proof_task",
@@ -292,27 +388,9 @@ where
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
 
-        let raw_proof_result = StorageProof::new_hashed(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            input.hashed_address,
-        )
-        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
-        .with_branch_node_masks(input.with_branch_node_masks)
-        .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof(input.target_slots)
-        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        let decoded_result = self.storage_proof_internal(&input);
 
         drop(span_guard);
-
-        let decoded_result = raw_proof_result.and_then(|raw_proof| {
-            raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to decode storage proof for {}: {}",
-                    input.hashed_address, e
-                ))
-            })
-        });
 
         trace!(
             target: "trie::proof_task",
@@ -433,15 +511,15 @@ where
 #[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
-    hashed_address: B256,
+    pub hashed_address: B256,
     /// The prefix set for the proof calculation.
-    prefix_set: PrefixSet,
+    pub prefix_set: PrefixSet,
     /// The target slots for the proof calculation.
-    target_slots: B256Set,
+    pub target_slots: B256Set,
     /// Whether or not to collect branch node masks
-    with_branch_node_masks: bool,
+    pub with_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
 }
 
 impl StorageProofInput {

@@ -447,8 +447,14 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            1, // num_workers
+            1, // max_concurrency
+        )
+        .unwrap();
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors
