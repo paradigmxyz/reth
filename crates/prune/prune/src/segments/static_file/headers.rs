@@ -241,7 +241,7 @@ mod tests {
         let blocks = random_block_range(
             &mut rng,
             0..=99,
-            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..0, ..Default::default() },
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
         );
         db.insert_blocks(blocks.iter(), 0).expect("insert blocks");
 
