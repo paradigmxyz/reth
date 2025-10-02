@@ -28,8 +28,6 @@ impl<T> DatabaseTrieCursorFactory<T> {
     }
 }
 
-/// Implementation for DatabaseTrieCursorFactory holding a reference to a DbTx.
-/// The factory uses AsRef internally to access the transaction.
 impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
 where
     TX: DbTx,
