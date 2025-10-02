@@ -214,6 +214,12 @@ where
     }
 }
 
+/// Type alias for the factory tuple returned by `create_factories`
+type ProofFactories<'a, Tx> = (
+    InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
+    HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
+);
+
 /// This contains all information shared between all storage proof instances.
 #[derive(Debug)]
 pub struct ProofTaskTx<Tx> {
@@ -240,20 +246,15 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn create_factories(
-        &self,
-    ) -> (
-        InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&Tx>, &Arc<TrieUpdatesSorted>>,
-        HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&Tx>, &Arc<HashedPostStateSorted>>,
-    ) {
+    fn create_factories(&self) -> ProofFactories<'_, Tx> {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
-            &self.task_ctx.nodes_sorted,
+            self.task_ctx.nodes_sorted.as_ref(),
         );
 
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(&self.tx),
-            &self.task_ctx.state_sorted,
+            self.task_ctx.state_sorted.as_ref(),
         );
 
         (trie_cursor_factory, hashed_cursor_factory)
