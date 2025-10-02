@@ -13,7 +13,7 @@ use crate::{
     OpEthApiError, SequencerClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
@@ -24,7 +24,7 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     BuildStateRx, ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService,
-    PendingBlockRx, WsFlashBlockStream,
+    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -47,14 +47,10 @@ use std::{
     fmt::{self, Formatter},
     marker::PhantomData,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::watch;
-use tracing::{debug, info};
-
-/// Maximum flashblock index in a sequence before the cycle resets.
-/// After this index, we don't wait for new flashblocks as the sequence is ending.
-const MAX_FLASHBLOCK_INDEX: u64 = 9;
+use tracing::info;
 
 /// Maximum duration to wait for a fresh flashblock when one is being built.
 const MAX_WAIT_DURATION: Duration = Duration::from_millis(20);
@@ -123,27 +119,46 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.flashblock_rx.as_ref().map(|rx| rx.resubscribe())
     }
 
+    /// Checks if a flashblock build is currently in progress.
+    fn is_flashblock_building(&self) -> bool {
+        self.inner.build_state_rx.as_ref().map(|rx| *rx.borrow()).unwrap_or(false)
+    }
+
+    /// Extracts pending block if it matches the expected parent hash.
+    fn extract_matching_block(
+        &self,
+        block: Option<&PendingFlashBlock<N::Primitives>>,
+        parent_hash: B256,
+    ) -> Option<PendingBlock<N::Primitives>> {
+        block.filter(|b| b.block().parent_hash() == parent_hash).map(|b| b.pending.clone())
+    }
+
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
     pub const fn builder() -> OpEthApiBuilder<Rpc> {
         OpEthApiBuilder::new()
     }
 
-    /// Checks if we should wait for a fresher flashblock based on build state and current block
-    /// freshness.
-    pub fn check_in_progress_flashblock(&self, flashblock_index: u64) -> bool {
-        // No build state tracking available
-        let Some(build_state_rx) = self.inner.build_state_rx.as_ref() else {
-            return false;
-        };
+    /// Awaits a fresh flashblock if one is being built, otherwise returns current.
+    async fn flashblock(
+        &self,
+        parent_hash: B256,
+    ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
+        let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
 
-        // No build currently in progress
-        if !*build_state_rx.borrow() {
-            return false;
+        if self.is_flashblock_building() {
+            let mut rx_clone = rx.clone();
+
+            // Wait up to 20ms for a new flashblock to arrive
+            if tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await.is_ok() {
+                let fresh = rx_clone.borrow();
+                if let Some(block) = self.extract_matching_block(fresh.as_ref(), parent_hash) {
+                    return Ok(Some(block));
+                }
+            }
         }
 
-        // It is not necessary to wait if it is the end of the 10-flashblock sequence,
-        // ie. after 9 blocks.
-        flashblock_index < MAX_FLASHBLOCK_INDEX
+        // Fall back to current block
+        Ok(self.extract_matching_block(rx.borrow().as_ref(), parent_hash))
     }
 
     /// Returns a [`PendingBlock`] that is built out of flashblocks.
@@ -162,48 +177,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
         };
 
-        let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
-
-        let (_expires_at, last_flashblock_index, _parent_hash, pending) = {
-            let pending_block = rx.borrow();
-            let Some(pending_block) = pending_block.as_ref() else { return Ok(None) };
-
-            let now = Instant::now();
-
-            // Is the pending block not expired and latest is its parent?
-            if pending.evm_env.block_env.number != U256::from(pending_block.block().number()) ||
-                parent.hash() != pending_block.block().parent_hash() ||
-                now > pending_block.expires_at
-            {
-                return Ok(None);
-            }
-
-            (
-                pending_block.expires_at,
-                pending_block.last_flashblock_index,
-                pending_block.block().parent_hash(),
-                pending_block.pending.clone(),
-            )
-        };
-
-        // Check if there is a current block in progress
-        if self.check_in_progress_flashblock(last_flashblock_index) {
-            debug!("Waiting for fresh flashblock");
-            let mut rx_clone = rx.clone();
-
-            // Wait up to 20ms for a new flashblock to arrive
-            if tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await.is_ok() {
-                debug!("Got fresh flashblock within timeout!");
-                let fresh = rx_clone.borrow();
-                if let Some(fresh_block) = fresh.as_ref() &&
-                    fresh_block.block().parent_hash() == parent.hash()
-                {
-                    return Ok(Some(fresh_block.pending.clone()));
-                }
-            }
-        }
-
-        Ok(Some(pending))
+        self.flashblock(parent.hash()).await
     }
 }
 
