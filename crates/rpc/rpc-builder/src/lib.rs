@@ -639,14 +639,14 @@ where
         Pool: TransactionPool + Clone + 'static,
     {
         let adminapi = self.admin_api();
-        self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Admin, adminapi.into_rpc().into());
         self
     }
 
     /// Register Web3 Namespace
     pub fn register_web3(&mut self) -> &mut Self {
         let web3api = self.web3_api();
-        self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Web3, web3api.into_rpc().into());
         self
     }
 }
@@ -680,7 +680,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api().clone();
-        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
     }
 
@@ -694,7 +694,7 @@ where
         EthApi: TraceExt + EthTransactions,
     {
         let otterscan_api = self.otterscan_api();
-        self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
         self
     }
 
@@ -709,7 +709,7 @@ where
         EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
     {
         let debug_api = self.debug_api();
-        self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
         self
     }
 
@@ -723,7 +723,7 @@ where
         EthApi: TraceExt,
     {
         let trace_api = self.trace_api();
-        self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
         self
     }
 
@@ -739,7 +739,7 @@ where
         EthApi: EthApiSpec + 'static,
     {
         let netapi = self.net_api();
-        self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Net, netapi.into_rpc().into());
         self
     }
 
@@ -752,7 +752,7 @@ where
     /// If called outside of the tokio runtime.
     pub fn register_reth(&mut self) -> &mut Self {
         let rethapi = self.reth_api();
-        self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
+        let _ = self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
     }
 
