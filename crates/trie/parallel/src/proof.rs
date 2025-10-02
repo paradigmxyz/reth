@@ -37,7 +37,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
-/// Creates a standardized error for when a storage proof channel closes unexpectedly.
+/// Error when storage proof channel closes unexpectedly.
 #[inline]
 fn storage_channel_closed_error(address: &B256) -> ParallelStateRootError {
     ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(format!(

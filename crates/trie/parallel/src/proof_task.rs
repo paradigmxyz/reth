@@ -52,7 +52,7 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 pub(crate) type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// Creates a standardized error for when the storage proof manager is closed.
+/// Error when storage manager is closed.
 #[inline]
 fn storage_manager_closed_error() -> ParallelStateRootError {
     ParallelStateRootError::Other("storage manager closed".into())
@@ -73,7 +73,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
     storage_proof_handle: ProofTaskManagerHandle<Tx>,
     proof_tx: &ProofTaskTx<Tx>,
 ) -> Result<DecodedMultiProof, ParallelStateRootError> {
-    // Queue ALL storage proof requests to storage manager
+    // Queue storage proof requests to storage manager
     let mut storage_receivers: B256Map<
         CrossbeamReceiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
     > = B256Map::default();
@@ -107,7 +107,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         storage_receivers.insert(*address, receiver);
     }
 
-    //  Build account multiproof, fetching storage proofs on-demand during trie traversal
+    // Build account multiproof, fetching storage proofs on-demand during trie traversal
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
     let result = crate::proof::build_account_multiproof_with_storage(
@@ -120,7 +120,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         multi_added_removed_keys,
     )?;
 
-    // Return just the multiproof (discard stats - caller doesn't need them)
+    // Return multiproof without stats
     Ok(result.0)
 }
 
@@ -241,12 +241,10 @@ where
 
                     #[cfg(feature = "metrics")]
                     {
-                        // Decrement after successful recv (balances the increment before send)
-                        // Use the old value (before decrement) to record the depth we're removing
-                        // from
-                        let old_depth = storage_queue_depth_clone.fetch_sub(1, Ordering::Relaxed);
-                        // Record the new depth (after this job is removed)
-                        metrics_clone.record_storage_queue_depth(old_depth.saturating_sub(1));
+                        let depth = storage_queue_depth_clone
+                            .fetch_sub(1, Ordering::SeqCst)
+                            .saturating_sub(1);
+                        metrics_clone.record_storage_queue_depth(depth);
                         metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
                     }
 
@@ -303,12 +301,10 @@ where
 
                     #[cfg(feature = "metrics")]
                     {
-                        // Decrement after successful recv (balances the increment before send)
-                        // Use the old value (before decrement) to record the depth we're removing
-                        // from
-                        let old_depth = account_queue_depth_clone.fetch_sub(1, Ordering::Relaxed);
-                        // Record the new depth (after this job is removed)
-                        metrics_clone.record_account_queue_depth(old_depth.saturating_sub(1));
+                        let depth = account_queue_depth_clone
+                            .fetch_sub(1, Ordering::SeqCst)
+                            .saturating_sub(1);
+                        metrics_clone.record_account_queue_depth(depth);
                         metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
                     }
 
