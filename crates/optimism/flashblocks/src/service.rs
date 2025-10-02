@@ -1,7 +1,7 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
-    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx,
+    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx, PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
@@ -14,7 +14,6 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
 };
 use reth_revm::cached::CachedReads;
-use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::{
@@ -25,7 +24,9 @@ use std::{
 use tokio::{pin, sync::oneshot};
 use tracing::{debug, trace, warn};
 
-/// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
+pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
+
+/// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
@@ -35,7 +36,7 @@ pub struct FlashBlockService<
     Provider,
 > {
     rx: S,
-    current: Option<PendingBlock<N>>,
+    current: Option<PendingFlashBlock<N>>,
     blocks: FlashBlockPendingSequence<N::SignedTx>,
     rebuild: bool,
     builder: FlashBlockBuilder<EvmConfig, Provider>,
@@ -43,11 +44,13 @@ pub struct FlashBlockService<
     spawner: TaskExecutor,
     job: Option<BuildJob<N>>,
     /// Cached state reads for the current block.
-    /// Current `PendingBlock` is built out of a sequence of `FlashBlocks`, and executed again when
-    /// fb received on top of the same block. Avoid redundant I/O across multiple executions
-    /// within the same block.
+    /// Current `PendingFlashBlock` is built out of a sequence of `FlashBlocks`, and executed again
+    /// when fb received on top of the same block. Avoid redundant I/O across multiple
+    /// executions within the same block.
     cached_state: Option<(B256, CachedReads)>,
     metrics: FlashBlockServiceMetrics,
+    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    compute_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -81,7 +84,14 @@ where
             job: None,
             cached_state: None,
             metrics: FlashBlockServiceMetrics::default(),
+            compute_state_root: false,
         }
+    }
+
+    /// Enable state root calculation from flashblock
+    pub const fn compute_state_root(mut self, enable_state_root: bool) -> Self {
+        self.compute_state_root = enable_state_root;
+        self
     }
 
     /// Returns a subscriber to the flashblock sequence.
@@ -92,7 +102,7 @@ where
     /// Drives the services and sends new blocks to the receiver
     ///
     /// Note: this should be spawned
-    pub async fn run(mut self, tx: tokio::sync::watch::Sender<Option<PendingBlock<N>>>) {
+    pub async fn run(mut self, tx: tokio::sync::watch::Sender<Option<PendingFlashBlock<N>>>) {
         while let Some(block) = self.next().await {
             if let Ok(block) = block.inspect_err(|e| tracing::error!("{e}")) {
                 let _ = tx.send(block).inspect_err(|e| tracing::error!("{e}"));
@@ -128,18 +138,30 @@ where
             latest.hash() != base.parent_hash
         {
             trace!(flashblock_parent=?base.parent_hash, flashblock_number=base.block_number, local_latest=?latest.num_hash(), "Skipping non consecutive build attempt");
-            return None;
+            return None
         }
+
+        let Some(last_flashblock) = self.blocks.last_flashblock() else {
+            trace!(flashblock_number = ?self.blocks.block_number(), count = %self.blocks.count(), "Missing last flashblock");
+            return None
+        };
+
+        // Check if state root must be computed
+        let compute_state_root =
+            self.compute_state_root && self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
 
         Some(BuildArgs {
             base,
             transactions: self.blocks.ready_transactions().collect::<Vec<_>>(),
             cached_state: self.cached_state.take(),
+            last_flashblock_index: last_flashblock.index,
+            last_flashblock_hash: last_flashblock.diff.block_hash,
+            compute_state_root,
         })
     }
 
-    /// Takes out `current` [`PendingBlock`] if `state` is not preceding it.
-    fn on_new_tip(&mut self, state: CanonStateNotification<N>) -> Option<PendingBlock<N>> {
+    /// Takes out `current` [`PendingFlashBlock`] if `state` is not preceding it.
+    fn on_new_tip(&mut self, state: CanonStateNotification<N>) -> Option<PendingFlashBlock<N>> {
         let tip = state.tip_checked()?;
         let tip_hash = tip.hash();
         let current = self.current.take_if(|current| current.parent_hash() != tip_hash);
@@ -180,7 +202,7 @@ where
         + Clone
         + 'static,
 {
-    type Item = eyre::Result<Option<PendingBlock<N>>>;
+    type Item = eyre::Result<Option<PendingFlashBlock<N>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -200,6 +222,9 @@ where
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
+                        // update state root of the current sequence
+                        this.blocks.set_state_root(new_pending.computed_state_root());
+
                         // built a new pending block
                         this.current = Some(new_pending.clone());
                         // cache reads
@@ -286,7 +311,7 @@ where
 }
 
 type BuildJob<N> =
-    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingBlock<N>, CachedReads)>>>);
+    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>>>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]

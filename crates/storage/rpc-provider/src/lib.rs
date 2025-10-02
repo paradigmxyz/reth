@@ -1369,6 +1369,10 @@ where
         self
     }
 
+    fn commit(self) -> ProviderResult<bool> {
+        unimplemented!("commit not supported for RPC provider")
+    }
+
     fn prune_modes_ref(&self) -> &reth_prune_types::PruneModes {
         unimplemented!("prune modes not supported for RPC provider")
     }

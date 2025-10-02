@@ -1,6 +1,6 @@
 //! Loads chain configuration.
 
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::Header;
 use alloy_eips::eip7910::{EthConfig, EthForkConfig, SystemContract};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
@@ -14,6 +14,7 @@ use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
 use std::collections::BTreeMap;
 
+/// RPC endpoint support for [EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthConfigApi {
@@ -87,11 +88,6 @@ where
             .latest_header()?
             .ok_or_else(|| ProviderError::BestBlockNotFound)?
             .into_header();
-
-        // Short-circuit if Cancun is not active.
-        if !chain_spec.is_cancun_active_at_timestamp(latest.timestamp()) {
-            return Err(RethError::msg("cancun has not been activated"))
-        }
 
         let current_precompiles = evm_to_precompiles_map(
             self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
