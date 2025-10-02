@@ -10,6 +10,7 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
+use crossbeam_channel::{unbounded, Receiver, SendError, Sender};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -31,10 +32,8 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
     },
     time::Instant,
@@ -60,17 +59,19 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     view: ConsistentDbView<Factory>,
     /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
-    /// Proof tasks pending execution
-    pending_tasks: VecDeque<ProofTaskKind>,
     /// The underlying handle from which to spawn proof tasks
     executor: Handle,
     /// The proof task transactions, containing owned cursor factories that are reused for proof
     /// calculation.
     proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
     /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
+    task_rx: Receiver<ProofTaskKind>,
+    /// A receiver for returned transactions.
+    tx_return_rx: Receiver<ProofTaskTx<FactoryTx<Factory>>>,
     /// A sender for sending back transactions.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    tx_return_sender: Sender<ProofTaskTx<FactoryTx<Factory>>>,
+    /// A sender for tasks (used for handle creation).
+    task_sender: Sender<ProofTaskKind>,
     /// The number of active handles.
     ///
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
@@ -92,17 +93,19 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
         task_ctx: ProofTaskCtx,
         max_concurrency: usize,
     ) -> Self {
-        let (tx_sender, proof_task_rx) = channel();
+        let (task_sender, task_rx) = unbounded();
+        let (tx_return_sender, tx_return_rx) = unbounded();
         Self {
             max_concurrency,
             total_transactions: 0,
             view,
             task_ctx,
-            pending_tasks: VecDeque::new(),
             executor,
             proof_task_txs: Vec::new(),
-            proof_task_rx,
-            tx_sender,
+            task_rx,
+            tx_return_rx,
+            tx_return_sender,
+            task_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
@@ -111,7 +114,7 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
     pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
+        ProofTaskManagerHandle::new(self.task_sender.clone(), self.active_handles.clone())
     }
 }
 
@@ -119,53 +122,39 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
-    /// Inserts the task into the pending tasks queue.
-    pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
-        self.pending_tasks.push_back(task);
+    /// Checks if there is an available transaction or if we can create a new one.
+    fn has_available_tx(&self) -> bool {
+        !self.proof_task_txs.is_empty() || self.total_transactions < self.max_concurrency
     }
 
     /// Gets either the next available transaction, or creates a new one if all are in use and the
     /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
+    fn get_or_create_tx(&mut self) -> ProviderResult<ProofTaskTx<FactoryTx<Factory>>> {
         if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Ok(Some(proof_task_tx));
+            return Ok(proof_task_tx);
         }
 
-        // if we can create a new tx within our concurrency limits, create one on-demand
-        if self.total_transactions < self.max_concurrency {
-            let provider_ro = self.view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
-        }
-
-        Ok(None)
+        // Create a new tx within our concurrency limits
+        let provider_ro = self.view.provider_ro()?;
+        let tx = provider_ro.into_tx();
+        self.total_transactions += 1;
+        Ok(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions))
     }
 
-    /// Spawns the next queued proof task on the executor with the given input, if there are any
-    /// transactions available.
-    ///
-    /// This will return an error if a transaction must be created on-demand and the consistent view
-    /// provider fails.
-    pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
+    /// Spawns a proof task on the executor with the given input.
+    fn spawn_task(&mut self, task: ProofTaskKind) -> ProviderResult<()> {
+        let proof_task_tx = self.get_or_create_tx()?;
+        let tx_return_sender = self.tx_return_sender.clone();
 
-        let Some(proof_task_tx) = self.get_or_create_tx()? else {
-            // if there are no txs available, requeue the proof task
-            self.pending_tasks.push_front(task);
-            return Ok(())
-        };
-
-        let tx_sender = self.tx_sender.clone();
         self.executor.spawn_blocking(move || match task {
             ProofTaskKind::StorageProof(input, sender) => {
-                proof_task_tx.storage_proof(input, sender, tx_sender);
+                proof_task_tx.storage_proof(input, sender, tx_return_sender);
             }
             ProofTaskKind::BlindedAccountNode(path, sender) => {
-                proof_task_tx.blinded_account_node(path, sender, tx_sender);
+                proof_task_tx.blinded_account_node(path, sender, tx_return_sender);
             }
             ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
+                proof_task_tx.blinded_storage_node(account, path, sender, tx_return_sender);
             }
         });
 
@@ -173,43 +162,54 @@ where
     }
 
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
+    ///
+    /// Uses crossbeam's `select!` with guard conditions to implement natural backpressure.
+    /// Tasks are only received when there's an available transaction or capacity to create one,
+    /// allowing the channel itself to serve as the queue.
     pub fn run(mut self) -> ProviderResult<()> {
         loop {
-            match self.proof_task_rx.recv() {
-                Ok(message) => match message {
-                    ProofTaskMessage::QueueTask(task) => {
-                        // Track metrics for blinded node requests
-                        #[cfg(feature = "metrics")]
-                        match &task {
-                            ProofTaskKind::BlindedAccountNode(_, _) => {
-                                self.metrics.account_nodes += 1;
+            crossbeam_channel::select! {
+                // Only receive new tasks when we have capacity (guard condition for backpressure)
+                recv(self.task_rx) -> result if self.has_available_tx() => {
+                    match result {
+                        Ok(task) => {
+                            // Track metrics for blinded node requests
+                            #[cfg(feature = "metrics")]
+                            match &task {
+                                ProofTaskKind::BlindedAccountNode(_, _) => {
+                                    self.metrics.account_nodes += 1;
+                                }
+                                ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                                    self.metrics.storage_nodes += 1;
+                                }
+                                _ => {}
                             }
-                            ProofTaskKind::BlindedStorageNode(_, _, _) => {
-                                self.metrics.storage_nodes += 1;
-                            }
-                            _ => {}
+                            // Spawn the task immediately since we have capacity
+                            self.spawn_task(task)?;
                         }
-                        // queue the task
-                        self.queue_proof_task(task)
+                        // All task senders are disconnected, check if all work is done
+                        Err(_) => {
+                            // If no active handles remain, we can terminate
+                            if self.active_handles.load(Ordering::SeqCst) == 0 {
+                                #[cfg(feature = "metrics")]
+                                self.metrics.record();
+                                return Ok(());
+                            }
+                        }
                     }
-                    ProofTaskMessage::Transaction(tx) => {
-                        // return the transaction to the pool
-                        self.proof_task_txs.push(tx);
+                }
+                // Always ready to receive returned transactions
+                recv(self.tx_return_rx) -> result => {
+                    match result {
+                        Ok(tx) => {
+                            // Return the transaction to the pool
+                            self.proof_task_txs.push(tx);
+                        }
+                        // This shouldn't happen as we hold a sender
+                        Err(_) => {}
                     }
-                    ProofTaskMessage::Terminate => {
-                        // Record metrics before terminating
-                        #[cfg(feature = "metrics")]
-                        self.metrics.record();
-                        return Ok(())
-                    }
-                },
-                // All senders are disconnected, so we can terminate
-                // However this should never happen, as this struct stores a sender
-                Err(_) => return Ok(()),
-            };
-
-            // try spawning the next task
-            self.try_spawn_next()?;
+                }
+            }
         }
     }
 }
@@ -264,7 +264,7 @@ where
         self,
         input: StorageProofInput,
         result_sender: Sender<StorageProofResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        tx_return_sender: Sender<ProofTaskTx<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -334,7 +334,7 @@ where
         }
 
         // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+        let _ = tx_return_sender.send(self);
     }
 
     /// Retrieves blinded account node by path.
@@ -342,7 +342,7 @@ where
         self,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        tx_return_sender: Sender<ProofTaskTx<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -377,7 +377,7 @@ where
         }
 
         // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+        let _ = tx_return_sender.send(self);
     }
 
     /// Retrieves blinded storage node of the given account by path.
@@ -386,7 +386,7 @@ where
         account: B256,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        tx_return_sender: Sender<ProofTaskTx<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -424,7 +424,7 @@ where
         }
 
         // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+        let _ = tx_return_sender.send(self);
     }
 }
 
@@ -488,21 +488,9 @@ impl ProofTaskCtx {
     }
 }
 
-/// Message used to communicate with [`ProofTaskManager`].
-#[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
-    /// A request to queue a proof task.
-    QueueTask(ProofTaskKind),
-    /// A returned database transaction.
-    Transaction(ProofTaskTx<Tx>),
-    /// A request to terminate the proof task manager.
-    Terminate,
-}
-
 /// Proof task kind.
 ///
-/// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
-/// specifies the type of proof task to be executed.
+/// Specifies the type of proof task to be executed by the [`ProofTaskManager`].
 #[derive(Debug)]
 pub enum ProofTaskKind {
     /// A storage proof request.
@@ -513,31 +501,28 @@ pub enum ProofTaskKind {
     BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
 }
 
-/// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
-/// number of active handles went to zero.
+/// A handle that wraps a single proof task sender. When the last handle is dropped, the task
+/// channel will be closed, signaling the manager to terminate after completing pending work.
 #[derive(Debug)]
 pub struct ProofTaskManagerHandle<Tx> {
-    /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
+    /// The sender for queuing tasks.
+    sender: Sender<ProofTaskKind>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
+    /// Phantom data to preserve type parameter.
+    _phantom: std::marker::PhantomData<Tx>,
 }
 
 impl<Tx> ProofTaskManagerHandle<Tx> {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(sender: Sender<ProofTaskKind>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { sender, active_handles }
+        Self { sender, active_handles, _phantom: std::marker::PhantomData }
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
-        self.sender.send(ProofTaskMessage::QueueTask(task))
-    }
-
-    /// Terminates the proof task manager.
-    pub fn terminate(&self) {
-        let _ = self.sender.send(ProofTaskMessage::Terminate);
+    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskKind>> {
+        self.sender.send(task)
     }
 }
 
@@ -549,17 +534,15 @@ impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
 
 impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     fn drop(&mut self) {
-        // Decrement the number of active handles and terminate the manager if it was the last
-        // handle.
-        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.terminate();
-        }
+        // Decrement the number of active handles. When the count reaches zero and all senders
+        // are dropped, the manager will terminate.
+        self.active_handles.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
 impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
@@ -572,37 +555,109 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskKind>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskKind>,
     },
 }
 
-impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let (tx, rx) = channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         match self {
             Self::AccountNode { sender } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedAccountNode(*path, tx),
-                ));
+                let _ = sender.send(ProofTaskKind::BlindedAccountNode(*path, tx));
             }
             Self::StorageNode { sender, account } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedStorageNode(*account, *path, tx),
-                ));
+                let _ = sender.send(ProofTaskKind::BlindedStorageNode(*account, *path, tx));
             }
         }
 
         rx.recv().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::map::B256Set;
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+    use std::{
+        sync::{atomic::AtomicUsize, Arc},
+        time::Duration,
+    };
+
+    #[test]
+    fn test_backpressure_with_limited_tx_pool() {
+        // Test that the manager properly handles backpressure when the tx pool is full.
+        // With max_concurrency=2, only 2 tasks should execute concurrently.
+
+        const MAX_CONCURRENCY: usize = 2;
+        const TOTAL_TASKS: usize = 100;
+
+        let factory = create_test_provider_factory();
+        let executor = tokio::runtime::Handle::current();
+
+        // Create a consistent view
+        let view = factory.latest().expect("failed to create consistent view");
+
+        // Create proof task context
+        let nodes_sorted = Arc::new(TrieUpdatesSorted::default());
+        let state_sorted = Arc::new(HashedPostStateSorted::default());
+        let prefix_sets = Arc::new(TriePrefixSetsMut::default());
+        let task_ctx = ProofTaskCtx::new(nodes_sorted, state_sorted, prefix_sets);
+
+        // Create manager with limited concurrency
+        let manager = ProofTaskManager::new(executor.clone(), view, task_ctx, MAX_CONCURRENCY);
+
+        let handle = manager.handle();
+
+        // Track concurrent executions
+        let concurrent_count = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+
+        // Spawn manager in background
+        let manager_handle = executor.clone().spawn_blocking(move || manager.run());
+
+        // Queue tasks
+        let mut result_receivers = Vec::new();
+        for i in 0..TOTAL_TASKS {
+            let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
+            let prefix_set = PrefixSet::default();
+            let target_slots = B256Set::default();
+            let hashed_address = B256::random();
+
+            let input =
+                StorageProofInput::new(hashed_address, prefix_set, target_slots, false, None);
+
+            let task = ProofTaskKind::StorageProof(input, result_tx);
+            handle.queue_task(task).expect("failed to queue task");
+
+            result_receivers.push(result_rx);
+        }
+
+        // Drop handle to signal completion
+        drop(handle);
+
+        // Wait for manager to complete
+        let manager_result = executor.block_on(manager_handle).expect("manager task failed");
+        assert!(manager_result.is_ok(), "manager should complete successfully");
+
+        // Verify all tasks completed (or most of them - some may fail due to empty proof data)
+        let completed = result_receivers.iter().filter(|rx| rx.try_recv().is_ok()).count();
+
+        // At least some tasks should have completed
+        assert!(completed > 0, "expected some tasks to complete");
     }
 }

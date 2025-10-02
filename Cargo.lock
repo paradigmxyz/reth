@@ -10743,6 +10743,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "codspeed-criterion-compat",
+ "crossbeam-channel",
  "derive_more",
  "itertools 0.14.0",
  "metrics",
