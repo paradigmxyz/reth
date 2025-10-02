@@ -422,9 +422,10 @@ where
 
         let override_timeout = overrides.timeout;
 
+        // Clamp user-provided timeout to MAX_SIM_TIMEOUT instead of falling back to default.
         let timeout = override_timeout
             .map(Duration::from_secs)
-            .filter(|&custom_duration| custom_duration <= MAX_SIM_TIMEOUT)
+            .map(|d| d.min(MAX_SIM_TIMEOUT))
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
         let bundle_res =
