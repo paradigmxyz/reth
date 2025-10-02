@@ -453,18 +453,16 @@ where
         let account_workers = config.account_proof_workers().max(1);
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
 
-        // Split max_proof_task_concurrency proportionally based on worker ratio 3:1
-        // (storage:account)
+        // Split max_proof_task_concurrency proportionally based on worker ratio
         let total_workers = storage_workers + account_workers;
         let mut storage_concurrency =
             (max_proof_task_concurrency * storage_workers) / total_workers;
         let mut account_concurrency =
             (max_proof_task_concurrency * account_workers) / total_workers;
 
-        // Ensure each pool can at least cover its workers (for blinded node transactions)
-        // Otherwise we'd deadlock waiting for concurrency that can never be freed
-        storage_concurrency = storage_concurrency.max(storage_workers);
-        account_concurrency = account_concurrency.max(account_workers);
+        // Account for ProofTaskManager's internal clamping to min 1 per pool type
+        storage_concurrency = storage_concurrency.max(storage_workers + 1);
+        account_concurrency = account_concurrency.max(account_workers + 1);
 
         // Create storage proof manager
         let storage_proof_manager = ProofTaskManager::new(
