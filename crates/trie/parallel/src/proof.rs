@@ -500,7 +500,7 @@ mod tests {
             consistent_view.clone(),
             task_ctx,
             1, // storage_worker_count
-            0, // account_worker_count
+            1, // account_worker_count
             1, // max_concurrency
         )
         .unwrap();

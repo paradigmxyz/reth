@@ -1007,7 +1007,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
 
-        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 0, 1).unwrap_err();
+        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 1, 1).unwrap_err();
 
         assert!(matches!(
             err,
@@ -1078,7 +1078,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
         let storage_workers = 1usize;
-        let account_workers = 0usize;
+        let account_workers = 0usize; // Gets clamped to 1
         let manager = ProofTaskManager::new(
             rt.handle().clone(),
             view,
@@ -1089,9 +1089,10 @@ mod tests {
         )
         .unwrap();
 
-        // Expect 1 transaction: 1 for storage worker (0 account workers = no account workers)
+        // Worker counts are clamped to min 1, so 0 account workers becomes 1
+        // Expect 2 transactions: 1 for storage worker + 1 for account worker (clamped from 0)
         let initial_calls = calls.load(Ordering::SeqCst);
-        assert_eq!(initial_calls, 1);
+        assert_eq!(initial_calls, 2);
 
         let handle = manager.handle();
         let join_handle = rt.spawn_blocking(move || manager.run());
@@ -1116,7 +1117,7 @@ mod tests {
             let _ = receiver.recv().unwrap();
         }
 
-        // Transaction count should still be 1 (worker reuses its transaction)
+        // Transaction count should still be 2 (workers reuse their transactions)
         assert_eq!(calls.load(Ordering::SeqCst), initial_calls);
 
         drop(handle);
@@ -1132,8 +1133,8 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
-        // 2 storage workers + 0 account workers = 2 total workers
-        let manager = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 2, 0, 4).unwrap();
+        // 2 storage workers + 1 account worker = 3 total workers
+        let manager = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 2, 1, 4).unwrap();
 
         let handle = manager.handle();
         let join_handle = rt.spawn_blocking(move || manager.run());

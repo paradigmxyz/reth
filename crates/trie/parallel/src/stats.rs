@@ -34,8 +34,6 @@ pub struct ParallelTrieTracker {
     trie: TrieTracker,
     precomputed_storage_roots: u64,
     missed_leaves: u64,
-    storage_proofs_immediate: u64,
-    storage_proofs_blocked: u64,
 }
 
 impl ParallelTrieTracker {
@@ -59,24 +57,12 @@ impl ParallelTrieTracker {
         self.missed_leaves += 1;
     }
 
-    /// Increment the number of storage proofs that returned immediately.
-    pub const fn inc_storage_proof_immediate(&mut self) {
-        self.storage_proofs_immediate += 1;
-    }
-
-    /// Increment the number of storage proofs that blocked waiting for completion.
-    pub const fn inc_storage_proof_blocked(&mut self) {
-        self.storage_proofs_blocked += 1;
-    }
-
     /// Called when root calculation is finished to return trie statistics.
     pub fn finish(self) -> ParallelTrieStats {
         ParallelTrieStats {
             trie: self.trie.finish(),
             precomputed_storage_roots: self.precomputed_storage_roots,
             missed_leaves: self.missed_leaves,
-            storage_proofs_immediate: self.storage_proofs_immediate,
-            storage_proofs_blocked: self.storage_proofs_blocked,
         }
     }
 }
