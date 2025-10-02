@@ -241,10 +241,12 @@ where
 
                     #[cfg(feature = "metrics")]
                     {
-                        let depth = storage_queue_depth_clone
-                            .fetch_sub(1, Ordering::SeqCst)
-                            .saturating_sub(1);
-                        metrics_clone.record_storage_queue_depth(depth);
+                        // Decrement after successful recv (balances the increment before send)
+                        // Use the old value (before decrement) to record the depth we're removing
+                        // from
+                        let old_depth = storage_queue_depth_clone.fetch_sub(1, Ordering::Relaxed);
+                        // Record the new depth (after this job is removed)
+                        metrics_clone.record_storage_queue_depth(old_depth.saturating_sub(1));
                         metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
                     }
 
@@ -301,10 +303,12 @@ where
 
                     #[cfg(feature = "metrics")]
                     {
-                        let depth = account_queue_depth_clone
-                            .fetch_sub(1, Ordering::SeqCst)
-                            .saturating_sub(1);
-                        metrics_clone.record_account_queue_depth(depth);
+                        // Decrement after successful recv (balances the increment before send)
+                        // Use the old value (before decrement) to record the depth we're removing
+                        // from
+                        let old_depth = account_queue_depth_clone.fetch_sub(1, Ordering::Relaxed);
+                        // Record the new depth (after this job is removed)
+                        metrics_clone.record_account_queue_depth(old_depth.saturating_sub(1));
                         metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
                     }
 
@@ -467,17 +471,22 @@ where
                                     enqueued_at: Instant::now(),
                                 };
 
+                                // Increment counter BEFORE sending to avoid race with worker
+                                // decrement
+                                #[cfg(feature = "metrics")]
+                                let old_depth =
+                                    self.storage_queue_depth.fetch_add(1, Ordering::Relaxed);
+
                                 if self.storage_work_tx.send(job).is_err() {
+                                    // Send failed, revert the increment
+                                    #[cfg(feature = "metrics")]
+                                    self.storage_queue_depth.fetch_sub(1, Ordering::Relaxed);
+
                                     trace!(target: "trie::proof_task", "Storage proof worker pool shut down");
                                 } else {
                                     #[cfg(feature = "metrics")]
-                                    {
-                                        let depth = self
-                                            .storage_queue_depth
-                                            .fetch_add(1, Ordering::SeqCst) +
-                                            1;
-                                        self.metrics.record_storage_queue_depth(depth);
-                                    }
+                                    self.metrics
+                                        .record_storage_queue_depth(old_depth.saturating_add(1));
                                 }
                             }
                             ProofTaskKind::BlindedAccountNode(_, _) => {
@@ -506,17 +515,22 @@ where
                                     enqueued_at: Instant::now(),
                                 };
 
+                                // Increment counter BEFORE sending to avoid race with worker
+                                // decrement
+                                #[cfg(feature = "metrics")]
+                                let old_depth =
+                                    self.account_queue_depth.fetch_add(1, Ordering::Relaxed);
+
                                 if self.account_work_tx.send(job).is_err() {
+                                    // Send failed, revert the increment
+                                    #[cfg(feature = "metrics")]
+                                    self.account_queue_depth.fetch_sub(1, Ordering::Relaxed);
+
                                     trace!(target: "trie::proof_task", "Account worker pool shut down");
                                 } else {
                                     #[cfg(feature = "metrics")]
-                                    {
-                                        let depth = self
-                                            .account_queue_depth
-                                            .fetch_add(1, Ordering::SeqCst) +
-                                            1;
-                                        self.metrics.record_account_queue_depth(depth);
-                                    }
+                                    self.metrics
+                                        .record_account_queue_depth(old_depth.saturating_add(1));
                                 }
                             }
                         }
