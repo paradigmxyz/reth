@@ -435,8 +435,8 @@ where
 
     /// Creates both storage and account proof task managers, reducing code duplication.
     ///
-    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_storage_concurrency`) for use with
-    /// multiproof tasks.
+    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_storage_concurrency`) for use
+    /// with multiproof tasks.
     fn create_proof_managers<Factory>(
         &self,
         state_root_config: &MultiProofConfig<Factory>,

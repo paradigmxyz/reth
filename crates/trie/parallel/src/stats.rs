@@ -8,12 +8,6 @@ pub struct ParallelTrieStats {
     trie: TrieStats,
     precomputed_storage_roots: u64,
     missed_leaves: u64,
-
-    // TODO: Remove this after testing
-    /// Number of storage proofs that returned immediately (already completed).
-    storage_proofs_immediate: u64,
-    /// Number of storage proofs that blocked waiting for completion.
-    storage_proofs_blocked: u64,
 }
 
 impl ParallelTrieStats {
@@ -30,26 +24,6 @@ impl ParallelTrieStats {
     /// The number of added leaf nodes for which we did not precompute the storage root.
     pub const fn missed_leaves(&self) -> u64 {
         self.missed_leaves
-    }
-
-    /// The number of storage proofs that returned immediately (already completed).
-    pub const fn storage_proofs_immediate(&self) -> u64 {
-        self.storage_proofs_immediate
-    }
-
-    /// The number of storage proofs that blocked waiting for completion.
-    pub const fn storage_proofs_blocked(&self) -> u64 {
-        self.storage_proofs_blocked
-    }
-
-    /// The percentage of storage proofs that returned immediately (0-100).
-    pub fn storage_proofs_immediate_percentage(&self) -> f64 {
-        let total = self.storage_proofs_immediate + self.storage_proofs_blocked;
-        if total == 0 {
-            0.0
-        } else {
-            (self.storage_proofs_immediate as f64 / total as f64) * 100.0
-        }
     }
 }
 

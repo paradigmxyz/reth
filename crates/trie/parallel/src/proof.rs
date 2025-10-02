@@ -105,32 +105,11 @@ where
             TrieElement::Leaf(hashed_address, account) => {
                 // Fetch storage proof on-demand (blocks if not yet ready)
                 let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
-                    Some(receiver) => {
-                        // Try non-blocking receive first to check if proof is already available
-
-                        match receiver.try_recv() {
-                            Ok(Ok(proof)) => {
-                                // Immediate: proof was already ready
-                                tracker.inc_storage_proof_immediate();
-                                proof
-                            }
-                            Ok(Err(e)) => return Err(e),
-                            Err(crossbeam_channel::TryRecvError::Empty) => {
-                                // Blocked: need to wait for proof
-                                tracker.inc_storage_proof_blocked();
-                                match receiver.recv() {
-                                    Ok(Ok(proof)) => proof,
-                                    Ok(Err(e)) => return Err(e),
-                                    Err(_) => {
-                                        return Err(storage_channel_closed_error(&hashed_address))
-                                    }
-                                }
-                            }
-                            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                                return Err(storage_channel_closed_error(&hashed_address));
-                            }
-                        }
-                    }
+                    Some(receiver) => match receiver.recv() {
+                        Ok(Ok(proof)) => proof,
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err(storage_channel_closed_error(&hashed_address)),
+                    },
                     // Since we do not store all intermediate nodes in the database, there might
                     // be a possibility of re-adding a non-modified leaf to the hash builder.
                     None => {

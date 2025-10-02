@@ -228,16 +228,21 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
-                            let mut handle = payload_processor.spawn(
-                                Default::default(),
-                                core::iter::empty::<
-                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                                >(),
-                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                TrieInput::default(),
-                                &TreeConfig::default(),
-                            ).expect("spawn failed");
+                            let mut handle = payload_processor
+                                .spawn(
+                                    Default::default(),
+                                    core::iter::empty::<
+                                        Result<
+                                            Recovered<TransactionSigned>,
+                                            core::convert::Infallible,
+                                        >,
+                                    >(),
+                                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                                    TrieInput::default(),
+                                    &TreeConfig::default(),
+                                )
+                                .expect("spawn failed");
 
                             let mut state_hook = handle.state_hook();
 
