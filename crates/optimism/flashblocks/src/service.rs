@@ -21,7 +21,10 @@ use std::{
     task::{ready, Context, Poll},
     time::Instant,
 };
-use tokio::{pin, sync::oneshot};
+use tokio::{
+    pin,
+    sync::{oneshot, watch},
+};
 use tracing::{debug, trace, warn};
 
 pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
@@ -48,6 +51,9 @@ pub struct FlashBlockService<
     /// when fb received on top of the same block. Avoid redundant I/O across multiple
     /// executions within the same block.
     cached_state: Option<(B256, CachedReads)>,
+    /// Signals when a block build is in progress
+    build_state_tx: watch::Sender<bool>,
+    /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
     /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
     compute_state_root: bool,
@@ -73,6 +79,7 @@ where
 {
     /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
     pub fn new(rx: S, evm_config: EvmConfig, provider: Provider, spawner: TaskExecutor) -> Self {
+        let (build_state_tx, _) = watch::channel(false);
         Self {
             rx,
             current: None,
@@ -83,6 +90,7 @@ where
             spawner,
             job: None,
             cached_state: None,
+            build_state_tx,
             metrics: FlashBlockServiceMetrics::default(),
             compute_state_root: false,
         }
@@ -97,6 +105,11 @@ where
     /// Returns a subscriber to the flashblock sequence.
     pub fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
         self.blocks.subscribe_block_sequence()
+    }
+
+    /// Returns a receiver that signals when a flashblock is being built.
+    pub fn subscribe_build_state(&self) -> crate::BuildStateRx {
+        self.build_state_tx.subscribe()
     }
 
     /// Drives the services and sends new blocks to the receiver
@@ -219,6 +232,8 @@ where
             // reset job
             this.job.take();
 
+            let _ = this.build_state_tx.send(false);
+
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
@@ -293,6 +308,8 @@ where
             if let Some(args) = this.build_args() {
                 let now = Instant::now();
 
+                // Signal that a flashblock build has started
+                let _ = this.build_state_tx.send(true);
                 let (tx, rx) = oneshot::channel();
                 let builder = this.builder.clone();
 

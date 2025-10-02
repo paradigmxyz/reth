@@ -23,8 +23,8 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService, PendingBlockRx,
-    WsFlashBlockStream,
+    BuildStateRx, ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService,
+    PendingBlockRx, WsFlashBlockStream,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -43,9 +43,24 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
-use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc, time::Instant};
+use std::{
+    fmt::{self, Formatter},
+    marker::PhantomData,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
-use tracing::info;
+use tracing::{debug, info};
+
+/// Maximum flashblock index in a sequence before the cycle resets.
+/// After this index, we don't wait for new flashblocks as the sequence is ending.
+const MAX_FLASHBLOCK_INDEX: u64 = 9;
+
+/// Maximum duration to wait for a fresh flashblock when one is being built.
+const MAX_WAIT_DURATION: Duration = Duration::from_millis(20);
+
+/// Minimum acceptable freshness threshold for the current pending block.
+const MIN_FRESHNESS_THRESHOLD: Duration = Duration::from_millis(50);
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
@@ -79,6 +94,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         min_suggested_priority_fee: U256,
         pending_block_rx: Option<PendingBlockRx<N::Primitives>>,
         flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
+        build_state_rx: Option<BuildStateRx>,
     ) -> Self {
         let inner = Arc::new(OpEthApiInner {
             eth_api,
@@ -86,6 +102,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             min_suggested_priority_fee,
             pending_block_rx,
             flashblock_rx,
+            build_state_rx,
         });
         Self { inner }
     }
@@ -114,10 +131,41 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         OpEthApiBuilder::new()
     }
 
+    /// Checks if we should wait for a fresher flashblock based on build state and current block freshness.
+    pub fn check_in_progress_flashblock(
+        &self,
+        current_expires_at: Instant,
+        flashblock_index: u64,
+        now: Instant,
+    ) -> bool {
+        // No build state tracking available
+        let Some(build_state_rx) = self.inner.build_state_rx.as_ref() else {
+            return false;
+        };
+
+        // No build currently in progress
+        if !*build_state_rx.borrow() {
+            return false;
+        }
+
+        // It is not necessary to wait if it is the end of the 10-flashblock sequence, ie after 9
+        // blocks.
+        if flashblock_index >= MAX_FLASHBLOCK_INDEX {
+            return false;
+        }
+
+        let time_remaining = current_expires_at.saturating_duration_since(now);
+
+        // Only wait if current flashblock will expire soon
+        time_remaining < MIN_FRESHNESS_THRESHOLD
+    }
+
     /// Returns a [`PendingBlock`] that is built out of flashblocks.
     ///
     /// If flashblocks receiver is not set, then it always returns `None`.
-    pub fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlock<N::Primitives>>>
+    ///
+    /// It may wait up to 20ms for a fresh flashblock if one is currently being built.
+    pub async fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlock<N::Primitives>>>
     where
         OpEthApiError: FromEvmError<N::Evm>,
         Rpc: RpcConvert<Primitives = N::Primitives>,
@@ -129,20 +177,48 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         };
 
         let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
-        let pending_block = rx.borrow();
-        let Some(pending_block) = pending_block.as_ref() else { return Ok(None) };
 
+        let (expires_at, last_flashblock_index, _parent_hash, pending) = {
+            let pending_block = rx.borrow();
+            let Some(pending_block) = pending_block.as_ref() else { return Ok(None) };
+
+            let now = Instant::now();
+
+            // Is the pending block not expired and latest is its parent?
+            if pending.evm_env.block_env.number != U256::from(pending_block.block().number()) ||
+                parent.hash() != pending_block.block().parent_hash() ||
+                now > pending_block.expires_at
+            {
+                return Ok(None);
+            }
+
+            (
+                pending_block.expires_at,
+                pending_block.last_flashblock_index,
+                pending_block.block().parent_hash(),
+                pending_block.pending.clone(),
+            )
+        };
+
+        // Check if there is a current block in progress
         let now = Instant::now();
+        if self.check_in_progress_flashblock(expires_at, last_flashblock_index, now) {
+            debug!("Waiting for fresh flashblock");
+            let mut rx_clone = rx.clone();
 
-        // Is the pending block not expired and latest is its parent?
-        if pending.evm_env.block_env.number == U256::from(pending_block.block().number()) &&
-            parent.hash() == pending_block.block().parent_hash() &&
-            now <= pending_block.expires_at
-        {
-            return Ok(Some(pending_block.pending.clone()));
+            // Wait up to 20ms for a new flashblock to arrive
+            if tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await.is_ok() {
+                debug!("Got fresh flashblock within timeout!");
+                let fresh = rx_clone.borrow();
+                if let Some(fresh_block) = fresh.as_ref() &&
+                    fresh_block.block().parent_hash() == parent.hash()
+                {
+                    return Ok(Some(fresh_block.pending.clone()));
+                }
+            }
         }
 
-        Ok(None)
+        Ok(Some(pending))
     }
 }
 
@@ -330,6 +406,8 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     ///
     /// If set, then it provides sequences of flashblock built.
     flashblock_rx: Option<FlashBlockCompleteSequenceRx>,
+    /// Receiver that signals when a flashblock is being built
+    build_state_rx: Option<BuildStateRx>,
 }
 
 impl<N: RpcNodeCore, Rpc: RpcConvert> fmt::Debug for OpEthApiInner<N, Rpc> {
@@ -465,24 +543,28 @@ where
             None
         };
 
-        let rxs = if let Some(ws_url) = flashblocks_url {
-            info!(target: "reth:cli", %ws_url,  "Launching flashblocks service");
-            let (tx, pending_block_rx) = watch::channel(None);
-            let stream = WsFlashBlockStream::new(ws_url);
-            let service = FlashBlockService::new(
-                stream,
-                ctx.components.evm_config().clone(),
-                ctx.components.provider().clone(),
-                ctx.components.task_executor().clone(),
-            );
-            let flashblock_rx = service.subscribe_block_sequence();
-            ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
-            Some((pending_block_rx, flashblock_rx))
-        } else {
-            None
-        };
+        let (pending_block_rx, flashblock_rx, build_state_rx) =
+            if let Some(ws_url) = flashblocks_url {
+                info!(target: "reth:cli", %ws_url, "Launching flashblocks service");
 
-        let (pending_block_rx, flashblock_rx) = rxs.unzip();
+                let (tx, pending_rx) = watch::channel(None);
+                let stream = WsFlashBlockStream::new(ws_url);
+                let service = FlashBlockService::new(
+                    stream,
+                    ctx.components.evm_config().clone(),
+                    ctx.components.provider().clone(),
+                    ctx.components.task_executor().clone(),
+                );
+
+                let flashblock_rx = service.subscribe_block_sequence();
+                let build_state_rx = service.subscribe_build_state();
+
+                ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
+
+                (Some(pending_rx), Some(flashblock_rx), Some(build_state_rx))
+            } else {
+                (None, None, None)
+            };
 
         let eth_api = ctx.eth_api_builder().with_rpc_converter(rpc_converter).build_inner();
 
@@ -492,6 +574,7 @@ where
             U256::from(min_suggested_priority_fee),
             pending_block_rx,
             flashblock_rx,
+            build_state_rx,
         ))
     }
 }
