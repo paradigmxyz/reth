@@ -131,7 +131,8 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         OpEthApiBuilder::new()
     }
 
-    /// Checks if we should wait for a fresher flashblock based on build state and current block freshness.
+    /// Checks if we should wait for a fresher flashblock based on build state and current block
+    /// freshness.
     pub fn check_in_progress_flashblock(
         &self,
         current_expires_at: Instant,
