@@ -17,6 +17,7 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
+// TODO: Experiment with this + metrics to understand the optimal number
 /// Default number of storage proof workers.
 pub const DEFAULT_STORAGE_PROOF_WORKERS: usize = 6;
 
