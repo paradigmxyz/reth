@@ -242,8 +242,7 @@ where
                     #[cfg(feature = "metrics")]
                     {
                         let depth = storage_queue_depth_clone
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| x.checked_sub(1))
-                            .unwrap_or(0)
+                            .fetch_sub(1, Ordering::SeqCst)
                             .saturating_sub(1);
                         metrics_clone.record_storage_queue_depth(depth);
                         metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
@@ -303,8 +302,7 @@ where
                     #[cfg(feature = "metrics")]
                     {
                         let depth = account_queue_depth_clone
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| x.checked_sub(1))
-                            .unwrap_or(0)
+                            .fetch_sub(1, Ordering::SeqCst)
                             .saturating_sub(1);
                         metrics_clone.record_account_queue_depth(depth);
                         metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
