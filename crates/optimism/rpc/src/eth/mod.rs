@@ -59,9 +59,6 @@ const MAX_FLASHBLOCK_INDEX: u64 = 9;
 /// Maximum duration to wait for a fresh flashblock when one is being built.
 const MAX_WAIT_DURATION: Duration = Duration::from_millis(20);
 
-/// Minimum acceptable freshness threshold for the current pending block.
-const MIN_FRESHNESS_THRESHOLD: Duration = Duration::from_millis(50);
-
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
 
@@ -133,12 +130,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
 
     /// Checks if we should wait for a fresher flashblock based on build state and current block
     /// freshness.
-    pub fn check_in_progress_flashblock(
-        &self,
-        current_expires_at: Instant,
-        flashblock_index: u64,
-        now: Instant,
-    ) -> bool {
+    pub fn check_in_progress_flashblock(&self, flashblock_index: u64) -> bool {
         // No build state tracking available
         let Some(build_state_rx) = self.inner.build_state_rx.as_ref() else {
             return false;
@@ -149,16 +141,9 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             return false;
         }
 
-        // It is not necessary to wait if it is the end of the 10-flashblock sequence, ie after 9
-        // blocks.
-        if flashblock_index >= MAX_FLASHBLOCK_INDEX {
-            return false;
-        }
-
-        let time_remaining = current_expires_at.saturating_duration_since(now);
-
-        // Only wait if current flashblock will expire soon
-        time_remaining < MIN_FRESHNESS_THRESHOLD
+        // It is not necessary to wait if it is the end of the 10-flashblock sequence,
+        // ie. after 9 blocks.
+        flashblock_index < MAX_FLASHBLOCK_INDEX
     }
 
     /// Returns a [`PendingBlock`] that is built out of flashblocks.
@@ -179,7 +164,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
 
         let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
 
-        let (expires_at, last_flashblock_index, _parent_hash, pending) = {
+        let (_expires_at, last_flashblock_index, _parent_hash, pending) = {
             let pending_block = rx.borrow();
             let Some(pending_block) = pending_block.as_ref() else { return Ok(None) };
 
@@ -202,8 +187,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         };
 
         // Check if there is a current block in progress
-        let now = Instant::now();
-        if self.check_in_progress_flashblock(expires_at, last_flashblock_index, now) {
+        if self.check_in_progress_flashblock(last_flashblock_index) {
             debug!("Waiting for fresh flashblock");
             let mut rx_clone = rx.clone();
 
