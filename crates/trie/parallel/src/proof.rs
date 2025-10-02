@@ -483,7 +483,8 @@ mod tests {
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
-            1, // num_workers
+            1, // storage_worker_count
+            0, // account_worker_count
             1, // max_concurrency
         )
         .unwrap();

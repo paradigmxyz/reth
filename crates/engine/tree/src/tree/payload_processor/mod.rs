@@ -26,13 +26,13 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
-    StateReader,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx, ProviderResult,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManager},
+    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskManagerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -174,7 +174,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> ProviderResult<PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -189,30 +189,25 @@ where
             MultiProofConfig::new_from_input(consistent_view, trie_input);
         self.trie_input = Some(trie_input);
 
-        // Create and spawn the storage proof task
+        // Create and spawn dual proof task managers
         let task_ctx = ProofTaskCtx::new(
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let num_workers = config.storage_proof_workers();
-        let proof_task = ProofTaskManager::new(
-            self.executor.handle().clone(),
-            state_root_config.consistent_view.clone(),
-            task_ctx,
-            num_workers,
-            max_proof_task_concurrency,
-        )
-        .expect("Failed to create ProofTaskManager");
+
+        // Create and spawn dual proof task managers
+        let (storage_handle, account_handle, max_storage_concurrency) =
+            self.create_proof_managers(&state_root_config, task_ctx, &config)?;
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        let max_multi_proof_task_concurrency = max_storage_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
-            proof_task.handle(),
+            account_handle,
+            storage_handle.clone(),
             to_sparse_trie,
             max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
@@ -241,26 +236,15 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
+        // Pass storage handle for blinded node retrieval during sparse trie construction
+        self.spawn_sparse_trie_task(sparse_trie_rx, storage_handle, state_root_tx);
 
-        // spawn the proof task
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
-                // At least log if there is an error at any point
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof task returned an error"
-                );
-            }
-        });
-
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -439,6 +423,75 @@ where
             // to the next step, so that time spent clearing doesn't block the step after this one.
             cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });
+    }
+
+    /// Creates both storage and account proof task managers, reducing code duplication.
+    ///
+    /// Returns a tuple of (storage_handle, account_handle, max_storage_concurrency) for use with
+    /// multiproof tasks.
+    fn create_proof_managers<Factory>(
+        &self,
+        state_root_config: &MultiProofConfig<Factory>,
+        task_ctx: ProofTaskCtx,
+        config: &TreeConfig,
+    ) -> ProviderResult<(
+        ProofTaskManagerHandle<FactoryTx<Factory>>,
+        ProofTaskManagerHandle<FactoryTx<Factory>>,
+        usize,
+    )>
+    where
+        Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
+    {
+        // Calculate worker counts and concurrency limits
+        let storage_workers = config.storage_proof_workers();
+        let account_workers = config.account_proof_workers();
+        let max_storage_concurrency = config.max_proof_task_concurrency() as usize;
+        let max_account_concurrency = account_workers; // Use worker count as concurrency limit
+
+        // Create storage proof manager
+        let storage_proof_manager = ProofTaskManager::new(
+            self.executor.handle().clone(),
+            state_root_config.consistent_view.clone(),
+            task_ctx.clone(),
+            storage_workers,
+            0, // account_worker_count = 0 (no account workers)
+            max_storage_concurrency,
+        )?;
+
+        // Create account proof manager
+        let account_proof_manager = ProofTaskManager::new(
+            self.executor.handle().clone(),
+            state_root_config.consistent_view.clone(),
+            task_ctx,
+            0,               // storage_worker_count = 0 (no storage workers)
+            account_workers, // account_worker_count
+            max_account_concurrency,
+        )?;
+
+        let storage_handle = storage_proof_manager.handle();
+        let account_handle = account_proof_manager.handle();
+
+        // Spawn both managers with error logging
+        self.executor.spawn_blocking(move || {
+            if let Err(err) = storage_proof_manager.run() {
+                tracing::error!(
+                    target: "engine::root",
+                    ?err,
+                    "Storage proof manager returned an error"
+                );
+            }
+        });
+        self.executor.spawn_blocking(move || {
+            if let Err(err) = account_proof_manager.run() {
+                tracing::error!(
+                    target: "engine::root",
+                    ?err,
+                    "Account proof manager returned an error"
+                );
+            }
+        });
+
+        Ok((storage_handle, account_handle, max_storage_concurrency))
     }
 }
 
@@ -860,14 +913,19 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-            &TreeConfig::default(),
-        );
+        let mut handle =
+            payload_processor
+                .spawn(
+                    Default::default(),
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                    TrieInput::from_state(hashed_state),
+                    &TreeConfig::default(),
+                )
+                .unwrap();
 
         let mut state_hook = handle.state_hook();
 

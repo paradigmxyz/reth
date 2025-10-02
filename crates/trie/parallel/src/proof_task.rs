@@ -9,7 +9,10 @@
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
 use crate::root::ParallelStateRootError;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    map::{B256Map, B256Set},
+    B256,
+};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -31,7 +34,7 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, SendError, Sender},
@@ -48,10 +51,98 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
+/// Executes an account multiproof task in a worker thread.
+///
+/// This function coordinates with the storage manager to compute storage proofs for all
+/// accounts in the multiproof, then assembles the final account multiproof using the
+/// pre-computed storage proofs.
+fn execute_account_multiproof_worker<Tx: DbTx>(
+    input: AccountMultiproofInput<Tx>,
+    proof_tx: &ProofTaskTx<Tx>,
+) {
+    let AccountMultiproofInput {
+        targets,
+        prefix_sets,
+        collect_branch_node_masks,
+        multi_added_removed_keys,
+        storage_proof_handle,
+        result_sender,
+    } = input;
+
+    // Phase 1: Queue ALL storage proof requests to storage manager
+    let mut storage_receivers = HashMap::new();
+    for (address, slots) in targets.iter() {
+        if slots.is_empty() {
+            continue;
+        }
+
+        let (sender, receiver) = channel();
+        let prefix_set = prefix_sets.storage_prefix_sets.get(address).cloned().unwrap_or_default();
+        let storage_input = StorageProofInput::new(
+            *address,
+            prefix_set,
+            slots.clone(),
+            collect_branch_node_masks,
+            multi_added_removed_keys.clone(),
+        );
+
+        if storage_proof_handle
+            .queue_task(ProofTaskKind::StorageProof(storage_input, sender))
+            .is_err()
+        {
+            let _ = result_sender
+                .send(Err(ParallelStateRootError::Other("storage manager closed".into())));
+            return;
+        }
+
+        storage_receivers.insert(*address, receiver);
+    }
+
+    // Phase 2: Wait for ALL storage proofs (BLOCKS worker until all complete)
+    let mut storage_proofs = B256Map::default();
+    for (address, receiver) in storage_receivers {
+        match receiver.recv() {
+            Ok(Ok(proof)) => {
+                storage_proofs.insert(address, proof);
+            }
+            Ok(Err(e)) => {
+                let _ = result_sender.send(Err(e));
+                return;
+            }
+            Err(_) => {
+                let _ = result_sender.send(Err(ParallelStateRootError::Other(
+                    "storage proof channel closed".into(),
+                )));
+                return;
+            }
+        }
+    }
+
+    // Phase 3: Assemble account multiproof using pre-computed storage proofs
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+
+    let result = crate::proof::build_account_multiproof_with_storage(
+        trie_cursor_factory,
+        hashed_cursor_factory,
+        targets,
+        prefix_sets,
+        storage_proofs,
+        collect_branch_node_masks,
+        multi_added_removed_keys,
+    );
+
+    let _ = result_sender.send(result.map(|(multiproof, _stats)| multiproof));
+}
+
 /// Proof job dispatched to the storage worker pool.
 struct ProofJob {
     input: StorageProofInput,
     result_tx: Sender<StorageProofResult>,
+}
+
+/// Account multiproof job dispatched to the account worker pool.
+struct AccountProofJob<Tx> {
+    input: AccountMultiproofInput<Tx>,
 }
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -60,6 +151,8 @@ struct ProofJob {
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Channel for dispatching storage proof work to workers
     storage_work_tx: crossbeam_channel::Sender<ProofJob>,
+    /// Channel for dispatching account multiproof work to workers
+    account_work_tx: crossbeam_channel::Sender<AccountProofJob<FactoryTx<Factory>>>,
     /// Max number of database transactions to create (for blinded nodes)
     max_concurrency: usize,
     /// Number of database transactions created (for blinded nodes)
@@ -92,24 +185,27 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
-    /// Creates a new [`ProofTaskManager`] with the given number of workers and max concurrency.
+    /// Creates a new [`ProofTaskManager`] with the given worker counts and max concurrency.
     ///
-    /// Spawns `num_workers` storage proof workers upfront that reuse database transactions
-    /// for the entire block lifetime (prewarm.rs pattern).
+    /// Spawns `storage_worker_count` storage proof workers and `account_worker_count` account
+    /// multiproof workers upfront that reuse database transactions for the entire block lifetime
+    /// (prewarm.rs pattern).
     ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
-        num_workers: usize,
+        storage_worker_count: usize,
+        account_worker_count: usize,
         max_concurrency: usize,
     ) -> ProviderResult<Self> {
         let (tx_sender, proof_task_rx) = channel();
         let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
+        let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
 
-        // Spawn workers upfront (prewarm.rs pattern)
-        for worker_id in 0..num_workers {
+        // Spawn storage workers upfront (prewarm.rs pattern)
+        for worker_id in 0..storage_worker_count {
             let provider = view.provider_ro()?;
             let tx = provider.into_tx();
             let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
@@ -133,8 +229,36 @@ where
             });
         }
 
+        // Spawn account workers upfront
+        for worker_id in 0..account_worker_count {
+            let provider = view.provider_ro()?;
+            let tx = provider.into_tx();
+            let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id + storage_worker_count);
+            let account_work_rx = account_work_rx.clone();
+
+            executor.spawn_blocking(move || {
+                debug!(target: "trie::proof_pool", worker_id, "Account proof worker started");
+
+                // Worker loop - reuse transaction for entire block
+                loop {
+                    let AccountProofJob { input } = match account_work_rx.recv() {
+                        Ok(item) => item,
+                        Err(_) => break, /* Channel closed, shutdown
+                                          * TODO: should we handle this error? */
+                    };
+
+                    // TODO: When would this be executed? also fix blocking
+                    // Execute account multiproof (blocks on storage proofs)
+                    execute_account_multiproof_worker(input, &proof_tx);
+                }
+
+                debug!(target: "trie::proof_pool", worker_id, "Account proof worker shutdown");
+            });
+        }
+
         Ok(Self {
             storage_work_tx,
+            account_work_tx,
             max_concurrency,
             total_transactions: 0,
             view,
@@ -208,10 +332,11 @@ where
             ProofTaskKind::BlindedStorageNode(account, path, sender) => {
                 proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
             }
-            ProofTaskKind::AccountMultiproof(_input) => {
-                // Phase 1b: Account multiproof logic not yet activated
-                trace!(target: "trie::proof_task", "AccountMultiproof task received but not yet implemented");
-                // Return transaction to pool to prevent leak
+            ProofTaskKind::AccountMultiproof(_) => {
+                // AccountMultiproof should never go through spawn-per-task path
+                // It should be dispatched to account worker pool in run() loop
+                debug!(target: "trie::proof_task", "AccountMultiproof in spawn path - this should not happen");
+                // Return transaction to pool
                 let _ = tx_sender.send(ProofTaskMessage::Transaction(proof_task_tx));
             }
         });
@@ -254,9 +379,15 @@ where
                                 // Queue blinded node task for spawn-per-task
                                 self.queue_proof_task(task);
                             }
-                            ProofTaskKind::AccountMultiproof(_input) => {
-                                // Phase 1b: Account multiproof logic not yet activated
-                                trace!(target: "trie::proof_task", "AccountMultiproof task received in run loop but not yet implemented");
+                            ProofTaskKind::AccountMultiproof(input) => {
+                                // Dispatch to account worker pool
+                                if self
+                                    .account_work_tx
+                                    .send(AccountProofJob { input: *input })
+                                    .is_err()
+                                {
+                                    trace!(target: "trie::proof_task", "Account worker pool shut down");
+                                }
                             }
                         }
                     }
@@ -269,8 +400,9 @@ where
                         #[cfg(feature = "metrics")]
                         self.metrics.record();
 
-                        // Shutdown: drop work_tx, workers will exit when channel closes
+                        // Shutdown: drop work channels, workers will exit when channels close
                         drop(self.storage_work_tx);
+                        drop(self.account_work_tx);
                         return Ok(());
                     }
                 },
@@ -279,6 +411,7 @@ where
                 Err(_) => {
                     // Shutdown workers
                     drop(self.storage_work_tx);
+                    drop(self.account_work_tx);
                     return Ok(());
                 }
             };
@@ -789,12 +922,12 @@ mod tests {
     #[test]
     fn proof_task_manager_new_propagates_consistent_view_error() {
         let factory = create_test_provider_factory();
-        let view = ConsistentDbView::new(factory.clone(), Some((B256::repeat_byte(0x11), 0)));
+        let view = ConsistentDbView::new(factory, Some((B256::repeat_byte(0x11), 0)));
 
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
 
-        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 1).unwrap_err();
+        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 0, 1).unwrap_err();
 
         assert!(matches!(
             err,
@@ -807,13 +940,13 @@ mod tests {
         let inner_factory = create_test_provider_factory();
         let calls = Arc::new(AtomicUsize::new(0));
         let counting_factory = CountingFactory::new(inner_factory, Arc::clone(&calls));
-        let view = ConsistentDbView::new(counting_factory.clone(), None);
+        let view = ConsistentDbView::new(counting_factory, None);
 
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
         let num_workers = 2usize;
         let manager =
-            ProofTaskManager::new(rt.handle().clone(), view, task_ctx, num_workers, 4).unwrap();
+            ProofTaskManager::new(rt.handle().clone(), view, task_ctx, num_workers, 0, 4).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), num_workers);
 
