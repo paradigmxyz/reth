@@ -235,15 +235,17 @@ where
 
                 // Worker loop - reuse transaction for entire block
                 loop {
-                    let job = match storage_work_rx.recv() {
+                    let job: ProofJob = match storage_work_rx.recv() {
                         Ok(item) => item,
                         Err(_) => break, // Channel closed, shutdown
                     };
 
                     #[cfg(feature = "metrics")]
                     {
-                        let prev = storage_queue_depth_clone.fetch_sub(1, Ordering::SeqCst);
-                        let depth = prev.saturating_sub(1);
+                        let depth = storage_queue_depth_clone
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| x.checked_sub(1))
+                            .unwrap_or(0)
+                            .saturating_sub(1);
                         metrics_clone.record_storage_queue_depth(depth);
                         metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
                     }
@@ -272,7 +274,7 @@ where
 
                 // Worker loop - reuse transaction for entire block
                 loop {
-                    let job = match account_work_rx.recv() {
+                    let job: AccountProofJob<_> = match account_work_rx.recv() {
                         Ok(item) => item,
                         Err(_) => break, /* Channel closed, shutdown
                                           * TODO: should we handle this error? */
@@ -280,8 +282,10 @@ where
 
                     #[cfg(feature = "metrics")]
                     {
-                        let prev = account_queue_depth_clone.fetch_sub(1, Ordering::SeqCst);
-                        let depth = prev.saturating_sub(1);
+                        let depth = account_queue_depth_clone
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| x.checked_sub(1))
+                            .unwrap_or(0)
+                            .saturating_sub(1);
                         metrics_clone.record_account_queue_depth(depth);
                         metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
                     }
@@ -744,7 +748,7 @@ pub struct StorageProofInput {
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
     /// slots.
-    pub fn new(
+    pub const fn new(
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: Arc<B256Set>,
