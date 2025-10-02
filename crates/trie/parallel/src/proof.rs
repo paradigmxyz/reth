@@ -108,7 +108,6 @@ where
                     Some(receiver) => {
                         // Try non-blocking receive first to check if proof is already available
                         
-
                         match receiver.try_recv() {
                             Ok(Ok(proof)) => {
                                 // Immediate: proof was already ready
