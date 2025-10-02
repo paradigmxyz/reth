@@ -13,6 +13,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
 };
+use crossbeam_channel::{self, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -34,28 +35,34 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
+        mpsc::{channel, Receiver as MpscReceiver, SendError, Sender as MpscSender},
         Arc,
     },
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
 
-type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
+pub(crate) type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
+
+/// Creates a standardized error for when the storage proof manager is closed.
+#[inline]
+fn storage_manager_closed_error() -> ParallelStateRootError {
+    ParallelStateRootError::Other("storage manager closed".into())
+}
 
 /// Executes an account multiproof task in a worker thread.
 ///
 /// This function coordinates with the storage manager to compute storage proofs for all
-/// accounts in the multiproof, then assembles the final account multiproof using the
-/// pre-computed storage proofs.
+/// accounts in the multiproof, then assembles the final account multiproof by fetching
+/// storage proofs on-demand during account trie traversal.
 fn execute_account_multiproof_worker<Tx: DbTx>(
     input: AccountMultiproofInput<Tx>,
     proof_tx: &ProofTaskTx<Tx>,
@@ -69,19 +76,21 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         result_sender,
     } = input;
 
-    // Phase 1: Queue ALL storage proof requests to storage manager
-    let mut storage_receivers = HashMap::new();
+    // Queue ALL storage proof requests to storage manager
+    let mut storage_receivers: B256Map<
+        CrossbeamReceiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
+    > = B256Map::default();
     for (address, slots) in targets.iter() {
         if slots.is_empty() {
             continue;
         }
 
-        let (sender, receiver) = channel();
+        let (sender, receiver) = crossbeam_channel::unbounded();
         let prefix_set = prefix_sets.storage_prefix_sets.get(address).cloned().unwrap_or_default();
         let storage_input = StorageProofInput::new(
             *address,
             prefix_set,
-            slots.clone(),
+            Arc::new(slots.clone()), // Arc clone is cheap (reference count only)
             collect_branch_node_masks,
             multi_added_removed_keys.clone(),
         );
@@ -90,35 +99,19 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
             .queue_task(ProofTaskKind::StorageProof(storage_input, sender))
             .is_err()
         {
-            let _ = result_sender
-                .send(Err(ParallelStateRootError::Other("storage manager closed".into())));
+            debug!(
+                target: "trie::proof_task",
+                ?address,
+                "Storage manager closed, cannot queue proof"
+            );
+            let _ = result_sender.send(Err(storage_manager_closed_error()));
             return;
         }
 
         storage_receivers.insert(*address, receiver);
     }
 
-    // Phase 2: Wait for ALL storage proofs (BLOCKS worker until all complete)
-    let mut storage_proofs = B256Map::default();
-    for (address, receiver) in storage_receivers {
-        match receiver.recv() {
-            Ok(Ok(proof)) => {
-                storage_proofs.insert(address, proof);
-            }
-            Ok(Err(e)) => {
-                let _ = result_sender.send(Err(e));
-                return;
-            }
-            Err(_) => {
-                let _ = result_sender.send(Err(ParallelStateRootError::Other(
-                    "storage proof channel closed".into(),
-                )));
-                return;
-            }
-        }
-    }
-
-    // Phase 3: Assemble account multiproof using pre-computed storage proofs
+    //  Build account multiproof, fetching storage proofs on-demand during trie traversal
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
     let result = crate::proof::build_account_multiproof_with_storage(
@@ -126,18 +119,23 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         hashed_cursor_factory,
         targets,
         prefix_sets,
-        storage_proofs,
+        storage_receivers, // ← Pass receivers directly for on-demand fetching
         collect_branch_node_masks,
         multi_added_removed_keys,
     );
 
-    let _ = result_sender.send(result.map(|(multiproof, _stats)| multiproof));
+    if result_sender.send(result.map(|(multiproof, _stats)| multiproof)).is_err() {
+        warn!(
+            target: "trie::proof_task",
+            "Account multiproof result discarded - receiver dropped"
+        );
+    }
 }
 
 /// Proof job dispatched to the storage worker pool.
 struct ProofJob {
     input: StorageProofInput,
-    result_tx: Sender<StorageProofResult>,
+    result_tx: CrossbeamSender<StorageProofResult>,
 }
 
 /// Account multiproof job dispatched to the account worker pool.
@@ -168,9 +166,9 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// The proof task transactions for blinded node requests
     proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
     /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
+    proof_task_rx: MpscReceiver<ProofTaskMessage<FactoryTx<Factory>>>,
     /// A sender for sending back transactions.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    tx_sender: MpscSender<ProofTaskMessage<FactoryTx<Factory>>>,
     /// The number of active handles.
     ///
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
@@ -492,7 +490,7 @@ where
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
         .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof(input.target_slots.clone())
+        .storage_multiproof((*input.target_slots).clone())
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         raw_proof_result.and_then(|raw_proof| {
@@ -509,8 +507,8 @@ where
     fn storage_proof(
         self,
         input: StorageProofInput,
-        result_sender: Sender<StorageProofResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        result_sender: CrossbeamSender<StorageProofResult>,
+        tx_sender: MpscSender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -563,8 +561,8 @@ where
     fn blinded_account_node(
         self,
         path: Nibbles,
-        result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        result_sender: CrossbeamSender<TrieNodeProviderResult>,
+        tx_sender: MpscSender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -607,8 +605,8 @@ where
         self,
         account: B256,
         path: Nibbles,
-        result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        result_sender: CrossbeamSender<TrieNodeProviderResult>,
+        tx_sender: MpscSender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -658,7 +656,8 @@ pub struct StorageProofInput {
     /// The prefix set for the proof calculation.
     pub prefix_set: PrefixSet,
     /// The target slots for the proof calculation.
-    pub target_slots: B256Set,
+    /// Arc allows cheap sharing across workers without cloning the entire set.
+    pub target_slots: Arc<B256Set>,
     /// Whether or not to collect branch node masks
     pub with_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
@@ -668,10 +667,10 @@ pub struct StorageProofInput {
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
     /// slots.
-    pub const fn new(
+    pub fn new(
         hashed_address: B256,
         prefix_set: PrefixSet,
-        target_slots: B256Set,
+        target_slots: Arc<B256Set>,
         with_branch_node_masks: bool,
         multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     ) -> Self {
@@ -699,7 +698,7 @@ pub struct AccountMultiproofInput<Tx> {
     /// Handle to the storage proof task manager for coordinating storage proofs
     pub storage_proof_handle: ProofTaskManagerHandle<Tx>,
     /// Sender for returning the multiproof result
-    pub result_sender: Sender<Result<DecodedMultiProof, ParallelStateRootError>>,
+    pub result_sender: MpscSender<Result<DecodedMultiProof, ParallelStateRootError>>,
 }
 
 impl<Tx> AccountMultiproofInput<Tx> {
@@ -710,7 +709,7 @@ impl<Tx> AccountMultiproofInput<Tx> {
         collect_branch_node_masks: bool,
         multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
         storage_proof_handle: ProofTaskManagerHandle<Tx>,
-        result_sender: Sender<Result<DecodedMultiProof, ParallelStateRootError>>,
+        result_sender: MpscSender<Result<DecodedMultiProof, ParallelStateRootError>>,
     ) -> Self {
         Self {
             targets,
@@ -766,11 +765,11 @@ pub enum ProofTaskMessage<Tx> {
 #[derive(Debug)]
 pub enum ProofTaskKind<Tx = ()> {
     /// A storage proof request.
-    StorageProof(StorageProofInput, Sender<StorageProofResult>),
+    StorageProof(StorageProofInput, CrossbeamSender<StorageProofResult>),
     /// A blinded account node request.
-    BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
+    BlindedAccountNode(Nibbles, CrossbeamSender<TrieNodeProviderResult>),
     /// A blinded storage node request.
-    BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
+    BlindedStorageNode(B256, Nibbles, CrossbeamSender<TrieNodeProviderResult>),
     /// An account multiproof request (Phase 1b - not yet activated)
     AccountMultiproof(Box<AccountMultiproofInput<Tx>>),
 }
@@ -780,14 +779,14 @@ pub enum ProofTaskKind<Tx = ()> {
 #[derive(Debug)]
 pub struct ProofTaskManagerHandle<Tx> {
     /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
+    sender: MpscSender<ProofTaskMessage<Tx>>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
 }
 
 impl<Tx> ProofTaskManagerHandle<Tx> {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(sender: MpscSender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self { sender, active_handles }
     }
@@ -841,20 +840,20 @@ pub enum ProofTaskTrieNodeProvider<Tx> {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: MpscSender<ProofTaskMessage<Tx>>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: MpscSender<ProofTaskMessage<Tx>>,
     },
 }
 
 impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let (tx, rx) = channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
         match self {
             Self::AccountNode { sender } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(
@@ -878,7 +877,7 @@ mod tests {
     use alloy_primitives::{map::B256Set, B256};
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_storage_errors::provider::{ConsistentViewError, ProviderError};
-    use std::sync::{mpsc, Arc};
+    use std::sync::Arc;
     use tokio::runtime::Runtime;
 
     #[derive(Clone)]
@@ -959,11 +958,11 @@ mod tests {
             let input = StorageProofInput::new(
                 B256::ZERO,
                 prefix_set.clone(),
-                B256Set::default(),
+                Arc::new(B256Set::default()),
                 false,
                 None,
             );
-            let (sender, receiver) = mpsc::channel();
+            let (sender, receiver) = crossbeam_channel::unbounded();
             handle.queue_task(ProofTaskKind::StorageProof(input, sender)).unwrap();
             receivers.push(receiver);
         }
