@@ -21,20 +21,20 @@ use tracing::{debug, error};
 /// This stage processes and maintains trie changesets from the finalized block to the latest block.
 #[derive(Debug, Clone)]
 pub struct MerkleChangeSets {
-    /// The finalized block height to use as a fallback when the finalized block is not found.
-    /// Defaults to 64 (2 epochs in beacon chain).
-    finalized_block_height: u64,
+    /// The number of blocks to retain changesets for, used as a fallback when the finalized block
+    /// is not found. Defaults to 64 (2 epochs in beacon chain).
+    retention_blocks: u64,
 }
 
 impl MerkleChangeSets {
-    /// Creates a new `MerkleChangeSets` stage with default finalized block height of 64.
+    /// Creates a new `MerkleChangeSets` stage with default retention blocks of 64.
     pub const fn new() -> Self {
-        Self { finalized_block_height: 64 }
+        Self { retention_blocks: 64 }
     }
 
     /// Creates a new `MerkleChangeSets` stage with a custom finalized block height.
-    pub const fn new_with_finalized_height(finalized_block_height: u64) -> Self {
-        Self { finalized_block_height }
+    pub const fn with_retention_blocks(retention_blocks: u64) -> Self {
+        Self { retention_blocks }
     }
 
     /// Returns the range of blocks which are already computed. Will return an empty range if none
@@ -70,10 +70,10 @@ impl MerkleChangeSets {
         // We maintain changesets from the finalized block to the latest block.
         let finalized_block = provider.last_finalized_block_number()?;
 
-        // If finalized block is not found, default to being `finalized_block_height` away from
+        // If finalized block is not found, default to being `retention_blocks` away from
         // target_end
         let mut target_start = finalized_block
-            .unwrap_or_else(|| merkle_checkpoint.saturating_sub(self.finalized_block_height))
+            .unwrap_or_else(|| merkle_checkpoint.saturating_sub(self.retention_blocks))
             .saturating_add(1);
 
         // We cannot revert the genesis block; target_start must be >0
@@ -105,10 +105,10 @@ impl MerkleChangeSets {
             .header_by_number(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
-        let header = SealedHeader::seal_slow(block);
-
-        let (got, expected) = (root, header.state_root());
+        let (got, expected) = (root, block.state_root());
         if got != expected {
+            // Only seal the header when we need it for the error
+            let header = SealedHeader::seal_slow(block);
             error!(
                 target: "sync::stages::merkle_changesets",
                 ?block_number,
@@ -146,21 +146,22 @@ impl MerkleChangeSets {
             "Starting trie changeset computation",
         );
 
-        // We need to distinguish a full revert and a per-block revert. A full revert reverts
-        // changes starting at db tip all the way to a block. A per-block revert only reverts
-        // a block's changes.
+        // We need to distinguish a cumulative revert and a per-block revert. A cumulative revert
+        // reverts changes starting at db tip all the way to a block. A per-block revert only
+        // reverts a block's changes.
         //
-        // We need to calculate the full HashedPostState reverts for every block in the target
-        // range. The full HashedPostState revert for block N can be calculated as:
+        // We need to calculate the cumulative HashedPostState reverts for every block in the
+        // target range. The cumulative HashedPostState revert for block N can be calculated as:
         //
         //
         // ```
         // // where `extend` overwrites any shared keys
-        // state_revert(N) = state_revert(N + 1).extend(per_block_state_revert(N))
+        // cumulative_state_revert(N) = cumulative_state_revert(N + 1).extend(get_block_state_revert(N))
         // ```
         //
-        // We need per-block reverts to calculate the prefix set for each individual block. By using
-        // the per-block reverts to calculate full reverts on-the-fly we can save a bunch of memory.
+        // We need per-block reverts to calculate the prefix set for each individual block. By
+        // using the per-block reverts to calculate cumulative reverts on-the-fly we can save a
+        // bunch of memory.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?target_range,
@@ -174,34 +175,37 @@ impl MerkleChangeSets {
             )?);
         }
 
-        let per_block_state_revert = |block_number| -> &HashedPostState {
-            &per_block_state_reverts[(block_number - target_start) as usize]
+        // Helper to retrieve state revert data for a specific block from the pre-computed array
+        let get_block_state_revert = |block_number: BlockNumber| -> &HashedPostState {
+            let index = (block_number - target_start) as usize;
+            &per_block_state_reverts[index]
         };
 
-        let state_revert = |block_number| -> HashedPostState {
-            let mut r = HashedPostState::default();
+        // Helper to accumulate state reverts from a given block to the target end
+        let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostState {
+            let mut cumulative_revert = HashedPostState::default();
             for n in (block_number..target_end).rev() {
-                r.extend_ref(per_block_state_revert(n))
+                cumulative_revert.extend_ref(get_block_state_revert(n))
             }
-            r
+            cumulative_revert
         };
 
-        // To calculate the changeset for a block, we first need the TrieUpdates which are generated
-        // as a result of processing the block. To get these we need:
+        // To calculate the changeset for a block, we first need the TrieUpdates which are
+        // generated as a result of processing the block. To get these we need:
         // 1) The TrieUpdates which revert the db's trie to _prior_ to the block
         // 2) The HashedPostState to revert the db's state to _after_ the block
         //
-        // To get (1) for `target_start` we need to do a big state root calculation which takes into
-        // account all changes between that block and db tip. For each block after the
+        // To get (1) for `target_start` we need to do a big state root calculation which takes
+        // into account all changes between that block and db tip. For each block after the
         // `target_start` we can update (1) using the TrieUpdates which were output by the previous
-        // block only targeting the state changes of that block.
+        // block, only targeting the state changes of that block.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?target_start,
             "Computing trie state at starting block",
         );
         let mut input = TrieInput::default();
-        input.state = state_revert(target_start);
+        input.state = compute_cumulative_state_revert(target_start);
         input.prefix_sets = input.state.construct_prefix_sets();
         // target_start will be >= 1, see `determine_target_range`.
         input.nodes =
@@ -213,14 +217,13 @@ impl MerkleChangeSets {
                 ?block_number,
                 "Computing trie updates for block",
             );
-            // Revert the state so that this block has been just processed, meaning we take the full
-            // revert of the subsequent block.
-            input.state = state_revert(block_number + 1);
+            // Revert the state so that this block has been just processed, meaning we take the
+            // cumulative revert of the subsequent block.
+            input.state = compute_cumulative_state_revert(block_number + 1);
 
             // Construct prefix sets from only this block's `HashedPostState`, because we only care
             // about trie updates which occurred as a result of this block being processed.
-            let this_state_revert = per_block_state_revert(block_number);
-            input.prefix_sets = this_state_revert.construct_prefix_sets();
+            input.prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
 
             // Calculate the trie updates for this block, then apply those updates to the reverts.
             // We calculate the overlay which will be passed into the next step using the trie
@@ -276,7 +279,6 @@ where
             return Err(StageError::Fatal(eyre::eyre!("Cannot sync stage to block {:?} when MerkleExecute is at block {merkle_checkpoint:?}", input.target).into()))
         }
 
-        // Determine the target range for changeset computation
         let mut target_range = self.determine_target_range(provider)?;
 
         // Get the previously computed range. This will be updated to reflect the populating of the
