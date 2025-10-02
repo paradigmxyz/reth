@@ -136,11 +136,15 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
 struct ProofJob {
     input: StorageProofInput,
     result_tx: CrossbeamSender<StorageProofResult>,
+    #[cfg(feature = "metrics")]
+    enqueued_at: Instant,
 }
 
 /// Account multiproof job dispatched to the account worker pool.
 struct AccountProofJob<Tx> {
     input: AccountMultiproofInput<Tx>,
+    #[cfg(feature = "metrics")]
+    enqueued_at: Instant,
 }
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -174,6 +178,12 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
     /// [`ProofTaskManagerHandle::drop`].
     active_handles: Arc<AtomicUsize>,
+    /// Tracks outstanding storage jobs for metrics purposes.
+    #[cfg(feature = "metrics")]
+    storage_queue_depth: Arc<AtomicUsize>,
+    /// Tracks outstanding account jobs for metrics purposes.
+    #[cfg(feature = "metrics")]
+    account_queue_depth: Arc<AtomicUsize>,
     /// Metrics tracking blinded node fetches.
     #[cfg(feature = "metrics")]
     metrics: ProofTaskMetrics,
@@ -202,25 +212,44 @@ where
         let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
         let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
 
+        #[cfg(feature = "metrics")]
+        let metrics = ProofTaskMetrics::default();
+        #[cfg(feature = "metrics")]
+        let storage_queue_depth = Arc::new(AtomicUsize::new(0));
+        #[cfg(feature = "metrics")]
+        let account_queue_depth = Arc::new(AtomicUsize::new(0));
+
         // Spawn storage workers upfront (prewarm.rs pattern)
         for worker_id in 0..storage_worker_count {
             let provider = view.provider_ro()?;
             let tx = provider.into_tx();
             let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
             let storage_work_rx = storage_work_rx.clone();
+            #[cfg(feature = "metrics")]
+            let storage_queue_depth_clone = Arc::clone(&storage_queue_depth);
+            #[cfg(feature = "metrics")]
+            let metrics_clone = metrics.clone();
 
             executor.spawn_blocking(move || {
                 debug!(target: "trie::proof_pool", worker_id, "Storage proof worker started");
 
                 // Worker loop - reuse transaction for entire block
                 loop {
-                    let ProofJob { input, result_tx } = match storage_work_rx.recv() {
+                    let job = match storage_work_rx.recv() {
                         Ok(item) => item,
                         Err(_) => break, // Channel closed, shutdown
                     };
 
-                    let result = proof_tx.storage_proof_internal(&input);
-                    let _ = result_tx.send(result);
+                    #[cfg(feature = "metrics")]
+                    {
+                        let prev = storage_queue_depth_clone.fetch_sub(1, Ordering::SeqCst);
+                        let depth = prev.saturating_sub(1);
+                        metrics_clone.record_storage_queue_depth(depth);
+                        metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
+                    }
+
+                    let result = proof_tx.storage_proof_internal(&job.input);
+                    let _ = job.result_tx.send(result);
                 }
 
                 debug!(target: "trie::proof_pool", worker_id, "Storage proof worker shutdown");
@@ -233,21 +262,32 @@ where
             let tx = provider.into_tx();
             let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id + storage_worker_count);
             let account_work_rx = account_work_rx.clone();
+            #[cfg(feature = "metrics")]
+            let account_queue_depth_clone = Arc::clone(&account_queue_depth);
+            #[cfg(feature = "metrics")]
+            let metrics_clone = metrics.clone();
 
             executor.spawn_blocking(move || {
                 debug!(target: "trie::proof_pool", worker_id, "Account proof worker started");
 
                 // Worker loop - reuse transaction for entire block
                 loop {
-                    let AccountProofJob { input } = match account_work_rx.recv() {
+                    let job = match account_work_rx.recv() {
                         Ok(item) => item,
                         Err(_) => break, /* Channel closed, shutdown
                                           * TODO: should we handle this error? */
                     };
 
-                    // TODO: When would this be executed? also fix blocking
+                    #[cfg(feature = "metrics")]
+                    {
+                        let prev = account_queue_depth_clone.fetch_sub(1, Ordering::SeqCst);
+                        let depth = prev.saturating_sub(1);
+                        metrics_clone.record_account_queue_depth(depth);
+                        metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
+                    }
+
                     // Execute account multiproof (blocks on storage proofs)
-                    execute_account_multiproof_worker(input, &proof_tx);
+                    execute_account_multiproof_worker(job.input, &proof_tx);
                 }
 
                 debug!(target: "trie::proof_pool", worker_id, "Account proof worker shutdown");
@@ -268,7 +308,11 @@ where
             tx_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "metrics")]
-            metrics: ProofTaskMetrics::default(),
+            storage_queue_depth,
+            #[cfg(feature = "metrics")]
+            account_queue_depth,
+            #[cfg(feature = "metrics")]
+            metrics,
         })
     }
 
@@ -351,12 +395,24 @@ where
                         match task {
                             ProofTaskKind::StorageProof(input, result_sender) => {
                                 // Dispatch to worker pool (non-blocking)
-                                if self
-                                    .storage_work_tx
-                                    .send(ProofJob { input, result_tx: result_sender })
-                                    .is_err()
-                                {
+                                let job = ProofJob {
+                                    input,
+                                    result_tx: result_sender,
+                                    #[cfg(feature = "metrics")]
+                                    enqueued_at: Instant::now(),
+                                };
+
+                                if self.storage_work_tx.send(job).is_err() {
                                     trace!(target: "trie::proof_task", "Storage proof worker pool shut down");
+                                } else {
+                                    #[cfg(feature = "metrics")]
+                                    {
+                                        let depth = self
+                                            .storage_queue_depth
+                                            .fetch_add(1, Ordering::SeqCst) +
+                                            1;
+                                        self.metrics.record_storage_queue_depth(depth);
+                                    }
                                 }
                             }
                             ProofTaskKind::BlindedAccountNode(_, _) => {
@@ -379,12 +435,23 @@ where
                             }
                             ProofTaskKind::AccountMultiproof(input) => {
                                 // Dispatch to account worker pool
-                                if self
-                                    .account_work_tx
-                                    .send(AccountProofJob { input: *input })
-                                    .is_err()
-                                {
+                                let job = AccountProofJob {
+                                    input: *input,
+                                    #[cfg(feature = "metrics")]
+                                    enqueued_at: Instant::now(),
+                                };
+
+                                if self.account_work_tx.send(job).is_err() {
                                     trace!(target: "trie::proof_task", "Account worker pool shut down");
+                                } else {
+                                    #[cfg(feature = "metrics")]
+                                    {
+                                        let depth = self
+                                            .account_queue_depth
+                                            .fetch_add(1, Ordering::SeqCst) +
+                                            1;
+                                        self.metrics.record_account_queue_depth(depth);
+                                    }
                                 }
                             }
                         }
@@ -401,6 +468,11 @@ where
                         // Shutdown: drop work channels, workers will exit when channels close
                         drop(self.storage_work_tx);
                         drop(self.account_work_tx);
+                        #[cfg(feature = "metrics")]
+                        {
+                            self.metrics.record_storage_queue_depth(0);
+                            self.metrics.record_account_queue_depth(0);
+                        }
                         return Ok(());
                     }
                 },
@@ -410,6 +482,11 @@ where
                     // Shutdown workers
                     drop(self.storage_work_tx);
                     drop(self.account_work_tx);
+                    #[cfg(feature = "metrics")]
+                    {
+                        self.metrics.record_storage_queue_depth(0);
+                        self.metrics.record_account_queue_depth(0);
+                    }
                     return Ok(());
                 }
             };
