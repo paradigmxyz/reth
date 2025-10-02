@@ -55,6 +55,13 @@ pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
 
+/// Type alias for proof managers tuple
+type ProofManagersResult<Factory> = ProviderResult<(
+    ProofTaskManagerHandle<FactoryTx<Factory>>,
+    ProofTaskManagerHandle<FactoryTx<Factory>>,
+    usize,
+)>;
+
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
 /// These values were determined by performing benchmarks using gradually increasing values to judge
@@ -166,6 +173,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    #[expect(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -198,7 +206,7 @@ where
 
         // Create and spawn dual proof task managers
         let (storage_handle, account_handle, max_storage_concurrency) =
-            self.create_proof_managers(&state_root_config, task_ctx, &config)?;
+            self.create_proof_managers(&state_root_config, task_ctx, config)?;
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -427,18 +435,14 @@ where
 
     /// Creates both storage and account proof task managers, reducing code duplication.
     ///
-    /// Returns a tuple of (storage_handle, account_handle, max_storage_concurrency) for use with
+    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_storage_concurrency`) for use with
     /// multiproof tasks.
     fn create_proof_managers<Factory>(
         &self,
         state_root_config: &MultiProofConfig<Factory>,
         task_ctx: ProofTaskCtx,
         config: &TreeConfig,
-    ) -> ProviderResult<(
-        ProofTaskManagerHandle<FactoryTx<Factory>>,
-        ProofTaskManagerHandle<FactoryTx<Factory>>,
-        usize,
-    )>
+    ) -> ProofManagersResult<Factory>
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {

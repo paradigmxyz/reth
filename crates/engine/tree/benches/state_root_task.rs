@@ -237,7 +237,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),
                                 &TreeConfig::default(),
-                            );
+                            ).expect("spawn failed");
 
                             let mut state_hook = handle.state_hook();
 
