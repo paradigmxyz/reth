@@ -30,7 +30,7 @@ pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 pub type StaticFileProducerWithResult<Provider> =
     (StaticFileProducer<Provider>, StaticFileProducerResult);
 
-/// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
+/// Static File producer. It's a wrapper around [`StaticFileProducerInner`] that allows to share it
 /// between threads.
 #[derive(Debug)]
 pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provider>>>);
