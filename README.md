@@ -20,7 +20,7 @@
 
 ## What is Reth?
 
-Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
+Reth (short for Rust Ethereum, [pronunciation](https://x.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
 
 ## Goals
 
@@ -43,7 +43,7 @@ More historical context below:
 
 -   We released 1.0 "production-ready" stable Reth in June 2024.
     -   Reth completed an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](./audit/sigma_prime_audit_v2.pdf).
-    -   Revm (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
+    -   Revm (the EVM used in Reth) underwent an audit with [Guido Vranken](https://x.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
 -   We released multiple iterative beta versions, up to [beta.9](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.9) on Monday June 3, 2024,the last beta release.
 -   We released [beta](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) on Monday March 4, 2024, our first breaking change to the database model, providing faster query speed, smaller database footprint, and allowing "history" to be mounted on separate drives.
 -   We shipped iterative improvements until the last alpha release on February 28, 2024, [0.1.0-alpha.21](https://github.com/paradigmxyz/reth/releases/tag/v0.1.0-alpha.21).
@@ -61,7 +61,7 @@ If you had a database produced by alpha versions of Reth, you need to drop it wi
 
 ## For Users
 
-See the [Reth documentation](https://paradigmxyz.github.io/reth) for instructions on how to install and run Reth.
+See the [Reth documentation](https://reth.rs/) for instructions on how to install and run Reth.
 
 ## For Developers
 
@@ -69,7 +69,7 @@ See the [Reth documentation](https://paradigmxyz.github.io/reth) for instruction
 
 You can use individual crates of reth in your project.
 
-The crate docs can be found [here](https://paradigmxyz.github.io/reth/docs).
+The crate docs can be found [here](https://reth.rs/docs/).
 
 For a general overview of the crates, see [Project Layout](./docs/repo/layout.md).
 
@@ -90,7 +90,7 @@ When updating this, also update:
 
 The Minimum Supported Rust Version (MSRV) of this project is [1.88.0](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/).
 
-See the docs for detailed instructions on how to [build from source](https://paradigmxyz.github.io/reth/installation/source).
+See the docs for detailed instructions on how to [build from source](https://reth.rs/installation/source/).
 
 To fully test Reth, you will need to have [Geth installed](https://geth.ethereum.org/docs/getting-started/installing-geth), but it is possible to run a subset of tests without Geth.
 
@@ -145,5 +145,5 @@ None of this would have been possible without them, so big shoutout to the teams
 
 The `NippyJar` and `Compact` encoding formats and their implementations are designed for storing and retrieving data internally. They are not hardened to safely read potentially malicious data.
 
-[book]: https://paradigmxyz.github.io/reth/
+[book]: https://reth.rs/
 [tg-url]: https://t.me/paradigm_reth
