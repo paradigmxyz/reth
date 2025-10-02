@@ -1,7 +1,8 @@
 use crate::{
     sequence::FlashBlockPendingSequence,
     worker::{BuildArgs, FlashBlockBuilder},
-    ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx, PendingFlashBlock,
+    BuildStateRx, ExecutionPayloadBaseV1, FlashBlock, FlashBlockCompleteSequenceRx,
+    PendingFlashBlock,
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
@@ -108,7 +109,7 @@ where
     }
 
     /// Returns a receiver that signals when a flashblock is being built.
-    pub fn subscribe_build_state(&self) -> crate::BuildStateRx {
+    pub fn subscribe_build_state(&self) -> BuildStateRx {
         self.build_state_tx.subscribe()
     }
 
