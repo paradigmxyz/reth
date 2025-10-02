@@ -3,13 +3,19 @@ use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
     /// Returns an [`EvmEnvFor`] for the given payload.
-    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self>;
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error>;
 
     /// Returns an [`ExecutionCtxFor`] for the given payload.
-    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self>;
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a ExecutionData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>;
 
     /// Returns an [`ExecutableTxIterator`] for the given payload.
-    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self>;
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error>;
 }
 
 /// Iterator over executable transactions.

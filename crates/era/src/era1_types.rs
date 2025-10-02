@@ -9,7 +9,7 @@ use crate::{
 };
 use alloy_primitives::BlockNumber;
 
-/// `BlockIndex` record: ['i', '2']
+/// `BlockIndex` record: ['f', '2']
 pub const BLOCK_INDEX: [u8; 2] = [0x66, 0x32];
 
 /// File content in an Era1 file
@@ -26,7 +26,7 @@ pub struct Era1Group {
     /// Accumulator is hash tree root of block headers and difficulties
     pub accumulator: Accumulator,
 
-    /// Block index, optional, omitted for genesis era
+    /// Block index, required
     pub block_index: BlockIndex,
 }
 

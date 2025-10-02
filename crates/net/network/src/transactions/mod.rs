@@ -1338,7 +1338,7 @@ where
 
         // mark the transactions as received
         self.transaction_fetcher
-            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.tx_hash()));
+            .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
         // If we received the transactions as the response to our `GetPooledTransactions``

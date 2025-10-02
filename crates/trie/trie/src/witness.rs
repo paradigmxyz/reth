@@ -84,7 +84,7 @@ impl<T, H> TrieWitness<T, H> {
         self
     }
 
-    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
     /// This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {

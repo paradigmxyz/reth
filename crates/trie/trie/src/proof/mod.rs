@@ -121,7 +121,7 @@ where
             .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
-        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        // Storage multiproofs for non-empty tries will be overwritten if necessary.
         let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);

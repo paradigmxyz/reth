@@ -256,7 +256,7 @@ macro_rules! impl_compression_fixed_compact {
                 }
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(self, buf);
                 }
             }
 

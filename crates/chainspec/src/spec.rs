@@ -1244,7 +1244,7 @@ Post-merge hard forks (timestamp based):
             Head { number: 101, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
-            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_head:#?} ",
         );
 
         // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
@@ -1273,7 +1273,7 @@ Post-merge hard forks (timestamp based):
             Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
         assert_eq!(
             fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
-            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
+            "expected satisfy() to return {fork_cond_ttd_no_new_spec_expected:#?}, but got {fork_cond_ttd_no_new_spec:#?} ",
         );
     }
 

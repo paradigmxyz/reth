@@ -35,8 +35,8 @@ pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
 
-    /// Seek an entry greater or equal to the given key and position the cursor there.
-    /// Returns the first entry with the key greater or equal to the sought key.
+    /// Seek an entry greater than or equal to the given key and position the cursor there.
+    /// Returns the first entry with the key greater than or equal to the sought key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
 
     /// Move the cursor to the next entry and return it.

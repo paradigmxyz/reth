@@ -230,7 +230,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
             BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
         }
     }
@@ -246,7 +246,10 @@ where
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config.tx_iterator_for_payload(payload).map(|res| res.map(Either::Left)),
+                self.evm_config
+                    .tx_iterator_for_payload(payload)
+                    .map_err(NewPayloadError::other)?
+                    .map(|res| res.map(Either::Left)),
             )),
             BlockOrPayload::Block(block) => {
                 let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
@@ -265,7 +268,7 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)),
+            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
             BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
         }
     }

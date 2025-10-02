@@ -164,15 +164,21 @@ impl ConfigureEvm for CustomEvmConfig {
 }
 
 impl ConfigureEngineEvm<ExecutionData> for CustomEvmConfig {
-    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env_for_payload(payload)
     }
 
-    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self> {
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a ExecutionData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         self.inner.context_for_payload(payload)
     }
 
-    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         self.inner.tx_iterator_for_payload(payload)
     }
 }
