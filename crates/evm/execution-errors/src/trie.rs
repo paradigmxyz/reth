@@ -171,7 +171,7 @@ pub enum SparseTrieErrorKind {
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
     /// Node not found in provider during revealing.
-    #[error("node {path:?} not found in provider during removal")]
+    #[error("node {path:?} not found in provider during revealing")]
     NodeNotFoundInProvider {
         /// Path to the missing node.
         path: Nibbles,

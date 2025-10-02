@@ -20,7 +20,7 @@ use tracing::debug;
 const DEFAULT_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS * 2;
 
 /// Number of blocks to retain persisted trie updates for OP Stack chains
-/// OP Stack chains only need `EPOCH_BLOCKS` as reorgs are relevant only when
+/// OP Stack chains only need `EPOCH_SLOTS` as reorgs are relevant only when
 /// op-node reorgs to the same chain twice
 const OPSTACK_PERSISTED_TRIE_UPDATES_RETENTION: u64 = EPOCH_SLOTS;
 
@@ -348,11 +348,11 @@ impl<N: NodePrimitives> TreeState<N> {
         }
     }
 
-    /// Determines if the second block is a direct descendant of the first block.
+    /// Determines if the second block is a descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
     pub(crate) fn is_descendant(&self, first: BlockNumHash, second: BlockWithParent) -> bool {
-        // If the second block's parent is the first block's hash, then it is a direct descendant
+        // If the second block's parent is the first block's hash, then it is a direct child
         // and we can return early.
         if second.parent == first.hash {
             return true
