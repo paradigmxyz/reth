@@ -57,7 +57,7 @@ where
         Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
     }
 
-    /// Prunes block data before the given block hash according to the configured prune
+    /// Prunes block data before the given block number according to the configured prune
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "engine::persistence", ?block_num, "Running pruner");
@@ -271,7 +271,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
-    /// Persists the finalized block number on disk.
+    /// Persists the safe block number on disk.
     pub fn save_safe_block_number(
         &self,
         safe_block: u64,

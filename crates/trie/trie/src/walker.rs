@@ -28,7 +28,7 @@ pub struct TrieWalker<C, K = AddedRemovedKeys> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
-    /// Provided when it's necessary to not skip certain nodes during proof generation.
+    /// Provided when it's necessary not to skip certain nodes during proof generation.
     /// Specifically we don't skip certain branch nodes even when they are not in the `PrefixSet`,
     /// when they might be required to support leaf removal.
     added_removed_keys: Option<K>,
@@ -185,7 +185,7 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
                 target: "trie::walker",
                 ?key_is_only_nonremoved_child,
                 full_key=?node.full_key(),
-                "Checked for only nonremoved child",
+                "Checked for only non-removed child",
             );
 
             !self.changes.contains(node.full_key()) &&
