@@ -443,6 +443,7 @@ where
         Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
         // Calculate worker counts and concurrency limits
+        // TODO: We gottta experiment with this + metrics
         let storage_workers = config.storage_proof_workers();
         let account_workers = config.account_proof_workers();
         let max_storage_concurrency = config.max_proof_task_concurrency() as usize;
