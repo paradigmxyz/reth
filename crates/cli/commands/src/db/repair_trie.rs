@@ -120,7 +120,7 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     // Get a read-write database provider
     let mut provider_rw = provider_factory.provider_rw()?;
 
-    // Check that a pipeline sync isn't in progress
+    // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
 
     // Create cursors for making modifications with
