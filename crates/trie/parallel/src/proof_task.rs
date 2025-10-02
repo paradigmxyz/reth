@@ -18,11 +18,11 @@ use reth_provider::{
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::TriePrefixSetsMut,
+    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
     proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
-    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -69,7 +69,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
     /// Proof tasks pending execution (blinded nodes only)
-    pending_tasks: VecDeque<ProofTaskKind>,
+    pending_tasks: VecDeque<ProofTaskKind<FactoryTx<Factory>>>,
     /// The underlying handle from which to spawn proof tasks
     executor: Handle,
     /// The proof task transactions for blinded node requests
@@ -88,7 +88,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     metrics: ProofTaskMetrics,
 }
 
-impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory>
+impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
@@ -161,7 +161,7 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
     /// Inserts the task into the pending tasks queue.
-    pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
+    pub fn queue_proof_task(&mut self, task: ProofTaskKind<FactoryTx<Factory>>) {
         self.pending_tasks.push_back(task);
     }
 
@@ -208,6 +208,12 @@ where
             ProofTaskKind::BlindedStorageNode(account, path, sender) => {
                 proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
             }
+            ProofTaskKind::AccountMultiproof(_input) => {
+                // Phase 1b: Account multiproof logic not yet activated
+                trace!(target: "trie::proof_task", "AccountMultiproof task received but not yet implemented");
+                // Return transaction to pool to prevent leak
+                let _ = tx_sender.send(ProofTaskMessage::Transaction(proof_task_tx));
+            }
         });
 
         Ok(())
@@ -247,6 +253,10 @@ where
                                 }
                                 // Queue blinded node task for spawn-per-task
                                 self.queue_proof_task(task);
+                            }
+                            ProofTaskKind::AccountMultiproof(_input) => {
+                                // Phase 1b: Account multiproof logic not yet activated
+                                trace!(target: "trie::proof_task", "AccountMultiproof task received in run loop but not yet implemented");
                             }
                         }
                     }
@@ -542,6 +552,44 @@ impl StorageProofInput {
     }
 }
 
+/// This represents an input for an account multiproof.
+#[derive(Debug)]
+pub struct AccountMultiproofInput<Tx> {
+    /// The proof targets (accounts and their storage slots)
+    pub targets: MultiProofTargets,
+    /// The frozen prefix sets for account and storage tries
+    pub prefix_sets: TriePrefixSets,
+    /// Whether to collect branch node masks
+    pub collect_branch_node_masks: bool,
+    /// Context for retaining extra proofs for added/removed keys
+    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    /// Handle to the storage proof task manager for coordinating storage proofs
+    pub storage_proof_handle: ProofTaskManagerHandle<Tx>,
+    /// Sender for returning the multiproof result
+    pub result_sender: Sender<Result<DecodedMultiProof, ParallelStateRootError>>,
+}
+
+impl<Tx> AccountMultiproofInput<Tx> {
+    /// Creates a new [`AccountMultiproofInput`] with the given parameters.
+    pub const fn new(
+        targets: MultiProofTargets,
+        prefix_sets: TriePrefixSets,
+        collect_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        storage_proof_handle: ProofTaskManagerHandle<Tx>,
+        result_sender: Sender<Result<DecodedMultiProof, ParallelStateRootError>>,
+    ) -> Self {
+        Self {
+            targets,
+            prefix_sets,
+            collect_branch_node_masks,
+            multi_added_removed_keys,
+            storage_proof_handle,
+            result_sender,
+        }
+    }
+}
+
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
 #[derive(Debug, Clone)]
 pub struct ProofTaskCtx {
@@ -571,7 +619,7 @@ impl ProofTaskCtx {
 #[derive(Debug)]
 pub enum ProofTaskMessage<Tx> {
     /// A request to queue a proof task.
-    QueueTask(ProofTaskKind),
+    QueueTask(ProofTaskKind<Tx>),
     /// A returned database transaction.
     Transaction(ProofTaskTx<Tx>),
     /// A request to terminate the proof task manager.
@@ -583,13 +631,15 @@ pub enum ProofTaskMessage<Tx> {
 /// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
 /// specifies the type of proof task to be executed.
 #[derive(Debug)]
-pub enum ProofTaskKind {
+pub enum ProofTaskKind<Tx = ()> {
     /// A storage proof request.
     StorageProof(StorageProofInput, Sender<StorageProofResult>),
     /// A blinded account node request.
     BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
     /// A blinded storage node request.
     BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
+    /// An account multiproof request (Phase 1b - not yet activated)
+    AccountMultiproof(Box<AccountMultiproofInput<Tx>>),
 }
 
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
@@ -610,7 +660,10 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+    pub fn queue_task(
+        &self,
+        task: ProofTaskKind<Tx>,
+    ) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
         self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
@@ -683,5 +736,111 @@ impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
         }
 
         rx.recv().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{map::B256Set, B256};
+    use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
+    use reth_storage_errors::provider::{ConsistentViewError, ProviderError};
+    use std::sync::{mpsc, Arc};
+    use tokio::runtime::Runtime;
+
+    #[derive(Clone)]
+    struct CountingFactory<F> {
+        inner: F,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl<F> CountingFactory<F> {
+        fn new(inner: F, calls: Arc<AtomicUsize>) -> Self {
+            Self { inner, calls }
+        }
+    }
+
+    impl<F> DatabaseProviderFactory for CountingFactory<F>
+    where
+        F: DatabaseProviderFactory,
+    {
+        type DB = F::DB;
+        type Provider = F::Provider;
+        type ProviderRW = F::ProviderRW;
+
+        fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.database_provider_ro()
+        }
+
+        fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+            self.inner.database_provider_rw()
+        }
+    }
+
+    fn default_task_ctx() -> ProofTaskCtx {
+        ProofTaskCtx::new(
+            Arc::new(TrieUpdatesSorted::default()),
+            Arc::new(HashedPostStateSorted::default()),
+            Arc::new(TriePrefixSetsMut::default()),
+        )
+    }
+
+    #[test]
+    fn proof_task_manager_new_propagates_consistent_view_error() {
+        let factory = create_test_provider_factory();
+        let view = ConsistentDbView::new(factory.clone(), Some((B256::repeat_byte(0x11), 0)));
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx = default_task_ctx();
+
+        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 1).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ProviderError::ConsistentView(ref e) if matches!(**e, ConsistentViewError::Reorged { .. })
+        ));
+    }
+
+    #[test]
+    fn proof_task_manager_spawns_requested_workers_and_processes_tasks() {
+        let inner_factory = create_test_provider_factory();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counting_factory = CountingFactory::new(inner_factory, Arc::clone(&calls));
+        let view = ConsistentDbView::new(counting_factory.clone(), None);
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx = default_task_ctx();
+        let num_workers = 2usize;
+        let manager =
+            ProofTaskManager::new(rt.handle().clone(), view, task_ctx, num_workers, 4).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), num_workers);
+
+        let handle = manager.handle();
+        let join_handle = rt.spawn_blocking(move || manager.run());
+
+        let prefix_set = PrefixSetMut::default().freeze();
+        let mut receivers = Vec::new();
+        for _ in 0..8 {
+            let input = StorageProofInput::new(
+                B256::ZERO,
+                prefix_set.clone(),
+                B256Set::default(),
+                false,
+                None,
+            );
+            let (sender, receiver) = mpsc::channel();
+            handle.queue_task(ProofTaskKind::StorageProof(input, sender)).unwrap();
+            receivers.push(receiver);
+        }
+
+        for receiver in receivers {
+            // We only assert that a result (Ok or Err) arrives for each queued task.
+            let _ = receiver.recv().unwrap();
+        }
+
+        drop(handle);
+        rt.block_on(join_handle).unwrap().unwrap();
     }
 }
