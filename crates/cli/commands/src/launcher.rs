@@ -66,6 +66,12 @@ impl<F> FnLauncher<F> {
     }
 }
 
+impl<F> fmt::Debug for FnLauncher<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FnLauncher").field("func", &"<function>").finish()
+    }
+}
+
 impl<C, Ext, F> Launcher<C, Ext> for FnLauncher<F>
 where
     C: ChainSpecParser,

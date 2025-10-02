@@ -2381,7 +2381,7 @@
                     },
                     "disableTextWrap": false,
                     "editorMode": "code",
-                    "expr": "reth_network_hashes_inflight_transaction_requests{$instance_label=\"$instance\"}",
+                    "expr": "reth_network_inflight_transaction_requests{$instance_label=\"$instance\"}",
                     "fullMetaSearch": false,
                     "hide": false,
                     "includeNullMetadata": true,

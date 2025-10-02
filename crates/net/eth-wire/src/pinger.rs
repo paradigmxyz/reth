@@ -1,5 +1,6 @@
 use crate::errors::PingerError;
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -77,7 +78,7 @@ impl Pinger {
                 }
             }
             PingState::WaitingForPong => {
-                if self.timeout_timer.is_elapsed() {
+                if self.timeout_timer.as_mut().poll(cx).is_ready() {
                     self.state = PingState::TimedOut;
                     return Poll::Ready(Ok(PingerEvent::Timeout))
                 }

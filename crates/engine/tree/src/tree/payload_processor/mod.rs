@@ -260,7 +260,7 @@ where
         }
     }
 
-    /// Spawn cache prewarming exclusively.
+    /// Spawns a task that exclusively handles cache prewarming for transaction execution.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
     pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(

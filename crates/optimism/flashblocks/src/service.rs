@@ -27,6 +27,8 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
+pub(crate) const FB_STATE_ROOT_FROM_INDEX: usize = 9;
+
 /// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
@@ -53,6 +55,8 @@ pub struct FlashBlockService<
     build_state_tx: watch::Sender<bool>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
+    /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
+    compute_state_root: bool,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -88,7 +92,14 @@ where
             cached_state: None,
             build_state_tx,
             metrics: FlashBlockServiceMetrics::default(),
+            compute_state_root: false,
         }
+    }
+
+    /// Enable state root calculation from flashblock
+    pub const fn compute_state_root(mut self, enable_state_root: bool) -> Self {
+        self.compute_state_root = enable_state_root;
+        self
     }
 
     /// Returns a subscriber to the flashblock sequence.
@@ -148,12 +159,17 @@ where
             return None
         };
 
+        // Check if state root must be computed
+        let compute_state_root =
+            self.compute_state_root && self.blocks.index() >= Some(FB_STATE_ROOT_FROM_INDEX as u64);
+
         Some(BuildArgs {
             base,
             transactions: self.blocks.ready_transactions().collect::<Vec<_>>(),
             cached_state: self.cached_state.take(),
             last_flashblock_index: last_flashblock.index,
             last_flashblock_hash: last_flashblock.diff.block_hash,
+            compute_state_root,
         })
     }
 
@@ -221,6 +237,9 @@ where
             if let Some((now, result)) = result {
                 match result {
                     Ok(Some((new_pending, cached_reads))) => {
+                        // update state root of the current sequence
+                        this.blocks.set_state_root(new_pending.computed_state_root());
+
                         // built a new pending block
                         this.current = Some(new_pending.clone());
                         // cache reads

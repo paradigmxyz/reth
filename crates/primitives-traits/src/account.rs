@@ -1,3 +1,4 @@
+use crate::InMemorySize;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
@@ -85,6 +86,12 @@ impl Account {
 impl From<revm_state::Account> for Account {
     fn from(value: revm_state::Account) -> Self {
         Self::from_revm_account(&value)
+    }
+}
+
+impl InMemorySize for Account {
+    fn size(&self) -> usize {
+        size_of::<Self>()
     }
 }
 
