@@ -105,11 +105,30 @@ where
             TrieElement::Leaf(hashed_address, account) => {
                 // Fetch storage proof on-demand (blocks if not yet ready)
                 let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
-                    Some(receiver) => match receiver.recv() {
-                        Ok(Ok(proof)) => proof,
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => return Err(storage_channel_closed_error(&hashed_address)),
-                    },
+                    Some(receiver) => {
+                        // Try non-blocking receive first to track if proof was ready
+                        match receiver.try_recv() {
+                            Ok(Ok(proof)) => {
+                                tracker.inc_storage_proof_immediate();
+                                proof
+                            }
+                            Ok(Err(e)) => return Err(e),
+                            Err(crossbeam_channel::TryRecvError::Empty) => {
+                                // Proof not ready yet, block and wait
+                                tracker.inc_storage_proof_blocked();
+                                match receiver.recv() {
+                                    Ok(Ok(proof)) => proof,
+                                    Ok(Err(e)) => return Err(e),
+                                    Err(_) => {
+                                        return Err(storage_channel_closed_error(&hashed_address))
+                                    }
+                                }
+                            }
+                            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                                return Err(storage_channel_closed_error(&hashed_address))
+                            }
+                        }
+                    }
                     // Since we do not store all intermediate nodes in the database, there might
                     // be a possibility of re-adding a non-modified leaf to the hash builder.
                     None => {
@@ -410,6 +429,90 @@ where
         self.metrics.record(stats);
 
         Ok(multiproof)
+    }
+
+    /// Generate a state multiproof according to specified targets, returning stats.
+    ///
+    /// This is identical to [`Self::decoded_multiproof`] but also returns the trie statistics
+    /// for analysis and testing.
+    pub fn decoded_multiproof_with_stats(
+        self,
+        targets: MultiProofTargets,
+    ) -> Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError> {
+        // Extend prefix sets with targets
+        let mut prefix_sets = (*self.prefix_sets).clone();
+        prefix_sets.extend(TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
+            storage_prefix_sets: targets
+                .iter()
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
+                .map(|(hashed_address, slots)| {
+                    (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
+                })
+                .collect(),
+            destroyed_accounts: Default::default(),
+        });
+
+        // Freeze prefix sets for storage root targets
+        let frozen_prefix_sets = prefix_sets.freeze();
+
+        let storage_root_targets = StorageRootTargets::new(
+            frozen_prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
+            frozen_prefix_sets.storage_prefix_sets.clone(),
+        );
+        let storage_root_targets_len = storage_root_targets.len();
+
+        trace!(
+            target: "trie::parallel_proof",
+            total_targets = storage_root_targets_len,
+            "Starting parallel proof generation"
+        );
+
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        // this way we can lazily await the outcome when we iterate over the map
+        let mut storage_proof_receivers: B256Map<
+            crossbeam_channel::Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
+        > = B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+
+        for (hashed_address, prefix_set) in
+            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        {
+            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
+            let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
+
+            // store the receiver for that result with the hashed address so we can await this in
+            // place when we iterate over the trie
+            storage_proof_receivers.insert(hashed_address, receiver);
+        }
+
+        let provider_ro = self.view.provider_ro()?;
+        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+            &self.nodes_sorted,
+        );
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+            &self.state_sorted,
+        );
+
+        // Build account multiproof with on-demand storage proof fetching
+        let (multiproof, stats) = build_account_multiproof_with_storage(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            targets,
+            frozen_prefix_sets,
+            storage_proof_receivers, // ← Pass receivers directly for on-demand fetching
+            self.collect_branch_node_masks,
+            self.multi_added_removed_keys,
+        )?;
+
+        #[cfg(feature = "metrics")]
+        self.metrics.record(stats);
+
+        Ok((multiproof, stats))
     }
 }
 
@@ -745,6 +848,110 @@ mod tests {
 
         // Results should be identical regardless of completion order
         assert_eq!(parallel_result, sequential_result_decoded);
+
+        drop(proof_task_handle);
+        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
+    }
+
+    /// Test that storage proof metrics are properly tracked
+    #[test]
+    fn storage_proof_metrics_tracking() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        // Create state with multiple accounts having storage
+        let state = (0..10)
+            .map(|_| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // All accounts have storage to ensure we get metrics
+                let storage: HashMap<B256, U256, DefaultHashBuilder> = (0..5)
+                    .map(|_| {
+                        (
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        )
+                    })
+                    .collect();
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Create targets for all accounts
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots = storage.iter().take(3).map(|(slot, _)| *slot).collect();
+            targets.insert(hashed_address, target_slots);
+        }
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            2, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+        let proof_task_handle = proof_task.handle();
+        let join_handle = rt.spawn_blocking(move || proof_task.run());
+
+        let (result, stats) = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof_with_stats(targets.clone())
+        .unwrap();
+
+        // Verify we got a valid result
+        assert!(!result.account_subtree.is_empty());
+
+        // Verify metrics are tracked
+        let total_proofs = stats.storage_proofs_immediate() + stats.storage_proofs_blocked();
+        assert_eq!(total_proofs, 10, "Should track all 10 storage proofs (immediate + blocked)");
+
+        // At least one category should have proofs
+        assert!(
+            stats.storage_proofs_immediate() > 0 || stats.storage_proofs_blocked() > 0,
+            "Should have at least some storage proof activity"
+        );
+
+        // Percentage should be valid (0-100)
+        let percentage = stats.storage_proofs_immediate_percentage();
+        assert!(
+            (0.0..=100.0).contains(&percentage),
+            "Percentage should be between 0-100, got {percentage}"
+        );
 
         drop(proof_task_handle);
         rt.block_on(join_handle).unwrap().expect("proof task should succeed");

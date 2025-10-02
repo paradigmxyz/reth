@@ -44,7 +44,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
@@ -63,19 +63,16 @@ fn storage_manager_closed_error() -> ParallelStateRootError {
 /// This function coordinates with the storage manager to compute storage proofs for all
 /// accounts in the multiproof, then assembles the final account multiproof by fetching
 /// storage proofs on-demand during account trie traversal.
+///
+/// Returns the multiproof result. The caller is responsible for sending via `result_sender`.
 fn execute_account_multiproof_worker<Tx: DbTx>(
-    input: AccountMultiproofInput<Tx>,
+    targets: MultiProofTargets,
+    prefix_sets: TriePrefixSets,
+    collect_branch_node_masks: bool,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    storage_proof_handle: ProofTaskManagerHandle<Tx>,
     proof_tx: &ProofTaskTx<Tx>,
-) {
-    let AccountMultiproofInput {
-        targets,
-        prefix_sets,
-        collect_branch_node_masks,
-        multi_added_removed_keys,
-        storage_proof_handle,
-        result_sender,
-    } = input;
-
+) -> Result<DecodedMultiProof, ParallelStateRootError> {
     // Queue ALL storage proof requests to storage manager
     let mut storage_receivers: B256Map<
         CrossbeamReceiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
@@ -104,8 +101,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
                 ?address,
                 "Storage manager closed, cannot queue proof"
             );
-            let _ = result_sender.send(Err(storage_manager_closed_error()));
-            return;
+            return Err(storage_manager_closed_error());
         }
 
         storage_receivers.insert(*address, receiver);
@@ -122,14 +118,10 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         storage_receivers, // ← Pass receivers directly for on-demand fetching
         collect_branch_node_masks,
         multi_added_removed_keys,
-    );
+    )?;
 
-    if result_sender.send(result.map(|(multiproof, _stats)| multiproof)).is_err() {
-        warn!(
-            target: "trie::proof_task",
-            "Account multiproof result discarded - receiver dropped"
-        );
-    }
+    // Return just the multiproof (discard stats - caller doesn't need them)
+    Ok(result.0)
 }
 
 /// Proof job dispatched to the storage worker pool.
@@ -199,6 +191,9 @@ where
     /// multiproof workers upfront that reuse database transactions for the entire block lifetime
     /// (prewarm.rs pattern).
     ///
+    /// Worker counts are clamped to at least 1 to prevent deadlocks. Configuring zero workers
+    /// for either pool would cause queued work to never be processed.
+    ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
         executor: Handle,
@@ -208,6 +203,10 @@ where
         account_worker_count: usize,
         max_concurrency: usize,
     ) -> ProviderResult<Self> {
+        // Clamp worker counts to at least 1 to prevent deadlocks
+        let storage_worker_count = storage_worker_count.max(1);
+        let account_worker_count = account_worker_count.max(1);
+
         let (tx_sender, proof_task_rx) = channel();
         let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
         let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
@@ -250,8 +249,29 @@ where
                         metrics_clone.record_storage_wait_time(job.enqueued_at.elapsed());
                     }
 
-                    let result = proof_tx.storage_proof_internal(&job.input);
-                    let _ = job.result_tx.send(result);
+                    // Wrap proof computation in panic recovery to prevent zombie workers
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        proof_tx.storage_proof_internal(&job.input)
+                    }));
+
+                    let final_result = match result {
+                        Ok(Ok(proof)) => Ok(proof),
+                        Ok(Err(e)) => Err(e),
+                        Err(_panic_info) => {
+                            error!(
+                                target: "trie::proof_pool",
+                                worker_id,
+                                hashed_address = ?job.input.hashed_address,
+                                "Storage proof task panicked, converting to error"
+                            );
+                            Err(ParallelStateRootError::Other(format!(
+                                "storage proof task panicked for {}",
+                                job.input.hashed_address
+                            )))
+                        }
+                    };
+
+                    let _ = job.result_tx.send(final_result);
                 }
 
                 debug!(target: "trie::proof_pool", worker_id, "Storage proof worker shutdown");
@@ -290,8 +310,51 @@ where
                         metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
                     }
 
-                    // Execute account multiproof (blocks on storage proofs)
-                    execute_account_multiproof_worker(job.input, &proof_tx);
+                    // Destructure input to extract result_sender and pass fields to worker
+                    let AccountMultiproofInput {
+                        targets,
+                        prefix_sets,
+                        collect_branch_node_masks,
+                        multi_added_removed_keys,
+                        storage_proof_handle,
+                        result_sender,
+                    } = job.input;
+
+                    // Wrap account multiproof execution in panic recovery
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        execute_account_multiproof_worker(
+                            targets,
+                            prefix_sets,
+                            collect_branch_node_masks,
+                            multi_added_removed_keys,
+                            storage_proof_handle,
+                            &proof_tx,
+                        )
+                    }));
+
+                    // Convert panic to error and send result
+                    let final_result = match result {
+                        Ok(Ok(multiproof)) => Ok(multiproof),
+                        Ok(Err(e)) => Err(e),
+                        Err(_panic_info) => {
+                            error!(
+                                target: "trie::proof_pool",
+                                worker_id,
+                                "Account multiproof task panicked - converting to error"
+                            );
+                            Err(ParallelStateRootError::Other(
+                                "account multiproof task panicked".into(),
+                            ))
+                        }
+                    };
+
+                    if result_sender.send(final_result).is_err() {
+                        warn!(
+                            target: "trie::proof_pool",
+                            worker_id,
+                            "Account multiproof result discarded - receiver dropped"
+                        );
+                    }
                 }
 
                 debug!(target: "trie::proof_pool", worker_id, "Account proof worker shutdown");
