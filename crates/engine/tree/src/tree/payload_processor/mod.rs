@@ -205,12 +205,12 @@ where
         );
 
         // Create and spawn dual proof task managers
-        let (storage_handle, account_handle, max_storage_concurrency) =
+        let (storage_handle, account_handle, max_proof_task_concurrency) =
             self.create_proof_managers(&state_root_config, task_ctx, config)?;
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_storage_concurrency / 2;
+        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
@@ -435,8 +435,8 @@ where
 
     /// Creates both storage and account proof task managers, reducing code duplication.
     ///
-    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_storage_concurrency`) for use
-    /// with multiproof tasks.
+    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_proof_task_concurrency`) for
+    /// use with multiproof tasks.
     fn create_proof_managers<Factory>(
         &self,
         state_root_config: &MultiProofConfig<Factory>,
@@ -448,10 +448,23 @@ where
     {
         // Calculate worker counts and concurrency limits
         // TODO: We gottta experiment with this + metrics
-        let storage_workers = config.storage_proof_workers();
-        let account_workers = config.account_proof_workers();
-        let max_storage_concurrency = config.max_proof_task_concurrency() as usize;
-        let max_account_concurrency = account_workers; // Use worker count as concurrency limit
+        // Clamp to at least 1 to avoid division by zero
+        let storage_workers = config.storage_proof_workers().max(1);
+        let account_workers = config.account_proof_workers().max(1);
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
+
+        // Split max_proof_task_concurrency proportionally based on worker ratio 3:1
+        // (storage:account)
+        let total_workers = storage_workers + account_workers;
+        let mut storage_concurrency =
+            (max_proof_task_concurrency * storage_workers) / total_workers;
+        let mut account_concurrency =
+            (max_proof_task_concurrency * account_workers) / total_workers;
+
+        // Ensure each pool can at least cover its workers (for blinded node transactions)
+        // Otherwise we'd deadlock waiting for concurrency that can never be freed
+        storage_concurrency = storage_concurrency.max(storage_workers);
+        account_concurrency = account_concurrency.max(account_workers);
 
         // Create storage proof manager
         let storage_proof_manager = ProofTaskManager::new(
@@ -460,7 +473,7 @@ where
             task_ctx.clone(),
             storage_workers,
             0, // account_worker_count = 0 (no account workers)
-            max_storage_concurrency,
+            storage_concurrency,
         )?;
 
         // Create account proof manager
@@ -470,7 +483,7 @@ where
             task_ctx,
             0,               // storage_worker_count = 0 (no storage workers)
             account_workers, // account_worker_count
-            max_account_concurrency,
+            account_concurrency,
         )?;
 
         let storage_handle = storage_proof_manager.handle();
@@ -496,7 +509,7 @@ where
             }
         });
 
-        Ok((storage_handle, account_handle, max_storage_concurrency))
+        Ok((storage_handle, account_handle, max_proof_task_concurrency))
     }
 }
 

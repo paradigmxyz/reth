@@ -191,8 +191,9 @@ where
     /// multiproof workers upfront that reuse database transactions for the entire block lifetime
     /// (prewarm.rs pattern).
     ///
-    /// Worker counts are clamped to at least 1 to prevent deadlocks. Configuring zero workers
-    /// for either pool would cause queued work to never be processed.
+    /// Worker counts are clamped to at least 1 to ensure the manager always has workers available.
+    /// Note: In the dual-manager architecture, each manager spawns workers for both types even if
+    /// only one type is used (e.g., storage-only manager still spawns 1 account worker).
     ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
@@ -203,7 +204,7 @@ where
         account_worker_count: usize,
         max_concurrency: usize,
     ) -> ProviderResult<Self> {
-        // Clamp worker counts to at least 1 to prevent deadlocks
+        // Clamp worker counts to at least 1
         let storage_worker_count = storage_worker_count.max(1);
         let account_worker_count = account_worker_count.max(1);
 
@@ -1149,7 +1150,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
         let storage_workers = 1usize;
-        let account_workers = 0usize; // Gets clamped to 1
+        let account_workers = 0usize; // Gets clamped to 1 inside ProofTaskManager::new
         let manager = ProofTaskManager::new(
             rt.handle().clone(),
             view,
@@ -1160,7 +1161,7 @@ mod tests {
         )
         .unwrap();
 
-        // Worker counts are clamped to min 1, so 0 account workers becomes 1
+        // Worker counts are clamped to min 1 inside ProofTaskManager::new
         // Expect 2 transactions: 1 for storage worker + 1 for account worker (clamped from 0)
         let initial_calls = calls.load(Ordering::SeqCst);
         assert_eq!(initial_calls, 2);
