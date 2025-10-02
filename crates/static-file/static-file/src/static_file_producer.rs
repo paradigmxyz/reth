@@ -289,6 +289,7 @@ mod tests {
             .expect("get static file writer for headers");
         static_file_writer.prune_headers(blocks.len() as u64).unwrap();
         static_file_writer.commit().expect("prune headers");
+        drop(static_file_writer);
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         for block in &blocks {
