@@ -1024,11 +1024,20 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
-        let num_workers = 2usize;
-        let manager =
-            ProofTaskManager::new(rt.handle().clone(), view, task_ctx, num_workers, 0, 4).unwrap();
+        let storage_workers = 2usize;
+        let account_workers = 1usize;
+        let manager = ProofTaskManager::new(
+            rt.handle().clone(),
+            view,
+            task_ctx,
+            storage_workers,
+            account_workers,
+            4,
+        )
+        .unwrap();
 
-        assert_eq!(calls.load(Ordering::SeqCst), num_workers);
+        let expected_total_workers = storage_workers + account_workers;
+        assert_eq!(calls.load(Ordering::SeqCst), expected_total_workers);
 
         let handle = manager.handle();
         let join_handle = rt.spawn_blocking(move || manager.run());
@@ -1050,6 +1059,103 @@ mod tests {
 
         for receiver in receivers {
             // We only assert that a result (Ok or Err) arrives for each queued task.
+            let _ = receiver.recv().unwrap();
+        }
+
+        drop(handle);
+        rt.block_on(join_handle).unwrap().unwrap();
+    }
+
+    /// Tests that storage workers reuse the same database transaction across multiple proofs,
+    /// validating the core Phase 1a optimization that eliminates per-proof transaction overhead.
+    #[test]
+    fn storage_worker_reuses_transaction_across_multiple_proofs() {
+        let inner_factory = create_test_provider_factory();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counting_factory = CountingFactory::new(inner_factory, Arc::clone(&calls));
+        let view = ConsistentDbView::new(counting_factory, None);
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx = default_task_ctx();
+        let storage_workers = 1usize;
+        let account_workers = 0usize;
+        let manager = ProofTaskManager::new(
+            rt.handle().clone(),
+            view,
+            task_ctx,
+            storage_workers,
+            account_workers,
+            4,
+        )
+        .unwrap();
+
+        // Expect 1 transaction: 1 for storage worker (0 account workers = no account workers)
+        let initial_calls = calls.load(Ordering::SeqCst);
+        assert_eq!(initial_calls, 1);
+
+        let handle = manager.handle();
+        let join_handle = rt.spawn_blocking(move || manager.run());
+
+        // Queue 10 storage proofs - all should use same transaction
+        let prefix_set = PrefixSetMut::default().freeze();
+        let mut receivers = Vec::new();
+        for _ in 0..10 {
+            let input = StorageProofInput::new(
+                B256::ZERO,
+                prefix_set.clone(),
+                Arc::new(B256Set::default()),
+                false,
+                None,
+            );
+            let (sender, receiver) = crossbeam_channel::unbounded();
+            handle.queue_task(ProofTaskKind::StorageProof(input, sender)).unwrap();
+            receivers.push(receiver);
+        }
+
+        for receiver in receivers {
+            let _ = receiver.recv().unwrap();
+        }
+
+        // Transaction count should still be 1 (worker reuses its transaction)
+        assert_eq!(calls.load(Ordering::SeqCst), initial_calls);
+
+        drop(handle);
+        rt.block_on(join_handle).unwrap().unwrap();
+    }
+
+    /// Tests that the dual manager architecture handles heavy concurrent load without deadlocks,
+    /// validating unbounded channel backpressure behavior under stress.
+    #[test]
+    fn handles_backpressure_with_many_concurrent_storage_proofs() {
+        let inner_factory = create_test_provider_factory();
+        let view = ConsistentDbView::new(inner_factory, None);
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx = default_task_ctx();
+        // 2 storage workers + 0 account workers = 2 total workers
+        let manager = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 2, 0, 4).unwrap();
+
+        let handle = manager.handle();
+        let join_handle = rt.spawn_blocking(move || manager.run());
+
+        // Queue 50 storage proofs concurrently
+        let prefix_set = PrefixSetMut::default().freeze();
+        let mut receivers = Vec::new();
+        for _ in 0..50 {
+            let input = StorageProofInput::new(
+                B256::ZERO,
+                prefix_set.clone(),
+                Arc::new(B256Set::default()),
+                false,
+                None,
+            );
+            let (sender, receiver) = crossbeam_channel::unbounded();
+            handle.queue_task(ProofTaskKind::StorageProof(input, sender)).unwrap();
+            receivers.push(receiver);
+        }
+
+        // All tasks complete without deadlock
+        for receiver in receivers {
             let _ = receiver.recv().unwrap();
         }
 

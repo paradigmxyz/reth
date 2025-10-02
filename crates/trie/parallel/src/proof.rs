@@ -107,7 +107,7 @@ where
                 let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
                     Some(receiver) => {
                         // Try non-blocking receive first to check if proof is already available
-                        
+
                         match receiver.try_recv() {
                             Ok(Ok(proof)) => {
                                 // Immediate: proof was already ready
@@ -118,9 +118,9 @@ where
                             Err(crossbeam_channel::TryRecvError::Empty) => {
                                 // Blocked: need to wait for proof
                                 tracker.inc_storage_proof_blocked();
-                        match receiver.recv() {
-                            Ok(Ok(proof)) => proof,
-                            Ok(Err(e)) => return Err(e),
+                                match receiver.recv() {
+                                    Ok(Ok(proof)) => proof,
+                                    Ok(Err(e)) => return Err(e),
                                     Err(_) => {
                                         return Err(storage_channel_closed_error(&hashed_address))
                                     }
@@ -569,5 +569,205 @@ mod tests {
         // sure it does not return any errors
         drop(proof_task_handle);
         rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
+    }
+
+    /// Test parallel proof with mixed storage targets (some accounts have storage, some don't)
+    #[test]
+    fn parallel_proof_handles_mixed_storage_targets() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        let state = (0..20)
+            .map(|i| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // Every other account has storage
+                let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
+                if i % 2 == 0 {
+                    for _ in 0..10 {
+                        storage.insert(
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        );
+                    }
+                }
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Create targets with mixed storage (some empty, some with slots)
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots = if storage.is_empty() {
+                B256Set::default() // Empty storage
+            } else {
+                storage.iter().take(3).map(|(slot, _)| *slot).collect()
+            };
+            targets.insert(hashed_address, target_slots);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            2, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+        let proof_task_handle = proof_task.handle();
+        let join_handle = rt.spawn_blocking(move || proof_task.run());
+
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result_raw =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+        let sequential_result_decoded: DecodedMultiProof =
+            sequential_result_raw.try_into().unwrap();
+
+        assert_eq!(parallel_result, sequential_result_decoded);
+
+        drop(proof_task_handle);
+        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
+    }
+
+    /// Test parallel proof with varying storage sizes (validates ordering independence)
+    #[test]
+    fn parallel_proof_ordering_independence() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        // Create state with varying storage sizes to ensure random completion order
+        let state = (0..15)
+            .map(|_| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // Random storage sizes (1-50 slots) to create different proof computation times
+                let storage_size = rng.random_range(1..50);
+                let storage: HashMap<B256, U256, DefaultHashBuilder> = (0..storage_size)
+                    .map(|_| {
+                        (
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        )
+                    })
+                    .collect();
+
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots: B256Set = storage.keys().take(5).copied().collect();
+            if !target_slots.is_empty() {
+                targets.insert(hashed_address, target_slots);
+            }
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+
+        // Use 3 workers to increase chance of out-of-order completion
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            3, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+        let proof_task_handle = proof_task.handle();
+        let join_handle = rt.spawn_blocking(move || proof_task.run());
+
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result_raw =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+        let sequential_result_decoded: DecodedMultiProof =
+            sequential_result_raw.try_into().unwrap();
+
+        // Results should be identical regardless of completion order
+        assert_eq!(parallel_result, sequential_result_decoded);
+
+        drop(proof_task_handle);
+        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
     }
 }
