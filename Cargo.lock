@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#622dafdb3acfbc88ea0e1160d78936e2384be235"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#7d3b2538064f622834f312ea2d1eee75229e2965"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#622dafdb3acfbc88ea0e1160d78936e2384be235"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#7d3b2538064f622834f312ea2d1eee75229e2965"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6389,12 +6389,11 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pest"
-version = "2.8.2"
+version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e0a3a33733faeaf8651dfee72dd0f388f0c8e5ad496a3478fa5a922f49cfa8"
+checksum = "989e7521a040efde50c3ab6bbadafbe15ab6dc042686926be59ac35d74607df4"
 dependencies = [
  "memchr",
- "thiserror 2.0.17",
  "ucd-trie",
 ]
 
