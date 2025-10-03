@@ -29,6 +29,7 @@ use reth_primitives_traits::{
 };
 
 mod validation;
+pub use validation::DepositContractProvider;
 pub use validation::validate_block_post_execution;
 
 /// Ethereum beacon consensus
@@ -52,9 +53,9 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
     }
 }
 
-impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
+impl<CS, N> FullConsensus<N> for EthBeaconConsensus<CS>
 where
-    ChainSpec: Send + Sync + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks + Debug,
+    CS: Send + Sync + EthChainSpec<Header = N::BlockHeader> + EthereumHardforks + DepositContractProvider + Debug,
     N: NodePrimitives,
 {
     fn validate_block_post_execution(
@@ -62,7 +63,7 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
+        validate_block_post_execution(block, self.chain_spec.as_ref(), &result.receipts, &result.requests)
     }
 }
 
