@@ -2487,10 +2487,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider
         let storage_tries = storage_tries
             .into_iter()
             .map(|(address, nodes)| {
-                (address, StorageTrieUpdatesSorted {
-                    storage_nodes: nodes,
-                    is_deleted: false,
-                })
+                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
             })
             .collect();
 

@@ -877,7 +877,7 @@ pub mod serde_bincode_compat {
 }
 
 #[cfg(all(test, feature = "serde"))]
-mod tests {
+mod serde_tests {
     use super::*;
 
     #[test]

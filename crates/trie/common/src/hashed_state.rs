@@ -691,6 +691,62 @@ impl Iterator for ChunkedHashedPostState {
     }
 }
 
+/// Helper function to extend a sorted vector with another sorted vector,
+/// taking into account removed items.
+/// Values from `other` take precedence for duplicate keys, and items in `removed` are excluded.
+fn extend_sorted_vec_with_removed<K, V, S>(
+    target: &mut Vec<(K, V)>,
+    other: &[(K, V)],
+    removed: &HashSet<K, S>,
+) where
+    K: Clone + Ord + core::hash::Hash + Eq,
+    V: Clone,
+    S: core::hash::BuildHasher,
+{
+    if other.is_empty() && removed.is_empty() {
+        return;
+    }
+
+    let mut other_iter = other.iter().peekable();
+    let mut to_insert = Vec::new();
+
+    // Iterate through target and update/collect items from other
+    for target_item in target.iter_mut() {
+        while let Some(other_item) = other_iter.peek() {
+            use core::cmp::Ordering;
+            match other_item.0.cmp(&target_item.0) {
+                Ordering::Less => {
+                    // Other item comes before current target item, collect it if not removed
+                    let item = other_iter.next().unwrap();
+                    if !removed.contains(&item.0) {
+                        to_insert.push(item.clone());
+                    }
+                }
+                Ordering::Equal => {
+                    // Same key, update target with other's value unless it's removed
+                    let item = other_iter.next().unwrap();
+                    if !removed.contains(&item.0) {
+                        target_item.1 = item.1.clone();
+                    }
+                    break;
+                }
+                Ordering::Greater => {
+                    // Other item comes after current target item
+                    break;
+                }
+            }
+        }
+    }
+
+    // Append collected new items, as well as any remaining from `other` (excluding removed),
+    // and sort if needed
+    if !to_insert.is_empty() || other_iter.peek().is_some() {
+        target.extend(to_insert);
+        target.extend(other_iter.filter(|item| !removed.contains(&item.0)).cloned());
+        target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1234,61 +1290,5 @@ mod tests {
         assert_eq!(storage3.non_zero_valued_slots[0].0, B256::from([3; 32]));
         assert_eq!(storage3.zero_valued_slots.len(), 1);
         assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
-    }
-}
-
-/// Helper function to extend a sorted vector with another sorted vector,
-/// taking into account removed items.
-/// Values from `other` take precedence for duplicate keys, and items in `removed` are excluded.
-fn extend_sorted_vec_with_removed<K, V, S>(
-    target: &mut Vec<(K, V)>,
-    other: &[(K, V)],
-    removed: &HashSet<K, S>,
-) where
-    K: Clone + Ord + core::hash::Hash + Eq,
-    V: Clone,
-    S: core::hash::BuildHasher,
-{
-    if other.is_empty() && removed.is_empty() {
-        return;
-    }
-
-    let mut other_iter = other.iter().peekable();
-    let mut to_insert = Vec::new();
-
-    // Iterate through target and update/collect items from other
-    for target_item in target.iter_mut() {
-        while let Some(other_item) = other_iter.peek() {
-            use core::cmp::Ordering;
-            match other_item.0.cmp(&target_item.0) {
-                Ordering::Less => {
-                    // Other item comes before current target item, collect it if not removed
-                    let item = other_iter.next().unwrap();
-                    if !removed.contains(&item.0) {
-                        to_insert.push(item.clone());
-                    }
-                }
-                Ordering::Equal => {
-                    // Same key, update target with other's value unless it's removed
-                    let item = other_iter.next().unwrap();
-                    if !removed.contains(&item.0) {
-                        target_item.1 = item.1.clone();
-                    }
-                    break;
-                }
-                Ordering::Greater => {
-                    // Other item comes after current target item
-                    break;
-                }
-            }
-        }
-    }
-
-    // Append collected new items, as well as any remaining from `other` (excluding removed),
-    // and sort if needed
-    if !to_insert.is_empty() || other_iter.peek().is_some() {
-        target.extend(to_insert);
-        target.extend(other_iter.filter(|item| !removed.contains(&item.0)).cloned());
-        target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     }
 }

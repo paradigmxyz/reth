@@ -59,8 +59,8 @@ where
         self
     }
 
-    /// Create the overlay state provider
-    pub fn provider(self) -> Result<OverlayStateProvider<F::Provider>, DatabaseError> {
+    /// Create a read-only [`OverlayStateProvider`].
+    pub fn provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, DatabaseError> {
         // Get a read-only provider
         let provider = self
             .factory
@@ -95,8 +95,12 @@ where
             hashed_state = Arc::new(hashed_state_mut);
         } else {
             // If no block_number, use overlays directly or defaults
-            trie_updates = self.trie_overlay.unwrap_or_default();
-            hashed_state = self.hashed_state_overlay.unwrap_or_default();
+            trie_updates =
+                self.trie_overlay.clone().unwrap_or_else(|| Arc::new(TrieUpdatesSorted::default()));
+            hashed_state = self
+                .hashed_state_overlay
+                .clone()
+                .unwrap_or_else(|| Arc::new(HashedPostStateSorted::default()));
         }
 
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_state))
