@@ -1462,7 +1462,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
         let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
+        let result = cursor.seek(id)?.map(|(_, bn)| bn);
+        tracing::debug!(target: "providers::db", tx_number=id, block_number=?result, "Transaction block lookup from database");
+        Ok(result)
     }
 
     fn transactions_by_block(

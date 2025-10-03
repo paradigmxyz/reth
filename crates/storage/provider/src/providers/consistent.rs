@@ -991,11 +991,21 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
     }
 
     fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        self.get_in_memory_or_storage_by_tx(
+        tracing::debug!(target: "providers::consistent", tx_number=id, "Looking up transaction block");
+        let result = self.get_in_memory_or_storage_by_tx(
             id.into(),
-            |provider| provider.transaction_block(id),
-            |_, _, block_state| Ok(Some(block_state.block_ref().recovered_block().number())),
-        )
+            |provider| {
+                tracing::debug!(target: "providers::consistent", tx_number=id, "Transaction not in memory, querying database");
+                provider.transaction_block(id)
+            },
+            |_, _, block_state| {
+                let block_num = block_state.block_ref().recovered_block().number();
+                tracing::info!(target: "providers::consistent", tx_number=id, block_number=block_num, "Transaction found in memory");
+                Ok(Some(block_num))
+            },
+        );
+        tracing::debug!(target: "providers::consistent", tx_number=id, block_number=?result, "Transaction block lookup result");
+        result
     }
 
     fn transactions_by_block(
