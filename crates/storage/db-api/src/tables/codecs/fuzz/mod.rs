@@ -19,7 +19,12 @@ macro_rules! impl_fuzzer_with_input {
                 #[expect(unused_imports)]
                 use reth_primitives_traits::*;
 
-                #[expect(unused_imports)]
+                // Use input types via explicit path to avoid blanket imports
+                // NOTE: We keep a blanket import from `inputs` guarded with `allow(unused_imports)`
+                // because macro instantiations vary: sometimes `$input_type` originates from
+                // `super::inputs`, other times it does not. Using `expect(unused_imports)` here can
+                // cause `unfulfilled-lint-expectations` when the import becomes used in CI.
+                #[allow(unused_imports)]
                 use super::inputs::*;
 
                 use crate::models::*;
