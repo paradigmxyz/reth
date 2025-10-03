@@ -4,7 +4,7 @@ use std::{
 };
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
-use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 use crate::formatter::LogFormat;
@@ -27,6 +27,12 @@ const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
     "discv5=off",
     "jsonrpsee-server=off",
 ];
+
+/// Buffer size for non-blocking file logging writer.
+/// This value (10,000 lines) handles typical Reth logging bursts (10-100 seconds buffer)
+/// with reasonable memory usage (~1.5MB), keeping the blocking from lossy(false) as a rare
+/// fallback for extreme cases only.
+const FILE_LOGGING_BUFFER_SIZE: usize = 10000;
 
 /// Manages the collection of layers for a tracing subscriber.
 ///
@@ -165,14 +171,18 @@ impl FileInfo {
     /// A tuple containing the non-blocking writer and its associated worker guard.
     fn create_log_writer(&self) -> (tracing_appender::non_blocking::NonBlocking, WorkerGuard) {
         let log_dir = self.create_log_dir();
-        let (writer, guard) = tracing_appender::non_blocking(
-            RollingFileAppender::new(
-                log_dir.join(&self.file_name),
-                RollingConditionBasic::new().max_size(self.max_size_bytes),
-                self.max_files,
-            )
-            .expect("Could not initialize file logging"),
-        );
+        let appender = RollingFileAppender::new(
+            log_dir.join(&self.file_name),
+            RollingConditionBasic::new().max_size(self.max_size_bytes),
+            self.max_files,
+        )
+        .expect("Could not initialize file logging");
+
+        let (writer, guard) = NonBlockingBuilder::default()
+            .lossy(false)
+            .buffered_lines_limit(FILE_LOGGING_BUFFER_SIZE)
+            .finish(appender);
+
         (writer, guard)
     }
 }
