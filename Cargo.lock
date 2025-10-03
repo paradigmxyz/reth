@@ -3491,7 +3491,6 @@ dependencies = [
  "revm",
  "revm-primitives",
  "serde",
- "test-fuzz",
  "thiserror 2.0.16",
 ]
 
@@ -7741,7 +7740,6 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
@@ -9741,7 +9739,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "test-fuzz",
  "thiserror 2.0.16",
 ]
 
@@ -9840,7 +9837,6 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
- "test-fuzz",
  "thiserror 2.0.16",
  "toml",
 ]
@@ -10400,7 +10396,6 @@ dependencies = [
  "reth-codecs",
  "reth-trie-common",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
