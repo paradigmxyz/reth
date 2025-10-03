@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::ZstdConfig;
-use convert_case::{Case, Casing};
 use syn::{Attribute, LitStr};
 
 /// Generates code to implement the `Compact` trait for a data type.
