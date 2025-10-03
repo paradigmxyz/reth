@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#ebe820ecfd7e0427026474504fed80e074d0355a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#4484ba12ef35ce781d799643c962832241509787"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -382,7 +382,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#ebe820ecfd7e0427026474504fed80e074d0355a"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#4484ba12ef35ce781d799643c962832241509787"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -432,7 +432,7 @@ dependencies = [
  "proptest-derive 0.6.0",
  "rand 0.9.2",
  "ruint",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "serde",
  "sha3",
  "tiny-keccak",
@@ -937,9 +937,9 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
-version = "0.6.20"
+version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ae563653d1938f79b1ab1b5e668c87c76a9930414574a6583a7b7e11a8e6192"
+checksum = "43d5b281e737544384e969a5ccad3f1cdd24b48086a0fc1b2a5262a26b8f4f4a"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -1566,24 +1566,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.70.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
-dependencies = [
- "bitflags 2.9.4",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn 2.0.106",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.71.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
@@ -1595,7 +1577,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash 2.1.1",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.72.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
+dependencies = [
+ "bitflags 2.9.4",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
  "shlex",
  "syn 2.0.106",
 ]
@@ -1702,7 +1702,7 @@ dependencies = [
  "boa_string",
  "indexmap 2.11.4",
  "num-bigint",
- "rustc-hash 2.1.1",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -1738,7 +1738,7 @@ dependencies = [
  "portable-atomic",
  "rand 0.8.5",
  "regress",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "ryu-js",
  "serde",
  "serde_json",
@@ -1775,7 +1775,7 @@ dependencies = [
  "indexmap 2.11.4",
  "once_cell",
  "phf 0.11.3",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "static_assertions",
 ]
 
@@ -1807,7 +1807,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "regress",
- "rustc-hash 2.1.1",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -1824,7 +1824,7 @@ checksum = "7debc13fbf7997bf38bf8e9b20f1ad5e2a7d27a900e1f6039fe244ce30f589b5"
 dependencies = [
  "fast-float2",
  "paste",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "sptr",
  "static_assertions",
 ]
@@ -5122,7 +5122,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.2",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -5364,11 +5364,11 @@ dependencies = [
 
 [[package]]
 name = "libproc"
-version = "0.14.10"
+version = "0.14.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e78a09b56be5adbcad5aa1197371688dc6bb249a26da3bca2011ee2fb987ebfb"
+checksum = "a54ad7278b8bc5301d5ffd2a94251c004feb971feba96c971ea4063645990757"
 dependencies = [
- "bindgen 0.70.1",
+ "bindgen 0.72.1",
  "errno",
  "libc",
 ]
@@ -6155,7 +6155,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "auto_impl",
  "revm",
@@ -6855,7 +6855,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "rustls",
  "socket2 0.6.0",
  "thiserror 2.0.17",
@@ -6875,7 +6875,7 @@ dependencies = [
  "lru-slab",
  "rand 0.9.2",
  "ring",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "rustls",
  "rustls-pki-types",
  "slab",
@@ -7656,7 +7656,7 @@ dependencies = [
  "reth-static-file-types",
  "reth-storage-errors",
  "reth-tracing",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "serde",
  "serde_json",
  "strum 0.27.2",
@@ -8368,7 +8368,7 @@ dependencies = [
  "arbitrary",
  "auto_impl",
  "once_cell",
- "rustc-hash 2.1.1",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -8771,7 +8771,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "schnellru",
  "secp256k1 0.30.0",
  "serde",
@@ -9820,7 +9820,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -10633,7 +10633,7 @@ dependencies = [
  "reth-tracing",
  "revm-interpreter",
  "revm-primitives",
- "rustc-hash 2.1.1",
+ "rustc-hash",
  "schnellru",
  "serde",
  "serde_json",
@@ -10836,7 +10836,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "29.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10854,7 +10854,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.2.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "bitvec",
  "phf 0.13.1",
@@ -10865,7 +10865,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "9.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -10882,7 +10882,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "10.1.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10897,7 +10897,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10910,7 +10910,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "auto_impl",
  "either",
@@ -10922,7 +10922,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10940,7 +10940,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "10.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "auto_impl",
  "either",
@@ -10977,7 +10977,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "25.0.2"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10989,7 +10989,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "27.0.0"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11013,7 +11013,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.2.1"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11024,7 +11024,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.5"
-source = "git+https://github.com/Soubhik-10/revm?branch=bal#3b27879a65b5813060ce1d729abeb5a7bfe150e3"
+source = "git+https://github.com/Soubhik-10/revm?branch=bal#82361c344ca942ea534b72ab8ade59faa83510ba"
 dependencies = [
  "bitflags 2.9.4",
  "revm-bytecode",
@@ -11222,12 +11222,6 @@ checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
@@ -11351,9 +11345,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.6"
+version = "0.103.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8572f3c2cb9934231157b45499fc41e1f58c589fdfb81a844ba873265e80f8eb"
+checksum = "e10b3f4191e8a80e6b43eebabfac91e5dcecebb27a71f04e820c47ec41d314bf"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -12886,9 +12880,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "ucd-trie"
