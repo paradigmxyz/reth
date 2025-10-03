@@ -369,6 +369,7 @@ where
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
             // this is pre-validated in the tree
+            error!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Failed to build state provider: parent not found");
             return Err(InsertBlockError::new(
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
@@ -376,6 +377,7 @@ where
             .into())
         };
 
+        debug!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Building state provider");
         let state_provider = ensure_ok!(provider_builder.build());
 
         // fetch parent block
@@ -957,7 +959,13 @@ where
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
         if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+            debug!(target: "engine::tree", %hash, %historical, num_blocks=%blocks.len(), "found canonical state for block in memory, creating provider builder");
+            // Log the block chain for debugging
+            if !blocks.is_empty() {
+                let first_block_num = blocks.first().map(|b| b.block.number()).unwrap_or(0);
+                let last_block_num = blocks.last().map(|b| b.block.number()).unwrap_or(0);
+                info!(target: "engine::tree", %hash, %historical, first_block=%first_block_num, last_block=%last_block_num, num_blocks=%blocks.len(), "In-memory block chain details");
+            }
             // the block leads back to the canonical chain
             return Ok(Some(StateProviderBuilder::new(
                 self.provider.clone(),

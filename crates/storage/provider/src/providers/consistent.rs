@@ -597,18 +597,22 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ) -> ProviderResult<Box<dyn StateProvider>> {
         let Self { storage_provider, head_block, .. } = self;
         let into_history_at_block_hash = |block_hash| -> ProviderResult<Box<dyn StateProvider>> {
+            tracing::debug!(target: "providers::consistent", ?block_hash, "Looking up block number for hash");
             let block_number = storage_provider
                 .block_number(block_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+            tracing::debug!(target: "providers::consistent", ?block_hash, block_number, "Found block number, creating historical state provider");
             storage_provider.try_into_history_at_block(block_number)
         };
         if let Some(Some(block_state)) =
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let anchor_hash = block_state.anchor().hash;
+            tracing::info!(target: "providers::consistent", ?block_hash, ?anchor_hash, "Block found in memory, using anchor hash for historical state");
             let latest_historical = into_history_at_block_hash(anchor_hash)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
+        tracing::debug!(target: "providers::consistent", ?block_hash, "Block not in memory, looking up in database");
         into_history_at_block_hash(block_hash)
     }
 }

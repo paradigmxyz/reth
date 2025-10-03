@@ -5,6 +5,10 @@ set -eo pipefail
 mkdir hive_assets/
 
 cd hivetests
+
+# Apply debug logging patch for reth client
+git apply ../.github/assets/hive/reth_debug_logging.diff
+
 go build .
 
 ./hive -client reth # first builds and caches the client
