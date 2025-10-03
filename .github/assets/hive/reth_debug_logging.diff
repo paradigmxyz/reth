@@ -6,5 +6,5 @@ index 00000000..11111111 100644
 
  # Launch the main client.
  echo "Running reth with flags: $FLAGS"
--RUST_LOG=debug $reth node $FLAGS
+-RUST_LOG=info $reth node $FLAGS
 +RUST_LOG=info,engine::tree=debug,providers::consistent=info $reth node $FLAGS
