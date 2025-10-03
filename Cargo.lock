@@ -7559,7 +7559,6 @@ dependencies = [
 name = "reth-codecs-derive"
 version = "1.8.2"
 dependencies = [
- "convert_case",
  "proc-macro2",
  "quote",
  "similar-asserts",
