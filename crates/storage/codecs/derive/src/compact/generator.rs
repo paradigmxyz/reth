@@ -20,11 +20,6 @@ pub fn generate_from_to(
     let to_compact = generate_to_compact(fields, ident, zstd.clone(), &reth_codecs);
     let from_compact = generate_from_compact(fields, ident, zstd);
 
-    let snake_case_ident = ident.to_string().to_case(Case::Snake);
-
-    let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
-    let test = format_ident!("fuzz_{snake_case_ident}");
-
     let lifetime = if has_lifetime {
         quote! { 'a }
     } else {
