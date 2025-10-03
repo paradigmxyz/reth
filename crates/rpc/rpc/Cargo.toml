@@ -40,6 +40,7 @@ reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 reth-node-api.workspace = true
 reth-trie-common.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-evm = { workspace = true, features = ["overrides"] }
@@ -95,7 +96,6 @@ derive_more.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
-reth-ethereum-primitives.workspace = true
 reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
