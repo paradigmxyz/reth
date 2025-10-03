@@ -484,6 +484,21 @@ impl HashedPostStateSorted {
     pub const fn account_storages(&self) -> &B256Map<HashedStorageSorted> {
         &self.storages
     }
+
+    /// Extends this state with contents of another sorted state.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        // Extend accounts
+        self.accounts.extend_ref(&other.accounts);
+
+        // Extend storages
+        for (hashed_address, other_storage) in &other.storages {
+            self.storages
+                .entry(*hashed_address)
+                .and_modify(|existing| existing.extend_ref(other_storage))
+                .or_insert_with(|| other_storage.clone());
+        }
+    }
 }
 
 impl AsRef<Self> for HashedPostStateSorted {
@@ -509,6 +524,25 @@ impl HashedAccountsSorted {
             .map(|(address, account)| (*address, Some(*account)))
             .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    /// Extends this collection with contents of another sorted collection.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        // Extend the sorted accounts vector
+        extend_sorted_vec_with_removed(
+            &mut self.accounts,
+            &other.accounts,
+            &other.destroyed_accounts,
+        );
+
+        // Merge destroyed accounts sets
+        self.destroyed_accounts.extend(&other.destroyed_accounts);
+
+        // Remove any destroyed accounts from the accounts vector
+        if !other.destroyed_accounts.is_empty() {
+            self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
+        }
     }
 }
 
@@ -536,6 +570,37 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+
+    /// Extends this storage with contents of another sorted storage.
+    /// Entries in `other` take precedence for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        if other.wiped {
+            // If other is wiped, clear everything and copy from other
+            self.wiped = true;
+            self.non_zero_valued_slots.clear();
+            self.zero_valued_slots.clear();
+            self.non_zero_valued_slots.extend_from_slice(&other.non_zero_valued_slots);
+            self.zero_valued_slots.extend(&other.zero_valued_slots);
+        } else {
+            // Extend the sorted non-zero valued slots
+            extend_sorted_vec_with_removed(
+                &mut self.non_zero_valued_slots,
+                &other.non_zero_valued_slots,
+                &other.zero_valued_slots,
+            );
+
+            // Merge zero valued slots sets
+            self.zero_valued_slots.extend(&other.zero_valued_slots);
+
+            // Remove any zero-valued slots from non-zero valued slots
+            if !other.zero_valued_slots.is_empty() {
+                self.non_zero_valued_slots
+                    .retain(|(slot, _)| !other.zero_valued_slots.contains(slot));
+            }
+
+            self.wiped = self.wiped || other.wiped;
+        }
     }
 }
 
@@ -1071,5 +1136,159 @@ mod tests {
             })
         );
         assert_eq!(chunks.next(), None);
+    }
+
+    #[test]
+    fn test_hashed_post_state_sorted_extend_ref() {
+        // Test extending accounts
+        let mut state1 = HashedPostStateSorted {
+            accounts: HashedAccountsSorted {
+                accounts: vec![
+                    (B256::from([1; 32]), Account::default()),
+                    (B256::from([3; 32]), Account::default()),
+                ],
+                destroyed_accounts: B256Set::from_iter([B256::from([5; 32])]),
+            },
+            storages: B256Map::default(),
+        };
+
+        let state2 = HashedPostStateSorted {
+            accounts: HashedAccountsSorted {
+                accounts: vec![
+                    (B256::from([2; 32]), Account::default()),
+                    (B256::from([3; 32]), Account { nonce: 1, ..Default::default() }), // Override
+                    (B256::from([4; 32]), Account::default()),
+                ],
+                destroyed_accounts: B256Set::from_iter([B256::from([6; 32])]),
+            },
+            storages: B256Map::default(),
+        };
+
+        state1.extend_ref(&state2);
+
+        // Check accounts are merged and sorted
+        assert_eq!(state1.accounts.accounts.len(), 4);
+        assert_eq!(state1.accounts.accounts[0].0, B256::from([1; 32]));
+        assert_eq!(state1.accounts.accounts[1].0, B256::from([2; 32]));
+        assert_eq!(state1.accounts.accounts[2].0, B256::from([3; 32]));
+        assert_eq!(state1.accounts.accounts[2].1.nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts.accounts[3].0, B256::from([4; 32]));
+
+        // Check destroyed accounts are merged
+        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([5; 32])));
+        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([6; 32])));
+    }
+
+    #[test]
+    fn test_hashed_storage_sorted_extend_ref() {
+        // Test normal extension
+        let mut storage1 = HashedStorageSorted {
+            non_zero_valued_slots: vec![
+                (B256::from([1; 32]), U256::from(10)),
+                (B256::from([3; 32]), U256::from(30)),
+            ],
+            zero_valued_slots: B256Set::from_iter([B256::from([5; 32])]),
+            wiped: false,
+        };
+
+        let storage2 = HashedStorageSorted {
+            non_zero_valued_slots: vec![
+                (B256::from([2; 32]), U256::from(20)),
+                (B256::from([3; 32]), U256::from(300)), // Override
+                (B256::from([4; 32]), U256::from(40)),
+            ],
+            zero_valued_slots: B256Set::from_iter([B256::from([6; 32])]),
+            wiped: false,
+        };
+
+        storage1.extend_ref(&storage2);
+
+        assert_eq!(storage1.non_zero_valued_slots.len(), 4);
+        assert_eq!(storage1.non_zero_valued_slots[0].0, B256::from([1; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[1].0, B256::from([2; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[2].0, B256::from([3; 32]));
+        assert_eq!(storage1.non_zero_valued_slots[2].1, U256::from(300)); // Should have storage2's value
+        assert_eq!(storage1.non_zero_valued_slots[3].0, B256::from([4; 32]));
+        assert!(storage1.zero_valued_slots.contains(&B256::from([5; 32])));
+        assert!(storage1.zero_valued_slots.contains(&B256::from([6; 32])));
+        assert!(!storage1.wiped);
+
+        // Test wiped storage
+        let mut storage3 = HashedStorageSorted {
+            non_zero_valued_slots: vec![(B256::from([1; 32]), U256::from(10))],
+            zero_valued_slots: B256Set::from_iter([B256::from([2; 32])]),
+            wiped: false,
+        };
+
+        let storage4 = HashedStorageSorted {
+            non_zero_valued_slots: vec![(B256::from([3; 32]), U256::from(30))],
+            zero_valued_slots: B256Set::from_iter([B256::from([4; 32])]),
+            wiped: true,
+        };
+
+        storage3.extend_ref(&storage4);
+
+        assert!(storage3.wiped);
+        // When wiped, should only have storage4's values
+        assert_eq!(storage3.non_zero_valued_slots.len(), 1);
+        assert_eq!(storage3.non_zero_valued_slots[0].0, B256::from([3; 32]));
+        assert_eq!(storage3.zero_valued_slots.len(), 1);
+        assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
+    }
+}
+
+/// Helper function to extend a sorted vector with another sorted vector,
+/// taking into account removed items.
+/// Values from `other` take precedence for duplicate keys, and items in `removed` are excluded.
+fn extend_sorted_vec_with_removed<K, V, S>(
+    target: &mut Vec<(K, V)>,
+    other: &[(K, V)],
+    removed: &HashSet<K, S>,
+) where
+    K: Clone + Ord + core::hash::Hash + Eq,
+    V: Clone,
+    S: core::hash::BuildHasher,
+{
+    if other.is_empty() && removed.is_empty() {
+        return;
+    }
+
+    let mut other_iter = other.iter().peekable();
+    let mut to_insert = Vec::new();
+
+    // Iterate through target and update/collect items from other
+    for target_item in target.iter_mut() {
+        while let Some(other_item) = other_iter.peek() {
+            use core::cmp::Ordering;
+            match other_item.0.cmp(&target_item.0) {
+                Ordering::Less => {
+                    // Other item comes before current target item, collect it if not removed
+                    let item = other_iter.next().unwrap();
+                    if !removed.contains(&item.0) {
+                        to_insert.push(item.clone());
+                    }
+                }
+                Ordering::Equal => {
+                    // Same key, update target with other's value unless it's removed
+                    let item = other_iter.next().unwrap();
+                    if !removed.contains(&item.0) {
+                        target_item.1 = item.1.clone();
+                    }
+                    break;
+                }
+                Ordering::Greater => {
+                    // Other item comes after current target item
+                    break;
+                }
+            }
+        }
+    }
+
+    // Append collected new items, as well as any remaining from `other` (excluding removed),
+    // and sort if needed
+    if !to_insert.is_empty() || other_iter.peek().is_some() {
+        target.extend(to_insert);
+        target.extend(other_iter.filter(|item| !removed.contains(&item.0)).cloned());
+        target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     }
 }
