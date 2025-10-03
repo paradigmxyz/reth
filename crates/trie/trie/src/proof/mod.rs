@@ -80,6 +80,16 @@ impl<T, H> Proof<T, H> {
         self.collect_branch_node_masks = branch_node_masks;
         self
     }
+
+    /// Get a reference to the trie cursor factory.
+    pub const fn trie_cursor_factory(&self) -> &T {
+        &self.trie_cursor_factory
+    }
+
+    /// Get a reference to the hashed cursor factory.
+    pub const fn hashed_cursor_factory(&self) -> &H {
+        &self.hashed_cursor_factory
+    }
 }
 
 impl<T, H> Proof<T, H>
