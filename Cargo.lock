@@ -270,8 +270,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#4484ba12ef35ce781d799643c962832241509787"
+version = "0.21.2"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#622dafdb3acfbc88ea0e1160d78936e2384be235"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -279,6 +279,7 @@ dependencies = [
  "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
  "auto_impl",
@@ -383,8 +384,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.21.1"
-source = "git+https://github.com/Rimeeeeee/evm?branch=bal#4484ba12ef35ce781d799643c962832241509787"
+version = "0.21.2"
+source = "git+https://github.com/Rimeeeeee/evm?branch=bal#622dafdb3acfbc88ea0e1160d78936e2384be235"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
