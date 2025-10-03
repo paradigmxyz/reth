@@ -9,14 +9,8 @@ use reth_primitives_traits::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseHashedCursorFactory<T>(T);
-
-impl<T: Clone> Clone for DatabaseHashedCursorFactory<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
 
 impl<T> DatabaseHashedCursorFactory<T> {
     /// Create new database hashed cursor factory.

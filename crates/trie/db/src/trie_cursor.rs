@@ -12,14 +12,8 @@ use reth_trie::{
 };
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatabaseTrieCursorFactory<T>(T);
-
-impl<T: Clone> Clone for DatabaseTrieCursorFactory<T> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
 
 impl<T> DatabaseTrieCursorFactory<T> {
     /// Create new [`DatabaseTrieCursorFactory`].
