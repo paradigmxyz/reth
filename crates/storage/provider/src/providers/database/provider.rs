@@ -2674,6 +2674,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
+        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
+            self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
+        }
+
         // Get highest static file block for the total block range
         let highest_static_file_block = self
             .static_file_provider()

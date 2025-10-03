@@ -477,7 +477,7 @@ impl DiskFileBlobStoreInner {
 
     /// Retrieves the raw blob data for the given transaction hashes.
     ///
-    /// Only returns the blobs that were found on file.
+    /// Only returns the blobs that were found in file.
     #[inline]
     fn read_many_raw(&self, txs: Vec<TxHash>) -> Vec<(TxHash, Vec<u8>)> {
         let mut res = Vec::with_capacity(txs.len());
