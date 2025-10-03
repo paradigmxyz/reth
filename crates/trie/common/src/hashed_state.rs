@@ -694,6 +694,10 @@ impl Iterator for ChunkedHashedPostState {
 /// Helper function to extend a sorted vector with another sorted vector,
 /// taking into account removed items.
 /// Values from `other` take precedence for duplicate keys, and items in `removed` are excluded.
+///
+/// TODO(mediocregopher): Once https://github.com/paradigmxyz/reth/issues/18848 is completed this
+/// function will not be necessary, `extend_sorted_vec` in `updates.rs` can be used for both
+/// TrieUpdates and HashedPostState.
 fn extend_sorted_vec_with_removed<K, V, S>(
     target: &mut Vec<(K, V)>,
     other: &[(K, V)],
