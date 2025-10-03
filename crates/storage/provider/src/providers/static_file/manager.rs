@@ -1155,19 +1155,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     }
                     None => {
                         if retrying {
-                            warn!(
-                                target: "provider::static_file",
-                                ?segment,
-                                ?number,
-                                "Could not find block or tx number on a range request"
-                            );
-
-                            let err = if segment.is_block_based() {
-                                ProviderError::MissingStaticFileBlock(segment, number)
-                            } else {
-                                ProviderError::MissingStaticFileTx(segment, number)
-                            };
-                            return Err(err)
+                            return Ok(result)
                         }
                         // There is a very small chance of hitting a deadlock if two consecutive
                         // static files share the same bucket in the
