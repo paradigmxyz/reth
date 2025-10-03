@@ -448,8 +448,8 @@ impl ExecutionCacheBuilder {
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
 
-        const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
-        const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
+        const EXPIRY_TIME: Duration = Duration::from_secs(30); // 2 hours
+        const TIME_TO_IDLE: Duration = Duration::from_secs(15); // 1 hour
 
         let storage_cache = CacheBuilder::new(self.storage_cache_entries)
             .weigher(|_key: &Address, value: &AccountStorageCache| -> u32 {
