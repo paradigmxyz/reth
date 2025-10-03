@@ -105,31 +105,34 @@ impl ConfigureEvm for CustomEvmConfig {
 }
 
 impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
-    fn evm_env_for_payload(&self, payload: &CustomExecutionData) -> EvmEnvFor<Self> {
+    fn evm_env_for_payload(
+        &self,
+        payload: &CustomExecutionData,
+    ) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env_for_payload(&payload.inner)
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a CustomExecutionData,
-    ) -> ExecutionCtxFor<'a, Self> {
-        CustomBlockExecutionCtx {
-            inner: self.inner.context_for_payload(&payload.inner),
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        Ok(CustomBlockExecutionCtx {
+            inner: self.inner.context_for_payload(&payload.inner)?,
             extension: payload.extension,
-        }
+        })
     }
 
     fn tx_iterator_for_payload(
         &self,
         payload: &CustomExecutionData,
-    ) -> impl ExecutableTxIterator<Self> {
-        payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
+        Ok(payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
             let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
                 .map_err(Into::into)
                 .map_err(PayloadError::Decode)?;
             let signer = tx.try_recover().map_err(NewPayloadError::other)?;
             Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
-        })
+        }))
     }
 }
 

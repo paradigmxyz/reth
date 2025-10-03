@@ -262,19 +262,22 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e536feefca2ba96c75798ac75a31046e8adfcefecdb6653803361045cc65b9"
+checksum = "06a5f67ee74999aa4fe576a83be1996bdf74a30fce3d248bf2007d6fc7dae8aa"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-hardforks",
+ "alloy-op-hardforks",
  "alloy-primitives",
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
  "auto_impl",
  "derive_more",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "op-revm",
  "revm",
  "thiserror 2.0.16",
@@ -376,9 +379,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.21.1"
+version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19f09c7785a3f2df462e4bb898e8b682b43de488d9d44bf2e5264e0bba44af21"
+checksum = "17aaeb600740c181bf29c9f138f9b228d115ea74fa6d0f0343e1952f1a766968"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3491,7 +3494,6 @@ dependencies = [
  "revm",
  "revm-primitives",
  "serde",
- "test-fuzz",
  "thiserror 2.0.16",
 ]
 
@@ -7559,7 +7561,6 @@ dependencies = [
 name = "reth-codecs-derive"
 version = "1.8.2"
 dependencies = [
- "convert_case",
  "proc-macro2",
  "quote",
  "similar-asserts",
@@ -7742,7 +7743,6 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
@@ -8041,6 +8041,7 @@ dependencies = [
  "assert_matches",
  "codspeed-criterion-compat",
  "crossbeam-channel",
+ "dashmap 6.1.0",
  "derive_more",
  "eyre",
  "futures",
@@ -9742,7 +9743,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "test-fuzz",
  "thiserror 2.0.16",
 ]
 
@@ -9841,7 +9841,6 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
- "test-fuzz",
  "thiserror 2.0.16",
  "toml",
 ]
@@ -10401,7 +10400,6 @@ dependencies = [
  "reth-codecs",
  "reth-trie-common",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
@@ -10743,6 +10741,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "codspeed-criterion-compat",
+ "dashmap 6.1.0",
  "derive_more",
  "itertools 0.14.0",
  "metrics",
