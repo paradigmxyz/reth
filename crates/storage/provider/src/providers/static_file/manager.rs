@@ -1109,20 +1109,31 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: FnMut(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>>,
         P: FnMut(&T) -> bool,
     {
-        let get_provider = |start: u64| {
-            if segment.is_block_based() {
-                self.get_segment_provider_from_block(segment, start, None)
-            } else {
-                self.get_segment_provider_from_transaction(segment, start, None)
-            }
-        };
-
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
-        let mut provider = match get_provider(range.start) {
-            Ok(provider) => provider,
-            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(vec![]),
-            Err(err) => return Err(err),
-        };
+
+        /// Resolves to the provider for the given block or transaction number.
+        ///
+        /// If the static file is missing, the `result` is returned.
+        macro_rules! get_provider {
+            ($number:expr) => {{
+                let provider = if segment.is_block_based() {
+                    self.get_segment_provider_from_block(segment, $number, None)
+                } else {
+                    self.get_segment_provider_from_transaction(segment, $number, None)
+                };
+
+                match provider {
+                    Ok(provider) => provider,
+                    Err(
+                        ProviderError::MissingStaticFileBlock(_, _) |
+                        ProviderError::MissingStaticFileTx(_, _),
+                    ) => return Ok(result),
+                    Err(err) => return Err(err),
+                }
+            }};
+        }
+
+        let mut provider = get_provider!(range.start);
         let mut cursor = provider.cursor()?;
 
         // advances number in range
@@ -1164,11 +1175,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // before requesting the next one.
                         drop(cursor);
                         drop(provider);
-                        provider = match get_provider(number) {
-                            Ok(provider) => provider,
-                            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(result),
-                            Err(err) => return Err(err),
-                        };
+                        provider = get_provider!(number);
                         cursor = provider.cursor()?;
                         retrying = true;
                     }
