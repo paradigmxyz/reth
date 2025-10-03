@@ -1,6 +1,8 @@
 use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::DatabaseError;
-use reth_storage_api::{DBProvider, DatabaseProviderFactory, TrieReader};
+use reth_errors::ProviderError;
+use reth_stages_types::StageId;
+use reth_storage_api::{DBProvider, DatabaseProviderFactory, StageCheckpointReader, TrieReader};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
@@ -31,7 +33,7 @@ pub struct OverlayStateProviderFactory<F> {
 impl<F> OverlayStateProviderFactory<F>
 where
     F: DatabaseProviderFactory,
-    F::Provider: Clone + TrieReader,
+    F::Provider: Clone + TrieReader + StageCheckpointReader,
 {
     /// Create a new overlay state provider factory
     pub fn new(factory: F) -> Self {
@@ -59,23 +61,59 @@ where
         self
     }
 
+    /// Validates that there are sufficient changesets to revert to the requested block number.
+    ///
+    /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
+    fn validate_changesets_availability(
+        &self,
+        provider: &F::Provider,
+        requested_block: BlockNumber,
+    ) -> Result<(), ProviderError> {
+        // Get the MerkleChangeSets stage checkpoint - let errors propagate as-is
+        let checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
+
+        // If there's no checkpoint at all, we can't revert
+        let checkpoint = checkpoint.ok_or_else(|| ProviderError::InsufficientChangesets {
+            requested: requested_block,
+            available: 0..=0,
+        })?;
+
+        // Extract the MerkleChangeSets checkpoint details using the helper method
+        let merkle_checkpoint =
+            checkpoint.merkle_changesets_stage_checkpoint().ok_or_else(|| {
+                ProviderError::InsufficientChangesets {
+                    requested: requested_block,
+                    available: 0..=0,
+                }
+            })?;
+
+        // Check if the requested block is within the available range
+        let available_range = merkle_checkpoint.block_range.from..=merkle_checkpoint.block_range.to;
+        if !available_range.contains(&requested_block) {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: available_range,
+            });
+        }
+
+        Ok(())
+    }
+
     /// Create a read-only [`OverlayStateProvider`].
-    pub fn provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, DatabaseError> {
+    pub fn provider_ro(&self) -> Result<OverlayStateProvider<F::Provider>, ProviderError> {
         // Get a read-only provider
-        let provider = self
-            .factory
-            .database_provider_ro()
-            .map_err(|_| DatabaseError::Other("Failed to get database provider".into()))?;
+        let provider = self.factory.database_provider_ro()?;
 
         let trie_updates: Arc<TrieUpdatesSorted>;
         let hashed_state: Arc<HashedPostStateSorted>;
 
         // If block_number is provided, collect reverts
         if let Some(from_block) = self.block_number {
+            // Validate that we have sufficient changesets for the requested block
+            self.validate_changesets_availability(&provider, from_block)?;
+
             // Collect trie reverts
-            let mut trie_updates_mut = provider
-                .revert_trie(from_block)
-                .map_err(|e| DatabaseError::Other(format!("Failed to revert trie: {}", e)))?;
+            let mut trie_updates_mut = provider.revert_trie(from_block)?;
 
             // Collect state reverts using HashedPostState::from_reverts
             let reverted_state =
