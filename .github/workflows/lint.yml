@@ -250,15 +250,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - name: fetch deps
-        run: |
-          # Eagerly pull dependencies
-          time cargo metadata --format-version=1 --locked > /dev/null
-      - name: run zepter
-        run: |
-          cargo install zepter -f --locked
-          zepter --version
-          time zepter run check
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: zepter
+      - name: Eagerly pull dependencies
+        run: cargo metadata --format-version=1 --locked > /dev/null
+      - run: zepter run check
 
   deny:
     uses: ithacaxyz/ci/.github/workflows/deny.yml@main

@@ -450,18 +450,32 @@ impl From<InvalidHeader> for EthApiError {
     }
 }
 
-impl<T> From<EVMError<T, InvalidTransaction>> for EthApiError
+impl<T, TxError> From<EVMError<T, TxError>> for EthApiError
 where
     T: Into<Self>,
+    TxError: reth_evm::InvalidTxError,
 {
-    fn from(err: EVMError<T, InvalidTransaction>) -> Self {
+    fn from(err: EVMError<T, TxError>) -> Self {
         match err {
-            EVMError::Transaction(invalid_tx) => match invalid_tx {
-                InvalidTransaction::NonceTooLow { tx, state } => {
-                    Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow { tx, state })
+            EVMError::Transaction(invalid_tx) => {
+                // Try to get the underlying InvalidTransaction if available
+                if let Some(eth_tx_err) = invalid_tx.as_invalid_tx_err() {
+                    // Handle the special NonceTooLow case
+                    match eth_tx_err {
+                        InvalidTransaction::NonceTooLow { tx, state } => {
+                            Self::InvalidTransaction(RpcInvalidTransactionError::NonceTooLow {
+                                tx: *tx,
+                                state: *state,
+                            })
+                        }
+                        _ => RpcInvalidTransactionError::from(eth_tx_err.clone()).into(),
+                    }
+                } else {
+                    // For custom transaction errors that don't wrap InvalidTransaction,
+                    // convert to a custom error message
+                    Self::EvmCustom(invalid_tx.to_string())
                 }
-                _ => RpcInvalidTransactionError::from(invalid_tx).into(),
-            },
+            }
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
@@ -882,7 +896,7 @@ pub enum RpcPoolError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
     ExceedsFeeCap {
-        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee in wei of new tx submitted to the pool (e.g. 0.11534 ETH)
         max_tx_fee_wei: u128,
         /// configured tx fee cap in wei (e.g. 1.0 ETH)
         tx_fee_cap_wei: u128,
