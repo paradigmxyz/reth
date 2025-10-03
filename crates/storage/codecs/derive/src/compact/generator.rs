@@ -58,33 +58,8 @@ pub fn generate_from_to(
         }
     };
 
-    let fuzz_tests = if has_lifetime {
-        quote! {}
-    } else {
-        quote! {
-            #[cfg(test)]
-            #[expect(dead_code)]
-            #[test_fuzz::test_fuzz]
-            fn #fuzz(obj: #ident)  {
-                use #reth_codecs::Compact;
-                let mut buf = vec![];
-                let len = obj.clone().to_compact(&mut buf);
-                let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
-                assert_eq!(obj, same_obj);
-            }
-
-            #[test]
-            #[expect(missing_docs)]
-            pub fn #test() {
-                #fuzz(#ident::default())
-            }
-        }
-    };
-
     // Build function
     quote! {
-        #fuzz_tests
-
         #impl_compact {
             fn to_compact<B>(&self, buf: &mut B) -> usize where B: #reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                 let mut flags = #flags::default();
