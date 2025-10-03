@@ -17,7 +17,7 @@ mod state;
 pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef, LowestAvailableBlocks},
     latest::{LatestStateProvider, LatestStateProviderRef},
-    overlay::OverlayStateProvider,
+    overlay::{OverlayStateProvider, OverlayStateProviderFactory},
 };
 
 mod consistent_view;

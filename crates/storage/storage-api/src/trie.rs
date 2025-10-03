@@ -89,6 +89,14 @@ pub trait StateProofProvider: Send + Sync {
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;
 }
 
+/// Trie Reader
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait TrieReader: Send + Sync {
+    /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
+    /// given block having been processed.
+    fn revert_trie(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
+}
+
 /// Trie Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieWriter: Send + Sync {
