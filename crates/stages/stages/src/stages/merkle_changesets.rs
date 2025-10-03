@@ -70,11 +70,14 @@ impl MerkleChangeSets {
         // We maintain changesets from the finalized block to the latest block.
         let finalized_block = provider.last_finalized_block_number()?;
 
-        // If finalized block is not found, default to being `retention_blocks` away from
-        // target_end
+        // Calculate the fallback start position based on retention blocks
+        let retention_based_start = merkle_checkpoint.saturating_sub(self.retention_blocks);
+
+        // Use minimum of finalized_block and retention_based_start if finalized_block exists,
+        // otherwise just use retention_based_start
         let mut target_start = finalized_block
-            .unwrap_or_else(|| merkle_checkpoint.saturating_sub(self.retention_blocks))
-            .saturating_add(1);
+            .map(|finalized| finalized.saturating_add(1).min(retention_based_start))
+            .unwrap_or(retention_based_start);
 
         // We cannot revert the genesis block; target_start must be >0
         target_start = target_start.max(1);
