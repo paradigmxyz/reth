@@ -24,6 +24,10 @@ pub use database::DatabaseArgs;
 mod log;
 pub use log::{ColorMode, LogArgs, Verbosity};
 
+/// `MetricArgs` to configure telemetry metrics.
+mod metric;
+pub use metric::MetricArgs;
+
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
 pub use payload_builder::PayloadBuilderArgs;

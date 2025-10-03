@@ -48,7 +48,10 @@ use reth_cli_commands::launcher::FnLauncher;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{args::LogArgs, version::version_metadata};
+use reth_node_core::{
+    args::{LogArgs, MetricArgs},
+    version::version_metadata,
+};
 use reth_optimism_node::args::RollupArgs;
 
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
@@ -72,6 +75,10 @@ pub struct Cli<
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// The metrics configuration for the CLI.
+    #[command(flatten)]
+    pub metrics: MetricArgs,
 
     /// Type marker for the RPC module validator
     #[arg(skip)]
@@ -193,6 +200,8 @@ mod test {
             "10000",
             "--metrics",
             "9003",
+            "--metrics-otlp",
+            "127.0.0.1:4318",
             "--log.file.max-size",
             "100",
         ]);
