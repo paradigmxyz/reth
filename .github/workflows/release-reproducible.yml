@@ -43,7 +43,7 @@ jobs:
       - name: Extract Rust version from Cargo.toml
         id: rust_version
         run: |
-          RUST_VERSION=$(grep '^rust-version' Cargo.toml | sed 's/.*= *"\([^"]*\)".*/\1/' || echo "1")
+          RUST_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "reth") | .rust_version' || echo "1")
           echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Build and push reproducible image
