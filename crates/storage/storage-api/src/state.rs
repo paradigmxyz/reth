@@ -33,8 +33,7 @@ pub type StateProviderBox = Box<dyn StateProvider>;
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
     BlockHashReader
-    + AccountReader
-    + BytecodeReader
+    + AccountInfoReader
     + StateRootProvider
     + StorageRootProvider
     + StateProofProvider
