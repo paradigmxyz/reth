@@ -157,7 +157,7 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if an EIP-4844 transaction without any blobs arrives
     #[error("blobless blob transaction")]
     NoEip4844Blobs,
-    /// Thrown if an EIP-4844 transaction without any blobs arrives
+    /// Thrown if an EIP-4844 transaction arrives with too many blobs
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
