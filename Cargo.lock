@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=balance-fix#bbd8c7bdf83a5b5477d856468f1d3d63a304ea4f"
+source = "git+https://github.com/Rimeeeeee/evm?branch=balance-fix#230a0d2d6c2d5d0df26027311a64930571a1157b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.21.2"
-source = "git+https://github.com/Rimeeeeee/evm?branch=balance-fix#bbd8c7bdf83a5b5477d856468f1d3d63a304ea4f"
+source = "git+https://github.com/Rimeeeeee/evm?branch=balance-fix#230a0d2d6c2d5d0df26027311a64930571a1157b"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
