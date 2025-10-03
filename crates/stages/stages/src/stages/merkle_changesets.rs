@@ -290,15 +290,15 @@ where
         // greater.
         //
         // ------------------------------> Block #
-        //    |------prev-----|
+        //    |------computed-----|
         //              |-----target-----|
         //                    |--actual--|
         //
         // However, if the target start is less than the previously computed start, we don't want to
-        // do this, as it would leave a gap of data at `target_start..=computed_range.start`.
+        // do this, as it would leave a gap of data at `target_range.start..=computed_range.start`.
         //
         // ------------------------------> Block #
-        //           |---prev---|
+        //           |---computed---|
         //      |-------target-------|
         //      |-------actual-------|
         //
