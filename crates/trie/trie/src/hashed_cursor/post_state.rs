@@ -66,7 +66,12 @@ where
     /// Create new instance of [`HashedPostStateAccountCursor`].
     pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
         let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
-        Self { cursor, post_state_cursor, post_state_accounts: &post_state_accounts.accounts, last_account: None }
+        Self {
+            cursor,
+            post_state_cursor,
+            post_state_accounts: &post_state_accounts.accounts,
+            last_account: None,
+        }
     }
 
     /// Check if an account is destroyed in the post state.
@@ -90,7 +95,7 @@ where
         if let Some((address, account)) = post_state_entry
             && address == key
         {
-            return Ok(Some((address, account.unwrap())))
+            return Ok(Some((address, account.unwrap())));
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
@@ -138,7 +143,7 @@ where
         let post_state_item = post_state_item.map(|(address, account)| {
             (address, account.expect("destroyed accounts should be filtered out"))
         });
-        
+
         match (post_state_item, db_item) {
             (Some(post_state_entry), Some(db_entry)) => {
                 // If both are not empty, return the smallest of the two
@@ -217,11 +222,16 @@ where
 {
     /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
     pub fn new(cursor: C, post_state_storage: Option<&'a HashedStorageSorted>) -> Self {
-        let post_state_cursor =
-            post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.storage));
+        let post_state_cursor = post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.storage));
         let storage_ref = post_state_storage.map(|s| s.storage.as_slice());
         let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
-        Self { cursor, post_state_cursor, post_state_storage: storage_ref, storage_wiped, last_slot: None }
+        Self {
+            cursor,
+            post_state_cursor,
+            post_state_storage: storage_ref,
+            storage_wiped,
+            last_slot: None,
+        }
     }
 
     /// Check if a storage slot is cleared (has zero value) in the post state.
@@ -247,16 +257,17 @@ where
             if let Some((slot, value)) = post_state_entry
                 && slot == subkey
             {
-                return Ok(if value.is_zero() { None } else { Some((slot, value)) })
+                return Ok(if value.is_zero() { None } else { Some((slot, value)) });
             }
-            return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()))
+            return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()));
         }
 
         // If the exact match in post state has a non-zero value, return it
         if let Some((slot, value)) = post_state_entry
-            && slot == subkey && !value.is_zero()
+            && slot == subkey
+            && !value.is_zero()
         {
-            return Ok(Some((slot, value)))
+            return Ok(Some((slot, value)));
         }
 
         // It's not an exact non-zero match in post state, so we need to check the database.
@@ -278,15 +289,16 @@ where
 
         // Return post state entry immediately if database was wiped (filtering out zeros).
         if self.storage_wiped {
-            return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()))
+            return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()));
         }
 
         // If post state was given precedence, move the cursor forward.
         // If the entry was already returned or is zero-valued, move to the next.
         let mut db_entry = self.cursor.seek(last_slot)?;
-        while db_entry.as_ref().is_some_and(|(slot, _)| {
-            *slot == last_slot || self.is_slot_zero_in_post_state(slot)
-        }) {
+        while db_entry
+            .as_ref()
+            .is_some_and(|(slot, _)| *slot == last_slot || self.is_slot_zero_in_post_state(slot))
+        {
             db_entry = self.cursor.next()?;
         }
 
@@ -305,7 +317,7 @@ where
     ) -> Option<(B256, U256)> {
         // Filter out zero-valued slots from post state
         let post_state_item = post_state_item.filter(|(_, value)| !value.is_zero());
-        
+
         match (post_state_item, db_item) {
             (Some(post_state_entry), Some(db_entry)) => {
                 // If both are not empty, return the smallest of the two
@@ -364,7 +376,8 @@ where
                     !storage.iter().any(|(_, value)| !value.is_zero())
                 } else {
                     // If not wiped, check if there are any non-zero values in post state
-                    let has_non_zero_in_post_state = storage.iter().any(|(_, value)| !value.is_zero());
+                    let has_non_zero_in_post_state =
+                        storage.iter().any(|(_, value)| !value.is_zero());
                     if has_non_zero_in_post_state {
                         false
                     } else {
