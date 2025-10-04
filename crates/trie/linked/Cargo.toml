@@ -1,0 +1,27 @@
+[package]
+name = "reth-trie-linked"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-trie.workspace = true
+reth-stateless.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+revm-bytecode.workspace = true
+serde = { workspace = true, optional = true }
+thiserror.workspace = true
+itertools.workspace = true
+
+[features]
+serde = ["dep:serde", "serde/derive", "alloy-primitives/serde"]
