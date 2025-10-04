@@ -89,11 +89,11 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
     type Header = N::BlockHeader;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderWithHashMask<Self::Header>>(block_hash.into())?
-            .filter(|(_, hash)| hash == block_hash)
+            .get_two::<HeaderWithHashMask<Self::Header>>((&block_hash).into())?
+            .filter(|(_, hash)| hash == &block_hash)
             .map(|(header, _)| header))
     }
 
@@ -101,11 +101,11 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProv
         self.cursor()?.get_one::<HeaderMask<Self::Header>>(num.into())
     }
 
-    fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<TDWithHashMask>(block_hash.into())?
-            .filter(|(_, hash)| hash == block_hash)
+            .get_two::<TDWithHashMask>((&block_hash).into())?
+            .filter(|(_, hash)| hash == &block_hash)
             .map(|(td, _)| td.into()))
     }
 

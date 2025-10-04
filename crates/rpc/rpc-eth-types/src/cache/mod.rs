@@ -539,7 +539,7 @@ where
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
-                                    let header = provider.header(&block_hash).and_then(|header| {
+                                    let header = provider.header(block_hash).and_then(|header| {
                                         header.ok_or_else(|| {
                                             ProviderError::HeaderNotFound(block_hash.into())
                                         })

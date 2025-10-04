@@ -493,8 +493,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 
@@ -533,8 +533,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 
@@ -575,8 +575,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 

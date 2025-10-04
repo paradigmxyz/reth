@@ -266,7 +266,7 @@ mod tests {
                         },
                         ..
                     }) if processed == previous_checkpoint.progress.processed + 1 &&
-                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
+                        total == runner.db.count_entries::<tables::PlainStorageState>().unwrap() as u64);
 
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
@@ -280,7 +280,7 @@ mod tests {
                         },
                         ..
                     }) if processed == total &&
-                        total == runner.db.table::<tables::PlainStorageState>().unwrap().len() as u64);
+                        total == runner.db.count_entries::<tables::PlainStorageState>().unwrap() as u64);
 
                 // Validate the stage execution
                 assert!(

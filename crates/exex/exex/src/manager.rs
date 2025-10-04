@@ -370,7 +370,7 @@ where
             .map(|(exex_id, num_hash)| {
                 num_hash.map_or(Ok((exex_id, num_hash, false)), |num_hash| {
                     self.provider
-                        .is_known(&num_hash.hash)
+                        .is_known(num_hash.hash)
                         // Save the ExEx ID, finished height, and whether the hash is canonical
                         .map(|is_canonical| (exex_id, Some(num_hash), is_canonical))
                 })

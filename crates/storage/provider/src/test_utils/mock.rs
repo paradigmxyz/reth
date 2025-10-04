@@ -281,9 +281,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
 {
     type Header = <T::Block as Block>::Header;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         let lock = self.headers.lock();
-        Ok(lock.get(block_hash).cloned())
+        Ok(lock.get(&block_hash).cloned())
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
@@ -291,9 +291,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> HeaderP
         Ok(lock.values().find(|h| h.number() == num).cloned())
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         let lock = self.headers.lock();
-        Ok(lock.get(hash).map(|target| {
+        Ok(lock.get(&hash).map(|target| {
             lock.values()
                 .filter(|h| h.number() < target.number())
                 .fold(target.difficulty(), |td, h| td + h.difficulty())
@@ -717,6 +717,10 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> BlockRe
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         Ok(vec![])
+    }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
     }
 }
 

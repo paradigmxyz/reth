@@ -2659,7 +2659,7 @@ where
         let mut canonical = self.canonical_in_memory_state.header_by_hash(hash);
 
         if canonical.is_none() {
-            canonical = self.provider.header(&hash)?.map(|header| SealedHeader::new(header, hash));
+            canonical = self.provider.header(hash)?.map(|header| SealedHeader::new(header, hash));
         }
 
         Ok(canonical)
@@ -2883,7 +2883,7 @@ where
         }
 
         // Check if the block is persisted
-        if let Some(header) = self.provider.header(&hash)? {
+        if let Some(header) = self.provider.header(hash)? {
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
