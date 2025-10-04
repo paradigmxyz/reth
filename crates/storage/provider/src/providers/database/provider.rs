@@ -76,7 +76,7 @@ use std::{
     ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -2838,21 +2838,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
-        // Get highest static file block for the total block range
-        let highest_static_file_block = self
-            .static_file_provider()
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .expect("todo: error handling, headers should exist");
-
-        // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make sure
-        // we remove only what is ABOVE the block.
-        //
-        // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
-        // will have three blocks to remove, which will be block 8, 7, and 6.
-        debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
-        self.static_file_provider()
-            .get_writer(block, StaticFileSegment::Headers)?
-            .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        // Get highest static file block for the total block range. If no static file headers
+        // exist on disk, there's nothing to prune from static files.
+        if let Some(highest_static_file_block) =
+            self.static_file_provider().get_highest_static_file_block(StaticFileSegment::Headers)
+        {
+            // IMPORTANT: we use `highest_static_file_block.saturating_sub(block_number)` to make
+            // sure we remove only what is ABOVE the block.
+            //
+            // i.e., if the highest static file block is 8, we want to remove above block 5 only, we
+            // will have three blocks to remove, which will be block 8, 7, and 6.
+            debug!(target: "providers::db", ?block, "Removing static file blocks above block_number");
+            self.static_file_provider()
+                .get_writer(block, StaticFileSegment::Headers)?
+                .prune_headers(highest_static_file_block.saturating_sub(block))?;
+        } else {
+            warn!(target: "providers::db", ?block, "No static file headers found, skipping static file pruning");
+        }
 
         // First transaction to be removed
         let unwind_tx_from = self
