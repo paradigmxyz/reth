@@ -134,30 +134,25 @@ enum ProofJob<Tx> {
         result_tx: CrossbeamSender<StorageProofResult>,
         #[cfg(feature = "metrics")]
         enqueued_at: Instant,
+        _phantom: std::marker::PhantomData<Tx>,
     },
-    /// Blinded account node request
+    /// Blinded account node request (reuses worker's pre-warmed tx)
     BlindedAccountNode {
-        /// Database transaction for this request
-        tx: Tx,
-        /// Trie context for this block
-        task_ctx: ProofTaskCtx,
         /// Node path to retrieve
         path: Nibbles,
         /// Result channel
         result_tx: CrossbeamSender<TrieNodeProviderResult>,
+        _phantom: std::marker::PhantomData<Tx>,
     },
-    /// Blinded storage node request
+    /// Blinded storage node request (reuses worker's pre-warmed tx)
     BlindedStorageNode {
-        /// Database transaction for this request
-        tx: Tx,
-        /// Trie context for this block
-        task_ctx: ProofTaskCtx,
         /// Account hash
         account: B256,
         /// Node path to retrieve
         path: Nibbles,
         /// Result channel
         result_tx: CrossbeamSender<TrieNodeProviderResult>,
+        _phantom: std::marker::PhantomData<Tx>,
     },
 }
 
@@ -261,7 +256,7 @@ where
                     };
 
                     match job {
-                        ProofJob::StorageProof { input, result_tx, #[cfg(feature = "metrics")] enqueued_at } => {
+                        ProofJob::StorageProof { input, result_tx, #[cfg(feature = "metrics")] enqueued_at, .. } => {
                             #[cfg(feature = "metrics")]
                             {
                                 let depth = storage_queue_depth_clone
@@ -296,16 +291,14 @@ where
                             let _ = result_tx.send(final_result);
                         }
 
-                        ProofJob::BlindedAccountNode { tx, task_ctx, path, result_tx } => {
-                            // Create ProofTaskTx for this blinded node request
-                            let blinded_proof_tx = ProofTaskTx::new(tx, task_ctx, worker_id);
-
+                        ProofJob::BlindedAccountNode { path, result_tx, .. } => {
+                            // Use worker's pre-warmed proof_tx (no fresh transaction needed)
                             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                let (trie_cursor_factory, hashed_cursor_factory) = blinded_proof_tx.create_factories();
+                                let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
                                 let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
                                     trie_cursor_factory,
                                     hashed_cursor_factory,
-                                    blinded_proof_tx.task_ctx.prefix_sets.clone(),
+                                    proof_tx.task_ctx.prefix_sets.clone(),
                                 );
                                 blinded_provider_factory.account_node_provider().trie_node(&path)
                             }));
@@ -325,16 +318,14 @@ where
                             let _ = result_tx.send(final_result);
                         }
 
-                        ProofJob::BlindedStorageNode { tx, task_ctx, account, path, result_tx } => {
-                            // Create ProofTaskTx for this blinded node request
-                            let blinded_proof_tx = ProofTaskTx::new(tx, task_ctx, worker_id);
-
+                        ProofJob::BlindedStorageNode { account, path, result_tx, .. } => {
+                            // Use worker's pre-warmed proof_tx (no fresh transaction needed)
                             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                let (trie_cursor_factory, hashed_cursor_factory) = blinded_proof_tx.create_factories();
+                                let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
                                 let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
                                     trie_cursor_factory,
                                     hashed_cursor_factory,
-                                    blinded_proof_tx.task_ctx.prefix_sets.clone(),
+                                    proof_tx.task_ctx.prefix_sets.clone(),
                                 );
                                 blinded_provider_factory.storage_node_provider(account).trie_node(&path)
                             }));
@@ -484,6 +475,7 @@ where
                                     result_tx: result_sender,
                                     #[cfg(feature = "metrics")]
                                     enqueued_at: Instant::now(),
+                                    _phantom: std::marker::PhantomData,
                                 };
 
                                 // Increment counter BEFORE sending to avoid race with worker
@@ -511,28 +503,10 @@ where
                                     self.metrics.account_nodes += 1;
                                 }
 
-                                // Create fresh transaction for this blinded node request
-                                let provider_ro = match self.view.provider_ro() {
-                                    Ok(p) => p,
-                                    Err(e) => {
-                                        let _ =
-                                            result_sender.send(Err(SparseTrieErrorKind::Other(
-                                                Box::new(std::io::Error::other(format!(
-                                                    "Failed to create provider: {}",
-                                                    e
-                                                ))),
-                                            )
-                                            .into()));
-                                        continue;
-                                    }
-                                };
-                                let tx = provider_ro.into_tx();
-
                                 let job = ProofJob::BlindedAccountNode {
-                                    tx,
-                                    task_ctx: self.task_ctx.clone(),
                                     path,
                                     result_tx: result_sender,
+                                    _phantom: std::marker::PhantomData,
                                 };
 
                                 if self.storage_work_tx.send(job).is_err() {
@@ -546,29 +520,11 @@ where
                                     self.metrics.storage_nodes += 1;
                                 }
 
-                                // Create fresh transaction for this blinded node request
-                                let provider_ro = match self.view.provider_ro() {
-                                    Ok(p) => p,
-                                    Err(e) => {
-                                        let _ =
-                                            result_sender.send(Err(SparseTrieErrorKind::Other(
-                                                Box::new(std::io::Error::other(format!(
-                                                    "Failed to create provider: {}",
-                                                    e
-                                                ))),
-                                            )
-                                            .into()));
-                                        continue;
-                                    }
-                                };
-                                let tx = provider_ro.into_tx();
-
                                 let job = ProofJob::BlindedStorageNode {
-                                    tx,
-                                    task_ctx: self.task_ctx.clone(),
                                     account,
                                     path,
                                     result_tx: result_sender,
+                                    _phantom: std::marker::PhantomData,
                                 };
 
                                 if self.storage_work_tx.send(job).is_err() {
