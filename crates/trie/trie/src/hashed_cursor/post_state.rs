@@ -254,18 +254,18 @@ where
 
         // If it's an exact match in post state and database storage was wiped
         if self.storage_wiped {
-            if let Some((slot, value)) = post_state_entry
-                && slot == subkey
+            if let Some((slot, value)) = post_state_entry &&
+                slot == subkey
             {
-                return Ok(if value.is_zero() { None } else { Some((slot, value)) });
+                return Ok(Some((slot, value)));
             }
             return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()));
         }
 
         // If the exact match in post state has a non-zero value, return it
-        if let Some((slot, value)) = post_state_entry
-            && slot == subkey
-            && !value.is_zero()
+        if let Some((slot, value)) = post_state_entry &&
+            slot == subkey && 
+            !value.is_zero()
         {
             return Ok(Some((slot, value)));
         }
