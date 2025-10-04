@@ -10,7 +10,7 @@ use reth_db::{
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
-    test_utils::{state_root_prehashed, storage_root_prehashed},
+    test_utils::{state_root_prehashed, storage_root_unhashed},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
     HashedPostState, HashedStorage, StateRoot, StorageRoot,
@@ -127,7 +127,7 @@ proptest! {
                 storage.clear();
             }
             storage.append(&mut storage_update);
-            let expected_root = storage_root_prehashed(storage.clone());
+            let expected_root = storage_root_unhashed(storage.clone());
             assert_eq!(expected_root, storage_root);
         }
     }
