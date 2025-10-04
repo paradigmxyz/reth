@@ -95,15 +95,12 @@ where
 
         let mut built_block_access_list = None;
         let mut block_access_list_hash = None;
-        if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
-            if let Some(bal) = block_access_list {
-                built_block_access_list = Some(bal);
-                block_access_list_hash = Some(alloy_primitives::keccak256(alloy_rlp::encode(bal)));
-            }
+        if self.chain_spec.is_amsterdam_active_at_timestamp(timestamp) &&
+            let Some(bal) = block_access_list
+        {
+            built_block_access_list = Some(bal);
+            block_access_list_hash = Some(alloy_primitives::keccak256(alloy_rlp::encode(bal)));
         }
-        // if let Some(err) = bal_error {
-        //     return Err(err);
-        // }
 
         let header = Header {
             parent_hash: ctx.parent_hash,
