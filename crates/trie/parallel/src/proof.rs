@@ -1,8 +1,8 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput},
+    proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput, StorageProofResult},
     root::ParallelStateRootError,
-    stats::ParallelTrieTracker,
+    stats::{ParallelTrieStats, ParallelTrieTracker},
     StorageRootTargets,
 };
 use alloy_primitives::{
@@ -10,6 +10,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use crossbeam_channel::Receiver;
 use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
@@ -21,7 +22,7 @@ use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
@@ -34,8 +35,181 @@ use reth_trie_common::{
     proof::{DecodedProofNodes, ProofRetainer},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
-use tracing::trace;
+use std::sync::Arc;
+use tracing::{debug, trace, warn};
+
+/// Error when storage proof channel closes unexpectedly.
+#[inline]
+fn storage_channel_closed_error(address: &B256) -> ParallelStateRootError {
+    ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(format!(
+        "storage proof channel closed unexpectedly for {address}"
+    ))))
+}
+
+/// Builds an account multiproof with storage proof receivers.
+///
+/// This function accepts a map of storage proof receivers and fetches proofs on-demand
+/// during account trie traversal, allowing account trie walking to interleave with
+/// storage proof computation for better performance.
+///
+/// Returns a tuple containing the decoded multiproof and stats for metrics recording.
+pub fn build_account_multiproof_with_storage<TCF, HCF>(
+    trie_cursor_factory: TCF,
+    hashed_cursor_factory: HCF,
+    targets: MultiProofTargets,
+    prefix_sets: TriePrefixSets,
+    mut storage_receivers: B256Map<Receiver<StorageProofResult>>,
+    collect_branch_node_masks: bool,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+) -> Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>
+where
+    TCF: TrieCursorFactory + Clone,
+    HCF: HashedCursorFactory + Clone,
+{
+    let mut tracker = ParallelTrieTracker::default();
+
+    let accounts_added_removed_keys =
+        multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
+    // Create the walker.
+    let walker = TrieWalker::<_>::state_trie(
+        trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+        prefix_sets.account_prefix_set,
+    )
+    .with_added_removed_keys(accounts_added_removed_keys)
+    .with_deletions_retained(true);
+
+    // Create a hash builder to rebuild the root node since it is not available in the database.
+    let retainer = targets
+        .keys()
+        .map(Nibbles::unpack)
+        .collect::<ProofRetainer>()
+        .with_added_removed_keys(accounts_added_removed_keys);
+    let mut hash_builder = HashBuilder::default()
+        .with_proof_retainer(retainer)
+        .with_updates(collect_branch_node_masks);
+
+    // Initialize all storage multiproofs as empty.
+    // Storage multiproofs for non empty tries will be overwritten if necessary.
+    let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
+        targets.keys().map(|key| (*key, DecodedStorageMultiProof::empty())).collect();
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    let mut account_node_iter = TrieNodeIter::state_trie(
+        walker,
+        hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+    );
+    while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        match account_node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                // Fetch storage proof on-demand (blocks if not yet ready)
+                let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
+                    Some(receiver) => {
+                        // Try non-blocking receive first to track if proof was ready
+                        match receiver.try_recv() {
+                            Ok(Ok(proof)) => {
+                                tracker.inc_storage_proof_immediate();
+                                proof
+                            }
+                            Ok(Err(e)) => return Err(e),
+                            Err(crossbeam_channel::TryRecvError::Empty) => {
+                                // Proof not ready yet, block and wait
+                                tracker.inc_storage_proof_blocked();
+                                match receiver.recv() {
+                                    Ok(Ok(proof)) => proof,
+                                    Ok(Err(e)) => return Err(e),
+                                    Err(_) => {
+                                        return Err(storage_channel_closed_error(&hashed_address))
+                                    }
+                                }
+                            }
+                            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                                return Err(storage_channel_closed_error(&hashed_address))
+                            }
+                        }
+                    }
+                    // Since we do not store all intermediate nodes in the database, there might
+                    // be a possibility of re-adding a non-modified leaf to the hash builder.
+                    None => {
+                        tracker.inc_missed_leaves();
+
+                        warn!(
+                            target: "trie::proof",
+                            ?hashed_address,
+                            "No storage proof receiver found - using fallback synchronous computation"
+                        );
+
+                        let raw_fallback_proof = StorageProof::new_hashed(
+                            trie_cursor_factory.clone(),
+                            hashed_cursor_factory.clone(),
+                            hashed_address,
+                        )
+                        .with_prefix_set_mut(Default::default())
+                        .storage_multiproof(
+                            targets.get(&hashed_address).cloned().unwrap_or_default(),
+                        )
+                        .map_err(|e| {
+                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                DatabaseError::Other(e.to_string()),
+                            ))
+                        })?;
+
+                        raw_fallback_proof.try_into()?
+                    }
+                };
+
+                // Encode account
+                account_rlp.clear();
+                let account = account.into_trie_account(decoded_storage_multiproof.root);
+                account.encode(&mut account_rlp as &mut dyn BufMut);
+
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+
+                // We might be adding leaves that are not necessarily our proof targets.
+                if targets.contains_key(&hashed_address) {
+                    collected_decoded_storages.insert(hashed_address, decoded_storage_multiproof);
+                }
+            }
+        }
+    }
+    let _ = hash_builder.root();
+
+    let stats = tracker.finish();
+
+    let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
+    let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
+
+    let (branch_node_hash_masks, branch_node_tree_masks) = if collect_branch_node_masks {
+        let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+        (
+            updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
+            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
+        )
+    } else {
+        (HashMap::default(), HashMap::default())
+    };
+
+    trace!(
+        target: "trie::parallel_proof",
+        duration = ?stats.duration(),
+        branches_added = stats.branches_added(),
+        leaves_added = stats.leaves_added(),
+        missed_leaves = stats.missed_leaves(),
+        "Calculated decoded proof"
+    );
+
+    Ok((
+        DecodedMultiProof {
+            account_subtree: decoded_account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+            storages: collected_decoded_storages,
+        },
+        stats,
+    ))
+}
 
 /// Parallel proof calculator.
 ///
@@ -62,6 +236,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
+    #[allow(dead_code)]
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
@@ -122,14 +297,23 @@ where
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
-            target_slots,
+            Arc::new(target_slots),
             self.collect_branch_node_masks,
             self.multi_added_removed_keys.clone(),
         );
 
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let _ =
-            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        if self
+            .storage_proof_task_handle
+            .queue_task(ProofTaskKind::StorageProof(input, sender))
+            .is_err()
+        {
+            debug!(
+                target: "trie::parallel_proof",
+                ?hashed_address,
+                "Storage proof task queue failed - manager closed"
+            );
+        }
         receiver
     }
 
@@ -172,8 +356,6 @@ where
         self,
         targets: MultiProofTargets,
     ) -> Result<DecodedMultiProof, ParallelStateRootError> {
-        let mut tracker = ParallelTrieTracker::default();
-
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
@@ -187,11 +369,16 @@ where
                 .collect(),
             destroyed_accounts: Default::default(),
         });
-        let prefix_sets = prefix_sets.freeze();
+
+        // Freeze prefix sets for storage root targets
+        let frozen_prefix_sets = prefix_sets.freeze();
 
         let storage_root_targets = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
-            prefix_sets.storage_prefix_sets.clone(),
+            frozen_prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
+            frozen_prefix_sets.storage_prefix_sets.clone(),
         );
         let storage_root_targets_len = storage_root_targets.len();
 
@@ -201,13 +388,11 @@ where
             "Starting parallel proof generation"
         );
 
-        // Pre-calculate storage roots for accounts which were changed.
-        tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
-
         // stores the receiver for the storage proof outcome for the hashed addresses
         // this way we can lazily await the outcome when we iterate over the map
-        let mut storage_proof_receivers =
-            B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+        let mut storage_proof_receivers: B256Map<
+            crossbeam_channel::Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
+        > = B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -230,145 +415,112 @@ where
             &self.state_sorted,
         );
 
-        let accounts_added_removed_keys =
-            self.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+        // Build account multiproof with on-demand storage proof fetching
+        let (multiproof, stats) = build_account_multiproof_with_storage(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            targets,
+            frozen_prefix_sets,
+            storage_proof_receivers, // ← Pass receivers directly for on-demand fetching
+            self.collect_branch_node_masks,
+            self.multi_added_removed_keys,
+        )?;
 
-        // Create the walker.
-        let walker = TrieWalker::<_>::state_trie(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            prefix_sets.account_prefix_set,
-        )
-        .with_added_removed_keys(accounts_added_removed_keys)
-        .with_deletions_retained(true);
-
-        // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = targets
-            .keys()
-            .map(Nibbles::unpack)
-            .collect::<ProofRetainer>()
-            .with_added_removed_keys(accounts_added_removed_keys);
-        let mut hash_builder = HashBuilder::default()
-            .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
-
-        // Initialize all storage multiproofs as empty.
-        // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
-            targets.keys().map(|key| (*key, DecodedStorageMultiProof::empty())).collect();
-        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::state_trie(
-            walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
-        );
-        while let Some(account_node) =
-            account_node_iter.try_next().map_err(ProviderError::Database)?
-        {
-            match account_node {
-                TrieElement::Branch(node) => {
-                    hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
-                }
-                TrieElement::Leaf(hashed_address, account) => {
-                    let root = match storage_proof_receivers.remove(&hashed_address) {
-                        Some(rx) => {
-                            let decoded_storage_multiproof = rx.recv().map_err(|e| {
-                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                    DatabaseError::Other(format!(
-                                        "channel closed for {hashed_address}: {e}"
-                                    )),
-                                ))
-                            })??;
-                            let root = decoded_storage_multiproof.root;
-                            collected_decoded_storages
-                                .insert(hashed_address, decoded_storage_multiproof);
-                            root
-                        }
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
-                        None => {
-                            tracker.inc_missed_leaves();
-
-                            match self.missed_leaves_storage_roots.entry(hashed_address) {
-                                dashmap::Entry::Occupied(occ) => *occ.get(),
-                                dashmap::Entry::Vacant(vac) => {
-                                    let root = StorageProof::new_hashed(
-                                        trie_cursor_factory.clone(),
-                                        hashed_cursor_factory.clone(),
-                                        hashed_address,
-                                    )
-                                    .with_prefix_set_mut(Default::default())
-                                    .storage_multiproof(
-                                        targets.get(&hashed_address).cloned().unwrap_or_default(),
-                                    )
-                                    .map_err(|e| {
-                                        ParallelStateRootError::StorageRoot(
-                                            StorageRootError::Database(DatabaseError::Other(
-                                                e.to_string(),
-                                            )),
-                                        )
-                                    })?
-                                    .root;
-                                    vac.insert(root);
-                                    root
-                                }
-                            }
-                        }
-                    };
-
-                    // Encode account
-                    account_rlp.clear();
-                    let account = account.into_trie_account(root);
-                    account.encode(&mut account_rlp as &mut dyn BufMut);
-
-                    hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-                }
-            }
-        }
-        let _ = hash_builder.root();
-
-        let stats = tracker.finish();
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
 
-        let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
-        let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
+        Ok(multiproof)
+    }
 
-        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
-            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-            (
-                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
-                updated_branch_nodes
-                    .into_iter()
-                    .map(|(path, node)| (path, node.tree_mask))
-                    .collect(),
-            )
-        } else {
-            (HashMap::default(), HashMap::default())
-        };
+    /// Generate a state multiproof according to specified targets, returning stats.
+    ///
+    /// This is identical to [`Self::decoded_multiproof`] but also returns the trie statistics
+    /// for analysis and testing.
+    pub fn decoded_multiproof_with_stats(
+        self,
+        targets: MultiProofTargets,
+    ) -> Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError> {
+        // Extend prefix sets with targets
+        let mut prefix_sets = (*self.prefix_sets).clone();
+        prefix_sets.extend(TriePrefixSetsMut {
+            account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
+            storage_prefix_sets: targets
+                .iter()
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
+                .map(|(hashed_address, slots)| {
+                    (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
+                })
+                .collect(),
+            destroyed_accounts: Default::default(),
+        });
+
+        // Freeze prefix sets for storage root targets
+        let frozen_prefix_sets = prefix_sets.freeze();
+
+        let storage_root_targets = StorageRootTargets::new(
+            frozen_prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
+            frozen_prefix_sets.storage_prefix_sets.clone(),
+        );
+        let storage_root_targets_len = storage_root_targets.len();
 
         trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
-            duration = ?stats.duration(),
-            branches_added = stats.branches_added(),
-            leaves_added = stats.leaves_added(),
-            missed_leaves = stats.missed_leaves(),
-            precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "Calculated decoded proof"
+            "Starting parallel proof generation"
         );
 
-        Ok(DecodedMultiProof {
-            account_subtree: decoded_account_subtree,
-            branch_node_hash_masks,
-            branch_node_tree_masks,
-            storages: collected_decoded_storages,
-        })
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        // this way we can lazily await the outcome when we iterate over the map
+        let mut storage_proof_receivers: B256Map<
+            crossbeam_channel::Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
+        > = B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+
+        for (hashed_address, prefix_set) in
+            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
+        {
+            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
+            let receiver = self.queue_storage_proof(hashed_address, prefix_set, target_slots);
+
+            // store the receiver for that result with the hashed address so we can await this in
+            // place when we iterate over the trie
+            storage_proof_receivers.insert(hashed_address, receiver);
+        }
+
+        let provider_ro = self.view.provider_ro()?;
+        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+            &self.nodes_sorted,
+        );
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+            &self.state_sorted,
+        );
+
+        // Build account multiproof with on-demand storage proof fetching
+        let (multiproof, stats) = build_account_multiproof_with_storage(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            targets,
+            frozen_prefix_sets,
+            storage_proof_receivers, // ← Pass receivers directly for on-demand fetching
+            self.collect_branch_node_masks,
+            self.multi_added_removed_keys,
+        )?;
+
+        #[cfg(feature = "metrics")]
+        self.metrics.record(stats);
+
+        Ok((multiproof, stats))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use crate::proof_task::{spawn_proof_workers, ProofTaskCtx};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder},
@@ -447,13 +599,15 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
-        let proof_task_handle = proof_task.handle();
-
-        // keep the join handle around to make sure it does not return any errors
-        // after we compute the state root
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
+        let proof_task_handle = spawn_proof_workers(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            1, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
 
         let parallel_result = ParallelProof::new(
             consistent_view,
@@ -489,9 +643,305 @@ mod tests {
         // then compare the entire thing for any mask differences
         assert_eq!(parallel_result, sequential_result_decoded);
 
-        // drop the handle to terminate the task and then block on the proof task handle to make
-        // sure it does not return any errors
+        // drop the handle to terminate workers
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
+    }
+
+    /// Test parallel proof with mixed storage targets (some accounts have storage, some don't)
+    #[test]
+    fn parallel_proof_handles_mixed_storage_targets() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        let state = (0..20)
+            .map(|i| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // Every other account has storage
+                let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
+                if i % 2 == 0 {
+                    for _ in 0..10 {
+                        storage.insert(
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        );
+                    }
+                }
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Create targets with mixed storage (some empty, some with slots)
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots = if storage.is_empty() {
+                B256Set::default() // Empty storage
+            } else {
+                storage.iter().take(3).map(|(slot, _)| *slot).collect()
+            };
+            targets.insert(hashed_address, target_slots);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let proof_task_handle = spawn_proof_workers(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            2, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result_raw =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+        let sequential_result_decoded: DecodedMultiProof =
+            sequential_result_raw.try_into().unwrap();
+
+        assert_eq!(parallel_result, sequential_result_decoded);
+
+        drop(proof_task_handle);
+    }
+
+    /// Test parallel proof with varying storage sizes (validates ordering independence)
+    #[test]
+    fn parallel_proof_ordering_independence() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        // Create state with varying storage sizes to ensure random completion order
+        let state = (0..15)
+            .map(|_| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // Random storage sizes (1-50 slots) to create different proof computation times
+                let storage_size = rng.random_range(1..50);
+                let storage: HashMap<B256, U256, DefaultHashBuilder> = (0..storage_size)
+                    .map(|_| {
+                        (
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        )
+                    })
+                    .collect();
+
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots: B256Set = storage.keys().take(5).copied().collect();
+            if !target_slots.is_empty() {
+                targets.insert(hashed_address, target_slots);
+            }
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
+        let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+
+        // Use 3 workers to increase chance of out-of-order completion
+        let proof_task_handle = spawn_proof_workers(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            3, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result_raw =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+        let sequential_result_decoded: DecodedMultiProof =
+            sequential_result_raw.try_into().unwrap();
+
+        // Results should be identical regardless of completion order
+        assert_eq!(parallel_result, sequential_result_decoded);
+
+        drop(proof_task_handle);
+    }
+
+    /// Test that storage proof metrics are properly tracked
+    #[test]
+    fn storage_proof_metrics_tracking() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let mut rng = rand::rng();
+        // Create state with multiple accounts having storage
+        let state = (0..10)
+            .map(|_| {
+                let address = Address::random();
+                let account =
+                    Account { balance: U256::from(rng.random::<u64>()), ..Default::default() };
+
+                // All accounts have storage to ensure we get metrics
+                let storage: HashMap<B256, U256, DefaultHashBuilder> = (0..5)
+                    .map(|_| {
+                        (
+                            B256::from(U256::from(rng.random::<u64>())),
+                            U256::from(rng.random::<u64>()),
+                        )
+                    })
+                    .collect();
+                (address, (account, storage))
+            })
+            .collect::<HashMap<_, _, DefaultHashBuilder>>();
+
+        {
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .insert_account_for_hashing(
+                    state.iter().map(|(address, (account, _))| (*address, Some(*account))),
+                )
+                .unwrap();
+            provider_rw
+                .insert_storage_for_hashing(state.iter().map(|(address, (_, storage))| {
+                    (
+                        *address,
+                        storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry { key: *slot, value: *value }),
+                    )
+                }))
+                .unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        // Create targets for all accounts
+        let mut targets = MultiProofTargets::default();
+        for (address, (_, storage)) in &state {
+            let hashed_address = keccak256(*address);
+            let target_slots = storage.iter().take(3).map(|(slot, _)| *slot).collect();
+            targets.insert(hashed_address, target_slots);
+        }
+
+        let rt = Runtime::new().unwrap();
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let proof_task_handle = spawn_proof_workers(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            2, // storage_worker_count
+            1, // account_worker_count
+            1, // max_concurrency
+        )
+        .unwrap();
+
+        let (result, stats) = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            proof_task_handle.clone(),
+        )
+        .decoded_multiproof_with_stats(targets.clone())
+        .unwrap();
+
+        // Verify we got a valid result
+        assert!(!result.account_subtree.is_empty());
+
+        // Verify metrics are tracked
+        let total_proofs = stats.storage_proofs_immediate() + stats.storage_proofs_blocked();
+        assert_eq!(total_proofs, 10, "Should track all 10 storage proofs (immediate + blocked)");
+
+        // At least one category should have proofs
+        assert!(
+            stats.storage_proofs_immediate() > 0 || stats.storage_proofs_blocked() > 0,
+            "Should have at least some storage proof activity"
+        );
+
+        // Percentage should be valid (0-100)
+        let percentage = stats.storage_proofs_immediate_percentage();
+        assert!(
+            (0.0..=100.0).contains(&percentage),
+            "Percentage should be between 0-100, got {percentage}"
+        );
+
+        drop(proof_task_handle);
     }
 }

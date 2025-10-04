@@ -17,6 +17,13 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
+// TODO: Experiment with this + metrics to understand the optimal number
+/// Default number of storage proof workers.
+pub const DEFAULT_STORAGE_PROOF_WORKERS: usize = 6;
+
+/// Default number of account proof workers.
+pub const DEFAULT_ACCOUNT_PROOF_WORKERS: usize = 2;
+
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
@@ -81,6 +88,10 @@ pub struct TreeConfig {
     has_enough_parallelism: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
+    /// Number of workers dedicated to storage proof execution
+    storage_proof_workers: usize,
+    /// Number of workers dedicated to account proof execution
+    account_proof_workers: usize,
     /// Whether multiproof task should chunk proof targets.
     multiproof_chunking_enabled: bool,
     /// Multiproof task chunk size for proof targets.
@@ -127,6 +138,8 @@ impl Default for TreeConfig {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            storage_proof_workers: DEFAULT_STORAGE_PROOF_WORKERS,
+            account_proof_workers: DEFAULT_ACCOUNT_PROOF_WORKERS,
             multiproof_chunking_enabled: true,
             multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
@@ -156,6 +169,8 @@ impl TreeConfig {
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
+        storage_proof_workers: usize,
+        account_proof_workers: usize,
         multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
@@ -179,6 +194,8 @@ impl TreeConfig {
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
+            storage_proof_workers,
+            account_proof_workers,
             multiproof_chunking_enabled,
             multiproof_chunk_size,
             reserved_cpu_cores,
@@ -218,6 +235,16 @@ impl TreeConfig {
     /// Return the maximum proof task concurrency.
     pub const fn max_proof_task_concurrency(&self) -> u64 {
         self.max_proof_task_concurrency
+    }
+
+    /// Return the number of storage proof workers.
+    pub const fn storage_proof_workers(&self) -> usize {
+        self.storage_proof_workers
+    }
+
+    /// Return the number of account proof workers.
+    pub const fn account_proof_workers(&self) -> usize {
+        self.account_proof_workers
     }
 
     /// Return whether the multiproof task chunking is enabled.
@@ -395,6 +422,18 @@ impl TreeConfig {
         max_proof_task_concurrency: u64,
     ) -> Self {
         self.max_proof_task_concurrency = max_proof_task_concurrency;
+        self
+    }
+
+    /// Setter for number of storage proof workers.
+    pub const fn with_storage_proof_workers(mut self, storage_proof_workers: usize) -> Self {
+        self.storage_proof_workers = storage_proof_workers;
+        self
+    }
+
+    /// Setter for number of account proof workers.
+    pub const fn with_account_proof_workers(mut self, account_proof_workers: usize) -> Self {
+        self.account_proof_workers = account_proof_workers;
         self
     }
 
