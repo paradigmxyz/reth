@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskManagerHandle},
+    proof_task::{spawn_proof_workers, ProofTaskCtx, ProofTaskManagerHandle},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -460,12 +460,12 @@ where
         let mut account_concurrency =
             (max_proof_task_concurrency * account_workers) / total_workers;
 
-        // Account for ProofTaskManager's internal clamping to min 1 per pool type
+        // Account for spawn_proof_workers' internal clamping to min 1 per pool type
         storage_concurrency = storage_concurrency.max(storage_workers + 1);
         account_concurrency = account_concurrency.max(account_workers + 1);
 
-        // Create storage proof manager
-        let storage_proof_manager = ProofTaskManager::new(
+        // Spawn storage proof workers
+        let storage_handle = spawn_proof_workers(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx.clone(),
@@ -474,8 +474,8 @@ where
             storage_concurrency,
         )?;
 
-        // Create account proof manager
-        let account_proof_manager = ProofTaskManager::new(
+        // Spawn account proof workers
+        let account_handle = spawn_proof_workers(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
@@ -483,29 +483,6 @@ where
             account_workers, // account_worker_count
             account_concurrency,
         )?;
-
-        let storage_handle = storage_proof_manager.handle();
-        let account_handle = account_proof_manager.handle();
-
-        // Spawn both managers with error logging
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = storage_proof_manager.run() {
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof manager returned an error"
-                );
-            }
-        });
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = account_proof_manager.run() {
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Account proof manager returned an error"
-                );
-            }
-        });
 
         Ok((storage_handle, account_handle, max_proof_task_concurrency))
     }

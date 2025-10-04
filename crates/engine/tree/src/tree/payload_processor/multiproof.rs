@@ -7,6 +7,7 @@ use alloy_primitives::{
     map::{B256Set, HashSet},
     B256,
 };
+use crossbeam_channel;
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::Histogram;
@@ -549,7 +550,7 @@ where
         );
 
         // Create channel for receiving multiproof result from account manager
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         // Queue account multiproof to account manager
         let account_input = AccountMultiproofInput::new(
@@ -1232,7 +1233,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie::{MultiProof, TrieInput};
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use reth_trie_parallel::proof_task::{spawn_proof_workers, ProofTaskCtx};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
@@ -1259,8 +1260,8 @@ mod tests {
             config.state_sorted.clone(),
             config.prefix_sets.clone(),
         );
-        // Create both storage and account managers for testing
-        let storage_manager = ProofTaskManager::new(
+        // Create both storage and account proof worker pools for testing
+        let storage_manager_handle = spawn_proof_workers(
             executor.handle().clone(),
             config.consistent_view.clone(),
             task_ctx.clone(),
@@ -1269,7 +1270,7 @@ mod tests {
             1, // max_concurrency
         )
         .unwrap();
-        let account_manager = ProofTaskManager::new(
+        let account_manager_handle = spawn_proof_workers(
             executor.handle().clone(),
             config.consistent_view.clone(),
             task_ctx,
@@ -1283,8 +1284,8 @@ mod tests {
         MultiProofTask::new(
             config,
             executor,
-            account_manager.handle(),
-            storage_manager.handle(),
+            account_manager_handle,
+            storage_manager_handle,
             channel.0,
             1,
             None,

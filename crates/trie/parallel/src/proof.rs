@@ -520,7 +520,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use crate::proof_task::{spawn_proof_workers, ProofTaskCtx};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder},
@@ -599,7 +599,7 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
@@ -608,11 +608,6 @@ mod tests {
             1, // max_concurrency
         )
         .unwrap();
-        let proof_task_handle = proof_task.handle();
-
-        // keep the join handle around to make sure it does not return any errors
-        // after we compute the state root
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let parallel_result = ParallelProof::new(
             consistent_view,
@@ -648,10 +643,8 @@ mod tests {
         // then compare the entire thing for any mask differences
         assert_eq!(parallel_result, sequential_result_decoded);
 
-        // drop the handle to terminate the task and then block on the proof task handle to make
-        // sure it does not return any errors
+        // drop the handle to terminate workers
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 
     /// Test parallel proof with mixed storage targets (some accounts have storage, some don't)
@@ -720,7 +713,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
@@ -729,8 +722,6 @@ mod tests {
             1, // max_concurrency
         )
         .unwrap();
-        let proof_task_handle = proof_task.handle();
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let parallel_result = ParallelProof::new(
             consistent_view,
@@ -751,7 +742,6 @@ mod tests {
         assert_eq!(parallel_result, sequential_result_decoded);
 
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
     }
 
     /// Test parallel proof with varying storage sizes (validates ordering independence)
@@ -821,7 +811,7 @@ mod tests {
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
 
         // Use 3 workers to increase chance of out-of-order completion
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
@@ -830,8 +820,6 @@ mod tests {
             1, // max_concurrency
         )
         .unwrap();
-        let proof_task_handle = proof_task.handle();
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let parallel_result = ParallelProof::new(
             consistent_view,
@@ -853,7 +841,6 @@ mod tests {
         assert_eq!(parallel_result, sequential_result_decoded);
 
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
     }
 
     /// Test that storage proof metrics are properly tracked
@@ -914,7 +901,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
@@ -923,8 +910,6 @@ mod tests {
             1, // max_concurrency
         )
         .unwrap();
-        let proof_task_handle = proof_task.handle();
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let (result, stats) = ParallelProof::new(
             consistent_view,
@@ -958,6 +943,5 @@ mod tests {
         );
 
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("proof task should succeed");
     }
 }

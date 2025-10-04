@@ -1,9 +1,8 @@
 //! A Task that manages sending proof requests to a number of tasks that have longer-running
 //! database transactions.
 //!
-//! The [`ProofTaskManager`] ensures that there are a max number of currently executing proof tasks,
-//! and is responsible for managing the fixed number of database transactions created at the start
-//! of the task.
+//! The [`spawn_proof_workers`] function spawns worker threads with pre-warmed database
+//! transactions. Proof jobs are dispatched directly to workers via [`ProofTaskManagerHandle`].
 //!
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
@@ -175,80 +174,65 @@ pub struct AccountProofJob<Tx> {
     pub(crate) enqueued_at: Instant,
 }
 
-/// A task that manages sending multiproof requests to a number of tasks that have longer-running
-/// database transactions
-#[derive(Debug)]
-pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Channel for dispatching storage proof work to workers (handles storage proofs and blinded
-    /// nodes)
-    storage_work_tx: crossbeam_channel::Sender<ProofJob<FactoryTx<Factory>>>,
-    /// Channel for dispatching account multiproof work to workers
-    account_work_tx: crossbeam_channel::Sender<AccountProofJob<FactoryTx<Factory>>>,
-    /// The number of active handles.
-    ///
-    /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
-    /// [`ProofTaskManagerHandle::drop`].
-    active_handles: Arc<AtomicUsize>,
-    /// Tracks outstanding storage jobs for metrics purposes.
-    #[cfg(feature = "metrics")]
-    storage_queue_depth: Arc<AtomicUsize>,
-    /// Tracks outstanding account jobs for metrics purposes.
-    #[cfg(feature = "metrics")]
-    account_queue_depth: Arc<AtomicUsize>,
-    /// Metrics tracking blinded node fetches.
-    #[cfg(feature = "metrics")]
-    metrics: ProofTaskMetrics,
-}
-
-impl<Factory> ProofTaskManager<Factory>
+/// Spawns proof workers for storage and account multiproofs.
+///
+/// This function spawns worker threads that maintain long-lived database transactions
+/// for efficient proof computation. Workers reuse these transactions across multiple proofs
+/// following the prewarm.rs pattern.
+///
+/// # Arguments
+///
+/// * `executor` - Tokio runtime handle for spawning blocking tasks
+/// * `view` - Consistent database view for creating read-only transactions
+/// * `task_ctx` - Shared context (trie updates, state, prefix sets) for all workers
+/// * `storage_worker_count` - Number of storage proof workers (clamped to minimum 1)
+/// * `account_worker_count` - Number of account multiproof workers (clamped to minimum 1)
+/// * `_max_concurrency` - Reserved for future use
+///
+/// # Returns
+///
+/// A handle for dispatching proof jobs to the worker pools.
+///
+/// # Errors
+///
+/// Returns an error if the consistent view provider fails to create read-only transactions.
+pub fn spawn_proof_workers<Factory>(
+    executor: Handle,
+    view: ConsistentDbView<Factory>,
+    task_ctx: ProofTaskCtx,
+    storage_worker_count: usize,
+    account_worker_count: usize,
+    _max_concurrency: usize,
+) -> ProviderResult<ProofTaskManagerHandle<FactoryTx<Factory>>>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
-    /// Creates a new [`ProofTaskManager`] with the given worker counts and max concurrency.
-    ///
-    /// Spawns `storage_worker_count` storage proof workers and `account_worker_count` account
-    /// multiproof workers upfront that reuse database transactions for the entire block lifetime
-    /// (prewarm.rs pattern).
-    ///
-    /// Worker counts are clamped to at least 1 to ensure the manager always has workers available.
-    /// Note: In the dual-manager architecture, each manager spawns workers for both types even if
-    /// only one type is used (e.g., storage-only manager still spawns 1 account worker).
-    ///
-    /// Returns an error if the consistent view provider fails to create a read-only transaction.
-    pub fn new(
-        executor: Handle,
-        view: ConsistentDbView<Factory>,
-        task_ctx: ProofTaskCtx,
-        storage_worker_count: usize,
-        account_worker_count: usize,
-        _max_concurrency: usize,
-    ) -> ProviderResult<Self> {
-        // Clamp worker counts to at least 1
-        let storage_worker_count = storage_worker_count.max(1);
-        let account_worker_count = account_worker_count.max(1);
+    // Clamp worker counts to at least 1
+    let storage_worker_count = storage_worker_count.max(1);
+    let account_worker_count = account_worker_count.max(1);
 
-        let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
-        let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
+    let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
+    let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
 
+    #[cfg(feature = "metrics")]
+    let metrics = ProofTaskMetrics::default();
+    #[cfg(feature = "metrics")]
+    let storage_queue_depth = Arc::new(AtomicUsize::new(0));
+    #[cfg(feature = "metrics")]
+    let account_queue_depth = Arc::new(AtomicUsize::new(0));
+
+    // Spawn storage workers upfront (prewarm.rs pattern)
+    for worker_id in 0..storage_worker_count {
+        let provider = view.provider_ro()?;
+        let tx = provider.into_tx();
+        let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+        let storage_work_rx = storage_work_rx.clone();
         #[cfg(feature = "metrics")]
-        let metrics = ProofTaskMetrics::default();
+        let storage_queue_depth_clone = Arc::clone(&storage_queue_depth);
         #[cfg(feature = "metrics")]
-        let storage_queue_depth = Arc::new(AtomicUsize::new(0));
-        #[cfg(feature = "metrics")]
-        let account_queue_depth = Arc::new(AtomicUsize::new(0));
+        let metrics_clone = metrics.clone();
 
-        // Spawn storage workers upfront (prewarm.rs pattern)
-        for worker_id in 0..storage_worker_count {
-            let provider = view.provider_ro()?;
-            let tx = provider.into_tx();
-            let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
-            let storage_work_rx = storage_work_rx.clone();
-            #[cfg(feature = "metrics")]
-            let storage_queue_depth_clone = Arc::clone(&storage_queue_depth);
-            #[cfg(feature = "metrics")]
-            let metrics_clone = metrics.clone();
-
-            executor.spawn_blocking(move || {
+        executor.spawn_blocking(move || {
                 debug!(target: "trie::proof_pool", worker_id, "Storage proof worker started");
 
                 // Worker loop - reuse transaction for entire block
@@ -353,149 +337,101 @@ where
 
                 debug!(target: "trie::proof_pool", worker_id, "Storage proof worker shutdown");
             });
-        }
+    }
 
-        // Spawn account workers upfront
-        for worker_id in 0..account_worker_count {
-            let provider = view.provider_ro()?;
-            let tx = provider.into_tx();
-            let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id + storage_worker_count);
-            let account_work_rx = account_work_rx.clone();
-            #[cfg(feature = "metrics")]
-            let account_queue_depth_clone = Arc::clone(&account_queue_depth);
-            #[cfg(feature = "metrics")]
-            let metrics_clone = metrics.clone();
+    // Spawn account workers upfront
+    for worker_id in 0..account_worker_count {
+        let provider = view.provider_ro()?;
+        let tx = provider.into_tx();
+        let proof_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id + storage_worker_count);
+        let account_work_rx = account_work_rx.clone();
+        #[cfg(feature = "metrics")]
+        let account_queue_depth_clone = Arc::clone(&account_queue_depth);
+        #[cfg(feature = "metrics")]
+        let metrics_clone = metrics.clone();
 
-            executor.spawn_blocking(move || {
-                debug!(target: "trie::proof_pool", worker_id, "Account proof worker started");
+        executor.spawn_blocking(move || {
+            debug!(target: "trie::proof_pool", worker_id, "Account proof worker started");
 
-                // Worker loop - reuse transaction for entire block
-                loop {
-                    let job: AccountProofJob<_> = match account_work_rx.recv() {
-                        Ok(item) => item,
-                        Err(_) => break, /* Channel closed, shutdown
-                                          * TODO: should we handle this error? */
-                    };
+            // Worker loop - reuse transaction for entire block
+            loop {
+                let job: AccountProofJob<_> = match account_work_rx.recv() {
+                    Ok(item) => item,
+                    Err(_) => break, /* Channel closed, shutdown
+                                      * TODO: should we handle this error? */
+                };
 
-                    #[cfg(feature = "metrics")]
-                    {
-                        let depth = account_queue_depth_clone
-                            .fetch_sub(1, Ordering::SeqCst)
-                            .saturating_sub(1);
-                        metrics_clone.record_account_queue_depth(depth);
-                        metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
-                    }
+                #[cfg(feature = "metrics")]
+                {
+                    let depth =
+                        account_queue_depth_clone.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
+                    metrics_clone.record_account_queue_depth(depth);
+                    metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
+                }
 
-                    // Destructure input to extract result_sender and pass fields to worker
-                    let AccountMultiproofInput {
+                // Destructure input to extract result_sender and pass fields to worker
+                let AccountMultiproofInput {
+                    targets,
+                    prefix_sets,
+                    collect_branch_node_masks,
+                    multi_added_removed_keys,
+                    storage_proof_handle,
+                    result_sender,
+                } = job.input;
+
+                // Wrap account multiproof execution in panic recovery
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    execute_account_multiproof_worker(
                         targets,
                         prefix_sets,
                         collect_branch_node_masks,
                         multi_added_removed_keys,
                         storage_proof_handle,
-                        result_sender,
-                    } = job.input;
+                        &proof_tx,
+                    )
+                }));
 
-                    // Wrap account multiproof execution in panic recovery
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        execute_account_multiproof_worker(
-                            targets,
-                            prefix_sets,
-                            collect_branch_node_masks,
-                            multi_added_removed_keys,
-                            storage_proof_handle,
-                            &proof_tx,
-                        )
-                    }));
-
-                    // Convert panic to error and send result
-                    let final_result = match result {
-                        Ok(Ok(multiproof)) => Ok(multiproof),
-                        Ok(Err(e)) => Err(e),
-                        Err(_panic_info) => {
-                            error!(
-                                target: "trie::proof_pool",
-                                worker_id,
-                                "Account multiproof task panicked - converting to error"
-                            );
-                            Err(ParallelStateRootError::Other(
-                                "account multiproof task panicked".into(),
-                            ))
-                        }
-                    };
-
-                    if result_sender.send(final_result).is_err() {
-                        warn!(
+                // Convert panic to error and send result
+                let final_result = match result {
+                    Ok(Ok(multiproof)) => Ok(multiproof),
+                    Ok(Err(e)) => Err(e),
+                    Err(_panic_info) => {
+                        error!(
                             target: "trie::proof_pool",
                             worker_id,
-                            "Account multiproof result discarded - receiver dropped"
+                            "Account multiproof task panicked - converting to error"
                         );
+                        Err(ParallelStateRootError::Other(
+                            "account multiproof task panicked".into(),
+                        ))
                     }
+                };
+
+                if result_sender.send(final_result).is_err() {
+                    warn!(
+                        target: "trie::proof_pool",
+                        worker_id,
+                        "Account multiproof result discarded - receiver dropped"
+                    );
                 }
+            }
 
-                debug!(target: "trie::proof_pool", worker_id, "Account proof worker shutdown");
-            });
-        }
-
-        Ok(Self {
-            storage_work_tx,
-            account_work_tx,
-            active_handles: Arc::new(AtomicUsize::new(0)),
-            #[cfg(feature = "metrics")]
-            storage_queue_depth,
-            #[cfg(feature = "metrics")]
-            account_queue_depth,
-            #[cfg(feature = "metrics")]
-            metrics,
-        })
+            debug!(target: "trie::proof_pool", worker_id, "Account proof worker shutdown");
+        });
     }
 
-    /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(
-            self.storage_work_tx.clone(),
-            self.account_work_tx.clone(),
-            self.active_handles.clone(),
-            #[cfg(feature = "metrics")]
-            self.storage_queue_depth.clone(),
-            #[cfg(feature = "metrics")]
-            self.account_queue_depth.clone(),
-        )
-    }
-}
-
-impl<Factory> ProofTaskManager<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
-{
-    /// Waits for all handles to be dropped, then performs cleanup.
-    ///
-    /// Workers are already running - this just waits for shutdown signal.
-    /// When the last handle is dropped, this returns and workers are cleaned up.
-    pub fn run(self) -> ProviderResult<()> {
-        use std::time::Duration;
-
-        // Wait for all handles to be dropped
-        while self.active_handles.load(Ordering::SeqCst) > 0 {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-
-        // Record metrics before shutdown
+    // Create and return handle directly
+    Ok(ProofTaskManagerHandle::new(
+        storage_work_tx,
+        account_work_tx,
+        Arc::new(AtomicUsize::new(0)),
         #[cfg(feature = "metrics")]
-        self.metrics.record();
-
-        // Drop channels to signal workers to shut down
-        drop(self.storage_work_tx);
-        drop(self.account_work_tx);
-
+        storage_queue_depth,
         #[cfg(feature = "metrics")]
-        {
-            self.metrics.record_storage_queue_depth(0);
-            self.metrics.record_account_queue_depth(0);
-        }
-
-        Ok(())
-    }
+        account_queue_depth,
+        #[cfg(feature = "metrics")]
+        Arc::new(metrics),
+    ))
 }
 
 /// Type alias for the factory tuple returned by `create_factories`
@@ -513,8 +449,7 @@ pub struct ProofTaskTx<Tx> {
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
 
-    /// Identifier for the tx within the context of a single [`ProofTaskManager`], used only for
-    /// tracing.
+    /// Identifier for the tx within the worker pool, used only for tracing.
     #[allow(dead_code)]
     id: usize,
 }
@@ -710,6 +645,9 @@ pub struct ProofTaskManagerHandle<Tx> {
     storage_queue_depth: Arc<AtomicUsize>,
     #[cfg(feature = "metrics")]
     account_queue_depth: Arc<AtomicUsize>,
+    /// Metrics for recording on shutdown
+    #[cfg(feature = "metrics")]
+    metrics: Arc<ProofTaskMetrics>,
 }
 
 impl<Tx> ProofTaskManagerHandle<Tx> {
@@ -720,6 +658,7 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
         active_handles: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] storage_queue_depth: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] account_queue_depth: Arc<AtomicUsize>,
+        #[cfg(feature = "metrics")] metrics: Arc<ProofTaskMetrics>,
     ) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self {
@@ -730,6 +669,8 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
             storage_queue_depth,
             #[cfg(feature = "metrics")]
             account_queue_depth,
+            #[cfg(feature = "metrics")]
+            metrics,
         }
     }
 
@@ -818,15 +759,20 @@ impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
             self.storage_queue_depth.clone(),
             #[cfg(feature = "metrics")]
             self.account_queue_depth.clone(),
+            #[cfg(feature = "metrics")]
+            self.metrics.clone(),
         )
     }
 }
 
 impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     fn drop(&mut self) {
-        // Decrement the number of active handles.
+        // Decrement the number of active handles and record metrics if this is the last one
+        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
+            #[cfg(feature = "metrics")]
+            self.metrics.record();
+        }
         // When last handle drops, crossbeam channels close automatically.
-        self.active_handles.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -937,14 +883,14 @@ mod tests {
     }
 
     #[test]
-    fn proof_task_manager_new_propagates_consistent_view_error() {
+    fn spawn_proof_workers_propagates_consistent_view_error() {
         let factory = create_test_provider_factory();
         let view = ConsistentDbView::new(factory, Some((B256::repeat_byte(0x11), 0)));
 
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
 
-        let err = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 1, 1, 1).unwrap_err();
+        let err = spawn_proof_workers(rt.handle().clone(), view, task_ctx, 1, 1, 1).unwrap_err();
 
         assert!(matches!(
             err,
@@ -953,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn proof_task_manager_spawns_requested_workers_and_processes_tasks() {
+    fn spawn_proof_workers_creates_requested_workers_and_processes_tasks() {
         let inner_factory = create_test_provider_factory();
         let calls = Arc::new(AtomicUsize::new(0));
         let counting_factory = CountingFactory::new(inner_factory, Arc::clone(&calls));
@@ -963,7 +909,7 @@ mod tests {
         let task_ctx = default_task_ctx();
         let storage_workers = 2usize;
         let account_workers = 1usize;
-        let manager = ProofTaskManager::new(
+        let handle = spawn_proof_workers(
             rt.handle().clone(),
             view,
             task_ctx,
@@ -975,9 +921,6 @@ mod tests {
 
         let expected_total_workers = storage_workers + account_workers;
         assert_eq!(calls.load(Ordering::SeqCst), expected_total_workers);
-
-        let handle = manager.handle();
-        let join_handle = rt.spawn_blocking(move || manager.run());
 
         let prefix_set = PrefixSetMut::default().freeze();
         let mut receivers = Vec::new();
@@ -1000,7 +943,6 @@ mod tests {
         }
 
         drop(handle);
-        rt.block_on(join_handle).unwrap().unwrap();
     }
 
     /// Tests that storage workers reuse the same database transaction across multiple proofs,
@@ -1015,8 +957,8 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
         let storage_workers = 1usize;
-        let account_workers = 0usize; // Gets clamped to 1 inside ProofTaskManager::new
-        let manager = ProofTaskManager::new(
+        let account_workers = 0usize; // Gets clamped to 1 inside spawn_proof_workers
+        let handle = spawn_proof_workers(
             rt.handle().clone(),
             view,
             task_ctx,
@@ -1026,13 +968,10 @@ mod tests {
         )
         .unwrap();
 
-        // Worker counts are clamped to min 1 inside ProofTaskManager::new
+        // Worker counts are clamped to min 1 inside spawn_proof_workers
         // Expect 2 transactions: 1 for storage worker + 1 for account worker (clamped from 0)
         let initial_calls = calls.load(Ordering::SeqCst);
         assert_eq!(initial_calls, 2);
-
-        let handle = manager.handle();
-        let join_handle = rt.spawn_blocking(move || manager.run());
 
         // Queue 10 storage proofs - all should use same transaction
         let prefix_set = PrefixSetMut::default().freeze();
@@ -1058,10 +997,9 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), initial_calls);
 
         drop(handle);
-        rt.block_on(join_handle).unwrap().unwrap();
     }
 
-    /// Tests that the dual manager architecture handles heavy concurrent load without deadlocks,
+    /// Tests that the worker architecture handles heavy concurrent load without deadlocks,
     /// validating unbounded channel backpressure behavior under stress.
     #[test]
     fn handles_backpressure_with_many_concurrent_storage_proofs() {
@@ -1071,10 +1009,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let task_ctx = default_task_ctx();
         // 2 storage workers + 1 account worker = 3 total workers
-        let manager = ProofTaskManager::new(rt.handle().clone(), view, task_ctx, 2, 1, 4).unwrap();
-
-        let handle = manager.handle();
-        let join_handle = rt.spawn_blocking(move || manager.run());
+        let handle = spawn_proof_workers(rt.handle().clone(), view, task_ctx, 2, 1, 4).unwrap();
 
         // Queue 50 storage proofs concurrently
         let prefix_set = PrefixSetMut::default().freeze();
@@ -1098,6 +1033,5 @@ mod tests {
         }
 
         drop(handle);
-        rt.block_on(join_handle).unwrap().unwrap();
     }
 }
