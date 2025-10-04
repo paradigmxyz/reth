@@ -276,6 +276,7 @@ mod block_bincode {
                     .collect(),
                 ommers: value.ommers.into_iter().map(SerdeBincodeCompat::from_repr).collect(),
                 withdrawals: value.withdrawals.into_owned(),
+                block_access_list: None,
             }
         }
     }

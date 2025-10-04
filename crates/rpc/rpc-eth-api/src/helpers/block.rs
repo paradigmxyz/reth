@@ -265,6 +265,7 @@ pub trait EthBlocks:
                         header,
                         transactions: BlockTransactions::Uncle,
                         withdrawals: None,
+                        block_access_list: None,
                     })
                 })
                 .transpose()

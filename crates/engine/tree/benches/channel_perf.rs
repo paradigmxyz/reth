@@ -30,6 +30,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
             storage,
             status: AccountStatus::empty(),
             transaction_id: 0,
+            ..Default::default()
         };
 
         let address = Address::with_last_byte(i as u8);
