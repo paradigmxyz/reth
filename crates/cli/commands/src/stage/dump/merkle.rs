@@ -6,7 +6,14 @@ use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::TableImporter, tables};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
+    database::Database,
+    models::BlockNumberAddress,
+    table::TableImporter,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
@@ -135,9 +142,37 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     let unwind_inner_tx = provider.into_tx();
 
-    // TODO optimize we can actually just get the entries we need
-    output_db
-        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
+    // Import only the StorageChangeSets entries within the block range (from, to)
+    output_db.update(|tx| {
+        let mut source_cursor = unwind_inner_tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+        let mut target_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+
+        // For DupSort tables, we need to iterate through each primary key in the range
+        // and then get all duplicate entries for each key
+        let range = BlockNumberAddress::range(from..=to);
+
+        if let Some((key, _)) = source_cursor.seek(range.start)? {
+            if key < range.end {
+                for dup_row in source_cursor.walk_dup(Some(key), None)? {
+                    let (k, v) = dup_row?;
+                    target_cursor.append_dup(k, v)?;
+                }
+
+                while let Some((key, _)) = source_cursor.next_no_dup()? {
+                    if key >= range.end {
+                        break;
+                    }
+
+                    for dup_row in source_cursor.walk_dup(Some(key), None)? {
+                        let (k, v) = dup_row?;
+                        target_cursor.append_dup(k, v)?;
+                    }
+                }
+            }
+        }
+
+        Ok::<(), reth_db::DatabaseError>(())
+    })??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;
