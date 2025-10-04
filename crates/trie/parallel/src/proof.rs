@@ -236,6 +236,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
+    #[allow(dead_code)]
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
@@ -424,7 +425,6 @@ where
             self.collect_branch_node_masks,
             self.multi_added_removed_keys,
         )?;
-
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
@@ -737,6 +737,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
+            Default::default(),
             proof_task_handle.clone(),
         )
         .decoded_multiproof(targets.clone())
@@ -837,6 +838,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
+            Default::default(),
             proof_task_handle.clone(),
         )
         .decoded_multiproof(targets.clone())
@@ -926,6 +928,7 @@ mod tests {
 
         let (result, stats) = ParallelProof::new(
             consistent_view,
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
