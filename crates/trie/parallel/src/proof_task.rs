@@ -37,13 +37,12 @@ use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProvide
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver as MpscReceiver, SendError, Sender as MpscSender},
         Arc,
     },
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
@@ -127,13 +126,19 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
 ///
 /// Storage workers handle storage proofs and blinded node requests since both
 /// operate on trie data with similar transaction requirements.
-enum ProofJob<Tx> {
+#[derive(Debug)]
+pub enum ProofJob<Tx> {
     /// Storage proof request
     StorageProof {
+        /// Input for the storage proof
         input: StorageProofInput,
+        /// Channel to send result
         result_tx: CrossbeamSender<StorageProofResult>,
+        /// Timestamp when enqueued (for metrics)
         #[cfg(feature = "metrics")]
         enqueued_at: Instant,
+        /// Phantom data to maintain type parameter
+        #[doc(hidden)]
         _phantom: std::marker::PhantomData<Tx>,
     },
     /// Blinded account node request (reuses worker's pre-warmed tx)
@@ -142,6 +147,8 @@ enum ProofJob<Tx> {
         path: Nibbles,
         /// Result channel
         result_tx: CrossbeamSender<TrieNodeProviderResult>,
+        /// Phantom data to maintain type parameter
+        #[doc(hidden)]
         _phantom: std::marker::PhantomData<Tx>,
     },
     /// Blinded storage node request (reuses worker's pre-warmed tx)
@@ -152,15 +159,20 @@ enum ProofJob<Tx> {
         path: Nibbles,
         /// Result channel
         result_tx: CrossbeamSender<TrieNodeProviderResult>,
+        /// Phantom data to maintain type parameter
+        #[doc(hidden)]
         _phantom: std::marker::PhantomData<Tx>,
     },
 }
 
 /// Account multiproof job dispatched to the account worker pool.
-struct AccountProofJob<Tx> {
-    input: AccountMultiproofInput<Tx>,
+#[derive(Debug)]
+pub struct AccountProofJob<Tx> {
+    /// Input for the account multiproof calculation
+    pub(crate) input: AccountMultiproofInput<Tx>,
+    /// Timestamp when the job was enqueued (for metrics)
     #[cfg(feature = "metrics")]
-    enqueued_at: Instant,
+    pub(crate) enqueued_at: Instant,
 }
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -172,14 +184,6 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     storage_work_tx: crossbeam_channel::Sender<ProofJob<FactoryTx<Factory>>>,
     /// Channel for dispatching account multiproof work to workers
     account_work_tx: crossbeam_channel::Sender<AccountProofJob<FactoryTx<Factory>>>,
-    /// Consistent view provider used for creating transactions on-demand (blinded nodes)
-    view: ConsistentDbView<Factory>,
-    /// Proof task context shared across all proof tasks
-    task_ctx: ProofTaskCtx,
-    /// A receiver for new proof tasks.
-    proof_task_rx: MpscReceiver<ProofTaskMessage<FactoryTx<Factory>>>,
-    /// A sender for coordinating with handles.
-    tx_sender: MpscSender<ProofTaskMessage<FactoryTx<Factory>>>,
     /// The number of active handles.
     ///
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
@@ -223,7 +227,6 @@ where
         let storage_worker_count = storage_worker_count.max(1);
         let account_worker_count = account_worker_count.max(1);
 
-        let (tx_sender, proof_task_rx) = channel();
         let (storage_work_tx, storage_work_rx) = crossbeam_channel::unbounded();
         let (account_work_tx, account_work_rx) = crossbeam_channel::unbounded();
 
@@ -437,10 +440,6 @@ where
         Ok(Self {
             storage_work_tx,
             account_work_tx,
-            view,
-            task_ctx,
-            proof_task_rx,
-            tx_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "metrics")]
             storage_queue_depth,
@@ -453,7 +452,15 @@ where
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
     pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
+        ProofTaskManagerHandle::new(
+            self.storage_work_tx.clone(),
+            self.account_work_tx.clone(),
+            self.active_handles.clone(),
+            #[cfg(feature = "metrics")]
+            self.storage_queue_depth.clone(),
+            #[cfg(feature = "metrics")]
+            self.account_queue_depth.clone(),
+        )
     }
 }
 
@@ -461,135 +468,33 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
-    /// Loops, managing the proof tasks, and sending new tasks to the executor.
-    pub fn run(mut self) -> ProviderResult<()> {
-        loop {
-            match self.proof_task_rx.recv() {
-                Ok(message) => match message {
-                    ProofTaskMessage::QueueTask(task) => {
-                        match task {
-                            ProofTaskKind::StorageProof(input, result_sender) => {
-                                // Dispatch to worker pool (non-blocking)
-                                let job = ProofJob::StorageProof {
-                                    input,
-                                    result_tx: result_sender,
-                                    #[cfg(feature = "metrics")]
-                                    enqueued_at: Instant::now(),
-                                    _phantom: std::marker::PhantomData,
-                                };
+    /// Waits for all handles to be dropped, then performs cleanup.
+    ///
+    /// Workers are already running - this just waits for shutdown signal.
+    /// When the last handle is dropped, this returns and workers are cleaned up.
+    pub fn run(self) -> ProviderResult<()> {
+        use std::time::Duration;
 
-                                // Increment counter BEFORE sending to avoid race with worker
-                                // decrement
-                                #[cfg(feature = "metrics")]
-                                let old_depth =
-                                    self.storage_queue_depth.fetch_add(1, Ordering::Relaxed);
-
-                                if self.storage_work_tx.send(job).is_err() {
-                                    // Send failed, revert the increment
-                                    #[cfg(feature = "metrics")]
-                                    self.storage_queue_depth.fetch_sub(1, Ordering::Relaxed);
-
-                                    trace!(target: "trie::proof_task", "Storage proof worker pool shut down");
-                                } else {
-                                    #[cfg(feature = "metrics")]
-                                    self.metrics
-                                        .record_storage_queue_depth(old_depth.saturating_add(1));
-                                }
-                            }
-                            ProofTaskKind::BlindedAccountNode(path, result_sender) => {
-                                // Track metrics for blinded node requests
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.account_nodes += 1;
-                                }
-
-                                let job = ProofJob::BlindedAccountNode {
-                                    path,
-                                    result_tx: result_sender,
-                                    _phantom: std::marker::PhantomData,
-                                };
-
-                                if self.storage_work_tx.send(job).is_err() {
-                                    trace!(target: "trie::proof_task", "Storage worker pool shut down");
-                                }
-                            }
-                            ProofTaskKind::BlindedStorageNode(account, path, result_sender) => {
-                                // Track metrics for blinded node requests
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.storage_nodes += 1;
-                                }
-
-                                let job = ProofJob::BlindedStorageNode {
-                                    account,
-                                    path,
-                                    result_tx: result_sender,
-                                    _phantom: std::marker::PhantomData,
-                                };
-
-                                if self.storage_work_tx.send(job).is_err() {
-                                    trace!(target: "trie::proof_task", "Storage worker pool shut down");
-                                }
-                            }
-                            ProofTaskKind::AccountMultiproof(input) => {
-                                // Dispatch to account worker pool
-                                let job = AccountProofJob {
-                                    input: *input,
-                                    #[cfg(feature = "metrics")]
-                                    enqueued_at: Instant::now(),
-                                };
-
-                                // Increment counter BEFORE sending to avoid race with worker
-                                // decrement
-                                #[cfg(feature = "metrics")]
-                                let old_depth =
-                                    self.account_queue_depth.fetch_add(1, Ordering::Relaxed);
-
-                                if self.account_work_tx.send(job).is_err() {
-                                    // Send failed, revert the increment
-                                    #[cfg(feature = "metrics")]
-                                    self.account_queue_depth.fetch_sub(1, Ordering::Relaxed);
-
-                                    trace!(target: "trie::proof_task", "Account worker pool shut down");
-                                } else {
-                                    #[cfg(feature = "metrics")]
-                                    self.metrics
-                                        .record_account_queue_depth(old_depth.saturating_add(1));
-                                }
-                            }
-                        }
-                    }
-                    ProofTaskMessage::Terminate => {
-                        // Record metrics before terminating
-                        #[cfg(feature = "metrics")]
-                        self.metrics.record();
-
-                        // Shutdown: drop work channels, workers will exit when channels close
-                        drop(self.storage_work_tx);
-                        drop(self.account_work_tx);
-                        #[cfg(feature = "metrics")]
-                        {
-                            self.metrics.record_storage_queue_depth(0);
-                            self.metrics.record_account_queue_depth(0);
-                        }
-                        return Ok(());
-                    }
-                },
-                // All senders are disconnected, so we can terminate
-                // However this should never happen, as this struct stores a sender
-                Err(_) => {
-                    // Shutdown workers
-                    drop(self.storage_work_tx);
-                    drop(self.account_work_tx);
-                    #[cfg(feature = "metrics")]
-                    {
-                        self.metrics.record_storage_queue_depth(0);
-                        self.metrics.record_account_queue_depth(0);
-                    }
-                    return Ok(());
-                }
-            };
+        // Wait for all handles to be dropped
+        while self.active_handles.load(Ordering::SeqCst) > 0 {
+            std::thread::sleep(Duration::from_millis(10));
         }
+
+        // Record metrics before shutdown
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
+
+        // Drop channels to signal workers to shut down
+        drop(self.storage_work_tx);
+        drop(self.account_work_tx);
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.record_storage_queue_depth(0);
+            self.metrics.record_account_queue_depth(0);
+        }
+
+        Ok(())
     }
 }
 
@@ -728,7 +633,7 @@ pub struct AccountMultiproofInput<Tx> {
     /// Handle to the storage proof task manager for coordinating storage proofs
     pub storage_proof_handle: ProofTaskManagerHandle<Tx>,
     /// Sender for returning the multiproof result
-    pub result_sender: MpscSender<Result<DecodedMultiProof, ParallelStateRootError>>,
+    pub result_sender: CrossbeamSender<Result<DecodedMultiProof, ParallelStateRootError>>,
 }
 
 impl<Tx> AccountMultiproofInput<Tx> {
@@ -739,7 +644,7 @@ impl<Tx> AccountMultiproofInput<Tx> {
         collect_branch_node_masks: bool,
         multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
         storage_proof_handle: ProofTaskManagerHandle<Tx>,
-        result_sender: MpscSender<Result<DecodedMultiProof, ParallelStateRootError>>,
+        result_sender: CrossbeamSender<Result<DecodedMultiProof, ParallelStateRootError>>,
     ) -> Self {
         Self {
             targets,
@@ -777,19 +682,7 @@ impl ProofTaskCtx {
     }
 }
 
-/// Message used to communicate with [`ProofTaskManager`].
-#[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
-    /// A request to queue a proof task.
-    QueueTask(ProofTaskKind<Tx>),
-    /// A request to terminate the proof task manager.
-    Terminate,
-}
-
-/// Proof task kind.
-///
-/// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
-/// specifies the type of proof task to be executed.
+/// Proof task kind dispatched via [`ProofTaskManagerHandle::queue_task`].
 #[derive(Debug)]
 pub enum ProofTaskKind<Tx = ()> {
     /// A storage proof request.
@@ -802,50 +695,138 @@ pub enum ProofTaskKind<Tx = ()> {
     AccountMultiproof(Box<AccountMultiproofInput<Tx>>),
 }
 
-/// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
-/// number of active handles went to zero.
+/// A handle that wraps crossbeam senders for direct worker communication.
+/// Channels are closed when the last handle is dropped.
 #[derive(Debug)]
 pub struct ProofTaskManagerHandle<Tx> {
-    /// The sender for the proof task manager.
-    sender: MpscSender<ProofTaskMessage<Tx>>,
+    /// Direct sender to storage worker pool (handles storage proofs + blinded nodes)
+    storage_work_tx: CrossbeamSender<ProofJob<Tx>>,
+    /// Direct sender to account worker pool (handles account multiproofs)
+    account_work_tx: CrossbeamSender<AccountProofJob<Tx>>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
+    /// Queue depth metrics
+    #[cfg(feature = "metrics")]
+    storage_queue_depth: Arc<AtomicUsize>,
+    #[cfg(feature = "metrics")]
+    account_queue_depth: Arc<AtomicUsize>,
 }
 
 impl<Tx> ProofTaskManagerHandle<Tx> {
-    /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: MpscSender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    /// Creates a new [`ProofTaskManagerHandle`] with crossbeam senders.
+    pub fn new(
+        storage_work_tx: CrossbeamSender<ProofJob<Tx>>,
+        account_work_tx: CrossbeamSender<AccountProofJob<Tx>>,
+        active_handles: Arc<AtomicUsize>,
+        #[cfg(feature = "metrics")] storage_queue_depth: Arc<AtomicUsize>,
+        #[cfg(feature = "metrics")] account_queue_depth: Arc<AtomicUsize>,
+    ) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { sender, active_handles }
+        Self {
+            storage_work_tx,
+            account_work_tx,
+            active_handles,
+            #[cfg(feature = "metrics")]
+            storage_queue_depth,
+            #[cfg(feature = "metrics")]
+            account_queue_depth,
+        }
     }
 
-    /// Queues a task to the proof task manager.
-    pub fn queue_task(
-        &self,
-        task: ProofTaskKind<Tx>,
-    ) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
-        self.sender.send(ProofTaskMessage::QueueTask(task))
-    }
+    /// Queues a task directly to the appropriate worker pool.
+    pub fn queue_task(&self, task: ProofTaskKind<Tx>) -> Result<(), String> {
+        match task {
+            ProofTaskKind::StorageProof(input, result_sender) => {
+                #[cfg(feature = "metrics")]
+                let old_depth = self.storage_queue_depth.fetch_add(1, Ordering::Relaxed);
 
-    /// Terminates the proof task manager.
-    pub fn terminate(&self) {
-        let _ = self.sender.send(ProofTaskMessage::Terminate);
+                let job = ProofJob::StorageProof {
+                    input,
+                    result_tx: result_sender,
+                    #[cfg(feature = "metrics")]
+                    enqueued_at: Instant::now(),
+                    _phantom: std::marker::PhantomData,
+                };
+
+                self.storage_work_tx.send(job).map_err(|_| {
+                    #[cfg(feature = "metrics")]
+                    self.storage_queue_depth.fetch_sub(1, Ordering::Relaxed);
+                    "storage worker pool closed".to_string()
+                })?;
+
+                #[cfg(feature = "metrics")]
+                {
+                    // Record queue depth metric
+                    let _ = old_depth;
+                }
+
+                Ok(())
+            }
+            ProofTaskKind::BlindedAccountNode(path, result_sender) => {
+                let job = ProofJob::BlindedAccountNode {
+                    path,
+                    result_tx: result_sender,
+                    _phantom: std::marker::PhantomData,
+                };
+
+                self.storage_work_tx.send(job).map_err(|_| "storage worker pool closed".to_string())
+            }
+            ProofTaskKind::BlindedStorageNode(account, path, result_sender) => {
+                let job = ProofJob::BlindedStorageNode {
+                    account,
+                    path,
+                    result_tx: result_sender,
+                    _phantom: std::marker::PhantomData,
+                };
+
+                self.storage_work_tx.send(job).map_err(|_| "storage worker pool closed".to_string())
+            }
+            ProofTaskKind::AccountMultiproof(input) => {
+                #[cfg(feature = "metrics")]
+                let old_depth = self.account_queue_depth.fetch_add(1, Ordering::Relaxed);
+
+                let job = AccountProofJob {
+                    input: *input,
+                    #[cfg(feature = "metrics")]
+                    enqueued_at: Instant::now(),
+                };
+
+                self.account_work_tx.send(job).map_err(|_| {
+                    #[cfg(feature = "metrics")]
+                    self.account_queue_depth.fetch_sub(1, Ordering::Relaxed);
+                    "account worker pool closed".to_string()
+                })?;
+
+                #[cfg(feature = "metrics")]
+                {
+                    let _ = old_depth;
+                }
+
+                Ok(())
+            }
+        }
     }
 }
 
 impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
     fn clone(&self) -> Self {
-        Self::new(self.sender.clone(), self.active_handles.clone())
+        Self::new(
+            self.storage_work_tx.clone(),
+            self.account_work_tx.clone(),
+            self.active_handles.clone(),
+            #[cfg(feature = "metrics")]
+            self.storage_queue_depth.clone(),
+            #[cfg(feature = "metrics")]
+            self.account_queue_depth.clone(),
+        )
     }
 }
 
 impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     fn drop(&mut self) {
-        // Decrement the number of active handles and terminate the manager if it was the last
-        // handle.
-        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.terminate();
-        }
+        // Decrement the number of active handles.
+        // When last handle drops, crossbeam channels close automatically.
+        self.active_handles.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -854,44 +835,53 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
     type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::AccountNode { sender: self.storage_work_tx.clone() }
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        ProofTaskTrieNodeProvider::StorageNode { account, sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::StorageNode { account, sender: self.storage_work_tx.clone() }
     }
 }
 
 /// Trie node provider for retrieving trie nodes by path.
+/// Sends blinded node requests directly to storage workers.
 #[derive(Debug)]
 pub enum ProofTaskTrieNodeProvider<Tx> {
     /// Blinded account trie node provider.
     AccountNode {
-        /// Sender to the proof task.
-        sender: MpscSender<ProofTaskMessage<Tx>>,
+        /// Direct sender to storage worker pool
+        sender: CrossbeamSender<ProofJob<Tx>>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
-        /// Sender to the proof task.
-        sender: MpscSender<ProofTaskMessage<Tx>>,
+        /// Direct sender to storage worker pool
+        sender: CrossbeamSender<ProofJob<Tx>>,
     },
 }
 
 impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let (tx, rx) = crossbeam_channel::unbounded();
+
         match self {
             Self::AccountNode { sender } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedAccountNode(*path, tx),
-                ));
+                let job = ProofJob::BlindedAccountNode {
+                    path: *path,
+                    result_tx: tx,
+                    _phantom: std::marker::PhantomData,
+                };
+                let _ = sender.send(job);
             }
             Self::StorageNode { sender, account } => {
-                let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedStorageNode(*account, *path, tx),
-                ));
+                let job = ProofJob::BlindedStorageNode {
+                    account: *account,
+                    path: *path,
+                    result_tx: tx,
+                    _phantom: std::marker::PhantomData,
+                };
+                let _ = sender.send(job);
             }
         }
 
