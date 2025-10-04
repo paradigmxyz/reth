@@ -52,6 +52,8 @@ pub struct HashedPostStateAccountCursor<'a, C> {
     cursor: C,
     /// Forward-only in-memory cursor over accounts. `None` values indicate destroyed accounts.
     post_state_cursor: ForwardInMemoryCursor<'a, B256, Option<Account>>,
+    /// Reference to the post state accounts for binary search.
+    post_state_accounts: &'a [(B256, Option<Account>)],
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
@@ -64,7 +66,15 @@ where
     /// Create new instance of [`HashedPostStateAccountCursor`].
     pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
         let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
-        Self { cursor, post_state_cursor, last_account: None }
+        Self { cursor, post_state_cursor, post_state_accounts: &post_state_accounts.accounts, last_account: None }
+    }
+
+    /// Check if an account is destroyed in the post state.
+    fn is_account_destroyed(&self, address: &B256) -> bool {
+        // Binary search in sorted accounts
+        self.post_state_accounts
+            .binary_search_by_key(address, |(addr, _)| *addr)
+            .is_ok_and(|idx| self.post_state_accounts[idx].1.is_none())
     }
 
     fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
@@ -77,32 +87,17 @@ where
         }
 
         // It's an exact match with a non-destroyed account, return it.
-        if let Some((address, account)) = post_state_entry {
-            if address == key {
-                return Ok(Some((address, account.unwrap())))
-            }
+        if let Some((address, account)) = post_state_entry
+            && address == key
+        {
+            return Ok(Some((address, account.unwrap())))
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
         let mut db_entry = self.cursor.seek(key)?;
-        while let Some((address, _)) = db_entry {
-            // Check if this address is destroyed in post state
-            let is_destroyed = post_state_entry
-                .as_ref()
-                .is_some_and(|(ps_addr, ps_account)| *ps_addr == address && ps_account.is_none());
-            
-            if is_destroyed {
-                db_entry = self.cursor.next()?;
-                // Also advance past this destroyed account in post state
-                post_state_entry = self.post_state_cursor.first_after(&address);
-                while post_state_entry.as_ref().is_some_and(|(_, account)| account.is_none()) {
-                    let addr = post_state_entry.unwrap().0;
-                    post_state_entry = self.post_state_cursor.first_after(&addr);
-                }
-            } else {
-                break;
-            }
+        while db_entry.as_ref().is_some_and(|(address, _)| self.is_account_destroyed(address)) {
+            db_entry = self.cursor.next()?;
         }
 
         // Compare two entries and return the lowest.
@@ -120,28 +115,10 @@ where
 
         // If post state was given precedence or account was cleared, move the cursor forward.
         let mut db_entry = self.cursor.seek(last_account)?;
-        while let Some((address, _)) = db_entry {
-            if address <= last_account {
-                db_entry = self.cursor.next()?;
-                continue;
-            }
-            
-            // Check if this address is destroyed in post state
-            let is_destroyed = post_state_entry
-                .as_ref()
-                .is_some_and(|(ps_addr, ps_account)| *ps_addr == address && ps_account.is_none());
-            
-            if is_destroyed {
-                db_entry = self.cursor.next()?;
-                // Also advance past this destroyed account in post state
-                post_state_entry = self.post_state_cursor.first_after(&address);
-                while post_state_entry.as_ref().is_some_and(|(_, account)| account.is_none()) {
-                    let addr = post_state_entry.unwrap().0;
-                    post_state_entry = self.post_state_cursor.first_after(&addr);
-                }
-            } else {
-                break;
-            }
+        while db_entry.as_ref().is_some_and(|(address, _)| {
+            address <= &last_account || self.is_account_destroyed(address)
+        }) {
+            db_entry = self.cursor.next()?;
         }
 
         // Compare two entries and return the lowest.
@@ -247,6 +224,19 @@ where
         Self { cursor, post_state_cursor, post_state_storage: storage_ref, storage_wiped, last_slot: None }
     }
 
+    /// Check if a storage slot is cleared (has zero value) in the post state.
+    fn is_slot_zero_in_post_state(&self, slot: &B256) -> bool {
+        // Binary search in sorted storage
+        self.post_state_storage
+            .and_then(|storage| {
+                storage
+                    .binary_search_by_key(slot, |(s, _)| *s)
+                    .ok()
+                    .map(|idx| storage[idx].1.is_zero())
+            })
+            .unwrap_or(false)
+    }
+
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
     fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
         // Attempt to find the account's storage in post state.
@@ -254,35 +244,26 @@ where
 
         // If it's an exact match in post state and database storage was wiped
         if self.storage_wiped {
-            if let Some((slot, value)) = post_state_entry {
-                if slot == subkey {
-                    return Ok(if value.is_zero() { None } else { Some((slot, value)) })
-                }
+            if let Some((slot, value)) = post_state_entry
+                && slot == subkey
+            {
+                return Ok(if value.is_zero() { None } else { Some((slot, value)) })
             }
             return Ok(post_state_entry.filter(|(_, value)| !value.is_zero()))
         }
 
         // If the exact match in post state has a non-zero value, return it
-        if let Some((slot, value)) = post_state_entry {
-            if slot == subkey && !value.is_zero() {
-                return Ok(Some((slot, value)))
-            }
+        if let Some((slot, value)) = post_state_entry
+            && slot == subkey && !value.is_zero()
+        {
+            return Ok(Some((slot, value)))
         }
 
         // It's not an exact non-zero match in post state, so we need to check the database.
         // Reposition to the first greater or equal slot that wasn't cleared.
         let mut db_entry = self.cursor.seek(subkey)?;
-        while let Some((slot, _)) = db_entry {
-            // Check if this slot is cleared in post state
-            let is_cleared = post_state_entry
-                .as_ref()
-                .is_some_and(|(ps_slot, ps_value)| *ps_slot == slot && ps_value.is_zero());
-            
-            if is_cleared {
-                db_entry = self.cursor.next()?;
-            } else {
-                break;
-            }
+        while db_entry.as_ref().is_some_and(|(slot, _)| self.is_slot_zero_in_post_state(slot)) {
+            db_entry = self.cursor.next()?;
         }
 
         // Compare two entries and return the lowest.
@@ -303,22 +284,10 @@ where
         // If post state was given precedence, move the cursor forward.
         // If the entry was already returned or is zero-valued, move to the next.
         let mut db_entry = self.cursor.seek(last_slot)?;
-        while let Some((slot, _)) = db_entry {
-            if slot == last_slot {
-                db_entry = self.cursor.next()?;
-                continue;
-            }
-            
-            // Check if this slot is cleared in post state
-            let is_cleared = post_state_entry
-                .as_ref()
-                .is_some_and(|(ps_slot, ps_value)| *ps_slot == slot && ps_value.is_zero());
-            
-            if is_cleared {
-                db_entry = self.cursor.next()?;
-            } else {
-                break;
-            }
+        while db_entry.as_ref().is_some_and(|(slot, _)| {
+            *slot == last_slot || self.is_slot_zero_in_post_state(slot)
+        }) {
+            db_entry = self.cursor.next()?;
         }
 
         // Compare two entries and return the lowest.
