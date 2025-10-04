@@ -8,7 +8,7 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap, HashSet},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
@@ -323,17 +323,9 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let mut accounts: Vec<(B256, Option<Account>)> = self.accounts.into_iter().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = HashedAccountsSorted { accounts };
 
         let storages = self
             .storages
@@ -352,17 +344,9 @@ impl HashedPostState {
     /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
     /// post state, like `into_sorted`.
     pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts.drain() {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let mut accounts: Vec<(B256, Option<Account>)> = self.accounts.drain().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = HashedAccountsSorted { accounts };
 
         let storages = self
             .storages
@@ -442,18 +426,10 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut non_zero_valued_slots = Vec::new();
-        let mut zero_valued_slots = HashSet::default();
-        for (hashed_slot, value) in self.storage {
-            if value.is_zero() {
-                zero_valued_slots.insert(hashed_slot);
-            } else {
-                non_zero_valued_slots.push((hashed_slot, value));
-            }
-        }
-        non_zero_valued_slots.sort_unstable_by_key(|(key, _)| *key);
+        let mut storage: Vec<(B256, U256)> = self.storage.into_iter().collect();
+        storage.sort_unstable_by_key(|(key, _)| *key);
 
-        HashedStorageSorted { non_zero_valued_slots, zero_valued_slots, wiped: self.wiped }
+        HashedStorageSorted { storage, wiped: self.wiped }
     }
 }
 
@@ -496,29 +472,22 @@ impl AsRef<Self> for HashedPostStateSorted {
 #[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
-    pub accounts: Vec<(B256, Account)>,
-    /// Set of destroyed account keys.
-    pub destroyed_accounts: B256Set,
+    /// `None` indicates a destroyed account.
+    pub accounts: Vec<(B256, Option<Account>)>,
 }
 
 impl HashedAccountsSorted {
     /// Returns a sorted iterator over updated accounts.
-    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
-        self.accounts
-            .iter()
-            .map(|(address, account)| (*address, Some(*account)))
-            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
-            .sorted_by_key(|entry| *entry.0)
+    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> + '_ {
+        self.accounts.iter().map(|(address, account)| (*address, *account))
     }
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
-    /// Sorted hashed storage slots with non-zero value.
-    pub non_zero_valued_slots: Vec<(B256, U256)>,
-    /// Slots that have been zero valued.
-    pub zero_valued_slots: B256Set,
+    /// Sorted hashed storage slots. `U256::ZERO` indicates a cleared slot.
+    pub storage: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
 }
@@ -530,12 +499,8 @@ impl HashedStorageSorted {
     }
 
     /// Returns a sorted iterator over updated storage slots.
-    pub fn storage_slots_sorted(&self) -> impl Iterator<Item = (B256, U256)> {
-        self.non_zero_valued_slots
-            .iter()
-            .map(|(hashed_slot, value)| (*hashed_slot, *value))
-            .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
-            .sorted_by_key(|entry| *entry.0)
+    pub fn storage_slots_sorted(&self) -> impl Iterator<Item = (B256, U256)> + '_ {
+        self.storage.iter().map(|(hashed_slot, value)| (*hashed_slot, *value))
     }
 }
 
