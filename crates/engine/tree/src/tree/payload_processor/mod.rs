@@ -85,9 +85,9 @@ pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
 /// * `max_proof_task_concurrency` - Maximum total concurrency for proof tasks
 ///
 /// # Returns
-/// Tuple of (storage_concurrency, account_concurrency)
+/// Tuple of (`storage_concurrency`, `account_concurrency`)
 #[inline]
-pub fn calculate_proof_concurrency(
+pub const fn calculate_proof_concurrency(
     storage_workers: usize,
     account_workers: usize,
     max_proof_task_concurrency: usize,
