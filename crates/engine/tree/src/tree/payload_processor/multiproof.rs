@@ -549,32 +549,36 @@ where
             "Starting multiproof calculation",
         );
 
-        // Create channel for receiving multiproof result from account manager
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-
-        // Queue account multiproof to account manager
-        let account_input = AccountMultiproofInput::new(
-            proof_targets,
-            Arc::unwrap_or_clone(config.prefix_sets).freeze(),
-            true, // collect_branch_node_masks
-            multi_added_removed_keys,
-            self.storage_proof_task_handle.clone(),
-            result_tx,
-        );
-
-        if self
-            .account_proof_task_handle
-            .queue_task(ProofTaskKind::AccountMultiproof(Box::new(account_input)))
-            .is_err()
-        {
-            let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculationError(
-                ParallelStateRootError::Other("account manager closed".into()).into(),
-            ));
-            return;
-        }
-
-        // Spawn receiver task to handle the result
+        let account_proof_task_handle = self.account_proof_task_handle.clone();
+        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
         self.executor.spawn_blocking(move || {
+            // Create channel for receiving multiproof result from account manager
+            let (result_tx, result_rx) = crossbeam_channel::unbounded();
+
+            // Perform expensive freeze operation off the manager's thread
+            let frozen_prefix_sets = Arc::unwrap_or_clone(config.prefix_sets).freeze();
+
+            // Queue account multiproof to account manager
+            let account_input = AccountMultiproofInput::new(
+                proof_targets,
+                frozen_prefix_sets,
+                true, // collect_branch_node_masks
+                multi_added_removed_keys,
+                storage_proof_task_handle,
+                result_tx,
+            );
+
+            if account_proof_task_handle
+                .queue_task(ProofTaskKind::AccountMultiproof(Box::new(account_input)))
+                .is_err()
+            {
+                let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculationError(
+                    ParallelStateRootError::Other("account manager closed".into()).into(),
+                ));
+                return;
+            }
+
+            // Wait for and handle the result
             let start = Instant::now();
             match result_rx.recv() {
                 Ok(Ok(proof)) => {
