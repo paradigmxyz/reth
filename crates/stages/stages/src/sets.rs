@@ -49,13 +49,14 @@ use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
-use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
+use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, snap::client::SnapClient};
 use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
 use std::{ops::Not, sync::Arc};
 use tokio::sync::watch;
+
 
 /// A set containing all stages to run a fully syncing instance of reth.
 ///
@@ -348,13 +349,16 @@ where
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<E: ConfigureEvm> {
+pub struct ExecutionStages<E: ConfigureEvm, S = ()> {
     /// Executor factory that will create executors.
     evm_config: E,
     /// Consensus instance for validating blocks.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Optional snap client for snap sync (when enabled)
+    /// `SnapSyncStage` is integrated into the pipeline when snap sync is enabled
+    snap_client: Option<Arc<S>>,
 }
 
 impl<E: ConfigureEvm> ExecutionStages<E> {
@@ -364,25 +368,76 @@ impl<E: ConfigureEvm> ExecutionStages<E> {
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> Self {
-        Self { evm_config: executor_provider, consensus, stages_config }
+        Self { 
+            evm_config: executor_provider, 
+            consensus, 
+            stages_config,
+            snap_client: None,
+        }
     }
 }
 
-impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
+impl<E: ConfigureEvm, S: SnapClient + Send + Sync + 'static> ExecutionStages<E, S> {
+    /// Create a new set of execution stages with snap client.
+    pub fn with_snap_client(
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        stages_config: StageConfig,
+        snap_client: Option<Arc<S>>,
+    ) -> Self {
+        Self { 
+            evm_config: executor_provider, 
+            consensus, 
+            stages_config,
+            snap_client,
+        }
+    }
+}
+
+impl<E, S, Provider> StageSet<Provider> for ExecutionStages<E, S>
 where
     E: ConfigureEvm + 'static,
+    S: reth_network_p2p::snap::client::SnapClient + Send + Sync + 'static,
+    Provider: reth_provider::DBProvider + reth_provider::StatsReader + reth_provider::HeaderProvider,
     SenderRecoveryStage: Stage<Provider>,
     ExecutionStage<E>: Stage<Provider>,
+    crate::stages::SnapSyncStage<S>: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        StageSetBuilder::default()
-            .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
-            .add_stage(ExecutionStage::from_config(
-                self.evm_config,
-                self.consensus,
-                self.stages_config.execution,
-                self.stages_config.execution_external_clean_threshold(),
-            ))
+        let mut builder = StageSetBuilder::default();
+        
+        // Check if snap sync is enabled
+        if self.stages_config.snap_sync.enabled {
+            // Use snap sync stage when enabled - REPLACES SenderRecoveryStage, ExecutionStage, PruneSenderRecoveryStage
+            if let Some(snap_client) = self.snap_client {
+                builder = builder.add_stage(crate::stages::SnapSyncStage::new(
+                    self.stages_config.snap_sync,
+                    snap_client,
+                ));
+            } else {
+                // Fall back to traditional stages if snap client not provided
+                builder = builder
+                    .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
+                    .add_stage(ExecutionStage::from_config(
+                        self.evm_config,
+                        self.consensus,
+                        self.stages_config.execution,
+                        self.stages_config.execution_external_clean_threshold(),
+                    ));
+            }
+        } else {
+            // Use traditional stages when snap sync is disabled
+            builder = builder
+                .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
+                .add_stage(ExecutionStage::from_config(
+                    self.evm_config,
+                    self.consensus,
+                    self.stages_config.execution,
+                    self.stages_config.execution_external_clean_threshold(),
+                ));
+        }
+            
+        builder
     }
 }
 
