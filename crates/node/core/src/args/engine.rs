@@ -1,7 +1,9 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::Args;
-use reth_engine_primitives::{TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE};
+use reth_engine_primitives::{
+    default_proof_workers, TreeConfig, DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
+};
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
@@ -141,6 +143,8 @@ impl Default for EngineArgs {
 impl EngineArgs {
     /// Creates a [`TreeConfig`] from the engine arguments.
     pub fn tree_config(&self) -> TreeConfig {
+        let (storage_workers, account_workers) = default_proof_workers(self.reserved_cpu_cores);
+
         TreeConfig::default()
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
@@ -154,6 +158,8 @@ impl EngineArgs {
             .with_multiproof_chunking_enabled(self.multiproof_chunking_enabled)
             .with_multiproof_chunk_size(self.multiproof_chunk_size)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
+            .with_storage_proof_workers(storage_workers)
+            .with_account_proof_workers(account_workers)
             .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)
             .with_always_process_payload_attributes_on_canonical_head(
