@@ -38,14 +38,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
-/// Error when storage proof channel closes unexpectedly.
-#[inline]
-fn storage_channel_closed_error(address: &B256) -> ParallelStateRootError {
-    ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(format!(
-        "storage proof channel closed unexpectedly for {address}"
-    ))))
-}
-
 /// Builds an account multiproof with storage proof receivers.
 ///
 /// This function accepts a map of storage proof receivers and fetches proofs on-demand
@@ -515,6 +507,14 @@ where
 
         Ok((multiproof, stats))
     }
+}
+
+/// Error when storage proof channel closes unexpectedly.
+#[inline]
+fn storage_channel_closed_error(address: &B256) -> ParallelStateRootError {
+    ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(format!(
+        "storage proof channel closed unexpectedly for {address}"
+    ))))
 }
 
 #[cfg(test)]
