@@ -125,14 +125,18 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
     ///
     /// Note: this only propagates if the pool contains the transaction.
     pub fn propagate_hash_to(&self, hash: TxHash, peer: PeerId) {
-        self.propagate_hashes_to(Some(hash), peer)
+        self.propagate_hashes_to(std::iter::once(&hash), peer)
     }
 
     /// Manually propagate the transaction hashes to a specific peer.
     ///
     /// Note: this only propagates the transactions that are known to the pool.
-    pub fn propagate_hashes_to(&self, hash: impl IntoIterator<Item = TxHash>, peer: PeerId) {
-        let hashes = hash.into_iter().collect::<Vec<_>>();
+    pub fn propagate_hashes_to<'a>(
+        &self,
+        hash: impl IntoIterator<Item = &'a TxHash>,
+        peer: PeerId,
+    ) {
+        let hashes = hash.into_iter().copied().collect::<Vec<_>>();
         if hashes.is_empty() {
             return
         }
@@ -942,7 +946,7 @@ where
     /// Note: This will only send the hashes for transactions that exist in the pool.
     fn propagate_hashes_to(
         &mut self,
-        hashes: Vec<TxHash>,
+        hashes: impl IntoIterator<Item = impl std::borrow::Borrow<TxHash>>,
         peer_id: PeerId,
         propagation_mode: PropagationMode,
     ) {
@@ -956,9 +960,12 @@ where
                 return
             };
 
+            // Collect hashes for pool lookup
+            let hashes_vec = hashes.into_iter().map(|h| *h.borrow()).collect::<Vec<_>>();
+
             let to_propagate = self
                 .pool
-                .get_all(hashes)
+                .get_all(hashes_vec)
                 .into_iter()
                 .map(PropagateTransaction::pool_tx)
                 .collect::<Vec<_>>();
