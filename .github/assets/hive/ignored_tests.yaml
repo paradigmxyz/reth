@@ -30,5 +30,7 @@ engine-api:
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
   - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P10 (Cancun) (reth)
   - Multiple New Payloads Extending Canonical Chain, Wait for Canonical Payload (Paris) (reth)
   - Multiple New Payloads Extending Canonical Chain, Set Head to First Payload Received (Paris) (reth)
