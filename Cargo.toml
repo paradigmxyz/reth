@@ -743,8 +743,8 @@ alloy-transport = { git = "https://github.com/pellekrab/alloy", branch = "focil"
 alloy-transport-http = { git = "https://github.com/pellekrab/alloy", branch = "focil" }
 alloy-transport-ipc = { git = "https://github.com/pellekrab/alloy", branch = "focil" }
 alloy-transport-ws = { git = "https://github.com/pellekrab/alloy", branch = "focil" }
-alloy-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil-0.3.0" }
-alloy-op-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil-0.3.0" }
+alloy-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil" }
+alloy-op-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil" }
 alloy-evm = { git = "https://github.com/PelleKrab/evm.git", branch = "focil" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

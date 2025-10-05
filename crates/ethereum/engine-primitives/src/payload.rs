@@ -15,9 +15,9 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
-use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::{Recovered, NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 

@@ -37,8 +37,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, Recovered, RecoveredBlock,
-    SealedHeader, SignedTransaction,
+    transaction::TxHashRef, AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives,
+    Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
@@ -458,23 +458,45 @@ where
         // we may not want to `flat_map` here so that IL indices of invalid transactions are
         // preserved.
         let il: Option<Vec<Recovered<TransactionSigned>>> = input.inclusion_list().map(|il| {
-            il.iter()
+            let parsed_transactions: Vec<Recovered<TransactionSigned>> = il
+                .iter()
                 .filter_map(|tx| {
                     let signed = TransactionSigned::decode(&mut tx.as_ref()).ok()?;
                     let signer = signed.recover_signer().ok()?;
                     Some(Recovered::new_unchecked(signed, signer))
                 })
-                .collect()
+                .collect();
+
+            parsed_transactions
         });
 
         let block = self.convert_to_block(input)?;
 
+        // Record EIP-7805 metrics for transactions received in payload
+        let transaction_count = block.body().transactions().len() as u64;
+        self.metrics.inclusion_list.record_transactions_received(transaction_count);
+
         // Inclusion list verification
         if let Some(il) = &il {
-            if let Err(err) = self.validate_block_inclusion_list(&state_provider, &block, il) {
-                info!("Block failed inclusionlist test.");
-                self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+            let validation_start = Instant::now();
+            match self.validate_block_inclusion_list(&state_provider, &block, il) {
+                Ok(()) => {
+                    // Record successful validation time
+                    self.metrics
+                        .inclusion_list
+                        .record_inclusion_list_validation_time(validation_start.elapsed());
+                }
+                Err(err) => {
+                    // Record failed validation time and unsatisfied block
+                    self.metrics
+                        .inclusion_list
+                        .record_inclusion_list_validation_time(validation_start.elapsed());
+                    self.metrics.inclusion_list.record_unsatisfied_inclusion_list_blocks();
+
+                    warn!("Block failed inclusionlist test.");
+                    self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+                    return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+                }
             }
         }
 
@@ -1188,9 +1210,11 @@ where
     where
         S: StateProvider,
     {
+        let mut invalid_count = 0;
+        
         // 1) Gather all tx hashes already in the block
         let included: BTreeSet<_> =
-            block.transactions_recovered().map(|tx| tx.inner().tx_hash()).collect();
+            block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
 
         // 2) Compute remaining gas after block execution
         let remaining = block.header().gas_limit().saturating_sub(block.gas_used());
@@ -1200,14 +1224,21 @@ where
             let tx = recovered.inner();
             let h = tx.tx_hash();
 
+            // Skip if already included
+            if included.contains(h){
+                continue
+            }
+            
             // Skip blob (EIP-4844) transactions
             if tx.is_eip4844() {
-                continue;
+                invalid_count +=1;
+                continue
             }
-
-            // Skip if already included or if not enough gas
-            if included.contains(&h) || tx.gas_limit() > remaining {
-                continue;
+            
+            //Skip if not enough gas
+            if tx.gas_limit() > remaining {
+                invalid_count +=1;
+                continue
             }
 
             // Get sender address
@@ -1216,8 +1247,11 @@ where
             // Get nonce
             let account_nonce = match state_provider.account_nonce(&sender) {
                 Ok(Some(nonce)) => nonce,
-                Ok(None) | Err(_) => continue, /* account does not exist or error reading nonce,
-                                                * skip */
+                // account does not exist or error reading nonce, skip
+                Ok(None) | Err(_) =>{ 
+                    invalid_count +=1;
+                    continue
+                }, 
             };
 
             // Check nonce
@@ -1229,8 +1263,10 @@ where
 
                 let account_balance = match state_provider.account_balance(&sender) {
                     Ok(Some(balance)) => balance,
-                    Ok(None) | Err(_) => continue, /* account does not exist or error reading
-                                                    * balance, skip */
+                    Ok(None) | Err(_) => {
+                        invalid_count +=1;
+                        continue
+                    }, /* account does not exist or error reading balance, skip */
                 };
 
                 if account_balance >= max_cost {
@@ -1240,9 +1276,16 @@ where
                         BlockValidationError::InvalidInclusionList,
                     ));
                 }
+                invalid_count += 1
             }
         }
 
+        // Record invalid and invalid inclusion list transactions
+        let il_len = il.as_ref().len() as u64;
+        let valid_count = il_len - invalid_count;
+        self.metrics.inclusion_list.record_invalid_inclusion_list_transactions(invalid_count);
+        self.metrics.inclusion_list.record_valid_inclusion_list_transactions(valid_count);
+        
         Ok(())
     }
 }

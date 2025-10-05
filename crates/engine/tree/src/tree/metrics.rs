@@ -27,6 +27,8 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
+    /// EIP-7805 Inclusion List metrics
+    pub(crate) inclusion_list: InclusionListMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub tree: TreeMetrics,
 }
@@ -198,6 +200,58 @@ impl BlockValidationMetrics {
         self.payload_validation_histogram.record(elapsed_as_secs);
     }
 }
+
+/// EIP-7805 Inclusion List Metrics for execution layer
+#[derive(Metrics)]
+#[metrics(scope = "execution")]
+pub(crate) struct InclusionListMetrics {
+    /// Total number of inclusion list transactions received in payload
+    pub(crate) inclusion_list_transactions_received_in_payload_total: Counter,
+    /// Total number of valid inclusion list transactions
+    pub(crate) inclusion_list_transactions_valid_total: Counter,
+    /// Total number of invalid inclusion list transactions
+    pub(crate) inclusion_list_transactions_invalid_total: Counter,
+    /// Time taken to validate inclusion list transactions (histogram, seconds)
+    pub(crate) inclusion_list_transactions_validation_time_seconds: Histogram,
+    /// Total number of unsatisfied inclusion list blocks
+    pub(crate) inclusion_list_unsatisfied_blocks_total: Counter,
+    /// Total number of transactions received in payload
+    pub(crate) transactions_received_in_payload_total: Counter,
+}
+
+impl InclusionListMetrics {
+    /// Record the number of inclusion list transactions received in a payload
+    pub(crate) fn record_inclusion_list_transactions_received(&self, count: u64) {
+        self.inclusion_list_transactions_received_in_payload_total.increment(count);
+    }
+
+    /// Record the number of transactions received in a payload
+    pub(crate) fn record_transactions_received(&self, count: u64) {
+        self.transactions_received_in_payload_total.increment(count);
+    }
+
+    /// Record valid inclusion list transactions
+    pub(crate) fn record_valid_inclusion_list_transactions(&self, count: u64) {
+        self.inclusion_list_transactions_valid_total.increment(count);
+    }
+
+    /// Record invalid inclusion list transactions
+    pub(crate) fn record_invalid_inclusion_list_transactions(&self, count: u64) {
+        self.inclusion_list_transactions_invalid_total.increment(count);
+    }
+
+    /// Record inclusion list validation time into the histogram
+    pub(crate) fn record_inclusion_list_validation_time(&self, duration: std::time::Duration) {
+        self.inclusion_list_transactions_validation_time_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record unsatisfied inclusion list blocks
+    pub(crate) fn record_unsatisfied_inclusion_list_blocks(&self) {
+        self.inclusion_list_unsatisfied_blocks_total.increment(1);
+    }
+}
+
+
 
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]

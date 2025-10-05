@@ -509,6 +509,14 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
+        // Record inclusion list transactions received in payload (before validation)
+        if let Some(inclusion_list) = payload.inclusion_list() {
+            let inclusion_list_tx_count = inclusion_list.len() as u64;
+            self.metrics
+                .inclusion_list
+                .record_inclusion_list_transactions_received(inclusion_list_tx_count);
+        }
+
         // start timing for the new payload process
         let start = Instant::now();
 
@@ -2643,7 +2651,7 @@ where
                 latest_valid_hash,
             )),
             _ => Ok(PayloadStatus::new(
-                PayloadStatusEnum::Invalid { validation_error: error_str },
+                PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
                 latest_valid_hash,
             )),
         }
