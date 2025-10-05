@@ -55,12 +55,16 @@ pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;
 
-/// Type alias for proof managers tuple
-type ProofManagersResult<Factory> = ProviderResult<(
-    ProofTaskManagerHandle<FactoryTx<Factory>>,
-    ProofTaskManagerHandle<FactoryTx<Factory>>,
-    usize,
-)>;
+/// Proof manager handles and configuration returned from creation.
+#[derive(Debug)]
+struct ProofManagers<Factory: DatabaseProviderFactory> {
+    /// Handle to the storage proof task manager
+    storage_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Handle to the account proof task manager
+    account_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Maximum number of concurrent proof tasks
+    max_concurrency: usize,
+}
 
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
@@ -205,12 +209,14 @@ where
         );
 
         // Create and spawn dual proof task managers
-        let (storage_handle, account_handle, max_proof_task_concurrency) =
-            self.create_proof_managers(&state_root_config, task_ctx, config)?;
+        let proof_managers = self.create_proof_managers(&state_root_config, task_ctx, config)?;
+
+        // Destructure to avoid partial move issues
+        let ProofManagers { storage_handle, account_handle, max_concurrency } = proof_managers;
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
-        let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
+        let max_multi_proof_task_concurrency = max_concurrency / 2;
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
@@ -435,14 +441,14 @@ where
 
     /// Creates both storage and account proof task managers, reducing code duplication.
     ///
-    /// Returns a tuple of (`storage_handle`, `account_handle`, `max_proof_task_concurrency`) for
-    /// use with multiproof tasks.
+    /// Returns a [`ProofManagers`] struct containing handles and configuration for use with
+    /// multiproof tasks.
     fn create_proof_managers<Factory>(
         &self,
         state_root_config: &MultiProofConfig<Factory>,
         task_ctx: ProofTaskCtx,
         config: &TreeConfig,
-    ) -> ProofManagersResult<Factory>
+    ) -> ProviderResult<ProofManagers<Factory>>
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
     {
@@ -484,7 +490,11 @@ where
             account_concurrency,
         )?;
 
-        Ok((storage_handle, account_handle, max_proof_task_concurrency))
+        Ok(ProofManagers {
+            storage_handle,
+            account_handle,
+            max_concurrency: max_proof_task_concurrency,
+        })
     }
 }
 
