@@ -74,6 +74,41 @@ struct ProofManagers<Factory: DatabaseProviderFactory> {
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
 
+/// Calculates proportional concurrency allocation for storage and account proof tasks.
+///
+/// Distributes max concurrency between storage and account workers based on their ratio.
+/// Returns zero for both if no workers are configured.
+///
+/// # Arguments
+/// * `storage_workers` - Number of storage proof workers
+/// * `account_workers` - Number of account proof workers
+/// * `max_proof_task_concurrency` - Maximum total concurrency for proof tasks
+///
+/// # Returns
+/// Tuple of (storage_concurrency, account_concurrency)
+#[inline]
+pub fn calculate_proof_concurrency(
+    storage_workers: usize,
+    account_workers: usize,
+    max_proof_task_concurrency: usize,
+) -> (usize, usize) {
+    let total_workers = storage_workers + account_workers;
+
+    let storage_concurrency = if total_workers > 0 {
+        (max_proof_task_concurrency * storage_workers) / total_workers
+    } else {
+        0
+    };
+
+    let account_concurrency = if total_workers > 0 {
+        (max_proof_task_concurrency * account_workers) / total_workers
+    } else {
+        0
+    };
+
+    (storage_concurrency, account_concurrency)
+}
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -454,21 +489,16 @@ where
     {
         // Calculate worker counts and concurrency limits
         // TODO: We gottta experiment with this + metrics
-        // Clamp to at least 1 to avoid division by zero
-        let storage_workers = config.storage_proof_workers().max(1);
-        let account_workers = config.account_proof_workers().max(1);
+        let storage_workers = config.storage_proof_workers();
+        let account_workers = config.account_proof_workers();
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
 
-        // Split max_proof_task_concurrency proportionally based on worker ratio
-        let total_workers = storage_workers + account_workers;
-        let mut storage_concurrency =
-            (max_proof_task_concurrency * storage_workers) / total_workers;
-        let mut account_concurrency =
-            (max_proof_task_concurrency * account_workers) / total_workers;
-
-        // Account for spawn_proof_workers' internal clamping to min 1 per pool type
-        storage_concurrency = storage_concurrency.max(storage_workers + 1);
-        account_concurrency = account_concurrency.max(account_workers + 1);
+        // Split max concurrency proportionally based on worker ratio.
+        let (storage_concurrency, account_concurrency) = calculate_proof_concurrency(
+            storage_workers,
+            account_workers,
+            max_proof_task_concurrency,
+        );
 
         // Spawn storage proof workers
         let storage_handle = spawn_proof_workers(
