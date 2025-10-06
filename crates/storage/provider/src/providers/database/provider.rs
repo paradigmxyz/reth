@@ -18,7 +18,7 @@ use crate::{
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieWriter,
+    TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -2443,6 +2443,55 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         }
 
         Ok(())
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
+        let tx = self.tx_ref();
+
+        // Read account trie changes directly into a Vec - data is already sorted by nibbles
+        // within each block, and we want the oldest (first) version of each node
+        let mut account_nodes = Vec::new();
+        let mut seen_account_keys = HashSet::new();
+        let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+
+        for entry in accounts_cursor.walk_range(from..)? {
+            let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
+            // Only keep the first (oldest) version of each node
+            if seen_account_keys.insert(nibbles.0) {
+                account_nodes.push((nibbles.0, node));
+            }
+        }
+
+        // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
+        // Keep track of seen (address, nibbles) pairs to only keep the oldest version
+        let mut storage_tries = B256Map::<Vec<_>>::default();
+        let mut seen_storage_keys = HashSet::new();
+        let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+        let storage_range = BlockNumberHashedAddress((from, B256::ZERO))..;
+
+        for entry in storages_cursor.walk_range(storage_range)? {
+            let (
+                BlockNumberHashedAddress((_, hashed_address)),
+                TrieChangeSetsEntry { nibbles, node },
+            ) = entry?;
+
+            // Only keep the first (oldest) version of each node for this address
+            if seen_storage_keys.insert((hashed_address, nibbles.0)) {
+                storage_tries.entry(hashed_address).or_default().push((nibbles.0, node));
+            }
+        }
+
+        // Convert to StorageTrieUpdatesSorted
+        let storage_tries = storage_tries
+            .into_iter()
+            .map(|(address, nodes)| {
+                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
+            })
+            .collect();
+
+        Ok(TrieUpdatesSorted { account_nodes, storage_tries })
     }
 }
 

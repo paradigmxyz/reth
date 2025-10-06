@@ -1,4 +1,4 @@
-use crate::{BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{utils::extend_sorted_vec, BranchNodeCompact, HashBuilder, Nibbles};
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
     vec::Vec,
@@ -447,6 +447,24 @@ impl TrieUpdatesSorted {
     pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
+
+    /// Extends the trie updates with another set of sorted updates.
+    ///
+    /// This merges the account nodes and storage tries from `other` into `self`.
+    /// Account nodes are merged and re-sorted, with `other`'s values taking precedence
+    /// for duplicate keys.
+    pub fn extend_ref(&mut self, other: &Self) {
+        // Extend account nodes
+        extend_sorted_vec(&mut self.account_nodes, &other.account_nodes);
+
+        // Merge storage tries
+        for (hashed_address, storage_trie) in &other.storage_tries {
+            self.storage_tries
+                .entry(*hashed_address)
+                .and_modify(|existing| existing.extend_ref(storage_trie))
+                .or_insert_with(|| storage_trie.clone());
+        }
+    }
 }
 
 impl AsRef<Self> for TrieUpdatesSorted {
@@ -488,6 +506,23 @@ impl StorageTrieUpdatesSorted {
     pub fn storage_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.storage_nodes
     }
+
+    /// Extends the storage trie updates with another set of sorted updates.
+    ///
+    /// If `other` is marked as deleted, this will be marked as deleted and all nodes cleared.
+    /// Otherwise, nodes are merged with `other`'s values taking precedence for duplicates.
+    pub fn extend_ref(&mut self, other: &Self) {
+        if other.is_deleted {
+            self.is_deleted = true;
+            self.storage_nodes.clear();
+            self.storage_nodes.extend(other.storage_nodes.iter().cloned());
+            return;
+        }
+
+        // Extend storage nodes
+        extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
+        self.is_deleted = self.is_deleted || other.is_deleted;
+    }
 }
 
 /// Excludes empty nibbles from the given iterator.
@@ -500,6 +535,136 @@ fn exclude_empty_from_pair<V>(
     iter: impl IntoIterator<Item = (Nibbles, V)>,
 ) -> impl Iterator<Item = (Nibbles, V)> {
     iter.into_iter().filter(|(n, _)| !n.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn test_trie_updates_sorted_extend_ref() {
+        // Test extending with empty updates
+        let mut updates1 = TrieUpdatesSorted::default();
+        let updates2 = TrieUpdatesSorted::default();
+        updates1.extend_ref(&updates2);
+        assert_eq!(updates1.account_nodes.len(), 0);
+        assert_eq!(updates1.storage_tries.len(), 0);
+
+        // Test extending account nodes
+        let mut updates1 = TrieUpdatesSorted {
+            account_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x03]), None),
+            ],
+            storage_tries: B256Map::default(),
+        };
+        let updates2 = TrieUpdatesSorted {
+            account_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x02]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())), /* Override */
+            ],
+            storage_tries: B256Map::default(),
+        };
+        updates1.extend_ref(&updates2);
+        assert_eq!(updates1.account_nodes.len(), 3);
+        // Should be sorted: 0x01, 0x02, 0x03
+        assert_eq!(updates1.account_nodes[0].0, Nibbles::from_nibbles_unchecked([0x01]));
+        assert_eq!(updates1.account_nodes[1].0, Nibbles::from_nibbles_unchecked([0x02]));
+        assert_eq!(updates1.account_nodes[2].0, Nibbles::from_nibbles_unchecked([0x03]));
+        // 0x03 should have Some value from updates2 (override)
+        assert!(updates1.account_nodes[2].1.is_some());
+
+        // Test extending storage tries
+        let storage_trie1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![(
+                Nibbles::from_nibbles_unchecked([0x0a]),
+                Some(BranchNodeCompact::default()),
+            )],
+        };
+        let storage_trie2 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![(Nibbles::from_nibbles_unchecked([0x0b]), None)],
+        };
+
+        let hashed_address1 = B256::from([1; 32]);
+        let hashed_address2 = B256::from([2; 32]);
+
+        let mut updates1 = TrieUpdatesSorted {
+            account_nodes: vec![],
+            storage_tries: B256Map::from_iter([(hashed_address1, storage_trie1.clone())]),
+        };
+        let updates2 = TrieUpdatesSorted {
+            account_nodes: vec![],
+            storage_tries: B256Map::from_iter([
+                (hashed_address1, storage_trie2),
+                (hashed_address2, storage_trie1),
+            ]),
+        };
+        updates1.extend_ref(&updates2);
+        assert_eq!(updates1.storage_tries.len(), 2);
+        assert!(updates1.storage_tries.contains_key(&hashed_address1));
+        assert!(updates1.storage_tries.contains_key(&hashed_address2));
+        // Check that storage trie for hashed_address1 was extended
+        let merged_storage = &updates1.storage_tries[&hashed_address1];
+        assert_eq!(merged_storage.storage_nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_storage_trie_updates_sorted_extend_ref_deleted() {
+        // Test case 1: Extending with a deleted storage trie that has nodes
+        let mut storage1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x02]), None),
+            ],
+        };
+
+        let storage2 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x04]), None),
+            ],
+        };
+
+        storage1.extend_ref(&storage2);
+
+        // Should be marked as deleted
+        assert!(storage1.is_deleted);
+        // Original nodes should be cleared, but other's nodes should be added
+        assert_eq!(storage1.storage_nodes.len(), 2);
+        assert_eq!(storage1.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x03]));
+        assert_eq!(storage1.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x04]));
+
+        // Test case 2: Extending a deleted storage trie with more nodes
+        let mut storage3 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![(
+                Nibbles::from_nibbles_unchecked([0x05]),
+                Some(BranchNodeCompact::default()),
+            )],
+        };
+
+        let storage4 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x06]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x07]), None),
+            ],
+        };
+
+        storage3.extend_ref(&storage4);
+
+        // Should remain deleted
+        assert!(storage3.is_deleted);
+        // Should have nodes from other (original cleared then extended)
+        assert_eq!(storage3.storage_nodes.len(), 2);
+        assert_eq!(storage3.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x06]));
+        assert_eq!(storage3.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x07]));
+    }
 }
 
 /// Bincode-compatible trie updates type serde implementations.
@@ -717,7 +882,7 @@ pub mod serde_bincode_compat {
 }
 
 #[cfg(all(test, feature = "serde"))]
-mod tests {
+mod serde_tests {
     use super::*;
 
     #[test]
