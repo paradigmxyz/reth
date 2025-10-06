@@ -2560,7 +2560,7 @@ mod tests {
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),
-                Ok(Some(_to_be_persisted_tx))
+                Ok(Some(_))
             ));
         }
 
