@@ -123,6 +123,14 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
 
     let extended_prefix_sets = extended_prefix_sets.freeze();
 
+    debug!(
+        target: "trie::proof_task",
+        targets_count = targets.len(),
+        account_prefix_set_len = extended_prefix_sets.account_prefix_set.len(),
+        storage_prefix_sets_len = extended_prefix_sets.storage_prefix_sets.len(),
+        "[WORKER] About to queue storage proofs for all accounts in extended prefix set"
+    );
+
     // Queue storage proof requests for ALL accounts we'll visit during trie traversal.
     // The walker visits all accounts in extended_prefix_sets.account_prefix_set, so we need
     // to queue storage proofs for all of them, even if they have no storage changes or empty slots.
@@ -161,6 +169,12 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
 
         storage_receivers.insert(address, receiver);
     }
+
+    debug!(
+        target: "trie::proof_task",
+        receivers_queued = storage_receivers.len(),
+        "[WORKER] Queued all storage proof receivers, calling build_account_multiproof_with_storage"
+    );
 
     let result = crate::proof::build_account_multiproof_with_storage(
         trie_cursor_factory,

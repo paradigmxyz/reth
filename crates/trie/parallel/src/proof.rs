@@ -58,6 +58,14 @@ where
     TCF: TrieCursorFactory + Clone,
     HCF: HashedCursorFactory + Clone,
 {
+    debug!(
+        target: "trie::proof",
+        targets_count = targets.len(),
+        prefix_sets_account_len = prefix_sets.account_prefix_set.len(),
+        storage_receivers_count = storage_receivers.len(),
+        "build_account_multiproof_with_storage starting"
+    );
+
     let mut tracker = ParallelTrieTracker::default();
 
     let accounts_added_removed_keys =
@@ -127,9 +135,15 @@ where
                     None => {
                         tracker.inc_missed_leaves();
 
+                        let is_in_targets = targets.contains_key(&hashed_address);
+                        let target_slots_count = targets.get(&hashed_address).map(|s| s.len()).unwrap_or(0);
+
                         warn!(
                             target: "trie::proof",
                             ?hashed_address,
+                            is_in_targets,
+                            target_slots_count,
+                            total_receivers = storage_receivers.len(),
                             "No storage proof receiver found - using fallback synchronous computation"
                         );
 
@@ -348,6 +362,12 @@ where
         self,
         targets: MultiProofTargets,
     ) -> Result<DecodedMultiProof, ParallelStateRootError> {
+        debug!(
+            target: "trie::parallel_proof",
+            targets_count = targets.len(),
+            "[OLD_PATH] ParallelProof::decoded_multiproof called"
+        );
+
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
@@ -374,10 +394,12 @@ where
         );
         let storage_root_targets_len = storage_root_targets.len();
 
-        trace!(
+        debug!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
-            "Starting parallel proof generation"
+            account_prefix_set_len = frozen_prefix_sets.account_prefix_set.len(),
+            storage_prefix_sets_len = frozen_prefix_sets.storage_prefix_sets.len(),
+            "[OLD_PATH] Created storage root targets"
         );
 
         // stores the receiver for the storage proof outcome for the hashed addresses
@@ -396,6 +418,12 @@ where
             // place when we iterate over the trie
             storage_proof_receivers.insert(hashed_address, receiver);
         }
+
+        debug!(
+            target: "trie::parallel_proof",
+            receivers_queued = storage_proof_receivers.len(),
+            "[OLD_PATH] Queued all storage proof receivers"
+        );
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -458,10 +486,12 @@ where
         );
         let storage_root_targets_len = storage_root_targets.len();
 
-        trace!(
+        debug!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
-            "Starting parallel proof generation"
+            account_prefix_set_len = frozen_prefix_sets.account_prefix_set.len(),
+            storage_prefix_sets_len = frozen_prefix_sets.storage_prefix_sets.len(),
+            "[OLD_PATH] Created storage root targets"
         );
 
         // stores the receiver for the storage proof outcome for the hashed addresses
@@ -480,6 +510,12 @@ where
             // place when we iterate over the trie
             storage_proof_receivers.insert(hashed_address, receiver);
         }
+
+        debug!(
+            target: "trie::parallel_proof",
+            receivers_queued = storage_proof_receivers.len(),
+            "[OLD_PATH] Queued all storage proof receivers"
+        );
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
