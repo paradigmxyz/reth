@@ -6,10 +6,11 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
-use opentelemetry::{trace::TracerProvider, KeyValue, Value};
-use opentelemetry_otlp::SpanExporter;
+use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
+use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
-    trace::{SdkTracer, SdkTracerProvider},
+    propagation::TraceContextPropagator,
+    trace::{Sampler, SdkTracer, SdkTracerProvider},
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
@@ -20,23 +21,30 @@ use tracing_subscriber::registry::LookupSpan;
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
 /// This layer can be added to a [`tracing_subscriber::Registry`] to enable `OpenTelemetry` tracing
-/// with OTLP export.
+/// with OTLP export to an url.
 pub fn span_layer<S>(
     service_name: impl Into<Value>,
+    exporter_endpoint: String,
 ) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
 {
+    global::set_text_map_propagator(TraceContextPropagator::new());
     let resource = build_resource(service_name);
 
-    let span_exporter = SpanExporter::builder().with_http().build()?;
+    let url = format!("http://{exporter_endpoint}");
 
-    let provider = SdkTracerProvider::builder()
+    let span_exporter = SpanExporter::builder().with_http().with_endpoint(url).build()?;
+
+    let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
+        .with_sampler(Sampler::AlwaysOn)
         .with_batch_exporter(span_exporter)
         .build();
 
-    let tracer = provider.tracer("reth-otlp");
+    global::set_tracer_provider(tracer_provider.clone());
+
+    let tracer = tracer_provider.tracer("reth-otlp");
     Ok(tracing_opentelemetry::layer().with_tracer(tracer))
 }
 

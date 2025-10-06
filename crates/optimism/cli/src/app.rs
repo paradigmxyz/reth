@@ -120,9 +120,9 @@ where
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
-            if self.cli.traces.otlp {
-                info!(target: "reth::op::cli", "Starting otlp tracing at");
-                layers.with_span_layer("reth::op::cli".to_string())?;
+            if let Some(endpoint) = self.cli.traces.otlp {
+                info!(target: "reth::op::cli", "Starting OTLP tracing export to {}", endpoint);
+                layers.with_span_layer("reth::op::cli".to_string(), endpoint.to_string())?;
             }
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;

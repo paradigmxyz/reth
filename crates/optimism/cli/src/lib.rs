@@ -201,6 +201,7 @@ mod test {
             "--metrics",
             "9003",
             "--tracing-otlp",
+            "4318",
             "--log.file.max-size",
             "100",
         ]);

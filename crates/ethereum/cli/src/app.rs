@@ -114,8 +114,8 @@ where
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
-            if self.cli.traces.otlp {
-                layers.with_span_layer("reth::cli".to_string())?;
+            if let Some(endpoint) = self.cli.traces.otlp {
+                layers.with_span_layer("reth::cli".to_string(), endpoint.to_string())?;
             }
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
