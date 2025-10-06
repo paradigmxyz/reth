@@ -755,6 +755,7 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static,
 {
     /// Creates a new multi proof task with the unified message channel
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,

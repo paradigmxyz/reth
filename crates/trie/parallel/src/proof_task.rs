@@ -808,7 +808,7 @@ pub struct ProofTaskCtx {
 
 impl ProofTaskCtx {
     /// Creates a new [`ProofTaskCtx`] with the given sorted nodes and state.
-    pub fn new(
+    pub const fn new(
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
