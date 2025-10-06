@@ -178,15 +178,19 @@ where
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
         let provider = self.provider.database_provider_ro()?;
-        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-            .into_iter()
-            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
-            .collect::<Result<Vec<_>, _>>()?;
+        let stages_checkpoints =
+            [StageId::Headers, StageId::Execution, StageId::Bodies, StageId::Execution]
+                .into_iter()
+                .map(|stage| {
+                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
         let highest_static_files = HighestStaticFiles {
             headers: stages_checkpoints[0],
             receipts: stages_checkpoints[1],
             transactions: stages_checkpoints[2],
+            account_change_sets: stages_checkpoints[3],
         };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
@@ -319,6 +323,7 @@ mod tests {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
+                account_change_sets: Some(1),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -332,7 +337,12 @@ mod tests {
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles {
+                headers: Some(1),
+                receipts: Some(1),
+                transactions: Some(1),
+                account_change_sets: Some(1)
+            }
         );
 
         let targets = static_file_producer
@@ -340,6 +350,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
+                account_change_sets: Some(3),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -353,7 +364,12 @@ mod tests {
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                account_change_sets: Some(3)
+            }
         );
 
         let targets = static_file_producer
@@ -361,6 +377,7 @@ mod tests {
                 headers: Some(4),
                 receipts: Some(4),
                 transactions: Some(4),
+                account_change_sets: Some(4),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -377,7 +394,12 @@ mod tests {
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                account_change_sets: Some(3)
+            }
         );
     }
 
@@ -405,6 +427,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
+                        account_change_sets: Some(1),
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));

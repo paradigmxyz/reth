@@ -29,6 +29,7 @@ pub(crate) struct StaticFileWriters<N> {
     headers: RwLock<Option<StaticFileProviderRW<N>>>,
     transactions: RwLock<Option<StaticFileProviderRW<N>>>,
     receipts: RwLock<Option<StaticFileProviderRW<N>>>,
+    account_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -37,6 +38,7 @@ impl<N> Default for StaticFileWriters<N> {
             headers: Default::default(),
             transactions: Default::default(),
             receipts: Default::default(),
+            account_change_sets: Default::default(),
         }
     }
 }
@@ -51,6 +53,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
         };
 
         if write_guard.is_none() {
@@ -242,6 +245,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Transactions => self
                     .prune_transaction_data(to_delete, last_block_number.expect("should exist"))?,
                 StaticFileSegment::Receipts => {
+                    self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
+                }
+                StaticFileSegment::AccountChangeSets => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
             }
@@ -728,6 +734,29 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Transactions,
+                StaticFileProviderOperation::Prune,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Prunes the last `to_delete` account changesets from the data file.
+    fn prune_account_changeset_data(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+
+        self.truncate(to_delete, Some(last_block))?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::AccountChangeSets,
                 StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );

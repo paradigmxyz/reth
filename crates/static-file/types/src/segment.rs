@@ -3,7 +3,7 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use alloy_primitives::TxNumber;
+use alloy_primitives::{Address, TxNumber};
 use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,9 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
+    #[strum(serialize = "account_change_sets")]
+    /// Static File segment resopnsible for the `AccountChangeSets` table.
+    AccountChangeSets,
 }
 
 impl StaticFileSegment {
@@ -46,13 +49,14 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
+            Self::AccountChangeSets => "account_change_sets",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
+        [Self::Headers, Self::Transactions, Self::Receipts, Self::AccountChangeSets].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -65,6 +69,7 @@ impl StaticFileSegment {
         match self {
             Self::Headers => 3,
             Self::Transactions | Self::Receipts => 1,
+            Self::AccountChangeSets => todo!(),
         }
     }
 
@@ -135,6 +140,11 @@ impl StaticFileSegment {
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
         matches!(self, Self::Receipts | Self::Transactions)
+    }
+
+    /// Returns `true` if the segment is `StaticFileSegment::AccountChangeSets`
+    pub const fn is_account_changesets(&self) -> bool {
+        matches!(self, Self::AccountChangeSets)
     }
 
     /// Returns `true` if a segment row is linked to a block.
@@ -303,6 +313,23 @@ impl SegmentHeader {
 pub struct SegmentConfig {
     /// Compression used on the segment
     pub compression: Compression,
+}
+
+/// Helper type to handle inclusive ranges in changesets keyed by block number and address.
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
+pub struct ChangesetSegmentRangeInclusive {
+    start: BlockNumberAddress,
+    end: BlockNumberAddress,
+}
+
+/// Helper type for block number and address pairs
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
+pub struct BlockNumberAddress {
+    /// Block number
+    block_number: BlockNumber,
+
+    /// Address
+    address: Address,
 }
 
 /// Helper type to handle segment transaction and block INCLUSIVE ranges.
