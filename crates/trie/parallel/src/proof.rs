@@ -11,7 +11,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::Receiver;
-use dashmap::DashMap;
+use dashmap::{mapref::entry::Entry, DashMap};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
@@ -53,6 +53,7 @@ pub fn build_account_multiproof_with_storage<TCF, HCF>(
     mut storage_receivers: B256Map<Receiver<StorageProofResult>>,
     collect_branch_node_masks: bool,
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
 ) -> Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>
 where
     TCF: TrieCursorFactory + Clone,
@@ -65,6 +66,8 @@ where
         storage_receivers_count = storage_receivers.len(),
         "build_account_multiproof_with_storage starting"
     );
+
+    let initial_storage_receivers = storage_receivers.len();
 
     // Track fallbacks to detect duplicates (proves cache would help)
     let mut fallback_tracker = std::collections::HashMap::<B256, usize>::new();
@@ -151,11 +154,7 @@ where
                         let nibbles = Nibbles::unpack(hashed_address);
                         let prefix_hex = format!(
                             "0x{}",
-                            nibbles
-                                .iter()
-                                .take(6)
-                                .map(|n| format!("{:x}", n))
-                                .collect::<String>()
+                            nibbles.iter().take(6).map(|n| format!("{:x}", n)).collect::<String>()
                         );
 
                         warn!(
@@ -166,8 +165,13 @@ where
                             target_slots_count,
                             fallback_count = *fallback_count,
                             is_duplicate,
-                            total_receivers_initially = storage_receivers.len(),
-                            "FALLBACK: No receiver - computing full multiproof synchronously (MAIN HAD CACHE!)"
+                            total_receivers_initially = initial_storage_receivers,
+                            "FALLBACK: No receiver - {}",
+                            if is_in_targets {
+                                "recomputing targeted storage proof"
+                            } else {
+                                "computing sibling storage proof"
+                            }
                         );
 
                         if is_duplicate {
@@ -175,27 +179,122 @@ where
                                 target: "trie::proof",
                                 ?hashed_address,
                                 fallback_count = *fallback_count,
-                                "DUPLICATE FALLBACK! Same address computed {} times. Cache would prevent this!",
+                                "DUPLICATE FALLBACK! Same address computed {} times.",
                                 *fallback_count
                             );
                         }
 
-                        let raw_fallback_proof = StorageProof::new_hashed(
-                            trie_cursor_factory.clone(),
-                            hashed_cursor_factory.clone(),
-                            hashed_address,
-                        )
-                        .with_prefix_set_mut(Default::default())
-                        .storage_multiproof(
-                            targets.get(&hashed_address).cloned().unwrap_or_default(),
-                        )
-                        .map_err(|e| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(e.to_string()),
+                        let (decoded_multiproof, fallback_source) = if is_in_targets {
+                            let target_slots =
+                                targets.get(&hashed_address).cloned().unwrap_or_default();
+                            let raw_fallback_proof = StorageProof::new_hashed(
+                                trie_cursor_factory.clone(),
+                                hashed_cursor_factory.clone(),
+                                hashed_address,
+                            )
+                            .with_prefix_set_mut(PrefixSetMut::from(
+                                target_slots.iter().map(Nibbles::unpack),
                             ))
-                        })?;
+                            .with_branch_node_masks(collect_branch_node_masks)
+                            .with_added_removed_keys(
+                                multi_added_removed_keys
+                                    .as_ref()
+                                    .and_then(|keys| keys.get_storage(&hashed_address)),
+                            )
+                            .storage_multiproof(target_slots)
+                            .map_err(|e| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(e.to_string()),
+                                ))
+                            })?;
+                            let decoded: DecodedStorageMultiProof =
+                                raw_fallback_proof.try_into()?;
 
-                        raw_fallback_proof.try_into()?
+                            // Cache the root for potential future reuse
+                            missed_leaves_storage_roots.insert(hashed_address, decoded.root);
+
+                            debug!(
+                                target: "trie::proof",
+                                ?hashed_address,
+                                root = ?decoded.root,
+                                cache_size = missed_leaves_storage_roots.len(),
+                                "Cached storage root from target computation"
+                            );
+
+                            (decoded, "target_recompute")
+                        } else {
+                            match missed_leaves_storage_roots.entry(hashed_address) {
+                                Entry::Occupied(occ) => {
+                                    tracker.inc_cache_hit();
+                                    let root = *occ.get();
+
+                                    info!(
+                                        target: "trie::proof",
+                                        ?hashed_address,
+                                        prefix_hex,
+                                        ?root,
+                                        cache_size = missed_leaves_storage_roots.len(),
+                                        "CACHE HIT: Reusing cached storage root for sibling"
+                                    );
+
+                                    let mut proof = DecodedStorageMultiProof::empty();
+                                    proof.root = root;
+                                    (proof, "cache_hit")
+                                }
+                                Entry::Vacant(vac) => {
+                                    tracker.inc_cache_miss();
+
+                                    debug!(
+                                        target: "trie::proof",
+                                        ?hashed_address,
+                                        prefix_hex,
+                                        cache_size = missed_leaves_storage_roots.len(),
+                                        "CACHE MISS: Computing storage root for sibling"
+                                    );
+                                    let raw_fallback_proof = StorageProof::new_hashed(
+                                        trie_cursor_factory.clone(),
+                                        hashed_cursor_factory.clone(),
+                                        hashed_address,
+                                    )
+                                    .with_prefix_set_mut(Default::default())
+                                    .storage_multiproof(
+                                        targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                    )
+                                    .map_err(|e| {
+                                        ParallelStateRootError::StorageRoot(
+                                            StorageRootError::Database(DatabaseError::Other(
+                                                e.to_string(),
+                                            )),
+                                        )
+                                    })?;
+                                    let decoded: DecodedStorageMultiProof =
+                                        raw_fallback_proof.try_into()?;
+                                    let root = decoded.root;
+                                    vac.insert(root);
+
+                                    debug!(
+                                        target: "trie::proof",
+                                        ?hashed_address,
+                                        ?root,
+                                        cache_size = missed_leaves_storage_roots.len(),
+                                        "CACHE INSERT: Stored storage root for sibling"
+                                    );
+
+                                    (decoded, "cache_miss_computed")
+                                }
+                            }
+                        };
+
+                        debug!(
+                            target: "trie::proof",
+                            ?hashed_address,
+                            prefix_hex,
+                            fallback_source,
+                            fallback_count = *fallback_count,
+                            "Fallback storage proof resolved"
+                        );
+
+                        decoded_multiproof
                     }
                 };
 
@@ -213,9 +312,44 @@ where
             }
         }
     }
+
+    debug!(
+        target: "trie::proof",
+        targets_count = targets.len(),
+        initial_storage_receivers,
+        storage_receivers_remaining = storage_receivers.len(),
+        missed_leaves = tracker.missed_leaves(),
+        fallback_addresses = fallback_tracker.len(),
+        "build_account_multiproof_with_storage finished"
+    );
     let _ = hash_builder.root();
 
     let stats = tracker.finish();
+
+    // Log cache effectiveness
+    if stats.missed_leaves() > 0 {
+        let hit_rate = stats.cache_hit_rate();
+        let cache_saved_computations = stats.cache_hits();
+
+        info!(
+            target: "trie::proof",
+            missed_leaves = stats.missed_leaves(),
+            cache_hits = stats.cache_hits(),
+            cache_misses = stats.cache_misses(),
+            hit_rate = format!("{:.1}%", hit_rate),
+            cache_size = missed_leaves_storage_roots.len(),
+            "Cache effectiveness summary"
+        );
+
+        if cache_saved_computations > 0 {
+            info!(
+                target: "trie::proof",
+                saved_computations = cache_saved_computations,
+                "Cache prevented {} duplicate storage trie walk(s)",
+                cache_saved_computations
+            );
+        }
+    }
 
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
     let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
@@ -236,6 +370,8 @@ where
         branches_added = stats.branches_added(),
         leaves_added = stats.leaves_added(),
         missed_leaves = stats.missed_leaves(),
+        cache_hits = stats.cache_hits(),
+        cache_misses = stats.cache_misses(),
         "Calculated decoded proof"
     );
 
@@ -275,7 +411,6 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
-    #[allow(dead_code)]
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
@@ -477,6 +612,7 @@ where
             storage_proof_receivers, // ← Pass receivers directly for on-demand fetching
             self.collect_branch_node_masks,
             self.multi_added_removed_keys,
+            self.missed_leaves_storage_roots.clone(),
         )?;
 
         #[cfg(feature = "metrics")]
@@ -569,6 +705,7 @@ where
             storage_proof_receivers, // ← Pass receivers directly for on-demand fetching
             self.collect_branch_node_masks,
             self.multi_added_removed_keys,
+            self.missed_leaves_storage_roots.clone(),
         )?;
 
         #[cfg(feature = "metrics")]
@@ -666,8 +803,12 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let task_ctx = ProofTaskCtx::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(DashMap::default()),
+        );
         let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
@@ -780,8 +921,12 @@ mod tests {
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
         let rt = Runtime::new().unwrap();
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let task_ctx = ProofTaskCtx::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(DashMap::default()),
+        );
         let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),
@@ -876,8 +1021,12 @@ mod tests {
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
         let rt = Runtime::new().unwrap();
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let task_ctx = ProofTaskCtx::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(DashMap::default()),
+        );
 
         // Use 3 workers to increase chance of out-of-order completion
         let proof_task_handle = spawn_proof_workers(
@@ -968,8 +1117,12 @@ mod tests {
         }
 
         let rt = Runtime::new().unwrap();
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let task_ctx = ProofTaskCtx::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(DashMap::default()),
+        );
         let proof_task_handle = spawn_proof_workers(
             rt.handle().clone(),
             consistent_view.clone(),

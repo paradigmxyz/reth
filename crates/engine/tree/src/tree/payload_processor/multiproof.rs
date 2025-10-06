@@ -394,6 +394,7 @@ where
         account_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         max_concurrent: usize,
+        missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     ) -> Self {
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
@@ -403,7 +404,7 @@ where
             metrics,
             account_proof_task_handle,
             storage_proof_task_handle,
-            missed_leaves_storage_roots: Default::default(),
+            missed_leaves_storage_roots,
         }
     }
 
@@ -732,6 +733,7 @@ where
         to_sparse_trie: Sender<SparseTrieUpdate>,
         max_concurrency: usize,
         chunk_size: Option<usize>,
+        missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
@@ -751,6 +753,7 @@ where
                 account_proof_task_handle,
                 storage_proof_task_handle,
                 max_concurrency,
+                missed_leaves_storage_roots,
             ),
             metrics,
         }
@@ -1296,10 +1299,12 @@ mod tests {
     {
         let executor = WorkloadExecutor::default();
         let config = create_state_root_config(factory, TrieInput::default());
+        let missed_leaves_storage_roots = Arc::new(DashMap::default());
         let task_ctx = ProofTaskCtx::new(
             config.nodes_sorted.clone(),
             config.state_sorted.clone(),
             config.prefix_sets.clone(),
+            missed_leaves_storage_roots.clone(),
         );
         // Create both storage and account proof worker pools for testing
         let storage_manager_handle = spawn_proof_workers(
@@ -1330,6 +1335,7 @@ mod tests {
             channel.0,
             1,
             None,
+            missed_leaves_storage_roots,
         )
     }
 

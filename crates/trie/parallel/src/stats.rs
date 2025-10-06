@@ -12,6 +12,10 @@ pub struct ParallelTrieStats {
     storage_proofs_immediate: u64,
     /// Number of storage proofs that blocked waiting for completion.
     storage_proofs_blocked: u64,
+    /// Number of cache hits when looking up missed leaf storage roots.
+    cache_hits: u64,
+    /// Number of cache misses when looking up missed leaf storage roots.
+    cache_misses: u64,
 }
 
 impl ParallelTrieStats {
@@ -51,6 +55,27 @@ impl ParallelTrieStats {
             (self.storage_proofs_immediate as f64 / total as f64) * 100.0
         }
     }
+
+    /// The number of cache hits for missed leaf storage roots.
+    pub const fn cache_hits(&self) -> u64 {
+        self.cache_hits
+    }
+
+    /// The number of cache misses for missed leaf storage roots.
+    pub const fn cache_misses(&self) -> u64 {
+        self.cache_misses
+    }
+
+    /// The cache hit rate as a percentage (0-100).
+    /// Higher percentage indicates cache is effectively preventing duplicate computations.
+    pub fn cache_hit_rate(&self) -> f64 {
+        let total = self.cache_hits + self.cache_misses;
+        if total == 0 {
+            0.0
+        } else {
+            (self.cache_hits as f64 / total as f64) * 100.0
+        }
+    }
 }
 
 /// Trie metrics tracker.
@@ -62,6 +87,8 @@ pub struct ParallelTrieTracker {
     missed_leaves: u64,
     storage_proofs_immediate: u64,
     storage_proofs_blocked: u64,
+    cache_hits: u64,
+    cache_misses: u64,
 }
 
 impl ParallelTrieTracker {
@@ -96,6 +123,16 @@ impl ParallelTrieTracker {
         self.storage_proofs_blocked += 1;
     }
 
+    /// Increment the number of cache hits for missed leaf storage roots.
+    pub fn inc_cache_hit(&mut self) {
+        self.cache_hits += 1;
+    }
+
+    /// Increment the number of cache misses for missed leaf storage roots.
+    pub fn inc_cache_miss(&mut self) {
+        self.cache_misses += 1;
+    }
+
     /// Called when root calculation is finished to return trie statistics.
     pub fn finish(self) -> ParallelTrieStats {
         ParallelTrieStats {
@@ -106,6 +143,8 @@ impl ParallelTrieTracker {
             // pool.
             storage_proofs_immediate: self.storage_proofs_immediate,
             storage_proofs_blocked: self.storage_proofs_blocked,
+            cache_hits: self.cache_hits,
+            cache_misses: self.cache_misses,
         }
     }
 }

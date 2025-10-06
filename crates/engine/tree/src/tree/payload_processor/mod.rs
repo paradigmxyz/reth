@@ -15,6 +15,7 @@ use crate::tree::{
 };
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
+use dashmap::DashMap;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
@@ -236,11 +237,14 @@ where
             MultiProofConfig::new_from_input(consistent_view, trie_input);
         self.trie_input = Some(trie_input);
 
+        let missed_leaves_storage_roots = Arc::new(DashMap::default());
+
         // Create and spawn dual proof task managers
         let task_ctx = ProofTaskCtx::new(
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
+            missed_leaves_storage_roots.clone(),
         );
 
         // Create and spawn dual proof task managers
@@ -260,6 +264,7 @@ where
             to_sparse_trie,
             max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            missed_leaves_storage_roots,
         );
 
         // wire the multiproof task to the prewarm task

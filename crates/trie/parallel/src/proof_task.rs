@@ -7,12 +7,13 @@
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
-use crate::root::ParallelStateRootError;
+use crate::{root::ParallelStateRootError, StorageRootTargets};
 use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
 };
 use crossbeam_channel::{self, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
+use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{
@@ -32,7 +33,6 @@ use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use crate::StorageRootTargets;
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     sync::{
@@ -210,6 +210,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         storage_receivers, // ← Pass receivers directly for on-demand fetching
         collect_branch_node_masks,
         multi_added_removed_keys,
+        proof_tx.task_ctx.missed_leaves_storage_roots.clone(),
     )?;
 
     // Return multiproof without stats
@@ -699,16 +700,19 @@ pub struct ProofTaskCtx {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Cached storage roots for leaves that were not part of the requested multiproof.
+    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
 }
 
 impl ProofTaskCtx {
     /// Creates a new [`ProofTaskCtx`] with the given sorted nodes and state.
-    pub const fn new(
+    pub fn new(
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     ) -> Self {
-        Self { nodes_sorted, state_sorted, prefix_sets }
+        Self { nodes_sorted, state_sorted, prefix_sets, missed_leaves_storage_roots }
     }
 }
 
@@ -974,6 +978,7 @@ mod tests {
             Arc::new(TrieUpdatesSorted::default()),
             Arc::new(HashedPostStateSorted::default()),
             Arc::new(TriePrefixSetsMut::default()),
+            Arc::new(DashMap::default()),
         )
     }
 
