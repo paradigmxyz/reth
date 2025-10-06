@@ -79,9 +79,6 @@ pub(super) struct MultiProofConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
-    /// Pre-frozen version of `prefix_sets` for account multiproof tasks.
-    /// This is computed once at config creation to avoid repeated expensive freeze operations.
-    pub frozen_prefix_sets: Arc<reth_trie::prefix_set::TriePrefixSets>,
 }
 
 impl<Factory> MultiProofConfig<Factory> {
@@ -93,17 +90,11 @@ impl<Factory> MultiProofConfig<Factory> {
         consistent_view: ConsistentDbView<Factory>,
         mut input: TrieInput,
     ) -> (TrieInput, Self) {
-        // Freeze once at config creation to avoid repeated expensive operations
-        // Clone once for freezing, then move original for mutable version
-        let frozen_prefix_sets = Arc::new(input.prefix_sets.clone().freeze());
-        let prefix_sets = Arc::new(std::mem::take(&mut input.prefix_sets));
-
         let config = Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
             state_sorted: Arc::new(input.state.drain_into_sorted()),
-            prefix_sets,
-            frozen_prefix_sets,
+            prefix_sets: Arc::new(std::mem::take(&mut input.prefix_sets)),
         };
         (input.cleared(), config)
     }
@@ -560,9 +551,8 @@ where
 
         let account_proof_task_handle = self.account_proof_task_handle.clone();
         let storage_proof_task_handle = self.storage_proof_task_handle.clone();
-        // Use pre-frozen prefix sets (cheap Arc clone) instead of expensive unwrap_or_clone +
-        // freeze
-        let frozen_prefix_sets = Arc::unwrap_or_clone(config.frozen_prefix_sets);
+        // Clone and freeze prefix sets to get the current accumulated state from all transactions
+        let frozen_prefix_sets = (*config.prefix_sets).clone().freeze();
 
         self.executor.spawn_blocking(move || {
             // Create channel for receiving multiproof result from account manager
@@ -1259,14 +1249,12 @@ mod tests {
         let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let prefix_sets = Arc::new(input.prefix_sets.clone());
-        let frozen_prefix_sets = Arc::new(input.prefix_sets.freeze());
 
         MultiProofConfig {
             consistent_view,
             nodes_sorted,
             state_sorted,
             prefix_sets,
-            frozen_prefix_sets,
         }
     }
 
