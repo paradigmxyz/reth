@@ -18,6 +18,7 @@ pub struct TraceArgs {
         value_name = "URL",
         num_args = 0..=1,
         default_missing_value = "stdout",
+        require_equals = true,
         value_parser = parse_trace_output,
         help_heading = "Tracing"
     )]

@@ -200,8 +200,7 @@ mod test {
             "10000",
             "--metrics",
             "9003",
-            "--tracing-otlp",
-            "http://localhost:4318/v1/traces",
+            "--tracing-otlp=http://localhost:4318/v1/traces",
             "--log.file.max-size",
             "100",
         ]);
