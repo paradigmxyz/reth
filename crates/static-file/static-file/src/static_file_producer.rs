@@ -255,9 +255,8 @@ mod tests {
     use crate::static_file_producer::{
         StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
     };
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
         providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
         ProviderFactory, StaticFileProviderFactory,
@@ -291,12 +290,7 @@ mod tests {
         static_file_writer.commit().expect("prune headers");
         drop(static_file_writer);
 
-        let tx = db.factory.db_ref().tx_mut().expect("init tx");
-        for block in &blocks {
-            TestStageDB::insert_header(None, &tx, block.sealed_header(), U256::ZERO)
-                .expect("insert block header");
-        }
-        tx.commit().expect("commit tx");
+        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
         for block in &blocks {

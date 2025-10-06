@@ -646,9 +646,9 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for ConsistentProvider<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.get_in_memory_or_storage_by_block(
-            (*block_hash).into(),
+            block_hash.into(),
             |db_provider| db_provider.header(block_hash),
             |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
@@ -662,8 +662,8 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         )
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(*hash)? {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
+        if let Some(num) = self.block_number(hash)? {
             self.header_td_by_number(num)
         } else {
             Ok(None)
@@ -915,6 +915,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
             |db_provider, range, _| db_provider.recovered_block_range(range),
             |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
+        )
+    }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.get_in_memory_or_storage_by_tx(
+            id.into(),
+            |db_provider| db_provider.block_by_transaction_id(id),
+            |_, _, block_state| Ok(Some(block_state.number())),
         )
     }
 }
@@ -1305,14 +1313,14 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal_slow),
+            BlockId::Hash(hash) => self.header(hash.block_hash)?.map(SealedHeader::seal_slow),
         })
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<HeaderTy<N>>> {
         Ok(match id {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?,
+            BlockId::Hash(hash) => self.header(hash.block_hash)?,
         })
     }
 }

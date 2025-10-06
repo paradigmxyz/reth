@@ -7845,8 +7845,6 @@ dependencies = [
  "reth-chainspec",
  "reth-config",
  "reth-consensus",
- "reth-db",
- "reth-db-api",
  "reth-ethereum-primitives",
  "reth-metrics",
  "reth-network-p2p",
