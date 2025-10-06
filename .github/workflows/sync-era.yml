@@ -17,8 +17,7 @@ concurrency:
 jobs:
   sync:
     name: sync (${{ matrix.chain.bin }})
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -64,4 +63,4 @@ jobs:
           ${{ matrix.chain.bin }} stage unwind num-blocks 100 --chain ${{ matrix.chain.chain }}
       - name: Run stage unwind to block hash
         run: |
-          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }} 
+          ${{ matrix.chain.bin }} stage unwind to-block ${{ matrix.chain.unwind-target }} --chain ${{ matrix.chain.chain }}

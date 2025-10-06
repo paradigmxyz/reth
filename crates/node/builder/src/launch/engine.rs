@@ -265,6 +265,7 @@ impl EngineNodeLauncher {
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
         info!(target: "reth::cli", "Starting consensus engine");
+        info!(target: "reth::cli", "built payloads ready: {:#?}", built_payloads);
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");

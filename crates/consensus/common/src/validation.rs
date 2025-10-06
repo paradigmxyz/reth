@@ -71,6 +71,29 @@ pub fn validate_shanghai_withdrawals<B: Block>(
     Ok(())
 }
 
+/// Validate that block access lists are present in Amsterdam
+///
+/// [EIP-7928]: https://eips.ethereum.org/EIPS/eip-7928
+#[inline]
+pub fn validate_amsterdam_block_access_lists<B: Block>(
+    block: &SealedBlock<B>,
+) -> Result<(), ConsensusError> {
+    let bal = block.body().block_access_list().ok_or(ConsensusError::BlockAccessListMissing)?;
+    let bal_hash = alloy_primitives::keccak256(alloy_rlp::encode(bal));
+    let header_bal_hash =
+        block.block_access_list_hash().ok_or(ConsensusError::BlockAccessListHashMissing)?;
+    if bal_hash != header_bal_hash {
+        tracing::error!(
+            target: "consensus",
+            ?header_bal_hash,
+            ?bal,
+            "Block access list hash mismatch in validation.rs in L81"
+        );
+        return Err(ConsensusError::InvalidBalHash);
+    }
+    Ok(())
+}
+
 /// Validate that blob gas is present in the block if Cancun is active.
 ///
 /// See [EIP-4844]: Shard Blob Transactions
@@ -132,6 +155,21 @@ where
             // this is ok because we assume the fork is not active in this case
         }
         _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
+    }
+    if let (Some(expected_hash), Some(body_bal)) =
+        (header.block_access_list_hash(), body.block_access_list())
+    {
+        let got_hash = alloy_primitives::keccak256(alloy_rlp::encode(body_bal));
+
+        if got_hash != expected_hash {
+            tracing::error!(
+                target: "consensus",
+                ?expected_hash,
+                ?body_bal,
+                "Block access list hash mismatch in validation.rs in L164"
+            );
+            return Err(ConsensusError::InvalidBalHash);
+        }
     }
 
     Ok(())
@@ -217,6 +255,10 @@ where
             rlp_length: block.rlp_length(),
             max_rlp_length: MAX_RLP_BLOCK_SIZE,
         })
+    }
+
+    if chain_spec.is_amsterdam_active_at_timestamp(block.header().timestamp()) {
+        validate_amsterdam_block_access_lists(block)?;
     }
 
     Ok(())
@@ -487,6 +529,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            block_access_list: None,
         };
 
         let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });

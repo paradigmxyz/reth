@@ -150,6 +150,45 @@ pub(crate) fn block_to_new_payload(
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
 
     let (version, params) = match payload {
+        ExecutionPayload::V4(payload) => {
+            let cancun = sidecar.cancun().unwrap();
+
+            if let Some(prague) = sidecar.prague() {
+                if is_optimism {
+                    (
+                        EngineApiMessageVersion::V4,
+                        serde_json::to_value((
+                            OpExecutionPayloadV4 {
+                                payload_inner: payload.payload_inner,
+                                withdrawals_root: block.withdrawals_root.unwrap(),
+                            },
+                            cancun.versioned_hashes.clone(),
+                            cancun.parent_beacon_block_root,
+                            Requests::default(),
+                        ))?,
+                    )
+                } else {
+                    (
+                        EngineApiMessageVersion::V4,
+                        serde_json::to_value((
+                            payload,
+                            cancun.versioned_hashes.clone(),
+                            cancun.parent_beacon_block_root,
+                            prague.requests.requests_hash(),
+                        ))?,
+                    )
+                }
+            } else {
+                (
+                    EngineApiMessageVersion::V3,
+                    serde_json::to_value((
+                        payload,
+                        cancun.versioned_hashes.clone(),
+                        cancun.parent_beacon_block_root,
+                    ))?,
+                )
+            }
+        }
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar.cancun().unwrap();
 
@@ -244,7 +283,10 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
     match message_version {
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 |
+        EngineApiMessageVersion::V6 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {
