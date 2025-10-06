@@ -79,14 +79,6 @@ pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
 ///
 /// Distributes max concurrency between storage and account workers based on their ratio.
 /// Returns zero for both if no workers are configured.
-///
-/// # Arguments
-/// * `storage_workers` - Number of storage proof workers
-/// * `account_workers` - Number of account proof workers
-/// * `max_proof_task_concurrency` - Maximum total concurrency for proof tasks
-///
-/// # Returns
-/// Tuple of (`storage_concurrency`, `account_concurrency`)
 #[inline]
 pub const fn calculate_proof_concurrency(
     storage_workers: usize,
