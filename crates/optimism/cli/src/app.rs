@@ -122,6 +122,7 @@ where
             #[cfg(feature = "otlp")]
             if let Some(endpoint_url) = &self.cli.metrics.otlp {
                 let url = format!("http://{endpoint_url}");
+                info!(target: "reth::op::cli", "Starting otlp endpoint at {}", url);
                 layers.with_metrics_layer("reth::op::cli".to_string(), &url)?;
             }
 
