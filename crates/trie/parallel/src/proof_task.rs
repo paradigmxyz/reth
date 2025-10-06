@@ -83,7 +83,12 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
 
     // Log first few targets and prefix_sets for comparison
     let target_addrs: Vec<_> = targets.keys().take(5).copied().collect();
-    let prefix_set_addrs: Vec<_> = prefix_sets.account_prefix_set.iter().take(5).map(|n| B256::from_slice(&n.pack())).collect();
+    let prefix_set_addrs: Vec<_> = prefix_sets
+        .account_prefix_set
+        .iter()
+        .take(5)
+        .map(|n| B256::from_slice(&n.pack()))
+        .collect();
 
     debug!(
         target: "trie::proof_task",

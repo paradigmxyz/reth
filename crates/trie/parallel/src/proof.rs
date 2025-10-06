@@ -136,7 +136,8 @@ where
                         tracker.inc_missed_leaves();
 
                         let is_in_targets = targets.contains_key(&hashed_address);
-                        let target_slots_count = targets.get(&hashed_address).map(|s| s.len()).unwrap_or(0);
+                        let target_slots_count =
+                            targets.get(&hashed_address).map(|s| s.len()).unwrap_or(0);
 
                         warn!(
                             target: "trie::proof",

@@ -1248,14 +1248,9 @@ mod tests {
         let consistent_view = ConsistentDbView::new(factory, None);
         let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
         let state_sorted = Arc::new(input.state.clone().into_sorted());
-        let prefix_sets = Arc::new(input.prefix_sets.clone());
+        let prefix_sets = Arc::new(input.prefix_sets);
 
-        MultiProofConfig {
-            consistent_view,
-            nodes_sorted,
-            state_sorted,
-            prefix_sets,
-        }
+        MultiProofConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
