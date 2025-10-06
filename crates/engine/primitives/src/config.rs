@@ -17,36 +17,31 @@ pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
-/// Maximum number of storage proof workers to prevent excessive memory usage.
+/// Upper limit for storage proof workers to prevent excessive memory usage.
 const MAX_STORAGE_PROOF_WORKERS: usize = 12;
 
-/// Maximum number of account proof workers to prevent excessive memory usage.
+/// Upper limit for account proof workers to prevent excessive memory usage.
 const MAX_ACCOUNT_PROOF_WORKERS: usize = 4;
 
-/// Minimum number of storage proof workers that keep the pipeline progressing.
+/// Lower limit for storage proof workers to maintain pipeline progress.
 const MIN_STORAGE_PROOF_WORKERS: usize = 2;
 
-/// Minimum number of account proof workers to ensure the pool stays active.
+/// Lower limit for account proof workers to keep the pool active.
 const MIN_ACCOUNT_PROOF_WORKERS: usize = 1;
 
-/// Historical fallback split used when host parallelism cannot be detected.
+/// Default `(storage, account)` worker counts used when CPU detection fails.
 const FALLBACK_PROOF_WORKERS: (usize, usize) = (6, 2);
 
-/// Derives the recommended `(storage, account)` proof worker counts from host parallelism.
+/// Calculates optimal `(storage, account)` proof worker counts based on available CPU cores.
 ///
-/// Proof workers run via `tokio::spawn_blocking`, so every worker consumes a dedicated blocking
-/// thread backed by an OS thread. We therefore align the worker pools with the CPU topology by:
-/// 1. Inspecting the number of logical CPUs reported by `available_parallelism`.
-/// 2. Reserving `reserved_cpu_cores` for other subsystems so the runtime keeps headroom.
-/// 3. Splitting the remaining capacity roughly 3:1 in favour of storage proofs, which tend to do
-///    more work per job than account proofs.
-/// 4. Clamping the result to sensible minima and maxima so we neither drop to zero workers nor
-///    spawn an excessive number on large machines. On CPUs with very few logical cores we keep the
-///    minimum of `(2, 1)` even if that slightly oversubscribes the host to maintain forward
-///    progress in both pools.
+/// Each worker runs in a dedicated blocking thread via `tokio::spawn_blocking`. The allocation
+/// strategy:
+/// 1. Query available logical CPUs via `available_parallelism`
+/// 2. Reserve `reserved_cpu_cores` for other tasks (e.g., networking, RPC)
+/// 3. Allocate remaining cores with a 3:1 ratio favoring storage proofs (which are more intensive)
+/// 4. Clamp results to `[MIN, MAX]` bounds to handle both low-core and high-core systems
 ///
-/// If we cannot query parallelism (e.g. `no_std` builds or OS errors) we fall back to the
-/// historical `(6, 2)` split.
+/// Returns `(6, 2)` if CPU detection fails.
 pub fn default_proof_workers(reserved_cpu_cores: usize) -> (usize, usize) {
     #[cfg(feature = "std")]
     {
