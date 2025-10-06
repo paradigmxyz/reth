@@ -1691,7 +1691,7 @@ mod forkchoice_updated_tests {
 
         // Create test blocks
         let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
-        test_harness = test_harness.with_blocks(blocks.clone());
+        test_harness = test_harness.with_blocks(blocks);
 
         let canonical_head = test_harness.tree.state.tree_state.canonical_block_hash();
 
