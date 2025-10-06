@@ -602,7 +602,7 @@ where
 
         match state_root.root_with_progress()? {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -622,7 +622,7 @@ where
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = provider.write_trie_updates(&updates)?;
+                let updated_len = provider.write_trie_updates(updates)?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",

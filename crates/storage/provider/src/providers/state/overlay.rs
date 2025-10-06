@@ -103,7 +103,7 @@ where
             self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
-            let mut trie_updates_mut = provider.trie_reverts(from_block)?;
+            let mut trie_updates_mut = provider.trie_reverts(from_block..)?;
 
             // Collect state reverts using HashedPostState::from_reverts
             let reverted_state =

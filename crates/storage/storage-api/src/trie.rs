@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
+use core::ops::RangeBounds;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+    updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
@@ -93,8 +94,11 @@ pub trait StateProofProvider: Send + Sync {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieReader: Send + Sync {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
-    /// given block having been processed.
-    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
+    /// given blocks range having been processed.
+    fn trie_reverts(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<TrieUpdatesSorted>;
 }
 
 /// Trie Writer
@@ -103,7 +107,14 @@ pub trait TrieWriter: Send + Sync {
     /// Writes trie updates to the database.
     ///
     /// Returns the number of entries modified.
-    fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize>;
+    fn write_trie_updates(&self, trie_updates: TrieUpdates) -> ProviderResult<usize> {
+        self.write_trie_updates_sorted(&trie_updates.into_sorted())
+    }
+
+    /// Writes trie updates to the database with already sorted updates.
+    ///
+    /// Returns the number of entries modified.
+    fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize>;
 
     /// Records the current values of all trie nodes which will be updated using the [`TrieUpdates`]
     /// into the trie changesets tables.
@@ -135,14 +146,14 @@ pub trait TrieWriter: Send + Sync {
 /// Storage Trie Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageTrieWriter: Send + Sync {
-    /// Writes storage trie updates from the given storage trie map.
+    /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///
-    /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
+    /// Expects the storage trie updates to already be sorted by the hashed address key.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates<'a>(
+    fn write_storage_trie_updates_sorted<'a>(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
     ) -> ProviderResult<usize>;
 
     /// Records the current values of all trie nodes which will be updated using the
