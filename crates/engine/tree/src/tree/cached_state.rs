@@ -302,7 +302,7 @@ pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Cache<B256, Option<Bytecode>>,
 
-    /// Flattened storage cache: composite key of (Address, StorageKey) maps directly to values.
+    /// Flattened storage cache: composite key of (`Address`, `StorageKey`) maps directly to values.
     storage_cache: Cache<(Address, StorageKey), Option<StorageValue>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
@@ -462,7 +462,7 @@ impl ExecutionCacheBuilder {
                 // Size of composite key (Address + StorageKey) + Option<StorageValue>
                 // Address: 20 bytes, StorageKey: 32 bytes, Option<StorageValue>: 33 bytes
                 // Plus some overhead for the hash map entry
-                120 as u32
+                120_u32
             })
             .max_capacity(storage_cache_size)
             .time_to_live(EXPIRY_TIME)
