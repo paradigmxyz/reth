@@ -36,12 +36,12 @@ where
     F::Provider: Clone + TrieReader + StageCheckpointReader,
 {
     /// Create a new overlay state provider factory
-    pub fn new(factory: F) -> Self {
+    pub const fn new(factory: F) -> Self {
         Self { factory, block_number: None, trie_overlay: None, hashed_state_overlay: None }
     }
 
     /// Set the block number for collecting reverts
-    pub fn with_block_number(mut self, block_number: Option<BlockNumber>) -> Self {
+    pub const fn with_block_number(mut self, block_number: Option<BlockNumber>) -> Self {
         self.block_number = block_number;
         self
     }
