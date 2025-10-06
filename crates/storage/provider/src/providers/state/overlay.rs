@@ -72,23 +72,16 @@ where
         // Get the MerkleChangeSets stage checkpoint - let errors propagate as-is
         let checkpoint = provider.get_stage_checkpoint(StageId::MerkleChangeSets)?;
 
-        // If there's no checkpoint at all, we can't revert
-        let checkpoint = checkpoint.ok_or_else(|| ProviderError::InsufficientChangesets {
-            requested: requested_block,
-            available: 0..=0,
-        })?;
-
-        // Extract the MerkleChangeSets checkpoint details using the helper method
-        let merkle_checkpoint =
-            checkpoint.merkle_changesets_stage_checkpoint().ok_or_else(|| {
-                ProviderError::InsufficientChangesets {
-                    requested: requested_block,
-                    available: 0..=0,
-                }
+        // If there's no checkpoint at all or block range details are missing, we can't revert
+        let checkpoint = checkpoint
+            .and_then(|checkpoint| checkpoint.merkle_changesets_stage_checkpoint())
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: requested_block,
+                available: 0..=0,
             })?;
 
         // Check if the requested block is within the available range
-        let available_range = merkle_checkpoint.block_range.from..=merkle_checkpoint.block_range.to;
+        let available_range = checkpoint.block_range.from..=checkpoint.block_range.to;
         if !available_range.contains(&requested_block) {
             return Err(ProviderError::InsufficientChangesets {
                 requested: requested_block,
@@ -110,7 +103,7 @@ where
             self.validate_changesets_availability(&provider, from_block)?;
 
             // Collect trie reverts
-            let mut trie_updates_mut = provider.revert_trie(from_block)?;
+            let mut trie_updates_mut = provider.trie_reverts(from_block)?;
 
             // Collect state reverts using HashedPostState::from_reverts
             let reverted_state =

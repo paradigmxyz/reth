@@ -94,7 +94,7 @@ pub trait StateProofProvider: Send + Sync {
 pub trait TrieReader: Send + Sync {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
     /// given block having been processed.
-    fn revert_trie(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
 }
 
 /// Trie Writer

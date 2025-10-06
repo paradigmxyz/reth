@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 /// Helper function to extend a sorted vector with another sorted vector.
 /// Values from `other` take precedence for duplicate keys.
 ///

@@ -2447,7 +2447,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
-    fn revert_trie(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         let tx = self.tx_ref();
 
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
