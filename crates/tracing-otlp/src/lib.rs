@@ -17,6 +17,16 @@ use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL}
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
+use url::Url;
+
+/// Destination for exported trace spans.
+#[derive(Debug, Clone)]
+pub enum TraceOutput {
+    /// Export traces as JSON to stdout.
+    Stdout,
+    /// Export traces to an OTLP collector at the specified URL.
+    Otlp(Url),
+}
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
@@ -24,7 +34,7 @@ use tracing_subscriber::registry::LookupSpan;
 /// with OTLP export to an url.
 pub fn span_layer<S>(
     service_name: impl Into<Value>,
-    exporter_endpoint: String,
+    output: TraceOutput,
 ) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
@@ -32,15 +42,20 @@ where
     global::set_text_map_propagator(TraceContextPropagator::new());
     let resource = build_resource(service_name);
 
-    let url = format!("http://{exporter_endpoint}");
+    let mut provider_builder =
+        SdkTracerProvider::builder().with_resource(resource).with_sampler(Sampler::AlwaysOn);
 
-    let span_exporter = SpanExporter::builder().with_http().with_endpoint(url).build()?;
+    provider_builder = if let TraceOutput::Otlp(url) = output {
+        println!("Exporting traces to OTLP endpoint: {}", url);
+        let span_exporter =
+            SpanExporter::builder().with_http().with_endpoint(url.to_string()).build()?;
+        provider_builder.with_batch_exporter(span_exporter)
+    } else {
+        let stdout_exporter = opentelemetry_stdout::SpanExporter::default();
+        provider_builder.with_simple_exporter(stdout_exporter)
+    };
 
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_sampler(Sampler::AlwaysOn)
-        .with_batch_exporter(span_exporter)
-        .build();
+    let tracer_provider = provider_builder.build();
 
     global::set_tracer_provider(tracer_provider.clone());
 

@@ -129,10 +129,10 @@ impl Layers {
     pub fn with_span_layer(
         &mut self,
         service_name: String,
-        exporter_endpoint: String,
+        output_type: reth_tracing_otlp::TraceOutput,
     ) -> eyre::Result<()> {
         // Create the span provider
-        let span_layer = span_layer(service_name, exporter_endpoint)
+        let span_layer = span_layer(service_name, output_type)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?;
 
         self.add_layer(span_layer);

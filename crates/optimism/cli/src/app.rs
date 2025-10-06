@@ -116,13 +116,12 @@ where
     /// If file logging is enabled, this function stores guard to the struct.
     pub fn init_tracing(&mut self) -> Result<()> {
         if self.guard.is_none() {
-            #[cfg_attr(not(feature = "otlp"), allow(unused_mut))]
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
-            if let Some(endpoint) = self.cli.traces.otlp {
-                info!(target: "reth::op::cli", "Starting OTLP tracing export to {}", endpoint);
-                layers.with_span_layer("reth::op::cli".to_string(), endpoint.to_string())?;
+            if let Some(output_type) = &self.cli.traces.otlp {
+                info!(target: "reth::op::cli", "Starting OTLP tracing export to {:?}", output_type);
+                layers.with_span_layer("reth::op::cli".to_string(), output_type.clone())?;
             }
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;

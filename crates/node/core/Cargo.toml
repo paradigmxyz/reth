@@ -60,6 +60,7 @@ dirs-next.workspace = true
 shellexpand.workspace = true
 
 # tracing
+reth-tracing-otlp.workspace = true
 tracing.workspace = true
 
 # crypto

@@ -151,8 +151,8 @@ Display:
           Silence all log output
 
 Tracing:
-      --tracing-otlp <TRACING-OTLP>
-          Enable OTLP tracing.
+      --tracing-otlp [<URL>]
+          Enable `OpenTelemetry` tracing export.
 
-          The otlp tracing will be enabled and the traces exported to this endpoint.
+          If no value provided, traces are printed to stdout. If a URL is provided, traces are exported to that OTLP endpoint. Example: --tracing-otlp=http://localhost:4318/v1/traces
 ```
