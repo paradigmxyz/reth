@@ -104,11 +104,8 @@ where
         // Get a read-only provider
         let provider = self.factory.database_provider_ro()?;
 
-        let trie_updates: Arc<TrieUpdatesSorted>;
-        let hashed_state: Arc<HashedPostStateSorted>;
-
         // If block_number is provided, collect reverts
-        if let Some(from_block) = self.block_number {
+        let (trie_updates, hashed_state) = if let Some(from_block) = self.block_number {
             // Validate that we have sufficient changesets for the requested block
             self.validate_changesets_availability(&provider, from_block)?;
 
@@ -129,17 +126,18 @@ where
                 hashed_state_mut.extend_ref(hashed_state_overlay);
             }
 
-            trie_updates = Arc::new(trie_updates_mut);
-            hashed_state = Arc::new(hashed_state_mut);
+            (Arc::new(trie_updates_mut), Arc::new(hashed_state_mut))
         } else {
             // If no block_number, use overlays directly or defaults
-            trie_updates =
+            let trie_updates =
                 self.trie_overlay.clone().unwrap_or_else(|| Arc::new(TrieUpdatesSorted::default()));
-            hashed_state = self
+            let hashed_state = self
                 .hashed_state_overlay
                 .clone()
                 .unwrap_or_else(|| Arc::new(HashedPostStateSorted::default()));
-        }
+
+            (trie_updates, hashed_state)
+        };
 
         Ok(OverlayStateProvider::new(provider, trie_updates, hashed_state))
     }
