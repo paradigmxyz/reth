@@ -1552,7 +1552,7 @@ mod forkchoice_updated_tests {
         let test_harness = TestHarness::new(chain_spec);
 
         let state = ForkchoiceState {
-            head_block_hash: B256::random(), // Random missing block
+            head_block_hash: B256::random(),
             safe_block_hash: B256::ZERO,
             finalized_block_hash: B256::ZERO,
         };
