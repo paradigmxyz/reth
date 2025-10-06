@@ -903,6 +903,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_tx,
                         highest_block,
                     )?,
+                StaticFileSegment::AccountChangeSets => self
+                    .ensure_invariants::<_, tables::AccountChangeSets>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -988,7 +995,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get_stage_checkpoint(match segment {
                 StaticFileSegment::Headers => StageId::Headers,
                 StaticFileSegment::Transactions => StageId::Bodies,
-                StaticFileSegment::Receipts => StageId::Execution,
+                StaticFileSegment::Receipts | StaticFileSegment::AccountChangeSets => {
+                    StageId::Execution
+                }
             })?
             .unwrap_or_default()
             .block_number;
