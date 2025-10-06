@@ -66,6 +66,9 @@ where
         "build_account_multiproof_with_storage starting"
     );
 
+    // Track fallbacks to detect duplicates (proves cache would help)
+    let mut fallback_tracker = std::collections::HashMap::<B256, usize>::new();
+
     let mut tracker = ParallelTrieTracker::default();
 
     let accounts_added_removed_keys =
@@ -139,14 +142,43 @@ where
                         let target_slots_count =
                             targets.get(&hashed_address).map(|s| s.len()).unwrap_or(0);
 
+                        // Track duplicate fallbacks
+                        let fallback_count = fallback_tracker.entry(hashed_address).or_insert(0);
+                        *fallback_count += 1;
+                        let is_duplicate = *fallback_count > 1;
+
+                        // Log trie prefix to see if siblings cluster by prefix
+                        let nibbles = Nibbles::unpack(hashed_address);
+                        let prefix_hex = format!(
+                            "0x{}",
+                            nibbles
+                                .iter()
+                                .take(6)
+                                .map(|n| format!("{:x}", n))
+                                .collect::<String>()
+                        );
+
                         warn!(
                             target: "trie::proof",
                             ?hashed_address,
+                            prefix_hex,
                             is_in_targets,
                             target_slots_count,
+                            fallback_count = *fallback_count,
+                            is_duplicate,
                             total_receivers_initially = storage_receivers.len(),
-                            "No storage proof receiver found - using fallback synchronous computation"
+                            "FALLBACK: No receiver - computing full multiproof synchronously (MAIN HAD CACHE!)"
                         );
+
+                        if is_duplicate {
+                            warn!(
+                                target: "trie::proof",
+                                ?hashed_address,
+                                fallback_count = *fallback_count,
+                                "DUPLICATE FALLBACK! Same address computed {} times. Cache would prevent this!",
+                                *fallback_count
+                            );
+                        }
 
                         let raw_fallback_proof = StorageProof::new_hashed(
                             trie_cursor_factory.clone(),

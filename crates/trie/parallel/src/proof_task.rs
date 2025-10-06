@@ -32,6 +32,7 @@ use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use crate::StorageRootTargets;
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     sync::{
@@ -152,27 +153,22 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         targets_count = targets.len(),
         account_prefix_set_len = extended_prefix_sets.account_prefix_set.len(),
         storage_prefix_sets_len = extended_prefix_sets.storage_prefix_sets.len(),
-        "[WORKER] About to queue storage proofs for all accounts in extended prefix set"
+        "[WORKER] Building storage root targets for proof queue"
     );
 
-    // Queue storage proof requests for ALL accounts we'll visit during trie traversal.
-    // The walker visits all accounts in extended_prefix_sets.account_prefix_set, so we need
-    // to queue storage proofs for all of them, even if they have no storage changes or empty slots.
+    let storage_root_targets = StorageRootTargets::new(
+        extended_prefix_sets.account_prefix_set.iter().map(|n| B256::from_slice(&n.pack())),
+        extended_prefix_sets.storage_prefix_sets.clone(),
+    );
+
+    // Queue storage proof requests for every account the walker will touch.
     let mut storage_receivers: B256Map<
         CrossbeamReceiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
     > = B256Map::default();
 
     let mut queued_addresses = Vec::new();
-    for account_nibbles in &extended_prefix_sets.account_prefix_set {
-        // Convert nibbles back to B256 address
-        let packed = account_nibbles.pack();
-        let address = B256::from_slice(&packed);
-
-        queued_addresses.push(address);
-
+    for (address, prefix_set) in storage_root_targets {
         let (sender, receiver) = crossbeam_channel::unbounded();
-        let prefix_set =
-            extended_prefix_sets.storage_prefix_sets.get(&address).cloned().unwrap_or_default();
         let target_slots = targets.get(&address).cloned().unwrap_or_default();
 
         let storage_input = StorageProofInput::new(
@@ -195,6 +191,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
             return Err(storage_manager_closed_error());
         }
 
+        queued_addresses.push(address);
         storage_receivers.insert(address, receiver);
     }
 
@@ -202,7 +199,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         target: "trie::proof_task",
         receivers_queued = storage_receivers.len(),
         ?queued_addresses,
-        "[WORKER] Queued all storage proof receivers, calling build_account_multiproof_with_storage"
+        "[WORKER] Queued storage proof receivers, calling build_account_multiproof_with_storage"
     );
 
     let result = crate::proof::build_account_multiproof_with_storage(
