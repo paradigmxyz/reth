@@ -735,8 +735,7 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
-        StaticFileWriter,
+        BlockWriter, CanonChainTracker, ProviderFactory,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -747,22 +746,12 @@ mod tests {
         CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
         NewCanonicalChain,
     };
-    use reth_chainspec::{
-        ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
-    };
-    use reth_db_api::{
-        cursor::DbCursorRO,
-        models::{AccountBeforeTx, StoredBlockBodyIndices},
-        tables,
-        transaction::DbTx,
-    };
+    use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
     use reth_errors::ProviderError;
-    use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+    use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives_traits::{
-        BlockBody, RecoveredBlock, SealedBlock, SignedTransaction, SignerRecoverable,
-    };
-    use reth_static_file_types::StaticFileSegment;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignerRecoverable};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
@@ -775,9 +764,8 @@ mod tests {
     };
     use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
-        ops::{Bound, Deref, Range, RangeBounds},
+        ops::{Bound, Range, RangeBounds},
         sync::Arc,
-        time::Instant,
     };
 
     const TEST_BLOCKS_COUNT: usize = 5;
@@ -2572,7 +2560,7 @@ mod tests {
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),
-                Ok(Some(to_be_persisted_tx))
+                Ok(Some(_to_be_persisted_tx))
             ));
         }
 
