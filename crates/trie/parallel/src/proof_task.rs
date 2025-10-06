@@ -532,12 +532,16 @@ where
                     result_sender,
                 } = job.input;
 
+                // Extract counts for logging before moving targets
+                let account_targets_count = targets.len();
+                let storage_targets_count = targets.values().map(|s| s.len()).sum::<usize>();
+
                 #[cfg(feature = "metrics")]
                 debug!(
                     target: "trie::proof_pool",
                     worker_id,
-                    account_targets = targets.len(),
-                    storage_targets = targets.values().map(|s| s.len()).sum::<usize>(),
+                    account_targets = account_targets_count,
+                    storage_targets = storage_targets_count,
                     wait_ms = wait_time.as_millis(),
                     "Account worker started processing multiproof"
                 );
@@ -546,8 +550,8 @@ where
                 debug!(
                     target: "trie::proof_pool",
                     worker_id,
-                    account_targets = targets.len(),
-                    storage_targets = targets.values().map(|s| s.len()).sum::<usize>(),
+                    account_targets = account_targets_count,
+                    storage_targets = storage_targets_count,
                     "Account worker started processing multiproof"
                 );
 
@@ -556,7 +560,7 @@ where
                 // Wrap account multiproof execution in panic recovery
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     execute_account_multiproof_worker(
-                        targets.clone(),
+                        targets,
                         prefix_sets,
                         collect_branch_node_masks,
                         multi_added_removed_keys,
@@ -573,7 +577,7 @@ where
                         debug!(
                             target: "trie::proof_pool",
                             worker_id,
-                            account_targets = targets.len(),
+                            account_targets = account_targets_count,
                             compute_ms = compute_time.as_millis(),
                             "Account multiproof completed successfully"
                         );
@@ -583,7 +587,7 @@ where
                         warn!(
                             target: "trie::proof_pool",
                             worker_id,
-                            account_targets = targets.len(),
+                            account_targets = account_targets_count,
                             error = %e,
                             compute_ms = compute_time.as_millis(),
                             "Account multiproof computation failed"
@@ -594,7 +598,7 @@ where
                         error!(
                             target: "trie::proof_pool",
                             worker_id,
-                            account_targets = targets.len(),
+                            account_targets = account_targets_count,
                             compute_ms = compute_time.as_millis(),
                             "Account multiproof task panicked - converting to error"
                         );
@@ -702,7 +706,7 @@ where
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
         .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof((*input.target_slots).clone())
+        .storage_multiproof(Arc::clone(&input.target_slots))
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         raw_proof_result.and_then(|raw_proof| {
@@ -832,6 +836,11 @@ pub enum ProofTaskKind<Tx = ()> {
 }
 
 /// A handle that wraps crossbeam senders for direct worker communication.
+///
+/// Tasks are dispatched via [`queue_task`](Self::queue_task) using [`ProofTaskKind`].
+/// Internally, tasks are converted to [`ProofJob`] (storage workers) or [`AccountProofJob`]
+/// (account workers) and sent to the appropriate worker pool.
+///
 /// Channels are closed when the last handle is dropped.
 #[derive(Debug)]
 pub struct ProofTaskManagerHandle<Tx> {
