@@ -180,8 +180,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for EraStr
     }
 }
 
-type DownloadFuture =
-    Pin<Box<dyn Future<Output = eyre::Result<EraRemoteMeta>> + Send + Sync + 'static>>;
+type DownloadFuture = Pin<Box<dyn Future<Output = eyre::Result<EraRemoteMeta>> + Send + 'static>>;
 
 struct DownloadStream {
     downloads: FuturesOrdered<DownloadFuture>,
@@ -220,11 +219,11 @@ impl Stream for DownloadStream {
 
 struct StartingStream<Http> {
     client: EraClient<Http>,
-    files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
-    next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
-    delete_outside_range: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
-    recover_index: Pin<Box<dyn Future<Output = Option<usize>> + Send + Sync + 'static>>,
-    fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
+    files_count: Pin<Box<dyn Future<Output = usize> + Send + 'static>>,
+    next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + 'static>>,
+    delete_outside_range: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + 'static>>,
+    recover_index: Pin<Box<dyn Future<Output = Option<usize>> + Send + 'static>>,
+    fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + 'static>>,
     state: State,
     max_files: usize,
     index: usize,
