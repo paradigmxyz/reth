@@ -1025,13 +1025,13 @@ where
         }
 
         // Return early if we are on the correct fork
-        if let Some(result) = self.handle_canonical_head(state, attrs.clone(), version)? {
+        if let Some(result) = self.handle_canonical_head(state, &attrs, version)? {
             return Ok(result);
         }
 
         // Attempt to apply a chain update when the head differs from our canonical chain.
         // This handles reorgs and chain extensions by making the specified head canonical.
-        if let Some(result) = self.apply_chain_update(state, attrs, version)? {
+        if let Some(result) = self.apply_chain_update(state, &attrs, version)? {
             return Ok(result);
         }
 
@@ -1049,6 +1049,9 @@ where
     }
 
     /// Pre-validates the forkchoice state and returns early if validation fails.
+    ///
+    /// Returns `Some(OnForkChoiceUpdated)` if validation fails and an early response should be
+    /// returned. Returns `None` if validation passes and processing should continue.
     fn validate_forkchoice_state(
         &mut self,
         state: ForkchoiceState,
@@ -1075,10 +1078,14 @@ where
     }
 
     /// Handles the case where the forkchoice head is already canonical.
+    ///
+    /// Returns `Some(TreeOutcome<OnForkChoiceUpdated>)` if the head is already canonical and
+    /// processing is complete. Returns `None` if the head is not canonical and processing
+    /// should continue.
     fn handle_canonical_head(
         &self,
         state: ForkchoiceState,
-        attrs: Option<T::PayloadAttributes>,
+        attrs: &Option<T::PayloadAttributes>, // Changed to reference
         version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Process the forkchoice update by trying to make the head block canonical
@@ -1116,7 +1123,8 @@ where
                     // to return an error
                     ProviderError::HeaderNotFound(state.head_block_hash.into())
                 })?;
-            let updated = self.process_payload_attributes(attr, &tip, state, version);
+            // Clone only when we actually need to process the attributes
+            let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
             return Ok(Some(TreeOutcome::new(updated)));
         }
 
@@ -1136,10 +1144,13 @@ where
     /// - Applying chain reorganizations (reorgs) if necessary
     /// - Processing payload attributes if provided
     /// - Returning the appropriate forkchoice update response
+    ///
+    /// Returns `Some(TreeOutcome<OnForkChoiceUpdated>)` if a chain update was successfully applied.
+    /// Returns `None` if no chain update was needed or possible.
     fn apply_chain_update(
         &mut self,
         state: ForkchoiceState,
-        attrs: Option<T::PayloadAttributes>,
+        attrs: &Option<T::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> ProviderResult<Option<TreeOutcome<OnForkChoiceUpdated>>> {
         // Check if the head is already part of the canonical chain
@@ -1153,8 +1164,13 @@ where
             {
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
-                    let updated =
-                        self.process_payload_attributes(attr, &canonical_header, state, version);
+                    // Clone only when we actually need to process the attributes
+                    let updated = self.process_payload_attributes(
+                        attr.clone(),
+                        &canonical_header,
+                        state,
+                        version,
+                    );
                     return Ok(Some(TreeOutcome::new(updated)));
                 }
 
@@ -1200,7 +1216,8 @@ where
             }
 
             if let Some(attr) = attrs {
-                let updated = self.process_payload_attributes(attr, &tip, state, version);
+                // Clone only when we actually need to process the attributes
+                let updated = self.process_payload_attributes(attr.clone(), &tip, state, version);
                 return Ok(Some(TreeOutcome::new(updated)));
             }
 
@@ -1215,6 +1232,9 @@ where
     }
 
     /// Handles the case where the head block is missing and needs to be downloaded.
+    ///
+    /// This is the fallback case when all other forkchoice update scenarios have been exhausted.
+    /// Returns a `TreeOutcome` with syncing status and download event.
     fn handle_missing_block(
         &self,
         state: ForkchoiceState,
@@ -1226,9 +1246,9 @@ where
         // find the appropriate target to sync to, if we don't have the safe block hash then we
         // start syncing to the safe block via backfill first
         let target = if self.state.forkchoice_state_tracker.is_empty() &&
-            // check that safe block is valid and missing
-            !state.safe_block_hash.is_zero() &&
-            self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
+        // check that safe block is valid and missing
+        !state.safe_block_hash.is_zero() &&
+        self.find_canonical_header(state.safe_block_hash).ok().flatten().is_none()
         {
             debug!(target: "engine::tree", "missing safe block on initial FCU, downloading safe block");
             state.safe_block_hash
@@ -2017,8 +2037,18 @@ where
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
-        // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent)?))
+
+        // Try to prepare invalid response, but handle errors gracefully
+        match self.prepare_invalid_response(header.parent) {
+            Ok(status) => Ok(Some(status)),
+            Err(err) => {
+                debug!(target: "engine::tree", %err, "Failed to prepare invalid response for ancestor check");
+                // Return a basic invalid status without latest valid hash
+                Ok(Some(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                    validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+                })))
+            }
+        }
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
