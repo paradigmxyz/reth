@@ -1,5 +1,8 @@
 //! Execution cache implementation for block processing.
-use alloy_primitives::{Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, HashSet},
+    Address, StorageKey, StorageValue, B256,
+};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
@@ -14,7 +17,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::map::DefaultHashBuilder;
 use std::{sync::Arc, time::Duration};
 use tracing::trace;
 
@@ -345,24 +347,20 @@ impl ExecutionCache {
         }
     }
 
-    /// Invalidate storage for specific account
-    pub(crate) fn invalidate_account_storage(&self, address: &Address) {
-        // With flattened cache, we need to remove all entries for this address
-        // Collect all keys for this address and invalidate them
-        let keys_to_invalidate: Vec<_> = self
-            .storage_cache
-            .iter()
-            .filter_map(|entry| if entry.key().0 == *address { Some(*entry.key()) } else { None })
-            .collect();
-
-        for key in keys_to_invalidate {
-            self.storage_cache.invalidate(&key);
-        }
-    }
-
     /// Returns the total number of storage slots cached across all accounts
     pub(crate) fn total_storage_slots(&self) -> usize {
         self.storage_cache.entry_count() as usize
+    }
+
+    /// Invalidates the storage for all addresses in the set
+    pub(crate) fn invalidate_storages(&self, addresses: HashSet<&Address>) {
+        let storage_entries = self
+            .storage_cache
+            .iter()
+            .filter_map(|entry| addresses.contains(&entry.key().0).then_some(*entry.key()));
+        for key in storage_entries {
+            self.storage_cache.invalidate(&key)
+        }
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -389,6 +387,7 @@ impl ExecutionCache {
             self.code_cache.insert(*code_hash, Some(Bytecode(bytecode.clone())));
         }
 
+        let mut invalidated_accounts = HashSet::default();
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
@@ -401,7 +400,7 @@ impl ExecutionCache {
                 // Invalidate the account cache entry if destroyed
                 self.account_cache.invalidate(addr);
 
-                self.invalidate_account_storage(addr);
+                invalidated_accounts.insert(addr);
                 continue
             }
 
@@ -427,6 +426,9 @@ impl ExecutionCache {
             // for the account cache
             self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
+
+        // invalidate storage for all destroyed acocunts
+        self.invalidate_storages(invalidated_accounts);
 
         Ok(())
     }
