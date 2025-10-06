@@ -49,7 +49,7 @@ use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{LogArgs, MetricArgs},
+    args::{LogArgs, TraceArgs},
     version::version_metadata,
 };
 use reth_optimism_node::args::RollupArgs;
@@ -78,7 +78,7 @@ pub struct Cli<
 
     /// The metrics configuration for the CLI.
     #[command(flatten)]
-    pub metrics: MetricArgs,
+    pub traces: TraceArgs,
 
     /// Type marker for the RPC module validator
     #[arg(skip)]
@@ -200,8 +200,7 @@ mod test {
             "10000",
             "--metrics",
             "9003",
-            "--metrics-otlp",
-            "127.0.0.1:4318",
+            "--tracing-otlp",
             "--log.file.max-size",
             "100",
         ]);

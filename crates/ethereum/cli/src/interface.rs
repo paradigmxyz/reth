@@ -19,7 +19,7 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{LogArgs, MetricArgs},
+    args::{LogArgs, TraceArgs},
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
@@ -46,9 +46,9 @@ pub struct Cli<
     #[command(flatten)]
     pub logs: LogArgs,
 
-    /// The metrics configuration for the CLI.
+    /// The tracing configuration for the CLI.
     #[command(flatten)]
-    pub metrics: MetricArgs,
+    pub traces: TraceArgs,
 
     /// Type marker for the RPC module validator
     #[arg(skip)]

@@ -304,21 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_metrics_otlp_port() {
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
-        assert!(cmd.metrics.otlp);
-
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
-        assert!(cmd.metrics.otlp);
-
-        let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
-        assert!(cmd.metrics.otlp);
-    }
-
-    #[test]
     fn parse_config_path() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();

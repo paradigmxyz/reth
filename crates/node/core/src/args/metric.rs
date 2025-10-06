@@ -13,15 +13,4 @@ pub struct MetricArgs {
     /// The metrics will be served at the given interface and port.
     #[arg(long="metrics", alias = "metrics.prometheus", value_name = "PROMETHEUS", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub prometheus: Option<SocketAddr>,
-
-    /// Enable OTLP export.
-    ///
-    /// The otlp tracing will be enabled.
-    #[arg(
-        long = "metrics-otlp",
-        alias = "metrics.otlp",
-        value_name = "OTLP",
-        help_heading = "Traces"
-    )]
-    pub otlp: bool,
 }

@@ -120,7 +120,7 @@ where
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
-            if self.cli.metrics.otlp {
+            if self.cli.traces.otlp {
                 info!(target: "reth::op::cli", "Starting otlp tracing at");
                 layers.with_span_layer("reth::op::cli".to_string())?;
             }
