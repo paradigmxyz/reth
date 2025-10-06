@@ -1409,7 +1409,7 @@ mod payload_execution_tests {
     }
 }
 
-/// Test suite for the refactored on_forkchoice_updated helper methods
+/// Test suite for the refactored `on_forkchoice_updated` helper methods
 #[cfg(test)]
 mod forkchoice_updated_tests {
     use super::*;
@@ -1469,7 +1469,7 @@ mod forkchoice_updated_tests {
 
         // Create test blocks
         let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
-        test_harness = test_harness.with_blocks(blocks.clone());
+        test_harness = test_harness.with_blocks(blocks);
 
         let canonical_head = test_harness.tree.state.tree_state.canonical_block_hash();
 
@@ -1574,7 +1574,7 @@ mod forkchoice_updated_tests {
         }
     }
 
-    /// Test the complete on_forkchoice_updated flow with all helper methods
+    /// Test the complete `on_forkchoice_updated` flow with all helper methods
     #[tokio::test]
     async fn test_on_forkchoice_updated_integration() {
         reth_tracing::init_test_tracing();
@@ -1680,7 +1680,7 @@ mod forkchoice_updated_tests {
         assert!(result.is_some(), "Should detect invalid ancestor");
     }
 
-    /// Test OpStack specific behavior with canonical head
+    /// Test `OpStack` specific behavior with canonical head
     #[tokio::test]
     async fn test_opstack_canonical_head_behavior() {
         let chain_spec = MAINNET.clone();
