@@ -172,10 +172,30 @@ impl ProofSequencer {
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
+        } else {
+            debug!(
+                target: "engine::root",
+                sequence,
+                next_to_deliver = self.next_to_deliver,
+                "Received proof with sequence < next_to_deliver (duplicate or late)"
+            );
         }
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
+            if !self.pending_proofs.is_empty() {
+                let pending_sequences: Vec<u64> =
+                    self.pending_proofs.keys().take(10).copied().collect();
+                debug!(
+                    target: "engine::root",
+                    next_to_deliver = self.next_to_deliver,
+                    pending_count = self.pending_proofs.len(),
+                    ?pending_sequences,
+                    "Waiting for sequence {} (have {} buffered proofs)",
+                    self.next_to_deliver,
+                    self.pending_proofs.len()
+                );
+            }
             return Vec::new()
         }
 
@@ -193,7 +213,17 @@ impl ProofSequencer {
             }
         }
 
+        let old_next = self.next_to_deliver;
         self.next_to_deliver += consecutive_proofs.len() as u64;
+
+        debug!(
+            target: "engine::root",
+            delivered_count = consecutive_proofs.len(),
+            old_next = old_next,
+            new_next = self.next_to_deliver,
+            remaining_pending = self.pending_proofs.len(),
+            "ProofSequencer delivered consecutive proofs"
+        );
 
         consecutive_proofs
     }
@@ -1048,6 +1078,8 @@ where
         let mut proofs_processed = 0;
 
         let mut updates_finished = false;
+        let mut last_progress_time = Instant::now();
+        let mut last_proofs_processed = 0;
 
         // Timestamp before the first state update or prefetch was received
         let start = Instant::now();
@@ -1148,12 +1180,17 @@ where
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
-                        trace!(target: "engine::root", "processing
-        MultiProofMessage::ProofCalculated");
+                        trace!(target: "engine::root", "processing MultiProofMessage::ProofCalculated");
 
                         // we increment proofs_processed for both state updates and prefetches,
                         // because both are used for the root termination condition.
                         proofs_processed += 1;
+
+                        // Track progress for timeout detection
+                        if proofs_processed > last_proofs_processed {
+                            last_proofs_processed = proofs_processed;
+                            last_progress_time = Instant::now();
+                        }
 
                         self.metrics
                             .proof_calculation_duration_histogram
@@ -1184,6 +1221,37 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation");
                             break
+                        }
+
+                        // Timeout detection: if no progress for 10 seconds, dump diagnostic info
+                        if updates_finished && last_progress_time.elapsed().as_secs() > 10 {
+                            let missing = state_update_proofs_requested + prefetch_proofs_requested -
+                                proofs_processed;
+                            let pending_sequences: Vec<u64> = self
+                                .proof_sequencer
+                                .pending_proofs
+                                .keys()
+                                .take(20)
+                                .copied()
+                                .collect();
+
+                            error!(
+                                target: "engine::root",
+                                proofs_processed,
+                                state_update_proofs_requested,
+                                prefetch_proofs_requested,
+                                missing_proofs = missing,
+                                next_to_deliver = self.proof_sequencer.next_to_deliver,
+                                pending_count = self.proof_sequencer.pending_proofs.len(),
+                                ?pending_sequences,
+                                inflight_multiproofs = self.multiproof_manager.inflight,
+                                pending_multiproofs = self.multiproof_manager.pending.len(),
+                                stalled_seconds = last_progress_time.elapsed().as_secs(),
+                                "STALLED: No proof progress for 10+ seconds - likely deadlock or missing proofs"
+                            );
+
+                            // Reset timer to avoid spamming logs every iteration
+                            last_progress_time = Instant::now();
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {

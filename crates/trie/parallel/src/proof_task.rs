@@ -341,27 +341,73 @@ where
                     match job {
                         ProofJob::StorageProof { input, result_tx, #[cfg(feature = "metrics")] enqueued_at, .. } => {
                             #[cfg(feature = "metrics")]
+                            let wait_time = enqueued_at.elapsed();
+
+                            #[cfg(feature = "metrics")]
                             {
                                 let depth = storage_queue_depth_clone
                                     .fetch_sub(1, Ordering::SeqCst)
                                     .saturating_sub(1);
                                 metrics_clone.record_storage_queue_depth(depth);
-                                metrics_clone.record_storage_wait_time(enqueued_at.elapsed());
+                                metrics_clone.record_storage_wait_time(wait_time);
                             }
+
+                            #[cfg(feature = "metrics")]
+                            debug!(
+                                target: "trie::proof_pool",
+                                worker_id,
+                                hashed_address = ?input.hashed_address,
+                                target_slots = input.target_slots.len(),
+                                wait_ms = wait_time.as_millis(),
+                                "Storage worker started processing proof"
+                            );
+
+                            #[cfg(not(feature = "metrics"))]
+                            debug!(
+                                target: "trie::proof_pool",
+                                worker_id,
+                                hashed_address = ?input.hashed_address,
+                                target_slots = input.target_slots.len(),
+                                "Storage worker started processing proof"
+                            );
+
+                            let start = Instant::now();
 
                             // Wrap proof computation in panic recovery to prevent zombie workers
                             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 proof_tx.storage_proof_internal(&input)
                             }));
 
+                            let compute_time = start.elapsed();
+
                             let final_result = match result {
-                                Ok(Ok(proof)) => Ok(proof),
-                                Ok(Err(e)) => Err(e),
+                                Ok(Ok(proof)) => {
+                                    debug!(
+                                        target: "trie::proof_pool",
+                                        worker_id,
+                                        hashed_address = ?input.hashed_address,
+                                        compute_ms = compute_time.as_millis(),
+                                        "Storage proof completed successfully"
+                                    );
+                                    Ok(proof)
+                                }
+                                Ok(Err(e)) => {
+                                    warn!(
+                                        target: "trie::proof_pool",
+                                        worker_id,
+                                        hashed_address = ?input.hashed_address,
+                                        error = %e,
+                                        compute_ms = compute_time.as_millis(),
+                                        "Storage proof computation failed"
+                                    );
+                                    Err(e)
+                                }
                                 Err(_panic_info) => {
                                     error!(
                                         target: "trie::proof_pool",
                                         worker_id,
                                         hashed_address = ?input.hashed_address,
+                                        compute_ms = compute_time.as_millis(),
                                         "Storage proof task panicked, converting to error"
                                     );
                                     Err(ParallelStateRootError::Other(format!(
@@ -371,7 +417,15 @@ where
                                 }
                             };
 
-                            let _ = result_tx.send(final_result);
+                            // Send result and check if receiver is still alive
+                            if result_tx.send(final_result).is_err() {
+                                warn!(
+                                    target: "trie::proof_pool",
+                                    worker_id,
+                                    hashed_address = ?input.hashed_address,
+                                    "Storage proof result channel disconnected - receiver dropped"
+                                );
+                            }
                         }
 
                         ProofJob::BlindedAccountNode { path, result_tx, .. } => {
@@ -458,11 +512,14 @@ where
                 };
 
                 #[cfg(feature = "metrics")]
+                let wait_time = job.enqueued_at.elapsed();
+
+                #[cfg(feature = "metrics")]
                 {
                     let depth =
                         account_queue_depth_clone.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
                     metrics_clone.record_account_queue_depth(depth);
-                    metrics_clone.record_account_wait_time(job.enqueued_at.elapsed());
+                    metrics_clone.record_account_wait_time(wait_time);
                 }
 
                 // Destructure input to extract result_sender and pass fields to worker
@@ -475,10 +532,31 @@ where
                     result_sender,
                 } = job.input;
 
+                #[cfg(feature = "metrics")]
+                debug!(
+                    target: "trie::proof_pool",
+                    worker_id,
+                    account_targets = targets.len(),
+                    storage_targets = targets.values().map(|s| s.len()).sum::<usize>(),
+                    wait_ms = wait_time.as_millis(),
+                    "Account worker started processing multiproof"
+                );
+
+                #[cfg(not(feature = "metrics"))]
+                debug!(
+                    target: "trie::proof_pool",
+                    worker_id,
+                    account_targets = targets.len(),
+                    storage_targets = targets.values().map(|s| s.len()).sum::<usize>(),
+                    "Account worker started processing multiproof"
+                );
+
+                let start = Instant::now();
+
                 // Wrap account multiproof execution in panic recovery
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     execute_account_multiproof_worker(
-                        targets,
+                        targets.clone(),
                         prefix_sets,
                         collect_branch_node_masks,
                         multi_added_removed_keys,
@@ -487,14 +565,37 @@ where
                     )
                 }));
 
+                let compute_time = start.elapsed();
+
                 // Convert panic to error and send result
                 let final_result = match result {
-                    Ok(Ok(multiproof)) => Ok(multiproof),
-                    Ok(Err(e)) => Err(e),
+                    Ok(Ok(multiproof)) => {
+                        debug!(
+                            target: "trie::proof_pool",
+                            worker_id,
+                            account_targets = targets.len(),
+                            compute_ms = compute_time.as_millis(),
+                            "Account multiproof completed successfully"
+                        );
+                        Ok(multiproof)
+                    }
+                    Ok(Err(e)) => {
+                        warn!(
+                            target: "trie::proof_pool",
+                            worker_id,
+                            account_targets = targets.len(),
+                            error = %e,
+                            compute_ms = compute_time.as_millis(),
+                            "Account multiproof computation failed"
+                        );
+                        Err(e)
+                    }
                     Err(_panic_info) => {
                         error!(
                             target: "trie::proof_pool",
                             worker_id,
+                            account_targets = targets.len(),
+                            compute_ms = compute_time.as_millis(),
                             "Account multiproof task panicked - converting to error"
                         );
                         Err(ParallelStateRootError::Other(
@@ -507,7 +608,8 @@ where
                     warn!(
                         target: "trie::proof_pool",
                         worker_id,
-                        "Account multiproof result discarded - receiver dropped"
+                        account_targets = targets.len(),
+                        "Account multiproof result channel disconnected - receiver dropped"
                     );
                 }
             }

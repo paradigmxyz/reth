@@ -36,7 +36,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Builds an account multiproof with storage proof receivers.
 ///
@@ -114,25 +114,76 @@ where
                 // Fetch storage proof on-demand (blocks if not yet ready)
                 let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
                     Some(receiver) => {
+                        trace!(
+                            target: "trie::proof",
+                            ?hashed_address,
+                            "Encountered leaf with receiver, attempting to fetch storage proof"
+                        );
+
                         // Try non-blocking receive first to track if proof was ready
                         let proof = match receiver.try_recv() {
                             Ok(Ok(proof)) => {
                                 tracker.inc_storage_proof_immediate();
+                                debug!(
+                                    target: "trie::proof",
+                                    ?hashed_address,
+                                    root = ?proof.root,
+                                    "Storage proof received immediately (was ready)"
+                                );
                                 proof
                             }
-                            Ok(Err(e)) => return Err(e),
+                            Ok(Err(e)) => {
+                                warn!(
+                                    target: "trie::proof",
+                                    ?hashed_address,
+                                    error = %e,
+                                    "Storage proof computation returned error"
+                                );
+                                return Err(e)
+                            }
                             Err(crossbeam_channel::TryRecvError::Empty) => {
                                 // Proof not ready yet, block and wait
                                 tracker.inc_storage_proof_blocked();
+                                debug!(
+                                    target: "trie::proof",
+                                    ?hashed_address,
+                                    "Storage proof not ready, blocking to wait for worker"
+                                );
                                 match receiver.recv() {
-                                    Ok(Ok(proof)) => proof,
-                                    Ok(Err(e)) => return Err(e),
+                                    Ok(Ok(proof)) => {
+                                        debug!(
+                                            target: "trie::proof",
+                                            ?hashed_address,
+                                            root = ?proof.root,
+                                            "Storage proof received after blocking"
+                                        );
+                                        proof
+                                    }
+                                    Ok(Err(e)) => {
+                                        warn!(
+                                            target: "trie::proof",
+                                            ?hashed_address,
+                                            error = %e,
+                                            "Storage proof computation returned error after blocking"
+                                        );
+                                        return Err(e)
+                                    }
                                     Err(_) => {
+                                        error!(
+                                            target: "trie::proof",
+                                            ?hashed_address,
+                                            "Storage proof channel disconnected while waiting"
+                                        );
                                         return Err(storage_channel_closed_error(&hashed_address))
                                     }
                                 }
                             }
                             Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                                error!(
+                                    target: "trie::proof",
+                                    ?hashed_address,
+                                    "Storage proof channel already disconnected"
+                                );
                                 return Err(storage_channel_closed_error(&hashed_address))
                             }
                         };
