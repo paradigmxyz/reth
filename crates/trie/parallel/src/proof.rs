@@ -14,7 +14,7 @@ use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     ProviderError,
 };
 use reth_storage_errors::db::DatabaseError;
@@ -59,7 +59,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -75,7 +75,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle,
     ) -> Self {
         Self {
             view,
@@ -447,13 +447,13 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task = ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1)
+            .expect("Failed to create proof task manager");
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors
         // after we compute the state root
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
+        let join_handle = rt.spawn(async move { proof_task.run().await });
 
         let parallel_result = ParallelProof::new(
             consistent_view,

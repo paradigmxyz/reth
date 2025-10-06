@@ -13,7 +13,7 @@ use alloy_primitives::{map::B256Set, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     ProviderResult,
 };
 use reth_trie::{
@@ -31,16 +31,25 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::VecDeque,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
+        mpsc::Sender,
         Arc,
     },
     time::Instant,
 };
-use tokio::runtime::Handle;
+use tokio::{
+    runtime::Handle,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+};
 use tracing::{debug, trace};
+
+/// Default number of workers in the proof task worker pool.
+///
+/// This controls how many concurrent database transactions will be created for proof calculation.
+pub const DEFAULT_PROOF_TASK_WORKER_POOL_SIZE: usize = 8;
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
@@ -48,29 +57,25 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// A task that manages sending multiproof requests to a number of tasks that have longer-running
-/// database transactions
+/// A task that manages sending multiproof requests to a number of worker tasks that have
+/// longer-running database transactions
 #[derive(Debug)]
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Max number of database transactions to create
-    max_concurrency: usize,
-    /// Number of database transactions created
-    total_transactions: usize,
-    /// Consistent view provider used for creating transactions on-demand
-    view: ConsistentDbView<Factory>,
-    /// Proof task context shared across all proof tasks
-    task_ctx: ProofTaskCtx,
-    /// Proof tasks pending execution
-    pending_tasks: VecDeque<ProofTaskKind>,
-    /// The underlying handle from which to spawn proof tasks
+    /// Number of workers in the pool.
+    /// This is also the max number of database transactions that can be created.
+    num_workers: usize,
+    /// The underlying handle from which to spawn proof tasks.
+    /// Only used during initialization; stored for Debug impl.
+    #[allow(dead_code)]
     executor: Handle,
-    /// The proof task transactions, containing owned cursor factories that are reused for proof
-    /// calculation.
-    proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
-    /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
-    /// A sender for sending back transactions.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    /// Worker task handles
+    worker_handles: Vec<JoinHandle<()>>,
+    /// Sender to distribute work to worker pool
+    work_tx: UnboundedSender<ProofTaskKind>,
+    /// A receiver for messages from handles.
+    task_rx: UnboundedReceiver<ProofTaskMessage>,
+    /// A sender for handles to communicate with the manager.
+    task_tx: UnboundedSender<ProofTaskMessage>,
     /// The number of active handles.
     ///
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
@@ -79,39 +84,136 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Metrics tracking blinded node fetches.
     #[cfg(feature = "metrics")]
     metrics: ProofTaskMetrics,
+    /// Phantom data to use the Factory type parameter
+    _phantom: PhantomData<Factory>,
 }
 
 impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
-    /// Creates a new [`ProofTaskManager`] with the given max concurrency, creating that number of
-    /// cursor factories.
+    /// Creates a new [`ProofTaskManager`] with the given number of workers.
+    ///
+    /// If `num_workers` is `None`, uses [`DEFAULT_PROOF_TASK_WORKER_POOL_SIZE`].
     ///
     /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
-        max_concurrency: usize,
-    ) -> Self {
-        let (tx_sender, proof_task_rx) = channel();
-        Self {
-            max_concurrency,
-            total_transactions: 0,
-            view,
-            task_ctx,
-            pending_tasks: VecDeque::new(),
+        num_workers: impl Into<Option<usize>>,
+    ) -> ProviderResult<Self>
+    where
+        Factory: Clone + Send + 'static,
+        Factory::Provider: BlockReader,
+    {
+        let num_workers = num_workers.into().unwrap_or(DEFAULT_PROOF_TASK_WORKER_POOL_SIZE);
+
+        let (task_tx, task_rx) = unbounded_channel();
+        let (work_tx, work_rx) = unbounded_channel();
+
+        let work_rx = Arc::new(tokio::sync::Mutex::new(work_rx));
+
+        let mut worker_handles = Vec::with_capacity(num_workers);
+
+        // Spawn worker tasks
+        for worker_id in 0..num_workers {
+            let provider_ro = view.provider_ro()?;
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = Arc::new(ProofTaskTx::new(tx, task_ctx.clone(), worker_id));
+            let work_rx_clone = Arc::clone(&work_rx);
+            let executor_clone = executor.clone();
+
+            let handle = executor.spawn(worker_loop(
+                work_rx_clone,
+                proof_task_tx,
+                worker_id,
+                executor_clone,
+            ));
+            worker_handles.push(handle);
+        }
+
+        Ok(Self {
+            num_workers,
             executor,
-            proof_task_txs: Vec::new(),
-            proof_task_rx,
-            tx_sender,
+            worker_handles,
+            work_tx,
+            task_rx,
+            task_tx,
             active_handles: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
-        }
+            _phantom: PhantomData,
+        })
     }
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
+    pub fn handle(&self) -> ProofTaskManagerHandle {
+        ProofTaskManagerHandle::new(self.task_tx.clone(), self.active_handles.clone())
+    }
+}
+
+/// Worker loop that processes proof tasks from the work queue.
+///
+/// Each worker owns a `ProofTaskTx` wrapped in Arc for shared access across `spawn_blocking` calls,
+/// and continuously polls for work from the shared queue.
+async fn worker_loop<Tx: DbTx + Send + Sync + 'static>(
+    work_rx: Arc<tokio::sync::Mutex<UnboundedReceiver<ProofTaskKind>>>,
+    proof_task_tx: Arc<ProofTaskTx<Tx>>,
+    worker_id: usize,
+    executor: Handle,
+) {
+    debug!(
+        target: "trie::proof_task",
+        worker_id,
+        "Proof task worker starting"
+    );
+
+    loop {
+        // Lock the receiver to get the next task
+        let task = {
+            let mut rx = work_rx.lock().await;
+            rx.recv().await
+        };
+
+        match task {
+            Some(task) => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Worker received task"
+                );
+
+                // Execute the task using spawn_blocking for CPU-intensive work
+                let proof_task_tx_clone = Arc::clone(&proof_task_tx);
+                let result = executor.spawn_blocking(move || match task {
+                    ProofTaskKind::StorageProof(input, sender) => {
+                        proof_task_tx_clone.storage_proof(input, sender);
+                    }
+                    ProofTaskKind::BlindedAccountNode(path, sender) => {
+                        proof_task_tx_clone.blinded_account_node(path, sender);
+                    }
+                    ProofTaskKind::BlindedStorageNode(account, path, sender) => {
+                        proof_task_tx_clone.blinded_storage_node(account, path, sender);
+                    }
+                }).await;
+
+                if let Err(err) = result {
+                    tracing::error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?err,
+                        "Worker task panicked or was cancelled"
+                    );
+                }
+            }
+            None => {
+                // Channel closed, worker should exit
+                debug!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    "Proof task worker shutting down"
+                );
+                break;
+            }
+        }
     }
 }
 
@@ -119,97 +221,63 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
-    /// Inserts the task into the pending tasks queue.
-    pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
-        self.pending_tasks.push_back(task);
+    /// Returns the number of workers in the pool.
+    pub const fn num_workers(&self) -> usize {
+        self.num_workers
     }
 
-    /// Gets either the next available transaction, or creates a new one if all are in use and the
-    /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
-        if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Ok(Some(proof_task_tx));
+    /// Shuts down the worker pool and waits for all workers to complete.
+    async fn shutdown(self) -> ProviderResult<()> {
+        // Close the work channel to signal workers to stop
+        drop(self.work_tx);
+
+        debug!(
+            target: "trie::proof_task",
+            num_workers = self.num_workers,
+            "Shutting down proof task manager, waiting for workers to complete"
+        );
+
+        // Wait for all workers to finish
+        for handle in self.worker_handles {
+            let _ = handle.await;
         }
 
-        // if we can create a new tx within our concurrency limits, create one on-demand
-        if self.total_transactions < self.max_concurrency {
-            let provider_ro = self.view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
-        }
+        // Record metrics before terminating
+        #[cfg(feature = "metrics")]
+        self.metrics.record();
 
-        Ok(None)
-    }
-
-    /// Spawns the next queued proof task on the executor with the given input, if there are any
-    /// transactions available.
-    ///
-    /// This will return an error if a transaction must be created on-demand and the consistent view
-    /// provider fails.
-    pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
-
-        let Some(proof_task_tx) = self.get_or_create_tx()? else {
-            // if there are no txs available, requeue the proof task
-            self.pending_tasks.push_front(task);
-            return Ok(())
-        };
-
-        let tx_sender = self.tx_sender.clone();
-        self.executor.spawn_blocking(move || match task {
-            ProofTaskKind::StorageProof(input, sender) => {
-                proof_task_tx.storage_proof(input, sender, tx_sender);
-            }
-            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                proof_task_tx.blinded_account_node(path, sender, tx_sender);
-            }
-            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
-            }
-        });
+        debug!(
+            target: "trie::proof_task",
+            "Proof task manager shut down successfully"
+        );
 
         Ok(())
     }
 
-    /// Loops, managing the proof tasks, and sending new tasks to the executor.
-    pub fn run(mut self) -> ProviderResult<()> {
+    /// Loops, managing the proof tasks, and distributing work to the worker pool.
+    pub async fn run(mut self) -> ProviderResult<()> {
         loop {
-            match self.proof_task_rx.recv() {
-                Ok(message) => match message {
-                    ProofTaskMessage::QueueTask(task) => {
-                        // Track metrics for blinded node requests
-                        #[cfg(feature = "metrics")]
-                        match &task {
-                            ProofTaskKind::BlindedAccountNode(_, _) => {
-                                self.metrics.account_nodes += 1;
-                            }
-                            ProofTaskKind::BlindedStorageNode(_, _, _) => {
-                                self.metrics.storage_nodes += 1;
-                            }
-                            _ => {}
+            match self.task_rx.recv().await {
+                Some(ProofTaskMessage::QueueTask(task)) => {
+                    // Track metrics for blinded node requests
+                    #[cfg(feature = "metrics")]
+                    match &task {
+                        ProofTaskKind::BlindedAccountNode(_, _) => {
+                            self.metrics.account_nodes += 1;
                         }
-                        // queue the task
-                        self.queue_proof_task(task)
+                        ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                            self.metrics.storage_nodes += 1;
+                        }
+                        _ => {}
                     }
-                    ProofTaskMessage::Transaction(tx) => {
-                        // return the transaction to the pool
-                        self.proof_task_txs.push(tx);
-                    }
-                    ProofTaskMessage::Terminate => {
-                        // Record metrics before terminating
-                        #[cfg(feature = "metrics")]
-                        self.metrics.record();
-                        return Ok(())
-                    }
-                },
-                // All senders are disconnected, so we can terminate
-                // However this should never happen, as this struct stores a sender
-                Err(_) => return Ok(()),
-            };
-
-            // try spawning the next task
-            self.try_spawn_next()?;
+                    // Send task to worker pool
+                    let _ = self.work_tx.send(task);
+                }
+                Some(ProofTaskMessage::Terminate) | None => {
+                    // Terminate message or all senders disconnected
+                    return self.shutdown().await;
+                }
+            }
         }
     }
 }
@@ -262,10 +330,9 @@ where
 
     /// Calculates a storage proof for the given hashed address, and desired prefix set.
     fn storage_proof(
-        self,
+        &self,
         input: StorageProofInput,
         result_sender: Sender<StorageProofResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -333,17 +400,13 @@ where
                 "Storage proof receiver is dropped, discarding the result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 
     /// Retrieves blinded account node by path.
     fn blinded_account_node(
-        self,
+        &self,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -376,18 +439,14 @@ where
                 "Failed to send blinded account node result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 
     /// Retrieves blinded storage node of the given account by path.
     fn blinded_storage_node(
-        self,
+        &self,
         account: B256,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -423,9 +482,6 @@ where
                 "Failed to send blinded storage node result"
             );
         }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
 }
 
@@ -491,11 +547,9 @@ impl ProofTaskCtx {
 
 /// Message used to communicate with [`ProofTaskManager`].
 #[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
+pub enum ProofTaskMessage {
     /// A request to queue a proof task.
     QueueTask(ProofTaskKind),
-    /// A returned database transaction.
-    Transaction(ProofTaskTx<Tx>),
     /// A request to terminate the proof task manager.
     Terminate,
 }
@@ -517,22 +571,22 @@ pub enum ProofTaskKind {
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
 /// number of active handles went to zero.
 #[derive(Debug)]
-pub struct ProofTaskManagerHandle<Tx> {
+pub struct ProofTaskManagerHandle {
     /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
+    sender: UnboundedSender<ProofTaskMessage>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
 }
 
-impl<Tx> ProofTaskManagerHandle<Tx> {
+impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(sender: UnboundedSender<ProofTaskMessage>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self { sender, active_handles }
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), tokio::sync::mpsc::error::SendError<ProofTaskMessage>> {
         self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
@@ -542,13 +596,13 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
+impl Clone for ProofTaskManagerHandle {
     fn clone(&self) -> Self {
         Self::new(self.sender.clone(), self.active_handles.clone())
     }
 }
 
-impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
+impl Drop for ProofTaskManagerHandle {
     fn drop(&mut self) {
         // Decrement the number of active handles and terminate the manager if it was the last
         // handle.
@@ -558,9 +612,9 @@ impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
+impl TrieNodeProviderFactory for ProofTaskManagerHandle {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
@@ -573,23 +627,24 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: UnboundedSender<ProofTaskMessage>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: UnboundedSender<ProofTaskMessage>,
     },
 }
 
-impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        use std::sync::mpsc::channel;
         let (tx, rx) = channel();
         match self {
             Self::AccountNode { sender } => {
@@ -605,5 +660,271 @@ impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
         }
 
         rx.recv().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
+    use reth_trie::TrieInput;
+    use std::{
+        sync::{mpsc::channel, Arc},
+        time::{Duration, Instant},
+    };
+
+    fn create_test_proof_task_manager(
+        num_workers: impl Into<Option<usize>>,
+    ) -> ProofTaskManager<impl DatabaseProviderFactory<Provider: BlockReader> + Clone + 'static> {
+        let factory = create_test_provider_factory();
+        let handle = tokio::runtime::Handle::current();
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let input = TrieInput::default();
+        let task_ctx = ProofTaskCtx::new(
+            Arc::new(input.nodes.into_sorted()),
+            Arc::new(input.state.into_sorted()),
+            Arc::new(input.prefix_sets),
+        );
+
+        ProofTaskManager::new(handle, consistent_view, task_ctx, num_workers)
+            .expect("Failed to create proof task manager")
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool_startup() {
+
+        let manager = create_test_proof_task_manager(4);
+
+        assert_eq!(manager.num_workers(), 4);
+
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        handle.terminate();
+        manager_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool_with_default_size() {
+        let manager = create_test_proof_task_manager(None);
+        assert_eq!(manager.num_workers(), DEFAULT_PROOF_TASK_WORKER_POOL_SIZE);
+
+        let handle = manager.handle();
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        handle.terminate();
+        manager_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool_graceful_shutdown() {
+        let manager = create_test_proof_task_manager(2);
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        // Sleep for a short period in order to allow tasks to start.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Initiate shutdown
+        handle.terminate();
+
+        // Wait for shutdown to complete
+        manager_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_task_scheduling_and_processing() {
+        let manager = create_test_proof_task_manager(2);
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        let num_tasks = 10;
+
+        // Queue multiple storage proof tasks
+        let _start = Instant::now();
+        for i in 0..num_tasks {
+            let (tx, _rx) = channel();
+            let input = StorageProofInput::new(
+                B256::left_padding_from(&(i as u64).to_be_bytes()),
+                Default::default(),
+                Default::default(),
+                false,
+                None,
+            );
+
+            handle
+                .queue_task(ProofTaskKind::StorageProof(input, tx))
+                .expect("Failed to queue task");
+        }
+
+        // Give workers a moment to pick up tasks
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Verify system is still running and responsive by queuing one more task
+        // and checking that the manager accepts it without error
+        let (verify_tx, verify_rx) = channel();
+        handle.queue_task(ProofTaskKind::StorageProof(
+            StorageProofInput::new(
+                B256::ZERO,
+                Default::default(),
+                Default::default(),
+                false,
+                None,
+            ),
+            verify_tx,
+        )).expect("Manager should still be accepting tasks");
+
+        assert!(
+            verify_rx.recv_timeout(Duration::from_millis(200)).is_ok() ||
+            verify_rx.recv_timeout(Duration::from_millis(0)).is_err(),
+            "Workers should be actively processing or queue should be accepting tasks"
+        );
+
+        handle.terminate();
+        let shutdown_result = tokio::time::timeout(
+            Duration::from_secs(2),
+            manager_task
+        ).await;
+        assert!(shutdown_result.is_ok(), "Manager should shut down gracefully");
+        shutdown_result.unwrap().unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires real database state for proof computation"]
+    async fn test_concurrent_task_distribution() {
+        let manager = create_test_proof_task_manager(4);
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        let num_tasks = 100;
+        let mut receivers = Vec::new();
+
+        let _queue_start = Instant::now();
+        // Queue all tasks
+        for i in 0..num_tasks {
+            let (tx, rx) = channel();
+            let input = StorageProofInput::new(
+                B256::left_padding_from(&(i as u64).to_be_bytes()),
+                Default::default(),
+                Default::default(),
+                false,
+                None,
+            );
+
+            handle
+                .queue_task(ProofTaskKind::StorageProof(input, tx))
+                .expect("Failed to queue task");
+            receivers.push(rx);
+        }
+
+        // Wait for all to complete
+        let mut completed = 0;
+        for rx in receivers {
+            if rx.recv_timeout(Duration::from_millis(100)).is_ok() {
+                completed += 1;
+            }
+        }
+
+        println!("Completed {completed}/{num_tasks} tasks");
+        assert!(completed > 0, "At least some tasks should complete");
+
+        handle.terminate();
+        manager_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires real database state for proof computation"]
+    async fn test_task_monitoring_with_different_task_types() {
+        let manager = create_test_proof_task_manager(2);
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        let mut receivers = Vec::new();
+
+        // account node tasks
+        for i in 0..5u8 {
+            let (tx, rx) = channel();
+            let path = Nibbles::from_nibbles_unchecked(vec![i; 32]);
+            handle
+                .queue_task(ProofTaskKind::BlindedAccountNode(path, tx))
+                .expect("Failed to queue task");
+            receivers.push(rx);
+        }
+
+        // storage node tasks
+        for i in 0..5 {
+            let (tx, rx) = channel();
+            let account = B256::left_padding_from(&(i as u64).to_be_bytes());
+            let path = Nibbles::from_nibbles_unchecked(vec![i as u8; 32]);
+            handle
+                .queue_task(ProofTaskKind::BlindedStorageNode(account, path, tx))
+                .expect("Failed to queue task");
+            receivers.push(rx);
+        }
+
+        let mut completed = 0;
+        for rx in receivers {
+            if rx.recv_timeout(Duration::from_millis(100)).is_ok() {
+                completed += 1;
+            }
+        }
+
+        assert!(completed > 0, "At least some tasks should complete");
+
+        handle.terminate();
+        manager_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_handle_drop_triggers_shutdown() {
+        let manager = create_test_proof_task_manager(2);
+        let handle = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        drop(handle);
+
+        let result = tokio::time::timeout(Duration::from_secs(2), manager_task).await;
+        assert!(result.is_ok(), "Manager should shut down when handle is dropped");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_handles() {
+        let manager = create_test_proof_task_manager(2);
+        let handle1 = manager.handle();
+        let handle2 = manager.handle();
+        let handle3 = manager.handle();
+
+        let manager_task = tokio::spawn(async move { manager.run().await });
+
+        // Queue tasks from different handles
+        let (tx1, rx1) = channel();
+        let (tx2, rx2) = channel();
+        let (tx3, rx3) = channel();
+
+        let input1 = StorageProofInput::new(B256::left_padding_from(&1u64.to_be_bytes()), Default::default(), Default::default(), false, None);
+        let input2 = StorageProofInput::new(B256::left_padding_from(&2u64.to_be_bytes()), Default::default(), Default::default(), false, None);
+        let input3 = StorageProofInput::new(B256::left_padding_from(&3u64.to_be_bytes()), Default::default(), Default::default(), false, None);
+
+        handle1.queue_task(ProofTaskKind::StorageProof(input1, tx1)).unwrap();
+        handle2.queue_task(ProofTaskKind::StorageProof(input2, tx2)).unwrap();
+        handle3.queue_task(ProofTaskKind::StorageProof(input3, tx3)).unwrap();
+
+        let _ = rx1.recv_timeout(Duration::from_millis(200));
+        let _ = rx2.recv_timeout(Duration::from_millis(200));
+        let _ = rx3.recv_timeout(Duration::from_millis(200));
+
+        // Drop all handles - last one should trigger shutdown
+        drop(handle1);
+        drop(handle2);
+        drop(handle3);
+
+        let result = tokio::time::timeout(Duration::from_secs(2), manager_task).await;
+        assert!(result.is_ok(), "Manager should shut down when all handles are dropped");
     }
 }

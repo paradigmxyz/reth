@@ -201,7 +201,8 @@ where
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
-        );
+        )
+        .expect("Failed to create proof task manager");
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -241,8 +242,8 @@ where
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
 
         // spawn the proof task
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
+        self.executor.handle().spawn(async move {
+            if let Err(err) = proof_task.run().await {
                 // At least log if there is an error at any point
                 tracing::error!(
                     target: "engine::root",
