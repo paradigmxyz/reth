@@ -122,7 +122,7 @@ where
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
-            target_slots,
+            Arc::new(target_slots),
             self.collect_branch_node_masks,
             self.multi_added_removed_keys.clone(),
         );
@@ -447,8 +447,14 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            1,
+            1, // storage_worker_count for test
+        )
+        .expect("Failed to create proof task");
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors

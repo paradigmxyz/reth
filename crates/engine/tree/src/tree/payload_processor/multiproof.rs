@@ -1236,7 +1236,9 @@ mod tests {
             config.consistent_view.clone(),
             task_ctx,
             1,
-        );
+            1, // storage_worker_count for test
+        )
+        .expect("Failed to create ProofTaskManager for multiproof test");
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
