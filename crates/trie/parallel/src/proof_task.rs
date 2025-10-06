@@ -107,11 +107,61 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
     // Build account multiproof, fetching storage proofs on-demand during trie traversal
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
+    // Extend prefix sets with targets to ensure all intermediate nodes are revealed.
+    // We must preserve the `all` flag from existing prefix sets (e.g., for wiped storage).
+    // Clone frozen prefix sets, convert to mutable, extend with targets, then freeze again.
+    let mut extended_prefix_sets = reth_trie::prefix_set::TriePrefixSetsMut {
+        account_prefix_set: {
+            if prefix_sets.account_prefix_set.all() {
+                // If all accounts changed, keep the all flag
+                reth_trie::prefix_set::PrefixSetMut::all()
+            } else {
+                // Otherwise, start with existing keys
+                reth_trie::prefix_set::PrefixSetMut::from(
+                    prefix_sets.account_prefix_set.iter().cloned(),
+                )
+            }
+        },
+        storage_prefix_sets: {
+            let mut storage_sets = B256Map::default();
+            for (address, prefix_set) in &prefix_sets.storage_prefix_sets {
+                let mutable_set = if prefix_set.all() {
+                    reth_trie::prefix_set::PrefixSetMut::all()
+                } else {
+                    reth_trie::prefix_set::PrefixSetMut::from(prefix_set.iter().cloned())
+                };
+                storage_sets.insert(*address, mutable_set);
+            }
+            storage_sets
+        },
+        destroyed_accounts: prefix_sets.destroyed_accounts.clone(),
+    };
+
+    // Now extend with targets. Using .extend() properly preserves the `all` flag.
+    extended_prefix_sets.extend(reth_trie::prefix_set::TriePrefixSetsMut {
+        account_prefix_set: reth_trie::prefix_set::PrefixSetMut::from(
+            targets.keys().copied().map(Nibbles::unpack),
+        ),
+        storage_prefix_sets: targets
+            .iter()
+            .filter(|&(_address, slots)| !slots.is_empty())
+            .map(|(address, slots)| {
+                (
+                    *address,
+                    reth_trie::prefix_set::PrefixSetMut::from(slots.iter().map(Nibbles::unpack)),
+                )
+            })
+            .collect(),
+        destroyed_accounts: Default::default(),
+    });
+
+    let extended_prefix_sets = extended_prefix_sets.freeze();
+
     let result = crate::proof::build_account_multiproof_with_storage(
         trie_cursor_factory,
         hashed_cursor_factory,
         targets,
-        prefix_sets,
+        extended_prefix_sets,
         storage_receivers, // ← Pass receivers directly for on-demand fetching
         collect_branch_node_masks,
         multi_added_removed_keys,
