@@ -73,6 +73,25 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
     // Build account multiproof, fetching storage proofs on-demand during trie traversal
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
+    debug!(
+        target: "trie::proof_task",
+        incoming_targets_count = targets.len(),
+        incoming_prefix_sets_account_len = prefix_sets.account_prefix_set.len(),
+        incoming_prefix_sets_storage_len = prefix_sets.storage_prefix_sets.len(),
+        "[WORKER] Received account multiproof request"
+    );
+
+    // Log first few targets and prefix_sets for comparison
+    let target_addrs: Vec<_> = targets.keys().take(5).copied().collect();
+    let prefix_set_addrs: Vec<_> = prefix_sets.account_prefix_set.iter().take(5).map(|n| B256::from_slice(&n.pack())).collect();
+
+    debug!(
+        target: "trie::proof_task",
+        ?target_addrs,
+        ?prefix_set_addrs,
+        "[WORKER] Sample addresses from targets and prefix_sets"
+    );
+
     // Extend prefix sets with targets to ensure all intermediate nodes are revealed.
     // We must preserve the `all` flag from existing prefix sets (e.g., for wiped storage).
     // Clone frozen prefix sets, convert to mutable, extend with targets, then freeze again.
