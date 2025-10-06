@@ -36,7 +36,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// Builds an account multiproof with storage proof receivers.
 ///
@@ -45,6 +45,7 @@ use tracing::{debug, info, trace, warn};
 /// storage proof computation for better performance.
 ///
 /// Returns a tuple containing the decoded multiproof and stats for metrics recording.
+#[allow(clippy::too_many_arguments)]
 pub fn build_account_multiproof_with_storage<TCF, HCF>(
     trie_cursor_factory: TCF,
     hashed_cursor_factory: HCF,
@@ -241,32 +242,12 @@ where
                         } else {
                             match missed_leaves_storage_roots.entry(hashed_address) {
                                 Entry::Occupied(occ) => {
-                                    tracker.inc_cache_hit();
                                     let root = *occ.get();
-
-                                    info!(
-                                        target: "trie::proof",
-                                        ?hashed_address,
-                                        prefix_hex,
-                                        ?root,
-                                        cache_size = missed_leaves_storage_roots.len(),
-                                        "CACHE HIT: Reusing cached storage root for sibling"
-                                    );
-
                                     let mut proof = DecodedStorageMultiProof::empty();
                                     proof.root = root;
                                     (proof, "cache_hit")
                                 }
                                 Entry::Vacant(vac) => {
-                                    tracker.inc_cache_miss();
-
-                                    debug!(
-                                        target: "trie::proof",
-                                        ?hashed_address,
-                                        prefix_hex,
-                                        cache_size = missed_leaves_storage_roots.len(),
-                                        "CACHE MISS: Computing storage root for sibling"
-                                    );
                                     let raw_fallback_proof = StorageProof::new_hashed(
                                         trie_cursor_factory.clone(),
                                         hashed_cursor_factory.clone(),
@@ -287,15 +268,6 @@ where
                                         raw_fallback_proof.try_into()?;
                                     let root = decoded.root;
                                     vac.insert(root);
-
-                                    debug!(
-                                        target: "trie::proof",
-                                        ?hashed_address,
-                                        ?root,
-                                        cache_size = missed_leaves_storage_roots.len(),
-                                        "CACHE INSERT: Stored storage root for sibling"
-                                    );
-
                                     (decoded, "cache_miss_computed")
                                 }
                             }
@@ -341,31 +313,6 @@ where
 
     let stats = tracker.finish();
 
-    // Log cache effectiveness
-    if stats.missed_leaves() > 0 {
-        let hit_rate = stats.cache_hit_rate();
-        let cache_saved_computations = stats.cache_hits();
-
-        info!(
-            target: "trie::proof",
-            missed_leaves = stats.missed_leaves(),
-            cache_hits = stats.cache_hits(),
-            cache_misses = stats.cache_misses(),
-            hit_rate = format!("{:.1}%", hit_rate),
-            cache_size = missed_leaves_storage_roots.len(),
-            "Cache effectiveness summary"
-        );
-
-        if cache_saved_computations > 0 {
-            info!(
-                target: "trie::proof",
-                saved_computations = cache_saved_computations,
-                "Cache prevented {} duplicate storage trie walk(s)",
-                cache_saved_computations
-            );
-        }
-    }
-
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
     let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
 
@@ -385,8 +332,6 @@ where
         branches_added = stats.branches_added(),
         leaves_added = stats.leaves_added(),
         missed_leaves = stats.missed_leaves(),
-        cache_hits = stats.cache_hits(),
-        cache_misses = stats.cache_misses(),
         "Calculated decoded proof"
     );
 
