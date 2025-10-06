@@ -522,6 +522,11 @@ where
                     metrics_clone.record_account_wait_time(wait_time);
                 }
 
+                // Extract counts for logging before destructuring
+                let account_targets_count = job.input.targets.len();
+                let storage_targets_count =
+                    job.input.targets.values().map(|s| s.len()).sum::<usize>();
+
                 // Destructure input to extract result_sender and pass fields to worker
                 let AccountMultiproofInput {
                     targets,
@@ -531,10 +536,6 @@ where
                     storage_proof_handle,
                     result_sender,
                 } = job.input;
-
-                // Extract counts for logging before moving targets
-                let account_targets_count = targets.len();
-                let storage_targets_count = targets.values().map(|s| s.len()).sum::<usize>();
 
                 #[cfg(feature = "metrics")]
                 debug!(
@@ -612,7 +613,7 @@ where
                     warn!(
                         target: "trie::proof_pool",
                         worker_id,
-                        account_targets = targets.len(),
+                        account_targets = account_targets_count,
                         "Account multiproof result channel disconnected - receiver dropped"
                     );
                 }
@@ -706,7 +707,7 @@ where
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
         .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof(Arc::clone(&input.target_slots))
+        .storage_multiproof((*input.target_slots).clone())
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         raw_proof_result.and_then(|raw_proof| {
