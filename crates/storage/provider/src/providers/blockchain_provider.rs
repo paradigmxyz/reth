@@ -2554,14 +2554,15 @@ mod tests {
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
-            assert!(matches!(
+            assert_eq!(
                 correct_transaction_hash_fn(
                     *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
-                ),
-                Ok(Some(_))
-            ));
+                )
+                .unwrap(),
+                Some(to_be_persisted_tx)
+            );
         }
 
         Ok(())
