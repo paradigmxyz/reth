@@ -2140,11 +2140,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         Ok(num_entries)
     }
 
-    /// Records the current values of all trie nodes which will be updated using the [`TrieUpdates`]
+    /// Records the current values of all trie nodes which will be updated using the `TrieUpdates`
     /// into the trie changesets tables.
     ///
     /// The intended usage of this method is to call it _prior_ to calling `write_trie_updates` with
-    /// the same [`TrieUpdates`].
+    /// the same `TrieUpdates`.
     ///
     /// Returns the number of keys written.
     fn write_trie_changesets(
@@ -2311,10 +2311,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     }
 
     /// Records the current values of all trie nodes which will be updated using the
-    /// [`StorageTrieUpdates`] into the storage trie changesets table.
+    /// `StorageTrieUpdates` into the storage trie changesets table.
     ///
     /// The intended usage of this method is to call it _prior_ to calling
-    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
+    /// `write_storage_trie_updates` with the same set of `StorageTrieUpdates`.
     ///
     /// Returns the number of keys written.
     fn write_storage_trie_changesets<'a>(
