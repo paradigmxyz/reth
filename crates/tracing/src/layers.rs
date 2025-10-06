@@ -7,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use tracing_appender::non_blocking::WorkerGuard;
-#[cfg(feature = "otlp")]
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 /// A worker guard returned by the file layer.
