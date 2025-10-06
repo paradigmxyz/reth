@@ -1,6 +1,6 @@
 use crate::formatter::LogFormat;
 #[cfg(feature = "otlp")]
-use reth_tracing_otlp::create_metrics_provider;
+use reth_tracing_otlp::span_layer;
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
@@ -8,7 +8,6 @@ use std::{
 };
 use tracing_appender::non_blocking::WorkerGuard;
 #[cfg(feature = "otlp")]
-use tracing_opentelemetry::MetricsLayer;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
 
 /// A worker guard returned by the file layer.
@@ -126,18 +125,14 @@ impl Layers {
         Ok(guard)
     }
 
-    /// Add OTLP metrics layer to the layer collection
+    /// Add OTLP spans layer to the layer collection
     #[cfg(feature = "otlp")]
-    pub fn with_metrics_layer(&mut self, service_name: String, endpoint: &str) -> eyre::Result<()> {
-        // Create the metrics provider
-        let meter_provider = create_metrics_provider(service_name, endpoint).map_err(|e| {
-            eyre::eyre!("Failed to build OTLP metric exporter for endpoint '{}': {}", endpoint, e)
-        })?;
+    pub fn with_span_layer(&mut self, service_name: String) -> eyre::Result<()> {
+        // Create the span provider
+        let span_layer = span_layer(service_name)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?;
 
-        // Create the metrics layer
-        let metrics_layer = MetricsLayer::new(meter_provider);
-
-        self.add_layer(metrics_layer);
+        self.add_layer(span_layer);
 
         Ok(())
     }

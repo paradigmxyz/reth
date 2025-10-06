@@ -306,16 +306,16 @@ mod tests {
     #[test]
     fn parse_metrics_otlp_port() {
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", "4318"]).unwrap();
-        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
+        assert!(cmd.metrics.otlp);
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", ":4318"]).unwrap();
-        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
+        assert!(cmd.metrics.otlp);
 
         let cmd: NodeCommand<EthereumChainSpecParser> =
-            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp", "localhost:4318"]).unwrap();
-        assert_eq!(cmd.metrics.otlp, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4318)));
+            NodeCommand::try_parse_args_from(["reth", "--metrics-otlp"]).unwrap();
+        assert!(cmd.metrics.otlp);
     }
 
     #[test]

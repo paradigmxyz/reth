@@ -114,9 +114,8 @@ where
             let mut layers = self.layers.take().unwrap_or_default();
 
             #[cfg(feature = "otlp")]
-            if let Some(endpoint_url) = &self.cli.metrics.otlp {
-                let url = format!("http://{endpoint_url}");
-                layers.with_metrics_layer("reth::cli".to_string(), &url)?;
+            if self.cli.metrics.otlp {
+                layers.with_span_layer("reth::cli".to_string())?;
             }
 
             self.guard = self.cli.logs.init_tracing_with_layers(layers)?;

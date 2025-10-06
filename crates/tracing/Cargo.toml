@@ -21,7 +21,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi"
 tracing-appender.workspace = true
 tracing-journald.workspace = true
 tracing-logfmt.workspace = true
-tracing-opentelemetry = { workspace = true, optional = true }
 
 # misc
 clap = { workspace = true, features = ["derive"] }
@@ -30,4 +29,4 @@ rolling-file.workspace = true
 
 [features]
 default = ["otlp"]
-otlp = ["reth-tracing-otlp", "tracing-opentelemetry"]
+otlp = ["reth-tracing-otlp"]

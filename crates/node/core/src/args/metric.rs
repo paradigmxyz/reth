@@ -16,7 +16,12 @@ pub struct MetricArgs {
 
     /// Enable OTLP export.
     ///
-    /// The metrics will be exported at the given endpoint - interface and port.
-    #[arg(long="metrics-otlp", alias = "metrics.otlp", value_name = "OTLP", value_parser = parse_socket_address, help_heading = "Metrics")]
-    pub otlp: Option<SocketAddr>,
+    /// The otlp tracing will be enabled.
+    #[arg(
+        long = "metrics-otlp",
+        alias = "metrics.otlp",
+        value_name = "OTLP",
+        help_heading = "Traces"
+    )]
+    pub otlp: bool,
 }

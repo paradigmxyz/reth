@@ -10577,7 +10577,6 @@ dependencies = [
  "tracing-appender",
  "tracing-journald",
  "tracing-logfmt",
- "tracing-opentelemetry",
  "tracing-subscriber 0.3.20",
 ]
 
