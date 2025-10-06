@@ -1,4 +1,4 @@
-use crate::{BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{utils::extend_sorted_vec, BranchNodeCompact, HashBuilder, Nibbles};
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
     vec::Vec,
@@ -515,63 +515,13 @@ impl StorageTrieUpdatesSorted {
         if other.is_deleted {
             self.is_deleted = true;
             self.storage_nodes.clear();
+            self.storage_nodes.extend(other.storage_nodes.iter().cloned());
             return;
         }
 
         // Extend storage nodes
         extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
         self.is_deleted = self.is_deleted || other.is_deleted;
-    }
-}
-
-/// Helper function to extend a sorted vector with another sorted vector.
-/// Values from `other` take precedence for duplicate keys.
-///
-/// This function efficiently merges two sorted vectors by:
-/// 1. Iterating through the target vector with mutable references
-/// 2. Using a peekable iterator for the other vector
-/// 3. For each target item, processing other items that come before or equal to it
-/// 4. Collecting items from other that need to be inserted
-/// 5. Appending and re-sorting only if new items were added
-fn extend_sorted_vec<T>(target: &mut Vec<(Nibbles, T)>, other: &[(Nibbles, T)])
-where
-    T: Clone,
-{
-    if other.is_empty() {
-        return;
-    }
-
-    let mut other_iter = other.iter().peekable();
-    let mut to_insert = Vec::new();
-
-    // Iterate through target and update/collect items from other
-    for target_item in target.iter_mut() {
-        while let Some(other_item) = other_iter.peek() {
-            use core::cmp::Ordering;
-            match other_item.0.cmp(&target_item.0) {
-                Ordering::Less => {
-                    // Other item comes before current target item, collect it
-                    to_insert.push(other_iter.next().unwrap().clone());
-                }
-                Ordering::Equal => {
-                    // Same key, update target with other's value
-                    target_item.1 = other_iter.next().unwrap().1.clone();
-                    break;
-                }
-                Ordering::Greater => {
-                    // Other item comes after current target item, keep target unchanged
-                    break;
-                }
-            }
-        }
-    }
-
-    // Append collected new items, as well as any remaining from `other` which are necessarily also
-    // new, and sort if needed
-    if !to_insert.is_empty() || other_iter.peek().is_some() {
-        target.extend(to_insert);
-        target.extend(other_iter.cloned());
-        target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     }
 }
 
@@ -659,6 +609,61 @@ mod tests {
         // Check that storage trie for hashed_address1 was extended
         let merged_storage = &updates1.storage_tries[&hashed_address1];
         assert_eq!(merged_storage.storage_nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_storage_trie_updates_sorted_extend_ref_deleted() {
+        // Test case 1: Extending with a deleted storage trie that has nodes
+        let mut storage1 = StorageTrieUpdatesSorted {
+            is_deleted: false,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x01]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x02]), None),
+            ],
+        };
+
+        let storage2 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x03]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x04]), None),
+            ],
+        };
+
+        storage1.extend_ref(&storage2);
+
+        // Should be marked as deleted
+        assert!(storage1.is_deleted);
+        // Original nodes should be cleared, but other's nodes should be added
+        assert_eq!(storage1.storage_nodes.len(), 2);
+        assert_eq!(storage1.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x03]));
+        assert_eq!(storage1.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x04]));
+
+        // Test case 2: Extending a deleted storage trie with more nodes
+        let mut storage3 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![(
+                Nibbles::from_nibbles_unchecked([0x05]),
+                Some(BranchNodeCompact::default()),
+            )],
+        };
+
+        let storage4 = StorageTrieUpdatesSorted {
+            is_deleted: true,
+            storage_nodes: vec![
+                (Nibbles::from_nibbles_unchecked([0x06]), Some(BranchNodeCompact::default())),
+                (Nibbles::from_nibbles_unchecked([0x07]), None),
+            ],
+        };
+
+        storage3.extend_ref(&storage4);
+
+        // Should remain deleted
+        assert!(storage3.is_deleted);
+        // Should have nodes from other (original cleared then extended)
+        assert_eq!(storage3.storage_nodes.len(), 2);
+        assert_eq!(storage3.storage_nodes[0].0, Nibbles::from_nibbles_unchecked([0x06]));
+        assert_eq!(storage3.storage_nodes[1].0, Nibbles::from_nibbles_unchecked([0x07]));
     }
 }
 

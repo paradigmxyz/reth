@@ -3,6 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    utils::extend_sorted_vec,
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -529,20 +530,15 @@ impl HashedAccountsSorted {
     /// Extends this collection with contents of another sorted collection.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
+        // Updates take precedence over removals, so we want removals from `other` to only apply to
+        // the previous accounts.
+        self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
+
         // Extend the sorted accounts vector
-        extend_sorted_vec_with_removed(
-            &mut self.accounts,
-            &other.accounts,
-            &other.destroyed_accounts,
-        );
+        extend_sorted_vec(&mut self.accounts, &other.accounts);
 
         // Merge destroyed accounts sets
         self.destroyed_accounts.extend(&other.destroyed_accounts);
-
-        // Remove any destroyed accounts from the accounts vector
-        if !other.destroyed_accounts.is_empty() {
-            self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
-        }
     }
 }
 
@@ -582,25 +578,16 @@ impl HashedStorageSorted {
             self.zero_valued_slots.clear();
             self.non_zero_valued_slots.extend_from_slice(&other.non_zero_valued_slots);
             self.zero_valued_slots.extend(&other.zero_valued_slots);
-        } else {
-            // Extend the sorted non-zero valued slots
-            extend_sorted_vec_with_removed(
-                &mut self.non_zero_valued_slots,
-                &other.non_zero_valued_slots,
-                &other.zero_valued_slots,
-            );
-
-            // Merge zero valued slots sets
-            self.zero_valued_slots.extend(&other.zero_valued_slots);
-
-            // Remove any zero-valued slots from non-zero valued slots
-            if !other.zero_valued_slots.is_empty() {
-                self.non_zero_valued_slots
-                    .retain(|(slot, _)| !other.zero_valued_slots.contains(slot));
-            }
-
-            self.wiped = self.wiped || other.wiped;
+            return;
         }
+
+        self.non_zero_valued_slots.retain(|(slot, _)| !other.zero_valued_slots.contains(slot));
+
+        // Extend the sorted non-zero valued slots
+        extend_sorted_vec(&mut self.non_zero_valued_slots, &other.non_zero_valued_slots);
+
+        // Merge zero valued slots sets
+        self.zero_valued_slots.extend(&other.zero_valued_slots);
     }
 }
 
@@ -688,66 +675,6 @@ impl Iterator for ChunkedHashedPostState {
         } else {
             Some(chunk)
         }
-    }
-}
-
-/// Helper function to extend a sorted vector with another sorted vector,
-/// taking into account removed items.
-/// Values from `other` take precedence for duplicate keys, and items in `removed` are excluded.
-///
-/// TODO(mediocregopher): Once https://github.com/paradigmxyz/reth/issues/18848 is completed this
-/// function will not be necessary, `extend_sorted_vec` in `updates.rs` can be used for both
-/// TrieUpdates and HashedPostState.
-fn extend_sorted_vec_with_removed<K, V, S>(
-    target: &mut Vec<(K, V)>,
-    other: &[(K, V)],
-    removed: &HashSet<K, S>,
-) where
-    K: Clone + Ord + core::hash::Hash + Eq,
-    V: Clone,
-    S: core::hash::BuildHasher,
-{
-    if other.is_empty() && removed.is_empty() {
-        return;
-    }
-
-    let mut other_iter = other.iter().peekable();
-    let mut to_insert = Vec::new();
-
-    // Iterate through target and update/collect items from other
-    for target_item in target.iter_mut() {
-        while let Some(other_item) = other_iter.peek() {
-            use core::cmp::Ordering;
-            match other_item.0.cmp(&target_item.0) {
-                Ordering::Less => {
-                    // Other item comes before current target item, collect it if not removed
-                    let item = other_iter.next().unwrap();
-                    if !removed.contains(&item.0) {
-                        to_insert.push(item.clone());
-                    }
-                }
-                Ordering::Equal => {
-                    // Same key, update target with other's value unless it's removed
-                    let item = other_iter.next().unwrap();
-                    if !removed.contains(&item.0) {
-                        target_item.1 = item.1.clone();
-                    }
-                    break;
-                }
-                Ordering::Greater => {
-                    // Other item comes after current target item
-                    break;
-                }
-            }
-        }
-    }
-
-    // Append collected new items, as well as any remaining from `other` (excluding removed),
-    // and sort if needed
-    if !to_insert.is_empty() || other_iter.peek().is_some() {
-        target.extend(to_insert);
-        target.extend(other_iter.filter(|item| !removed.contains(&item.0)).cloned());
-        target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     }
 }
 

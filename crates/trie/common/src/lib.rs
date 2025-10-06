@@ -57,6 +57,9 @@ pub mod updates;
 
 pub mod added_removed_keys;
 
+/// Utilities used by other modules in this crate.
+mod utils;
+
 /// Bincode-compatible serde implementations for trie types.
 ///
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows
