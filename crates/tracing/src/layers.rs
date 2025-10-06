@@ -126,7 +126,11 @@ impl Layers {
 
     /// Add OTLP spans layer to the layer collection
     #[cfg(feature = "otlp")]
-    pub fn with_span_layer(&mut self, service_name: String, exporter_endpoint: String) -> eyre::Result<()> {
+    pub fn with_span_layer(
+        &mut self,
+        service_name: String,
+        exporter_endpoint: String,
+    ) -> eyre::Result<()> {
         // Create the span provider
         let span_layer = span_layer(service_name, exporter_endpoint)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?;

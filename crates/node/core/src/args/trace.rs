@@ -1,5 +1,5 @@
-use reth_cli_util::parse_socket_address;
 use clap::Parser;
+use reth_cli_util::parse_socket_address;
 use std::net::SocketAddr;
 
 /// Opentelemetry tracing configuration through CLI args.
