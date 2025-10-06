@@ -256,7 +256,7 @@ self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
 The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
-This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
+This next example uses the `DbTx::cursor_read()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
 [File: crates/static-file/static-file/src/segments/headers.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/static-file/static-file/src/segments/headers.rs#L22-L58)
 
@@ -299,11 +299,6 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
         // Delete the withdrawals entry if any
         if withdrawals_cursor.seek_exact(number)?.is_some() {
             withdrawals_cursor.delete_current()?;
-        }
-
-        // Delete the requests entry if any
-        if requests_cursor.seek_exact(number)?.is_some() {
-            requests_cursor.delete_current()?;
         }
 
         // Delete all transactions to block values.

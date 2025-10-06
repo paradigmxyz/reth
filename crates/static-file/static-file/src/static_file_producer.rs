@@ -30,7 +30,7 @@ pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 pub type StaticFileProducerWithResult<Provider> =
     (StaticFileProducer<Provider>, StaticFileProducerResult);
 
-/// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
+/// Static File producer. It's a wrapper around [`StaticFileProducerInner`] that allows to share it
 /// between threads.
 #[derive(Debug)]
 pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provider>>>);
@@ -289,6 +289,7 @@ mod tests {
             .expect("get static file writer for headers");
         static_file_writer.prune_headers(blocks.len() as u64).unwrap();
         static_file_writer.commit().expect("prune headers");
+        drop(static_file_writer);
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         for block in &blocks {

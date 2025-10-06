@@ -486,6 +486,12 @@ impl HashedPostStateSorted {
     }
 }
 
+impl AsRef<Self> for HashedPostStateSorted {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 /// Sorted account state optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {

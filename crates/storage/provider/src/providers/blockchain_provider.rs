@@ -749,7 +749,6 @@ mod tests {
             create_test_provider_factory, create_test_provider_factory_with_chain_spec,
             MockNodeTypesWithDB,
         },
-        writer::UnifiedStorageWriter,
         BlockWriter, CanonChainTracker, ProviderFactory, StaticFileProviderFactory,
         StaticFileWriter,
     };
@@ -780,15 +779,15 @@ mod tests {
     use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-        BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
-        ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, TransactionVariant,
-        TransactionsProvider,
+        BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, StateWriter,
+        TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm_database::BundleState;
+    use revm_database::{BundleState, OriginalValuesKnown};
     use std::{
         ops::{Bound, Deref, Range, RangeBounds},
         sync::Arc,
@@ -863,37 +862,27 @@ mod tests {
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let provider_rw = factory.database_provider_rw()?;
-        let static_file_provider = factory.static_file_provider();
-
-        // Write transactions to static files with the right `tx_num``
-        let mut tx_num = provider_rw
-            .block_body_indices(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
-            .map(|indices| indices.next_tx_num())
-            .unwrap_or_default();
 
         // Insert blocks into the database
-        for (block, receipts) in database_blocks.iter().zip(&receipts) {
-            // TODO: this should be moved inside `insert_historical_block`: <https://github.com/paradigmxyz/reth/issues/11524>
-            let mut transactions_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
-            let mut receipts_writer =
-                static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-            transactions_writer.increment_block(block.number)?;
-            receipts_writer.increment_block(block.number)?;
-
-            for (tx, receipt) in block.body().transactions().zip(receipts) {
-                transactions_writer.append_transaction(tx_num, tx)?;
-                receipts_writer.append_receipt(tx_num, receipt)?;
-                tx_num += 1;
-            }
-
-            provider_rw.insert_historical_block(
+        for block in &database_blocks {
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
 
-        // Commit to both storages: database and static files
-        UnifiedStorageWriter::commit(provider_rw)?;
+        // Insert receipts into the database
+        if let Some(first_block) = database_blocks.first() {
+            provider_rw.write_state(
+                &ExecutionOutcome {
+                    first_block: first_block.number,
+                    receipts: receipts.iter().take(database_blocks.len()).cloned().collect(),
+                    ..Default::default()
+                },
+                OriginalValuesKnown::No,
+            )?;
+        }
+
+        provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
 
@@ -978,10 +967,8 @@ mod tests {
 
                 // Push to disk
                 let provider_rw = hook_provider.database_provider_rw().unwrap();
-                UnifiedStorageWriter::from(&provider_rw, &hook_provider.static_file_provider())
-                    .save_blocks(vec![lowest_memory_block])
-                    .unwrap();
-                UnifiedStorageWriter::commit(provider_rw).unwrap();
+                provider_rw.save_blocks(vec![lowest_memory_block]).unwrap();
+                provider_rw.commit().unwrap();
 
                 // Remove from memory
                 hook_provider.canonical_in_memory_state.remove_persisted_blocks(num_hash);
@@ -1006,7 +993,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1110,7 +1097,7 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            provider_rw.insert_historical_block(
+            provider_rw.insert_block(
                 block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
@@ -1348,7 +1335,7 @@ mod tests {
 
         // Insert and commit the block.
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_historical_block(block_1)?;
+        provider_rw.insert_block(block_1)?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
