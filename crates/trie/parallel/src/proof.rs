@@ -143,7 +143,7 @@ where
                             ?hashed_address,
                             is_in_targets,
                             target_slots_count,
-                            total_receivers = storage_receivers.len(),
+                            total_receivers_initially = storage_receivers.len(),
                             "No storage proof receiver found - using fallback synchronous computation"
                         );
 

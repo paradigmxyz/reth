@@ -138,9 +138,13 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
         CrossbeamReceiver<Result<DecodedStorageMultiProof, ParallelStateRootError>>,
     > = B256Map::default();
 
+    let mut queued_addresses = Vec::new();
     for account_nibbles in &extended_prefix_sets.account_prefix_set {
         // Convert nibbles back to B256 address
-        let address = B256::from_slice(&account_nibbles.pack());
+        let packed = account_nibbles.pack();
+        let address = B256::from_slice(&packed);
+
+        queued_addresses.push(address);
 
         let (sender, receiver) = crossbeam_channel::unbounded();
         let prefix_set =
@@ -173,6 +177,7 @@ fn execute_account_multiproof_worker<Tx: DbTx>(
     debug!(
         target: "trie::proof_task",
         receivers_queued = storage_receivers.len(),
+        ?queued_addresses,
         "[WORKER] Queued all storage proof receivers, calling build_account_multiproof_with_storage"
     );
 
