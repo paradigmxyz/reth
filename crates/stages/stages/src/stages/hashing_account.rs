@@ -344,7 +344,7 @@ mod tests {
                 done: true,
             }) if block_number == previous_stage &&
                 processed == total &&
-                total == runner.db.table::<tables::PlainAccountState>().unwrap().len() as u64
+                total == runner.db.count_entries::<tables::PlainAccountState>().unwrap() as u64
         );
 
         // Validate the stage execution
