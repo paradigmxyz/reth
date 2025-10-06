@@ -221,13 +221,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     /// that all logs are flushed to disk.
     /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let mut layers = reth_tracing::Layers::new();
-
-        #[cfg(feature = "otlp")]
-        if let Some(endpoint_url) = self.metrics.otlp {
-            let url = format!("http://{endpoint_url}");
-            layers.with_metrics_layer("reth::cli".to_string(), &url)?;
-        }
+        let layers = reth_tracing::Layers::new();
 
         let guard = self.logs.init_tracing_with_layers(layers)?;
         Ok(guard)
