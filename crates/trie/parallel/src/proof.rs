@@ -36,7 +36,7 @@ use reth_trie_common::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Builds an account multiproof with storage proof receivers.
 ///
@@ -114,7 +114,7 @@ where
                 let decoded_storage_multiproof = match storage_receivers.remove(&hashed_address) {
                     Some(receiver) => {
                         // Try non-blocking receive first to track if proof was ready
-                        match receiver.try_recv() {
+                        let proof = match receiver.try_recv() {
                             Ok(Ok(proof)) => {
                                 tracker.inc_storage_proof_immediate();
                                 proof
@@ -134,7 +134,23 @@ where
                             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                                 return Err(storage_channel_closed_error(&hashed_address))
                             }
-                        }
+                        };
+
+                        // CRITICAL: Update cache with fresh root to maintain coherence.
+                        // If this account was previously cached as a sibling with an old root,
+                        // we must overwrite it with the new root to prevent serving stale data
+                        // to subsequent proofs that encounter this account as a sibling.
+                        missed_leaves_storage_roots.insert(hashed_address, proof.root);
+
+                        debug!(
+                            target: "trie::proof",
+                            ?hashed_address,
+                            root = ?proof.root,
+                            cache_size = missed_leaves_storage_roots.len(),
+                            "Updated cache with fresh storage root from receiver"
+                        );
+
+                        proof
                     }
                     // Since we do not store all intermediate nodes in the database, there might
                     // be a possibility of re-adding a non-modified leaf to the hash builder.
@@ -318,7 +334,6 @@ where
         targets_count = targets.len(),
         initial_storage_receivers,
         storage_receivers_remaining = storage_receivers.len(),
-        missed_leaves = tracker.missed_leaves(),
         fallback_addresses = fallback_tracker.len(),
         "build_account_multiproof_with_storage finished"
     );
