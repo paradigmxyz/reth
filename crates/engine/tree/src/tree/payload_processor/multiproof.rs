@@ -90,11 +90,20 @@ impl<Factory> MultiProofConfig<Factory> {
         consistent_view: ConsistentDbView<Factory>,
         mut input: TrieInput,
     ) -> (TrieInput, Self) {
+        let prefix_sets = Arc::new(std::mem::take(&mut input.prefix_sets));
+
+        debug!(
+            target: "engine::root",
+            "MultiProofConfig::new_from_input: INITIAL prefix_sets account_len={} storage_len={}",
+            prefix_sets.account_prefix_set.len(),
+            prefix_sets.storage_prefix_sets.len(),
+        );
+
         let config = Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.drain_into_sorted()),
             state_sorted: Arc::new(input.state.drain_into_sorted()),
-            prefix_sets: Arc::new(std::mem::take(&mut input.prefix_sets)),
+            prefix_sets,
         };
         (input.cleared(), config)
     }
@@ -554,6 +563,15 @@ where
         // Clone and freeze prefix sets to get the current accumulated state from all transactions
         let frozen_prefix_sets = (*config.prefix_sets).clone().freeze();
 
+        debug!(
+            target: "engine::root",
+            proof_sequence_number,
+            ?source,
+            "spawn_multiproof: FREEZING prefix_sets account_len={} storage_len={} for worker",
+            frozen_prefix_sets.account_prefix_set.len(),
+            frozen_prefix_sets.storage_prefix_sets.len(),
+        );
+
         self.executor.spawn_blocking(move || {
             // Create channel for receiving multiproof result from account manager
             let (result_tx, result_rx) = crossbeam_channel::unbounded();
@@ -875,6 +893,16 @@ where
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
+        debug!(
+            target: "engine::root",
+            ?source,
+            "on_state_update: hashed_state_update accounts={} storages={} config.prefix_sets.account_len={} config.prefix_sets.storage_len={}",
+            hashed_state_update.accounts.len(),
+            hashed_state_update.storages.len(),
+            self.config.prefix_sets.account_prefix_set.len(),
+            self.config.prefix_sets.storage_prefix_sets.len(),
+        );
+
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
@@ -910,6 +938,15 @@ where
                 &multi_added_removed_keys,
             );
             spawned_proof_targets.extend_ref(&proof_targets);
+
+            debug!(
+                target: "engine::root",
+                ?source,
+                "spawn_multiproof: proof_targets accounts={} BEFORE_SPAWN config.prefix_sets.account_len={} config.prefix_sets.storage_len={}",
+                proof_targets.len(),
+                self.config.prefix_sets.account_prefix_set.len(),
+                self.config.prefix_sets.storage_prefix_sets.len(),
+            );
 
             self.multiproof_manager.spawn_or_queue(
                 MultiproofInput {
