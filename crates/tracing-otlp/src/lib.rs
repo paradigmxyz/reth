@@ -6,7 +6,7 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
-use opentelemetry::{trace::TracerProvider, KeyValue, Value};
+use opentelemetry::{global::set_meter_provider, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{MetricExporter, SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -20,7 +20,7 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 
 // Reads every 30 second-interval the metrics
-const DEFAULT_METRICS_READER_INTERVAL: Duration = Duration::from_secs(30);
+const DEFAULT_METRICS_READER_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
@@ -45,7 +45,7 @@ where
 
 /// Creates an `OpenTelemetry` metrics provider that exports metrics to a default OTLP endpoint.
 pub fn create_metrics_provider(
-    service_name: impl Into<Value>,
+    service_name: impl Into<Value> + std::fmt::Debug,
     endpoint: &str,
 ) -> eyre::Result<SdkMeterProvider> {
     let resource = build_resource(service_name);
@@ -57,7 +57,11 @@ pub fn create_metrics_provider(
         .with_interval(DEFAULT_METRICS_READER_INTERVAL)
         .build();
 
-    Ok(SdkMeterProvider::builder().with_resource(resource).with_reader(metrics_reader).build())
+    let meter_provider =
+        SdkMeterProvider::builder().with_resource(resource).with_reader(metrics_reader).build();
+
+    set_meter_provider(meter_provider.clone());
+    Ok(meter_provider)
 }
 
 // Builds OTLP resource with service information.
