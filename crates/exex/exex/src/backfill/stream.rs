@@ -100,7 +100,10 @@ where
     /// Polls the next task in the [`BackfillTasks`] queue until it returns a non-empty result.
     fn poll_next_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<BackfillJobResult<T>>> {
         while let Some(res) = ready!(self.tasks.poll_next_unpin(cx)) {
-            let task_result = res.map_err(BlockExecutionError::other)?;
+            let task_result = match res {
+                Ok(value) => value,
+                Err(e) => return Poll::Ready(Some(Err(BlockExecutionError::other(e)))),
+            };
 
             if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
                 // If the task returned a non-empty result, a new task advancing the job is created
