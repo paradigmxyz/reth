@@ -196,11 +196,13 @@ where
             state_root_config.prefix_sets.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
+        let storage_worker_count = config.storage_proof_workers();
         let proof_task = ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
+            storage_worker_count,
         );
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
