@@ -877,17 +877,25 @@ where
                 // too expensive because it requires walking all paths in every proof.
                 let spawn_start = Instant::now();
                 let (handle, strategy) = if trie_input.prefix_sets.is_empty() {
-                    (
-                        self.payload_processor.spawn(
-                            env,
-                            txs,
-                            provider_builder,
-                            consistent_view,
-                            trie_input,
-                            &self.config,
-                        ),
-                        StateRootStrategy::StateRootTask,
-                    )
+                    let handle = self.payload_processor.spawn(
+                        env,
+                        txs,
+                        provider_builder,
+                        consistent_view,
+                        trie_input,
+                        &self.config,
+                    );
+                    let strategy = if handle.supports_state_root() {
+                        StateRootStrategy::StateRootTask
+                    } else {
+                        debug!(
+                            target: "engine::tree",
+                            block=?block_num_hash,
+                            "Proof task initialization failed, falling back to parallel state root"
+                        );
+                        StateRootStrategy::Parallel
+                    };
+                    (handle, strategy)
                 // if prefix sets are not empty, we spawn a task that exclusively handles cache
                 // prewarming for transaction execution
                 } else {

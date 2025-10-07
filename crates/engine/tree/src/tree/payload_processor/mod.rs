@@ -45,7 +45,7 @@ use std::sync::{
     mpsc::{self, channel, Sender},
     Arc,
 };
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -201,13 +201,28 @@ where
         let storage_worker_count = (max_proof_task_concurrency / 2)
             .max(1)
             .min(max_proof_task_concurrency.saturating_sub(1));
-        let proof_task = ProofTaskManager::new(
+        let proof_task = match ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
             storage_worker_count,
-        );
+        ) {
+            Ok(proof_task) => proof_task,
+            Err(error) => {
+                // If we cannot bootstrap the proof task manager, continue with cache prewarming
+                // only; the caller will detect the missing state root channel and fall back to the
+                // parallel state root algorithm.
+                tracing::warn!(
+                    target: "engine::tree",
+                    ?error,
+                    max_concurrency = max_proof_task_concurrency,
+                    requested_workers = storage_worker_count,
+                    "Failed to initialize proof task manager, falling back to cache-only mode"
+                );
+                return self.spawn_cache_exclusive(env, transactions, provider_builder);
+            }
+        };
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -470,6 +485,11 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
             .expect("state_root is None")
             .recv()
             .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
+    }
+
+    /// Returns `true` if the handle is connected to a background state root task.
+    pub fn supports_state_root(&self) -> bool {
+        self.state_root.is_some()
     }
 
     /// Returns a state hook to be used to send state updates to this task.

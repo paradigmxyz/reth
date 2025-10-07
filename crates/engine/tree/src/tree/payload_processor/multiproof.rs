@@ -1237,7 +1237,8 @@ mod tests {
             task_ctx,
             1,
             1,
-        );
+        )
+        .unwrap();
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
