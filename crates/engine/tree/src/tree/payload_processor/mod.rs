@@ -26,8 +26,8 @@ use reth_evm::{
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateProviderFactory,
-    StateReader,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ProviderResult,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
@@ -174,7 +174,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> ProviderResult<PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -196,13 +196,14 @@ where
             state_root_config.prefix_sets.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
+        let storage_worker_count = config.storage_proof_workers();
         let proof_task_handle = new_proof_task_handle(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
-        )
-        .expect("Failed to create proof task handle");
+            storage_worker_count,
+        )?;
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -241,12 +242,12 @@ where
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
         self.spawn_sparse_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx);
 
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -846,14 +847,18 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-            &TreeConfig::default(),
-        );
+        let mut handle = payload_processor
+            .spawn(
+                Default::default(),
+                core::iter::empty::<
+                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                >(),
+                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                TrieInput::from_state(hashed_state),
+                &TreeConfig::default(),
+            )
+            .expect("failed to spawn payload processor task");
 
         let mut state_hook = handle.state_hook();
 

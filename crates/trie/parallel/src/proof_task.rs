@@ -5,7 +5,7 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError, TrySendError};
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender, SendError, TrySendError};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -26,13 +26,15 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
+    fmt,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    marker::PhantomData,
     time::Instant,
 };
-use tokio::{runtime::Handle, sync::Notify};
+use tokio::{runtime::Handle, task};
 use tracing::{error, trace};
 
 #[cfg(feature = "metrics")]
@@ -40,6 +42,12 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
+
+/// Type alias for the factory tuple returned by `create_factories`
+type ProofFactories<'a, Tx> = (
+    InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
+    HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
+);
 
 /// Creates a new proof task handle with a pre-initialized transaction pool.
 ///
@@ -51,38 +59,61 @@ pub fn new_proof_task_handle<Factory>(
     view: ConsistentDbView<Factory>,
     task_ctx: ProofTaskCtx,
     max_concurrency: usize,
+    storage_worker_count: usize,
 ) -> ProviderResult<ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx>>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     let max_concurrency = max_concurrency.max(1);
-    let (tx_pool_sender, tx_pool_receiver) = bounded(max_concurrency);
-    let pool_notify = Arc::new(Notify::new());
+    let storage_worker_count = storage_worker_count.max(1);
+    let queue_capacity = max_concurrency;
+    let worker_count = storage_worker_count.min(max_concurrency);
 
-    // Pre-create all transactions upfront
-    for worker_id in 0..max_concurrency {
+    let (task_sender, task_receiver) = bounded(queue_capacity);
+
+    // Spawn dedicated blocking workers upfront. Each worker owns a single reusable transaction.
+    for worker_id in 0..worker_count {
         let provider_ro = view.provider_ro()?;
         let tx = provider_ro.into_tx();
-        let proof_task_tx = Arc::new(ProofTaskTx::new(tx, task_ctx.clone(), worker_id));
-        tx_pool_sender.send(proof_task_tx).expect("pool channel should have capacity");
+        let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+        let receiver = task_receiver.clone();
+        executor.spawn_blocking(move || worker_loop(proof_task_tx, receiver));
     }
 
-    Ok(ProofTaskManagerHandle::new(
-        tx_pool_sender,
-        tx_pool_receiver,
-        pool_notify,
+    let handle: ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx> =
+        ProofTaskManagerHandle::new(
         executor,
+            task_sender,
         Arc::new(AtomicUsize::new(0)),
         #[cfg(feature = "metrics")]
         Arc::new(ProofTaskMetrics::default()),
-    ))
+        );
+
+    Ok(handle)
 }
 
-/// Type alias for the factory tuple returned by `create_factories`
-type ProofFactories<'a, Tx> = (
-    InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
-    HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
-);
+fn worker_loop<Tx>(proof_tx: ProofTaskTx<Tx>, receiver: Receiver<ProofTaskKind>)
+where
+    Tx: DbTx,
+{
+    while let Ok(task) = receiver.recv() {
+        match task {
+            ProofTaskKind::StorageProof(input, sender) => {
+                proof_tx.storage_proof(input, &sender);
+            }
+            ProofTaskKind::BlindedAccountNode(path, sender) => {
+                proof_tx.blinded_account_node(&path, &sender);
+            }
+            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
+                proof_tx.blinded_storage_node(&account, &path, &sender);
+            }
+            #[cfg(test)]
+            ProofTaskKind::Test(task) => {
+                (task)();
+            }
+        }
+    }
+}
 
 /// This contains all information shared between all storage proof instances.
 #[derive(Debug)]
@@ -348,25 +379,38 @@ pub enum ProofTaskKind {
     BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
     /// A blinded storage node request.
     BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
+    /// Test-only hook for exercising the worker pool.
+    #[cfg(test)]
+    Test(Box<dyn FnOnce() + Send + 'static>),
+}
+
+impl fmt::Debug for ProofTaskKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StorageProof(_, _) => f.write_str("StorageProof"),
+            Self::BlindedAccountNode(_, _) => f.write_str("BlindedAccountNode"),
+            Self::BlindedStorageNode(_, _, _) => f.write_str("BlindedStorageNode"),
+            #[cfg(test)]
+            Self::Test(_) => f.write_str("Test"),
+        }
+    }
 }
 
 /// A handle for dispatching proof tasks using a transaction pool and Tokio's blocking threadpool.
 ///
 /// Tasks are dispatched directly without an intermediate manager loop.
 pub struct ProofTaskManagerHandle<Tx> {
-    /// Transaction pool sender (for returning transactions)
-    tx_pool_sender: Sender<Arc<ProofTaskTx<Tx>>>,
-    /// Transaction pool receiver (for checking out transactions)
-    tx_pool_receiver: Receiver<Arc<ProofTaskTx<Tx>>>,
-    /// Notifies waiters when a transaction is returned to the pool
-    pool_notify: Arc<Notify>,
-    /// Tokio executor for spawning blocking tasks
+    /// Tokio executor for spawning helper tasks.
     executor: Handle,
+    /// Sender used to dispatch tasks to the persistent worker pool.
+    task_sender: Sender<ProofTaskKind>,
     /// The number of active handles (for metrics).
     active_handles: Arc<AtomicUsize>,
     /// Metrics tracking blinded node fetches.
     #[cfg(feature = "metrics")]
     metrics: Arc<ProofTaskMetrics>,
+    /// Marker to retain the database transaction type parameter.
+    _marker: PhantomData<Tx>,
 }
 
 // Manual Debug impl since Tx may not be Debug
@@ -385,118 +429,69 @@ where
 {
     /// Creates a new [`ProofTaskManagerHandle`].
     pub fn new(
-        tx_pool_sender: Sender<Arc<ProofTaskTx<Tx>>>,
-        tx_pool_receiver: Receiver<Arc<ProofTaskTx<Tx>>>,
-        pool_notify: Arc<Notify>,
         executor: Handle,
+        task_sender: Sender<ProofTaskKind>,
         active_handles: Arc<AtomicUsize>,
         #[cfg(feature = "metrics")] metrics: Arc<ProofTaskMetrics>,
     ) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self {
-            tx_pool_sender,
-            tx_pool_receiver,
-            pool_notify,
             executor,
+            task_sender,
             active_handles,
             #[cfg(feature = "metrics")]
             metrics,
+            _marker: PhantomData,
         }
     }
 
-    /// Queues a task by checking out a transaction from the pool and spawning it
-    /// directly in Tokio's blocking threadpool.
+    /// Queues a proof task by enqueuing it onto the worker channel.
     pub fn queue_task(&self, task: ProofTaskKind) {
-        let tx_pool_receiver = self.tx_pool_receiver.clone();
-        let tx_pool_sender = self.tx_pool_sender.clone();
-        let executor = self.executor.clone();
-        let pool_notify = Arc::clone(&self.pool_notify);
-
         #[cfg(feature = "metrics")]
-        let metrics = Arc::clone(&self.metrics);
-
-        // Track metrics for blinded node requests
-        #[cfg(feature = "metrics")]
+        {
         match &task {
             ProofTaskKind::BlindedAccountNode(_, _) => {
-                metrics.account_nodes.fetch_add(1, Ordering::Relaxed);
+                    self.metrics.account_nodes.fetch_add(1, Ordering::Relaxed);
             }
             ProofTaskKind::BlindedStorageNode(_, _, _) => {
-                metrics.storage_nodes.fetch_add(1, Ordering::Relaxed);
+                    self.metrics.storage_nodes.fetch_add(1, Ordering::Relaxed);
             }
             _ => {}
         }
+        }
 
-        self.executor.spawn(async move {
-            // Wait asynchronously until a transaction becomes available.
-            let proof_tx = loop {
-                match tx_pool_receiver.try_recv() {
-                    Ok(tx) => break tx,
-                    Err(TryRecvError::Empty) => {
-                        pool_notify.notified().await;
-                    }
-                    Err(TryRecvError::Disconnected) => {
-                        error!(target: "trie::proof_task", "Transaction pool closed");
-                        return;
-                    }
-                }
-            };
-
-            // Execute task in blocking threadpool
-            let result = executor
-                .spawn_blocking(move || {
-                    match task {
-                        ProofTaskKind::StorageProof(input, sender) => {
-                            proof_tx.storage_proof(input, &sender);
+        match self.task_sender.try_send(task) {
+            Ok(()) => {}
+            Err(TrySendError::Full(task)) => {
+                let sender = self.task_sender.clone();
+                let executor = self.executor.clone();
+                executor.spawn(async move {
+                    let send_result = task::spawn_blocking(move || sender.send(task)).await;
+                    match send_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(SendError(_))) => {
+                            error!(
+                                target: "trie::proof_task",
+                                "Worker channel disconnected while enqueueing proof task"
+                            );
                         }
-                        ProofTaskKind::BlindedAccountNode(path, sender) => {
-                            proof_tx.blinded_account_node(&path, &sender);
+                        Err(join_error) => {
+                            error!(
+                                target: "trie::proof_task",
+                                ?join_error,
+                                "Failed to enqueue proof task: blocking send panicked"
+                            );
                         }
-                        ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                            proof_tx.blinded_storage_node(&account, &path, &sender);
-                        }
-                    }
-                    proof_tx
-                })
-                .await;
-
-            // Return transaction to pool
-            match result {
-                Ok(proof_tx) => {
-                    match tx_pool_sender.try_send(proof_tx) {
-                        Ok(()) => {
-                            pool_notify.notify_one();
-                        }
-                        Err(TrySendError::Full(tx)) => {
-                            // Should never happen - we're returning what we took
-                            error!(target: "trie::proof_task",
-                                "Pool full on return. This should not happen.");
-
-                            // Fallback: Use spawn_blocking to retry the send operation
-                            // This prevents losing the transaction from the pool
-                            // The send() call blocks a blocking-pool thread, NOT the async worker
-                            let tx_pool_sender = tx_pool_sender.clone();
-                            let pool_notify = Arc::clone(&pool_notify);
-                            executor.spawn_blocking(move || {
-                                // Retry the send in a blocking context
-                                if tx_pool_sender.send(tx).is_ok() {
-                                    pool_notify.notify_one();
-                                } else {
-                                    error!(target: "trie::proof_task",
-                                        "Failed to return transaction to pool even after blocking retry");
                                 }
                             });
                         }
                         Err(TrySendError::Disconnected(_)) => {
-                            // Pool closed, ignore
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(target: "trie::proof_task", ?e, "Proof task panicked, transaction lost from pool");
+                error!(
+                    target: "trie::proof_task",
+                    "Worker channel disconnected, dropping proof task"
+                );
                 }
             }
-        });
     }
 }
 
@@ -506,10 +501,8 @@ where
 {
     fn clone(&self) -> Self {
         Self::new(
-            self.tx_pool_sender.clone(),
-            self.tx_pool_receiver.clone(),
-            Arc::clone(&self.pool_notify),
             self.executor.clone(),
+            self.task_sender.clone(),
             Arc::clone(&self.active_handles),
             #[cfg(feature = "metrics")]
             Arc::clone(&self.metrics),
@@ -519,9 +512,6 @@ where
 
 impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     fn drop(&mut self) {
-        // Wake any tasks waiting on a transaction so they can observe shutdown.
-        self.pool_notify.notify_waiters();
-
         // Record metrics if this is the last handle
         if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
             #[cfg(feature = "metrics")]
