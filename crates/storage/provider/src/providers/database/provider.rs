@@ -336,7 +336,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_range = BlockNumberAddress::range(from..=self.last_block_number()?);
+        let storage_range = BlockNumberAddress::range(from..);
         let changed_storages = self
             .tx
             .cursor_read::<tables::StorageChangeSets>()?
