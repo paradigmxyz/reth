@@ -1,6 +1,6 @@
 name: Bug Report
 description: Create a bug report
-labels: ["C-bug", "S-needs-triage"]
+labels: ["K-bug", "S-needs-triage"]
 body:
   - type: markdown
     attributes:
