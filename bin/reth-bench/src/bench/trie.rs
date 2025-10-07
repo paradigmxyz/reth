@@ -1,4 +1,7 @@
-use alloy_primitives::{map::HashMap, Address, B256, U256};
+use alloy_primitives::{
+    map::{AddressSet, HashMap},
+    Address, B256, U256,
+};
 use clap::Parser;
 use eyre::{OptionExt, Result};
 use reth_cli::chainspec::ChainSpecParser;
@@ -185,43 +188,43 @@ impl Command {
         let state_transitions = (0..self.state_transitions)
             .map(|_| {
                 let mut state = Vec::new();
+                let mut seen_accounts = AddressSet::default();
                 let mut reverts = Vec::new();
 
                 for _ in 0..self.changed_accounts {
-                    let mut entry = if self.changed_storages > 0 {
-                        loop {
-                            let address = storages_cursor
-                                .seek(Address::random())?
-                                .ok_or_eyre("account not found")?
-                                .0;
-                            let walker = storages_cursor.walk_dup(Some(address), None)?;
-                            let storages = walker.collect::<Vec<_>>();
-                            if storages.len() >= self.changed_storages {
-                                let account = tx
-                                    .get::<tables::PlainAccountState>(address)?
-                                    .ok_or_eyre("account not found")?;
-
-                                break (
-                                    address,
-                                    Some(account.into()),
-                                    Some(account.into()),
-                                    storages
-                                        .into_iter()
-                                        .take(self.changed_storages)
-                                        .map(|result| {
-                                            let StorageEntry { key, value } = result?.1;
-
-                                            Result::Ok((key.into(), (value, U256::random())))
-                                        })
-                                        .collect::<Result<HashMap<_, _>>>()?,
-                                );
-                            }
-                        }
-                    } else {
-                        let (address, account) = accounts_cursor
+                    let mut entry = loop {
+                        let address = accounts_cursor
                             .seek(Address::random())?
-                            .ok_or_eyre("account not found")?;
-                        (address, Some(account.into()), Some(account.into()), HashMap::default())
+                            .ok_or_eyre("account not found")?
+                            .0;
+                        if seen_accounts.contains(&address) {
+                            continue;
+                        }
+
+                        let walker = storages_cursor.walk_dup(Some(address), None)?;
+                        let storages = walker.collect::<Vec<_>>();
+                        if storages.len() >= self.changed_storages {
+                            seen_accounts.insert(address);
+
+                            let account = tx
+                                .get::<tables::PlainAccountState>(address)?
+                                .ok_or_eyre("account not found")?;
+
+                            break (
+                                address,
+                                Some(account.into()),
+                                Some(account.into()),
+                                storages
+                                    .into_iter()
+                                    .take(self.changed_storages)
+                                    .map(|result| {
+                                        let StorageEntry { key, value } = result?.1;
+
+                                        Result::Ok((key.into(), (value, U256::random())))
+                                    })
+                                    .collect::<Result<HashMap<_, _>>>()?,
+                            );
+                        }
                     };
 
                     for _ in 0..self.new_storages {
