@@ -438,6 +438,11 @@ pub struct TrieUpdatesSorted {
 }
 
 impl TrieUpdatesSorted {
+    /// Returns `true` if the updates are empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_nodes.is_empty() && self.storage_tries.is_empty()
+    }
+
     /// Returns reference to updated account nodes.
     pub fn account_nodes_ref(&self) -> &[(Nibbles, Option<BranchNodeCompact>)] {
         &self.account_nodes
