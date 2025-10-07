@@ -77,6 +77,12 @@ pub struct Command {
     pub changed_storages: usize,
     #[arg(long, help = "New storages per account per state transition")]
     pub new_storages: usize,
+    #[arg(
+        long,
+        default_value = "1",
+        help = "Number of iterations to run for calculating statistics"
+    )]
+    pub iterations: usize,
 }
 
 impl Command {
@@ -88,34 +94,85 @@ impl Command {
             .open_read_only(self.chain.clone(), ReadOnlyConfig::from_datadir(datadir))?;
 
         let provider = factory.provider()?;
-
-        let (state_transitions, bundle_state) =
-            self.generate_state_transitions(provider.tx_ref())?;
-        println!("Accounts in bundle state: {}", bundle_state.state.len());
-
-        let hashed_post_state =
-            HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
-        let trie_input = TrieInput::from_state(hashed_post_state);
-
         let consistent_view = ConsistentDbView::new_with_latest_tip(factory)?;
 
-        // Run sequential state root calculation
-        let sequential_root =
-            self.calculate_sequential_state_root(provider.tx_ref(), trie_input.clone())?;
+        // Structures to store timing results for each method
+        let mut sequential_times = Vec::with_capacity(self.iterations);
+        let mut parallel_times = Vec::with_capacity(self.iterations);
+        let mut task_times = Vec::with_capacity(self.iterations);
 
-        // Run parallel state root calculation
-        let parallel_root =
-            self.calculate_parallel_state_root(consistent_view.clone(), trie_input.clone())?;
+        // Run multiple iterations
+        for i in 0..self.iterations {
+            println!("\nIteration {}/{}", i + 1, self.iterations);
 
-        // Run state root task calculation
-        let task_root =
-            self.calculate_state_root_task(consistent_view, trie_input, state_transitions)?;
+            // Generate new state transitions for each iteration
+            let (state_transitions, bundle_state) =
+                self.generate_state_transitions(provider.tx_ref())?;
+            println!("Accounts in bundle state: {}", bundle_state.state.len());
 
-        // Verify all methods produce the same result
-        assert_eq!(sequential_root, parallel_root, "Sequential and parallel roots differ");
-        assert_eq!(sequential_root, task_root, "Sequential and task roots differ");
+            let hashed_post_state =
+                HashedPostState::from_bundle_state::<KeccakKeyHasher>(&bundle_state.state);
+            let trie_input = TrieInput::from_state(hashed_post_state);
+
+            // Run sequential state root calculation
+            let (sequential_root, sequential_time) =
+                self.calculate_sequential_state_root(provider.tx_ref(), trie_input.clone())?;
+            sequential_times.push(sequential_time);
+
+            // Run parallel state root calculation
+            let (parallel_root, parallel_time) =
+                self.calculate_parallel_state_root(consistent_view.clone(), trie_input.clone())?;
+            parallel_times.push(parallel_time);
+
+            // Run state root task calculation
+            let (task_root, task_time) = self.calculate_state_root_task(
+                consistent_view.clone(),
+                trie_input.clone(),
+                state_transitions,
+            )?;
+            task_times.push(task_time);
+
+            // Verify all methods produce the same result
+            assert_eq!(sequential_root, parallel_root, "Sequential and parallel roots differ");
+            assert_eq!(sequential_root, task_root, "Sequential and task roots differ");
+        }
+
+        // Calculate and print statistics
+        if self.iterations > 1 {
+            println!("\n========== Statistics over {} iterations ==========", self.iterations);
+            println!("\nSequential State Root:");
+            self.print_statistics(&sequential_times);
+            println!("\nParallel State Root:");
+            self.print_statistics(&parallel_times);
+            println!("\nTask-based State Root:");
+            self.print_statistics(&task_times);
+        }
 
         Ok(())
+    }
+
+    /// Calculate and print statistics for a set of timing measurements
+    fn print_statistics(&self, times: &[Duration]) {
+        let mut sorted_times = times.to_vec();
+        sorted_times.sort();
+
+        // Calculate mean
+        let sum: Duration = sorted_times.iter().sum();
+        let mean = sum / sorted_times.len() as u32;
+
+        // Calculate percentiles
+        let p50 = self.calculate_percentile(&sorted_times, 50.0);
+        let p99 = self.calculate_percentile(&sorted_times, 99.0);
+
+        println!("  Mean:  {:?}", mean);
+        println!("  P50:   {:?}", p50);
+        println!("  P99:   {:?}", p99);
+    }
+
+    /// Calculate a specific percentile from sorted durations
+    fn calculate_percentile(&self, sorted: &[Duration], percentile: f64) -> Duration {
+        let index = ((percentile / 100.0) * (sorted.len() - 1) as f64).round() as usize;
+        sorted[index]
     }
 
     fn generate_state_transitions(
@@ -199,7 +256,7 @@ impl Command {
         &self,
         tx: &impl DbTx,
         trie_input: TrieInput,
-    ) -> Result<B256> {
+    ) -> Result<(B256, Duration)> {
         let hashed_post_state_sorted = trie_input.state.into_sorted();
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
@@ -215,8 +272,8 @@ impl Command {
             .with_prefix_sets(trie_input.prefix_sets.freeze())
             .root()?;
         let elapsed = start.elapsed();
-        println!("Sequential state root calculation finished. State root = {state_root}, elapsed time = {elapsed:?}");
-        Ok(state_root)
+        println!("  Sequential: state root = {state_root}, time = {elapsed:?}");
+        Ok((state_root, elapsed))
     }
 
     /// Calculate state root using parallel method
@@ -226,7 +283,7 @@ impl Command {
         &self,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
-    ) -> Result<B256> {
+    ) -> Result<(B256, Duration)> {
         let start = Instant::now();
         std::thread::sleep(
             self.state_transition_delay.saturating_mul(self.state_transitions as u32),
@@ -234,8 +291,8 @@ impl Command {
         let parallel_state_root =
             ParallelStateRoot::new(consistent_view, trie_input).incremental_root()?;
         let elapsed = start.elapsed();
-        println!("Parallel state root calculation finished. State root = {parallel_state_root}, elapsed time = {elapsed:?}");
-        Ok(parallel_state_root)
+        println!("  Parallel:   state root = {parallel_state_root}, time = {elapsed:?}");
+        Ok((parallel_state_root, elapsed))
     }
 
     /// Calculate state root using task-based method with multiproof and sparse trie
@@ -246,7 +303,7 @@ impl Command {
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         state_transitions: Vec<BundleState>,
-    ) -> Result<B256> {
+    ) -> Result<(B256, Duration)> {
         let tree_config = TreeConfig::default();
         let payload_processor = PayloadProcessor::new(
             WorkloadExecutor::default(),
@@ -367,8 +424,8 @@ impl Command {
 
         let state_root_task_root = state_root_rx.recv().unwrap().unwrap().state_root;
         let elapsed = start.elapsed();
-        println!("State root task calculation finished. State root = {state_root_task_root}, elapsed time = {elapsed:?}");
+        println!("  Task-based: state root = {state_root_task_root}, time = {elapsed:?}");
 
-        Ok(state_root_task_root)
+        Ok((state_root_task_root, elapsed))
     }
 }
