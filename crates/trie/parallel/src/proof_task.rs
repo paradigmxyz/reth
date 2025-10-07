@@ -616,7 +616,7 @@ mod tests {
             runtime.handle().clone(),
             consistent_view,
             task_ctx,
-            4, // max_concurrency (results in worker_count = 4/2 = 2)
+            2, // max_concurrency (results in worker_count = 2)
         )
         .expect("failed to create proof task handle");
 
