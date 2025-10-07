@@ -66,7 +66,12 @@ struct StorageProofJob {
 
 /// Internal message for on-demand task execution.
 ///
-/// These tasks are executed with lazily-created transactions that are
+/// **Note**: Currently unused in favor of [`ProofTaskKind`] for simplicity and backwards
+/// compatibility. This enum represents a more type-safe design where on-demand tasks
+/// (blinded nodes) are strictly separated from worker pool tasks (storage proofs).
+/// Available for future refactoring if stricter type safety is desired.
+///
+/// These tasks would be executed with lazily-created transactions that are
 /// returned to the pool after use (same as current behavior).
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -131,7 +136,9 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Queue of pending on-demand tasks waiting for available transaction.
     ///
     /// Replaces the old `pending_tasks` `VecDeque` which held all task types.
-    /// TODO: Change to `VecDeque`<OnDemandTask> in Phase 8 when implementing proper task routing
+    /// Currently holds `ProofTaskKind` for both blinded node fetches and storage proof
+    /// fallbacks (when worker pool is full/unavailable). Could be refactored to use
+    /// the more type-safe `OnDemandTask` enum if strict separation is desired.
     pending_on_demand: VecDeque<ProofTaskKind>,
 
     // ==================== SHARED RESOURCES  ====================
@@ -565,15 +572,27 @@ where
                                                 ),
                                             );
                                         }
-                                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                                            // Workers shut down - this should not happen
-                                            tracing::error!(
+                                        Err(crossbeam_channel::TrySendError::Disconnected(job)) => {
+                                            // No workers available (likely all spawns failed) -
+                                            // fall back to on-demand
+                                            tracing::warn!(
                                                 target: "trie::proof_task",
-                                                "Worker pool disconnected unexpectedly"
+                                                storage_worker_count = self.storage_worker_count,
+                                                "Worker pool disconnected (no workers available), falling back to on-demand"
                                             );
-                                            return Err(reth_storage_errors::provider::ProviderError::Database(
-                                            reth_db_api::DatabaseError::Other("Worker pool disconnected".into())
-                                        ))
+
+                                            #[cfg(feature = "metrics")]
+                                            {
+                                                self.metrics.on_demand_fallback += 1;
+                                            }
+
+                                            // Queue for on-demand execution instead of failing
+                                            self.pending_on_demand.push_back(
+                                                ProofTaskKind::StorageProof(
+                                                    job.input,
+                                                    job.result_sender,
+                                                ),
+                                            );
                                         }
                                     }
                                 }
