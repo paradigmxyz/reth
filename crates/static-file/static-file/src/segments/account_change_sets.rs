@@ -4,7 +4,8 @@ use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockReader, ChangeSetReader, DBProvider,
+    StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -16,7 +17,10 @@ pub struct AccountChangeSets;
 
 impl<Provider> Segment<Provider> for AccountChangeSets
 where
-    Provider: StaticFileProviderFactory<Primitives: NodePrimitives> + DBProvider + BlockReader,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives>
+        + DBProvider
+        + BlockReader
+        + ChangeSetReader,
 {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::AccountChangeSets
@@ -33,6 +37,9 @@ where
 
         for block in block_range {
             static_file_writer.increment_block(block)?;
+
+            let account_changeset = provider.account_block_changeset(block)?;
+            static_file_writer.append_account_changeset(account_changeset);
 
             // let block_body_indices = provider
             //     .block_body_indices(block)?
