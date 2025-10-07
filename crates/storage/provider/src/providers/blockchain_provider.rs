@@ -182,7 +182,7 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
 impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header(block_hash)
     }
 
@@ -190,7 +190,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for BlockchainProvider<N> {
         self.consistent_provider()?.header_by_number(num)
     }
 
-    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, hash: BlockHash) -> ProviderResult<Option<U256>> {
         self.consistent_provider()?.header_td(hash)
     }
 
@@ -341,6 +341,10 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.consistent_provider()?.recovered_block_range(range)
+    }
+
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        self.consistent_provider()?.block_by_transaction_id(id)
     }
 }
 
@@ -2290,13 +2294,15 @@ mod tests {
         let test_tx_index = 0;
 
         test_non_range!([
-            // TODO: header should use B256 like others instead of &B256
-            // (
-            //     ONE,
-            //     header,
-            //     |block: &SealedBlock, tx_num: TxNumber, tx_hash: B256, receipts: &Vec<Vec<Receipt>>| (&block.hash(), Some(block.header.header().clone())),
-            //     (&B256::random())
-            // ),
+            (
+                ONE,
+                header,
+                |block: &SealedBlock<Block>, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
+                    block.hash(),
+                    Some(block.header().clone())
+                ),
+                B256::random()
+            ),
             (
                 ONE,
                 header_by_number,
