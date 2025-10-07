@@ -35,9 +35,6 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 /// Maximum number of storage proof workers
 const MAX_STORAGE_PROOF_WORKERS: usize = 12;
 
-/// Minimum number of storage proof workers
-const MIN_STORAGE_PROOF_WORKERS: usize = 2;
-
 /// Default ratio of storage proof workers to `max_proof_task_concurrency`
 const DEFAULT_STORAGE_PROOF_WORKER_RATIO: f32 = 0.5;
 
@@ -484,24 +481,32 @@ impl TreeConfig {
 
     /// Get the number of storage proof workers.
     ///
-    /// Defaults to half of `max_proof_task_concurrency`, clamped to valid range.
+    /// Defaults to half of `max_proof_task_concurrency`, clamped to valid range and leaving at
+    /// least one slot for on-demand work.
     pub fn storage_proof_workers(&self) -> usize {
+        let max_allowed = self.max_proof_task_concurrency.saturating_sub(1) as usize;
+        if max_allowed == 0 {
+            return 0;
+        }
+
         self.storage_proof_workers.unwrap_or_else(|| {
             let derived = (self.max_proof_task_concurrency as f32 *
                 DEFAULT_STORAGE_PROOF_WORKER_RATIO) as usize;
-            derived.clamp(MIN_STORAGE_PROOF_WORKERS, MAX_STORAGE_PROOF_WORKERS)
+            let capped = derived.min(MAX_STORAGE_PROOF_WORKERS);
+
+            capped.clamp(1, max_allowed)
         })
     }
 
     /// Set the number of storage proof workers explicitly.
     ///
-    /// Value is clamped to [`MIN_STORAGE_PROOF_WORKERS`, `MAX_STORAGE_PROOF_WORKERS`].
+    /// Value is clamped to the remaining concurrency budget (leaving one on-demand slot).
     pub const fn with_storage_proof_workers(mut self, workers: usize) -> Self {
-        // Note: Can't use clamp in const fn, so we'll do manual clamping
-        let clamped = if workers < MIN_STORAGE_PROOF_WORKERS {
-            MIN_STORAGE_PROOF_WORKERS
-        } else if workers > MAX_STORAGE_PROOF_WORKERS {
+        let max_allowed = self.max_proof_task_concurrency.saturating_sub(1) as usize;
+        let clamped = if workers > MAX_STORAGE_PROOF_WORKERS {
             MAX_STORAGE_PROOF_WORKERS
+        } else if workers > max_allowed {
+            max_allowed
         } else {
             workers
         };
