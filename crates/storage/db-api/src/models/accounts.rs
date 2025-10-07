@@ -145,44 +145,6 @@ impl Decode for BlockNumberHashedAddress {
     }
 }
 
-/// A [`RangeBounds`] over a range of [`BlockNumberHashedAddress`]s. Used to conveniently convert
-/// from a range of [`BlockNumber`]s.
-#[derive(Debug)]
-pub struct BlockNumberHashedAddressRange {
-    /// Starting bound of the range.
-    pub start: Bound<BlockNumberHashedAddress>,
-    /// Ending bound of the range.
-    pub end: Bound<BlockNumberHashedAddress>,
-}
-
-impl RangeBounds<BlockNumberHashedAddress> for BlockNumberHashedAddressRange {
-    fn start_bound(&self) -> Bound<&BlockNumberHashedAddress> {
-        self.start.as_ref()
-    }
-
-    fn end_bound(&self) -> Bound<&BlockNumberHashedAddress> {
-        self.end.as_ref()
-    }
-}
-
-impl<R: RangeBounds<BlockNumber>> From<R> for BlockNumberHashedAddressRange {
-    fn from(r: R) -> Self {
-        let start = match r.start_bound() {
-            Bound::Included(n) => Bound::Included(BlockNumberHashedAddress((*n, B256::ZERO))),
-            Bound::Excluded(n) => Bound::Included(BlockNumberHashedAddress((n + 1, B256::ZERO))),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-
-        let end = match r.end_bound() {
-            Bound::Included(n) => Bound::Excluded(BlockNumberHashedAddress((n + 1, B256::ZERO))),
-            Bound::Excluded(n) => Bound::Excluded(BlockNumberHashedAddress((*n, B256::ZERO))),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-
-        Self { start, end }
-    }
-}
-
 /// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.

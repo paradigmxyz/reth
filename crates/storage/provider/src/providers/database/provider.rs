@@ -39,8 +39,7 @@ use reth_db_api::{
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        BlockNumberHashedAddress, BlockNumberHashedAddressRange, ShardedKey,
-        StoredBlockBodyIndices,
+        BlockNumberHashedAddress, ShardedKey, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -324,14 +323,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
-    pub fn unwind_trie_state_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()> {
+    pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let changed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range.clone())?
+            .walk_range(from..)?
             .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind account hashes.
@@ -340,7 +336,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_range = BlockNumberAddress::range(range.clone());
+        let storage_range = BlockNumberAddress::range(from..=self.last_block_number()?);
         let changed_storages = self
             .tx
             .cursor_read::<tables::StorageChangeSets>()?
@@ -354,11 +350,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
         // Unwind accounts/storages trie tables using the revert.
-        let trie_revert = self.trie_reverts(range.clone())?;
+        let trie_revert = self.trie_reverts(from)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         // Clear trie changesets which have been unwound.
-        self.clear_trie_changesets_from(*range.start())?;
+        self.clear_trie_changesets_from(from)?;
 
         Ok(())
     }
@@ -2229,14 +2225,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
-    fn trie_reverts(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<TrieUpdatesSorted> {
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         let tx = self.tx_ref();
-
-        // Convert range bounds to account range
-        let account_range = (range.start_bound(), range.end_bound());
 
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
         // within each block, and we want the oldest (first) version of each node
@@ -2244,7 +2234,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider
         let mut seen_account_keys = HashSet::new();
         let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
 
-        for entry in accounts_cursor.walk_range(account_range)? {
+        for entry in accounts_cursor.walk_range(from..)? {
             let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
             // Only keep the first (oldest) version of each node
             if seen_account_keys.insert(nibbles.0) {
@@ -2258,10 +2248,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider
         let mut seen_storage_keys = HashSet::new();
         let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
 
-        // Create storage range using BlockNumberHashedAddressRange
-        let storage_range = BlockNumberHashedAddressRange::from(range);
+        // Create storage range starting from `from` block
+        let storage_range_start = BlockNumberHashedAddress((from, B256::ZERO));
 
-        for entry in storages_cursor.walk_range(storage_range)? {
+        for entry in storages_cursor.walk_range(storage_range_start..)? {
             let (
                 BlockNumberHashedAddress((_, hashed_address)),
                 TrieChangeSetsEntry { nibbles, node },
@@ -2701,7 +2691,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     ) -> ProviderResult<Chain<Self::Primitives>> {
         let range = block + 1..=self.last_block_number()?;
 
-        self.unwind_trie_state_range(range.clone())?;
+        self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
         let execution_state = self.take_state_above(block)?;
@@ -2719,9 +2709,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        let range = block + 1..=self.last_block_number()?;
-
-        self.unwind_trie_state_range(range)?;
+        self.unwind_trie_state_from(block + 1)?;
 
         // remove execution res
         self.remove_state_above(block)?;

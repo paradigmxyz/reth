@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
-use core::ops::RangeBounds;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
@@ -94,11 +93,8 @@ pub trait StateProofProvider: Send + Sync {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieReader: Send + Sync {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
-    /// given blocks range having been processed.
-    fn trie_reverts(
-        &self,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<TrieUpdatesSorted>;
+    /// given block and onwards having been processed.
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
 }
 
 /// Trie Writer
