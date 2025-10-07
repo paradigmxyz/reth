@@ -173,6 +173,9 @@ fn storage_worker_loop<Tx>(
         "Storage proof worker started"
     );
 
+    // Create factories once at worker startup to avoid recreation overhead.
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+
     let mut proofs_processed = 0u64;
 
     while let Ok(StorageProofJob { input, result_sender }) = work_rx.recv() {
@@ -188,7 +191,8 @@ fn storage_worker_loop<Tx>(
         );
 
         let proof_start = Instant::now();
-        let result = proof_tx.compute_storage_proof(input);
+        let result =
+            proof_tx.compute_storage_proof(input, &trie_cursor_factory, &hashed_cursor_factory);
 
         let proof_elapsed = proof_start.elapsed();
         proofs_processed += 1;
@@ -540,15 +544,24 @@ where
         (trie_cursor_factory, hashed_cursor_factory)
     }
 
-    /// Compute storage proof without consuming self.
+    /// Compute storage proof with pre-created factories.
     ///
-    /// Borrows self immutably to allow transaction reuse across multiple calls.
-    /// Used by storage workers in the worker pool to avoid transaction creation
+    /// Accepts cursor factories as parameters to allow reuse across multiple proofs.
+    /// Used by storage workers in the worker pool to avoid factory recreation
     /// overhead on each proof computation.
     #[inline]
-    fn compute_storage_proof(&self, input: StorageProofInput) -> StorageProofResult {
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
+    fn compute_storage_proof(
+        &self,
+        input: StorageProofInput,
+        trie_cursor_factory: &InMemoryTrieCursorFactory<
+            DatabaseTrieCursorFactory<&Tx>,
+            &TrieUpdatesSorted,
+        >,
+        hashed_cursor_factory: &HashedPostStateCursorFactory<
+            DatabaseHashedCursorFactory<&Tx>,
+            &HashedPostStateSorted,
+        >,
+    ) -> StorageProofResult {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput {
             hashed_address,
@@ -574,13 +587,16 @@ where
         let proof_start = Instant::now();
 
         // Compute raw storage multiproof
-        let raw_proof_result =
-            StorageProof::new_hashed(trie_cursor_factory, hashed_cursor_factory, hashed_address)
-                .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
-                .with_branch_node_masks(with_branch_node_masks)
-                .with_added_removed_keys(added_removed_keys)
-                .storage_multiproof(target_slots)
-                .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        let raw_proof_result = StorageProof::new_hashed(
+            trie_cursor_factory.clone(),
+            hashed_cursor_factory.clone(),
+            hashed_address,
+        )
+        .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
+        .with_branch_node_masks(with_branch_node_masks)
+        .with_added_removed_keys(added_removed_keys)
+        .storage_multiproof(target_slots)
+        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
@@ -620,67 +636,39 @@ where
     ) {
         trace!(
             target: "trie::proof_task",
-            hashed_address=?input.hashed_address,
+            hashed_address = ?input.hashed_address,
             "Starting storage proof task calculation"
         );
 
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-        let multi_added_removed_keys = input
-            .multi_added_removed_keys
-            .unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
-        let added_removed_keys = multi_added_removed_keys.get_storage(&input.hashed_address);
-
-        let span = tracing::trace_span!(
-            target: "trie::proof_task",
-            "Storage proof calculation",
-            hashed_address=?input.hashed_address,
-            // Add a unique id because we often have parallel storage proof calculations for the
-            // same hashed address, and we want to differentiate them during trace analysis.
-            span_id=self.id,
-        );
-        let span_guard = span.enter();
-
+        let hashed_address = input.hashed_address;
+        let prefix_set_len = input.prefix_set.len();
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
 
-        let raw_proof_result = StorageProof::new_hashed(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            input.hashed_address,
-        )
-        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
-        .with_branch_node_masks(input.with_branch_node_masks)
-        .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof(input.target_slots)
-        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
-
-        drop(span_guard);
-
-        let decoded_result = raw_proof_result.and_then(|raw_proof| {
-            raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to decode storage proof for {}: {}",
-                    input.hashed_address, e
-                ))
-            })
-        });
-
+        // Create factories
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
+        let proof_result =
+            self.compute_storage_proof(input, &trie_cursor_factory, &hashed_cursor_factory);
+        let proof_time = proof_start.elapsed();
+        let success = proof_result.is_ok();
         trace!(
             target: "trie::proof_task",
-            hashed_address=?input.hashed_address,
-            prefix_set = ?input.prefix_set.len(),
+            hashed_address = ?hashed_address,
+            prefix_set = ?prefix_set_len,
             target_slots = ?target_slots_len,
-            proof_time = ?proof_start.elapsed(),
+            proof_time = ?proof_time,
+            worker_id = self.id,
+            success,
             "Completed storage proof task calculation"
         );
 
         // send the result back
-        if let Err(error) = result_sender.send(decoded_result) {
+        if let Err(error) = result_sender.send(proof_result) {
             debug!(
                 target: "trie::proof_task",
-                hashed_address = ?input.hashed_address,
+                hashed_address = ?hashed_address,
                 ?error,
-                task_time = ?proof_start.elapsed(),
+                task_time = ?proof_time,
                 "Storage proof receiver is dropped, discarding the result"
             );
         }
