@@ -165,6 +165,7 @@ impl TreeConfig {
         prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
     ) -> Self {
+        assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         Self {
             persistence_threshold,
             memory_block_buffer_target,
@@ -394,6 +395,7 @@ impl TreeConfig {
         mut self,
         max_proof_task_concurrency: u64,
     ) -> Self {
+        assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         self.max_proof_task_concurrency = max_proof_task_concurrency;
         self
     }
