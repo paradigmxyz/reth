@@ -49,19 +49,28 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
-/// Internal message for storage proof workers.
+/// Internal message for storage workers.
 ///
-/// This is NOT exposed publicly. External callers still use `ProofTaskKind::StorageProof`
-/// which is routed through the manager's `std::mpsc` channel.
+/// This is NOT exposed publicly. External callers use `ProofTaskKind::StorageProof` or
+/// `ProofTaskKind::BlindedStorageNode` which are routed through the manager's `std::mpsc` channel.
 #[derive(Debug)]
-struct StorageProofJob {
-    /// Storage proof input parameters
-    input: StorageProofInput,
-    /// Channel to send result back to original caller
-    ///
-    /// This is the same `std::mpsc::Sender` that the external caller provided in
-    /// `ProofTaskKind::StorageProof(input`, sender).
-    result_sender: Sender<StorageProofResult>,
+enum StorageWorkerJob {
+    /// Storage proof computation request
+    StorageProof {
+        /// Storage proof input parameters
+        input: StorageProofInput,
+        /// Channel to send result back to original caller
+        result_sender: Sender<StorageProofResult>,
+    },
+    /// Blinded storage node retrieval request
+    BlindedStorageNode {
+        /// Target account
+        account: B256,
+        /// Path to the storage node
+        path: Nibbles,
+        /// Channel to send result back to original caller
+        result_sender: Sender<TrieNodeProviderResult>,
+    },
 }
 
 /// Manager for coordinating proof request execution across different task types.
@@ -89,8 +98,8 @@ struct StorageProofJob {
 /// - Receive consistent return types and error handling
 #[derive(Debug)]
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
-    /// Sender for storage proof tasks to worker pool.
-    storage_work_tx: CrossbeamSender<StorageProofJob>,
+    /// Sender for storage worker jobs to worker pool.
+    storage_work_tx: CrossbeamSender<StorageWorkerJob>,
 
     /// Number of storage workers successfully spawned.
     ///
@@ -136,20 +145,20 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     metrics: ProofTaskMetrics,
 }
 
-/// Worker loop for storage proof computation.
+/// Worker loop for storage trie operations.
 ///
 /// # Lifecycle
 ///
 /// Each worker:
-/// 1. Receives `StorageProofJob` from crossbeam bounded channel
-/// 2. Computes proof using its dedicated long-lived transaction
+/// 1. Receives `StorageWorkerJob` from crossbeam unbounded channel
+/// 2. Computes result using its dedicated long-lived transaction
 /// 3. Sends result directly to original caller via `std::mpsc`
 /// 4. Repeats until channel closes (graceful shutdown)
 ///
 /// # Transaction Reuse
 ///
-/// Reuses the same transaction across multiple proofs to avoid transaction
-/// creation and cursor factory setup overhead.
+/// Reuses the same transaction and cursor factories across multiple operations
+/// to avoid transaction creation and cursor factory setup overhead.
 ///
 /// # Panic Safety
 ///
@@ -161,7 +170,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
 /// Worker shuts down when the crossbeam channel closes (all senders dropped).
 fn storage_worker_loop<Tx>(
     proof_tx: ProofTaskTx<Tx>,
-    work_rx: CrossbeamReceiver<StorageProofJob>,
+    work_rx: CrossbeamReceiver<StorageWorkerJob>,
     worker_id: usize,
 ) where
     Tx: DbTx,
@@ -169,59 +178,113 @@ fn storage_worker_loop<Tx>(
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
-        "Storage proof worker started"
+        "Storage worker started"
     );
 
     // Create factories once at worker startup to avoid recreation overhead.
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
 
-    let mut proofs_processed = 0u64;
+    // Create blinded provider factory once for all blinded node requests
+    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory.clone(),
+        proof_tx.task_ctx.prefix_sets.clone(),
+    );
 
-    while let Ok(StorageProofJob { input, result_sender }) = work_rx.recv() {
-        let hashed_address = input.hashed_address;
+    let mut storage_proofs_processed = 0u64;
+    let mut storage_nodes_processed = 0u64;
 
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            hashed_address = ?hashed_address,
-            prefix_set_len = input.prefix_set.len(),
-            target_slots = input.target_slots.len(),
-            "Processing storage proof"
-        );
+    while let Ok(job) = work_rx.recv() {
+        match job {
+            StorageWorkerJob::StorageProof { input, result_sender } => {
+                let hashed_address = input.hashed_address;
 
-        let proof_start = Instant::now();
-        let result =
-            proof_tx.compute_storage_proof(input, &trie_cursor_factory, &hashed_cursor_factory);
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    hashed_address = ?hashed_address,
+                    prefix_set_len = input.prefix_set.len(),
+                    target_slots = input.target_slots.len(),
+                    "Processing storage proof"
+                );
 
-        let proof_elapsed = proof_start.elapsed();
-        proofs_processed += 1;
+                let proof_start = Instant::now();
+                let result = proof_tx.compute_storage_proof(
+                    input,
+                    &trie_cursor_factory,
+                    &hashed_cursor_factory,
+                );
 
-        if result_sender.send(result).is_err() {
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                hashed_address = ?hashed_address,
-                proofs_processed,
-                "Storage proof receiver dropped, discarding result"
-            );
+                let proof_elapsed = proof_start.elapsed();
+                storage_proofs_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        hashed_address = ?hashed_address,
+                        storage_proofs_processed,
+                        "Storage proof receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    hashed_address = ?hashed_address,
+                    proof_time_us = proof_elapsed.as_micros(),
+                    total_processed = storage_proofs_processed,
+                    "Storage proof completed"
+                );
+            }
+
+            StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?account,
+                    ?path,
+                    "Processing blinded storage node"
+                );
+
+                let start = Instant::now();
+                let result =
+                    blinded_provider_factory.storage_node_provider(account).trie_node(&path);
+                let elapsed = start.elapsed();
+
+                storage_nodes_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?account,
+                        ?path,
+                        storage_nodes_processed,
+                        "Blinded storage node receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?account,
+                    ?path,
+                    elapsed_us = elapsed.as_micros(),
+                    total_processed = storage_nodes_processed,
+                    "Blinded storage node completed"
+                );
+            }
         }
-
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            hashed_address = ?hashed_address,
-            proof_time_us = proof_elapsed.as_micros(),
-            total_processed = proofs_processed,
-            "Storage proof completed"
-        );
     }
 
     // Channel closed - graceful shutdown
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
-        proofs_processed,
-        "Storage proof worker shutting down"
+        storage_proofs_processed,
+        storage_nodes_processed,
+        "Storage worker shutting down"
     );
 }
 
@@ -260,15 +323,15 @@ where
             );
         }
 
-        // Use unbounded channel to ensure all storage proofs are queued to workers.
+        // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
-        let (storage_work_tx, storage_work_rx) = unbounded::<StorageProofJob>();
+        let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
 
         tracing::info!(
             target: "trie::proof_task",
             storage_worker_count = planned_workers,
             max_concurrency,
-            "Initializing storage proof worker pool with unbounded queue"
+            "Initializing storage worker pool with unbounded queue"
         );
 
         let mut spawned_workers = 0;
@@ -378,10 +441,10 @@ where
             ProofTaskKind::BlindedAccountNode(path, sender) => {
                 proof_task_tx.blinded_account_node(path, sender, tx_sender);
             }
-            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                proof_task_tx.blinded_storage_node(account, path, sender, tx_sender);
+            // Storage trie operations should never reach here as they're routed to worker pool
+            ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                unreachable!("BlindedStorageNode should be routed to worker pool")
             }
-            // StorageProof should never reach here as it's routed to worker pool
             ProofTaskKind::StorageProof(_, _) => {
                 unreachable!("StorageProof should be routed to worker pool")
             }
@@ -411,10 +474,10 @@ where
                     match message {
                         ProofTaskMessage::QueueTask(task) => match task {
                             ProofTaskKind::StorageProof(input, sender) => {
-                                match self
-                                    .storage_work_tx
-                                    .send(StorageProofJob { input, result_sender: sender })
-                                {
+                                match self.storage_work_tx.send(StorageWorkerJob::StorageProof {
+                                    input,
+                                    result_sender: sender,
+                                }) {
                                     Ok(_) => {
                                         tracing::trace!(
                                             target: "trie::proof_task",
@@ -429,25 +492,68 @@ where
                                         );
 
                                         // Send error back to caller
-                                        let _ = job.result_sender.send(Err(
-                                            ParallelStateRootError::Other(
-                                                "Storage proof worker pool unavailable".to_string(),
-                                            ),
-                                        ));
+                                        if let StorageWorkerJob::StorageProof {
+                                            result_sender,
+                                            ..
+                                        } = job
+                                        {
+                                            let _ = result_sender.send(Err(
+                                                ParallelStateRootError::Other(
+                                                    "Storage proof worker pool unavailable"
+                                                        .to_string(),
+                                                ),
+                                            ));
+                                        }
                                     }
                                 }
                             }
 
                             ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                                // Route storage trie operations to worker pool
-                                // For now, queue to pending_tasks until we add worker pool support
                                 #[cfg(feature = "metrics")]
                                 {
                                     self.metrics.storage_nodes += 1;
                                 }
-                                self.queue_proof_task(ProofTaskKind::BlindedStorageNode(
-                                    account, path, sender,
-                                ));
+
+                                match self.storage_work_tx.send(
+                                    StorageWorkerJob::BlindedStorageNode {
+                                        account,
+                                        path,
+                                        result_sender: sender,
+                                    },
+                                ) {
+                                    Ok(_) => {
+                                        tracing::trace!(
+                                            target: "trie::proof_task",
+                                            ?account,
+                                            ?path,
+                                            "Blinded storage node dispatched to worker pool"
+                                        );
+                                    }
+                                    Err(crossbeam_channel::SendError(job)) => {
+                                        tracing::warn!(
+                                            target: "trie::proof_task",
+                                            storage_worker_count = self.storage_worker_count,
+                                            ?account,
+                                            ?path,
+                                            "Worker pool disconnected, cannot process blinded storage node"
+                                        );
+
+                                        // Send error back to caller
+                                        if let StorageWorkerJob::BlindedStorageNode {
+                                            result_sender,
+                                            ..
+                                        } = job
+                                        {
+                                            let _ = result_sender.send(Err(SparseTrieError::from(
+                                                Box::new(std::io::Error::new(
+                                                    std::io::ErrorKind::BrokenPipe,
+                                                    "Storage worker pool unavailable",
+                                                ))
+                                                    as Box<dyn std::error::Error + Send>,
+                                            )));
+                                        }
+                                    }
+                                }
                             }
 
                             ProofTaskKind::BlindedAccountNode(_, _) => {
@@ -650,53 +756,6 @@ where
                 ?path,
                 ?error,
                 "Failed to send blinded account node result"
-            );
-        }
-
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
-    }
-
-    /// Retrieves blinded storage node of the given account by path.
-    fn blinded_storage_node(
-        self,
-        account: B256,
-        path: Nibbles,
-        result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
-        trace!(
-            target: "trie::proof_task",
-            ?account,
-            ?path,
-            "Starting blinded storage node retrieval"
-        );
-
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
-        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            self.task_ctx.prefix_sets.clone(),
-        );
-
-        let start = Instant::now();
-        let result = blinded_provider_factory.storage_node_provider(account).trie_node(&path);
-        trace!(
-            target: "trie::proof_task",
-            ?account,
-            ?path,
-            elapsed = ?start.elapsed(),
-            "Completed blinded storage node retrieval"
-        );
-
-        if let Err(error) = result_sender.send(result) {
-            tracing::error!(
-                target: "trie::proof_task",
-                ?account,
-                ?path,
-                ?error,
-                "Failed to send blinded storage node result"
             );
         }
 
