@@ -213,7 +213,7 @@ fn storage_worker_loop<Tx>(
     }
 
     // Channel closed - graceful shutdown
-    tracing::info!(
+    tracing::debug!(
         target: "trie::proof_task",
         worker_id,
         proofs_processed,
