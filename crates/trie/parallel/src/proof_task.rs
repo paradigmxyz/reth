@@ -49,11 +49,7 @@ type ProofFactories<'a, Tx> = (
     HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
 );
 
-/// Creates a new proof task handle with a pre-initialized transaction pool.
-///
-/// This function creates a pool of database transactions that will be reused across
-/// multiple proof tasks. Tasks are queued asynchronously and coordinated via notification,
-/// with actual computation dispatched to Tokio's blocking threadpool using the pooled transactions.
+/// Builds the worker-pool handle that queues proof tasks and reuses a fixed set of database transactions.
 pub fn new_proof_task_handle<Factory>(
     executor: Handle,
     view: ConsistentDbView<Factory>,
@@ -64,14 +60,12 @@ pub fn new_proof_task_handle<Factory>(
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
-    let max_concurrency = max_concurrency.max(1);
-    let storage_worker_count = storage_worker_count.max(1);
-    let queue_capacity = max_concurrency;
-    let worker_count = storage_worker_count.min(max_concurrency);
+    let queue_capacity = max_concurrency.max(1);
+    let worker_count = storage_worker_count.max(1).min(queue_capacity);
 
     let (task_sender, task_receiver) = bounded(queue_capacity);
 
-    // Spawn dedicated blocking workers upfront. Each worker owns a single reusable transaction.
+    // Spawn blocking workers upfront; each owns a reusable transaction from the consistent view.
     for worker_id in 0..worker_count {
         let provider_ro = view.provider_ro()?;
         let tx = provider_ro.into_tx();

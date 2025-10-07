@@ -500,7 +500,6 @@ mod tests {
         assert_eq!(parallel_result, sequential_result_decoded);
 
         // Drop the handle to release transaction pool resources
-        // Note: No manager loop to join in the new design - handle manages lifecycle via Drop
         drop(proof_task_handle);
     }
 }
