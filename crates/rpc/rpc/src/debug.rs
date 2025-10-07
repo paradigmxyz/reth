@@ -768,12 +768,13 @@ where
 
                         let gas_limit = tx_env.gas_limit();
                         let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
+                        let gas_used =
+                            if res.result.is_success() { res.result.gas_used() } else { gas_limit };
 
                         inspector.set_transaction_gas_limit(gas_limit);
 
-                        let frame = inspector
-                            .geth_builder()
-                            .geth_call_traces(call_config, res.result.gas_used());
+                        let frame =
+                            inspector.geth_builder().geth_call_traces(call_config, gas_used);
 
                         return Ok((frame.into(), res.state))
                     }
