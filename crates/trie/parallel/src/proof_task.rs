@@ -61,8 +61,7 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     let queue_capacity = max_concurrency.max(1);
-    let worker_count = (queue_capacity / 2).max(1); // Right now we are only using half of the queue capacity for storage proofs. TODO: Update this
-                                                    // when we have account proof workers.
+    let worker_count = queue_capacity; // TODO: Update this when we have account proof workers.
 
     let (task_sender, task_receiver) = bounded(queue_capacity);
 
