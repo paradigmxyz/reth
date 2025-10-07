@@ -623,51 +623,19 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     "Branch node has only one child",
                 );
 
-                let remaining_child_subtrie = self.subtrie_for_path_mut(&remaining_child_path);
-
                 // If the remaining child node is not yet revealed then we have to reveal it here,
                 // otherwise it's not possible to know how to collapse the branch.
-                let remaining_child_node =
-                    match remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap() {
-                        SparseNode::Hash(_) => {
-                            debug!(
-                                target: "trie::parallel_sparse",
-                                child_path = ?remaining_child_path,
-                                leaf_full_path = ?full_path,
-                                "Branch node child not revealed in remove_leaf, falling back to db",
-                            );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&remaining_child_path)?
-                            {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(
-                                    target: "trie::parallel_sparse",
-                                    ?remaining_child_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing remaining blinded branch child"
-                                );
-                                remaining_child_subtrie.reveal_node(
-                                    remaining_child_path,
-                                    &decoded,
-                                    TrieMasks { hash_mask, tree_mask },
-                                )?;
-                                remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap()
-                            } else {
-                                return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                                    path: remaining_child_path,
-                                }
-                                .into())
-                            }
-                        }
-                        node => node,
-                    };
+                let remaining_child_node = self.reveal_remaining_child_on_leaf_removal(
+                    provider,
+                    full_path,
+                    &remaining_child_path,
+                    true, // recurse_into_extension
+                )?;
 
                 let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
                     branch_path,
                     &remaining_child_path,
-                    remaining_child_node,
+                    &remaining_child_node,
                 );
 
                 if remove_child {
@@ -1226,6 +1194,86 @@ impl ParallelSparseTrie {
             // For a branch node, we just leave the extension node as-is.
             SparseNode::Branch { .. } => None,
         }
+    }
+
+    /// Called when a leaf is removed on a branch which has only one other remaining child. That
+    /// child must be revealed in order to properly collapse the branch.
+    ///
+    /// If `recurse_into_extension` is true, and the remaining child is an extension node, then its
+    /// child will be ensured to be revealed as well.
+    ///
+    /// ## Returns
+    ///
+    /// The node of the remaining child, whether it was already revealed or not.
+    fn reveal_remaining_child_on_leaf_removal<P: TrieNodeProvider>(
+        &mut self,
+        provider: P,
+        full_path: &Nibbles, // only needed for logs
+        remaining_child_path: &Nibbles,
+        recurse_into_extension: bool,
+    ) -> SparseTrieResult<SparseNode> {
+        let remaining_child_subtrie = self.subtrie_for_path_mut(remaining_child_path);
+
+        let remaining_child_node =
+            match remaining_child_subtrie.nodes.get(remaining_child_path).unwrap() {
+                SparseNode::Hash(_) => {
+                    debug!(
+                        target: "trie::parallel_sparse",
+                        child_path = ?remaining_child_path,
+                        leaf_full_path = ?full_path,
+                        "Branch node child not revealed in remove_leaf, falling back to db",
+                    );
+                    if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                        provider.trie_node(remaining_child_path)?
+                    {
+                        let decoded = TrieNode::decode(&mut &node[..])?;
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            ?remaining_child_path,
+                            ?decoded,
+                            ?tree_mask,
+                            ?hash_mask,
+                            "Revealing remaining blinded branch child"
+                        );
+                        remaining_child_subtrie.reveal_node(
+                            *remaining_child_path,
+                            &decoded,
+                            TrieMasks { hash_mask, tree_mask },
+                        )?;
+                        remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone()
+                    } else {
+                        return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                            path: *remaining_child_path,
+                        }
+                        .into())
+                    }
+                }
+                node => node.clone(),
+            };
+
+        if let SparseNode::Extension { key, .. } = &remaining_child_node &&
+            recurse_into_extension
+        {
+            let mut remaining_grandchild_path = *remaining_child_path;
+            remaining_grandchild_path.extend(key);
+
+            trace!(
+                target: "trie::parallel_sparse",
+                remaining_grandchild_path = ?remaining_grandchild_path,
+                child_path = ?remaining_child_path,
+                leaf_full_path = ?full_path,
+                "Revealing child of extension node, which is the last remaining child of the branch"
+            );
+
+            self.reveal_remaining_child_on_leaf_removal(
+                provider,
+                full_path,
+                &remaining_grandchild_path,
+                false, // recurse_into_extension
+            )?;
+        }
+
+        Ok(remaining_child_node)
     }
 
     /// Drains any [`SparseTrieUpdatesAction`]s from the given subtrie, and applies each action to
