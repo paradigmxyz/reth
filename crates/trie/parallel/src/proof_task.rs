@@ -64,45 +64,27 @@ struct StorageProofJob {
     result_sender: Sender<StorageProofResult>,
 }
 
-/// Internal message for on-demand task execution.
-///
-/// **Note**: Currently unused in favor of [`ProofTaskKind`] for simplicity and backwards
-/// compatibility. This enum represents a more type-safe design where on-demand tasks
-/// (blinded nodes) are strictly separated from worker pool tasks (storage proofs).
-/// Available for future refactoring if stricter type safety is desired.
-///
-/// These tasks would be executed with lazily-created transactions that are
-/// returned to the pool after use (same as current behavior).
-#[derive(Debug)]
-#[allow(dead_code)]
-enum OnDemandTask {
-    /// Fetch a blinded account node by path
-    BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
-    /// Fetch a blinded storage node by account and path
-    BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
-}
-
-/// A task that manages sending proof requests to worker pools and on-demand tasks.
+/// Manager for coordinating proof request execution across different task types.
 ///
 /// # Architecture
 ///
-/// This manager maintains two execution paths:
+/// This manager handles two distinct execution paths:
 ///
 /// 1. **Storage Worker Pool**:
 ///    - Pre-spawned workers with dedicated long-lived transactions
 ///    - Tasks queued via crossbeam bounded channel
-///    - Workers continuously process without transaction return overhead
+///    - Workers continuously process without transaction overhead
 ///
 /// 2. **On-Demand Execution**:
 ///    - Lazy transaction creation for blinded node fetches
-///    - Transactions returned to pool after use
+///    - Transactions returned to pool after use for reuse
 ///
-/// # External API
+/// # Public Interface
 ///
-/// The external API via `ProofTaskManagerHandle`:
-/// - `queue_task(ProofTaskKind)` for submitting tasks
-/// - `std::mpsc` message passing
-/// - Consistent return types and error handling
+/// The public interface through `ProofTaskManagerHandle` allows external callers to:
+/// - Submit tasks via `queue_task(ProofTaskKind)`
+/// - Use standard `std::mpsc` message passing
+/// - Receive consistent return types and error handling
 #[derive(Debug)]
 pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Sender for storage proof tasks to worker pool.
