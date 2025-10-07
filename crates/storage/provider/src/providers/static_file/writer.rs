@@ -6,6 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
+use reth_db::models::AccountBeforeTx;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
@@ -532,6 +533,18 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends change to changeset static file.
+    ///
+    /// Returns the current number of changesets in the block.
+    fn append_change<V: Compact>(&mut self, change: &V) -> ProviderResult<()> {
+        if self.writer.user_header().changeset_offsets().is_some() {
+            self.writer.user_header_mut().increment_block_changes();
+        }
+
+        self.append_column(change)?;
+        Ok(())
+    }
+
     /// Appends header to static file.
     ///
     /// It **CALLS** `increment_block()` since the number of headers is equal to the number of
@@ -664,6 +677,41 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         }
 
         Ok(Some(tx_number))
+    }
+
+    /// Appends a block changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()` since we should be appending one block per changeset.
+    ///
+    /// Returns the current number of changesets in the file, if any.
+    pub fn append_account_changeset(
+        &mut self,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<Option<u64>> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::AccountChangeSets);
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        // first sort the changeset by address
+        changeset.sort_by_key(|change| change.address);
+
+        let mut count: u64 = 0;
+
+        for change in changeset {
+            self.append_change(&change)?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::AccountChangeSets,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        todo!()
     }
 
     /// Adds an instruction to prune `to_delete` transactions during commit.

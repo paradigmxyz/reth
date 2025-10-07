@@ -3,8 +3,8 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use alloy_primitives::{Address, TxNumber};
-use core::{ops::RangeInclusive, str::FromStr};
+use alloy_primitives::TxNumber;
+use core::{ops::{Range, RangeInclusive}, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
@@ -68,8 +68,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions | Self::Receipts => 1,
-            Self::AccountChangeSets => todo!(),
+            Self::Transactions | Self::Receipts | Self::AccountChangeSets => 1,
         }
     }
 
@@ -156,12 +155,29 @@ impl StaticFileSegment {
 /// A changeset offset, also with the number of elements in the offset for convenience
 // TODO: should this be replaced with a method in SegmentHeader?
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
-pub(crate) struct ChangesetOffset {
+pub struct ChangesetOffset {
     /// Offset for the row for this block
-    offset: usize,
+    offset: u64,
 
     /// Number of changes in this changeset
-    num_changes: usize,
+    num_changes: u64,
+}
+
+impl ChangesetOffset {
+    /// Returns the start offset for the row for this block
+    pub const fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the number of changes in this changeset
+    pub const fn num_changes(&self) -> u64 {
+        self.num_changes
+    }
+
+    /// Returns a range corresponding to the changes.
+    pub const fn changeset_range(&self) -> Range<u64> {
+        self.offset..(self.offset + self.num_changes)
+    }
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
@@ -181,7 +197,7 @@ pub struct SegmentHeader {
     /// List of offsets, for where each block's changeset starts.
     ///
     /// This is used to determine where in the file to index, and can also be used to
-    changeset_offsets: Option<ChangesetOffset>,
+    changeset_offsets: Option<Vec<ChangesetOffset>>,
 }
 
 impl SegmentHeader {
@@ -208,6 +224,11 @@ impl SegmentHeader {
     /// Returns the transaction range.
     pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
         self.tx_range.as_ref()
+    }
+
+    /// Returns the changeset offsets.
+    pub const fn changeset_offsets(&self) -> Option<&Vec<ChangesetOffset>> {
+        self.changeset_offsets.as_ref()
     }
 
     /// The expected block start of the segment.
@@ -275,6 +296,20 @@ impl SegmentHeader {
         }
     }
 
+    /// Increments the latest block's number of changes.
+    pub fn increment_block_changes(&mut self) {
+        if self.segment.is_account_changesets() {
+            let offsets = self.changeset_offsets.get_or_insert_with(Default::default);
+            if let Some(last_offset) = offsets.last_mut() {
+                last_offset.num_changes += 1;
+            } else {
+                // If offsets is empty (either from `None` or `Some([])`), we are adding the
+                // first change for a block. The offset for the first block is 0.
+                offsets.push(ChangesetOffset { offset: 0, num_changes: 1 });
+            }
+        }
+    }
+
     /// Removes `num` elements from end of tx or block range.
     pub const fn prune(&mut self, num: u64) {
         if self.segment.is_block_based() {
@@ -320,6 +355,23 @@ impl SegmentHeader {
             return self.block_start()
         }
         self.tx_start()
+    }
+
+    /// Returns the `ChangesetOffset` corresponding for the given block, if it's in the block
+    /// range.
+    ///
+    /// If it is not in the block range or the changeset list in the header does not contain a
+    /// value for the block, this returns `None`.
+    pub fn changeset_offset(&self, block: BlockNumber) -> Option<&ChangesetOffset> {
+        let block_range = self.block_range()?;
+        if !(block_range.start()..=block_range.end()).contains(&block) {
+            return None
+        }
+
+        let offsets = self.changeset_offsets.as_ref()?;
+        let index = (block - block_range.start()) as usize;
+
+        offsets.get(index)
     }
 }
 

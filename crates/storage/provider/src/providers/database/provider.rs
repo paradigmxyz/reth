@@ -929,6 +929,9 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
+        // TODO: switch for static files
+
+        // self.static_file_provider.
         let range = block_number..=block_number;
         self.tx
             .cursor_read::<tables::AccountChangeSets>()?

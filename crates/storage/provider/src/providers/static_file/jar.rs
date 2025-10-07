@@ -86,6 +86,13 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     }
 }
 
+
+impl<N: NodePrimitives> ChangeSetReader for StaticFileJarProvider<'_, N> {
+    fn account_block_changeset(&self, block_number: BlockNumber) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx> > {
+        // TODO: we have to use the header here to get the rows for the block then do the lookups
+    }
+}
+
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
     type Header = N::BlockHeader;
 
