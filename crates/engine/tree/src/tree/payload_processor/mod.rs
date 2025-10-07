@@ -58,7 +58,7 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 /// Default parallelism thresholds to use with the [`ParallelSparseTrie`].
 ///
 /// These values were determined by performing benchmarks using gradually increasing values to judge
-/// the affects. Below 100 throughput would generally be equal or slightly less, while above 150 it
+/// the effects. Below 100 throughput would generally be equal or slightly less, while above 150 it
 /// would deteriorate to the point where PST might as well not be used.
 pub const PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS: ParallelismThresholds =
     ParallelismThresholds { min_revealed_nodes: 100, min_updated_nodes: 100 };
@@ -69,7 +69,7 @@ pub struct PayloadProcessor<Evm>
 where
     Evm: ConfigureEvm,
 {
-    /// The executor used by to spawn tasks.
+    /// The executor used to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
     execution_cache: ExecutionCache,
@@ -162,7 +162,6 @@ where
     /// Responsible for calculating the state root based on the received [`SparseTrieUpdate`].
     ///
     /// This task runs until there are no further updates to process.
-    ///
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
