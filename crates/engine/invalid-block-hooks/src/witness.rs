@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
@@ -13,37 +13,103 @@ use reth_revm::{
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
+use revm_bytecode::Bytecode;
+use revm_database::{
+    states::{reverts::AccountInfoRevert, StorageSlot},
+    AccountStatus, RevertToSlot,
+};
+use revm_state::AccountInfo;
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
 
-/// Converts bundle state to sorted JSON format for deterministic comparison
-fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> serde_json::Value {
-    serde_json::json!({
-        "state": bundle_state.state.iter().map(|(addr, acc)| {
-            (addr, serde_json::json!({
-                "info": acc.info,
-                "original_info": acc.original_info,
-                "storage": BTreeMap::from_iter(acc.storage.clone()),
-                "status": acc.status
-            }))
-        }).collect::<BTreeMap<_, _>>(),
-        "contracts": BTreeMap::from_iter(bundle_state.contracts.clone()),
-        "reverts": bundle_state.reverts.iter().map(|block| {
-            block.iter().map(|(addr, rev)| {
-                (addr, serde_json::json!({
-                    "account": rev.account,
-                    "storage": BTreeMap::from_iter(rev.storage.clone()),
-                    "previous_status": rev.previous_status,
-                    "wipe_storage": rev.wipe_storage
-                }))
-            }).collect::<BTreeMap<_, _>>()
-        }).collect::<Vec<_>>(),
-        "state_size": bundle_state.state_size,
-        "reverts_size": bundle_state.reverts_size
-    })
+/// Serializable version of `BundleState` for deterministic comparison
+#[derive(Debug, PartialEq, Eq)]
+struct BundleStateSorted {
+    /// Account state
+    pub state: BTreeMap<Address, BundleAccountSorted>,
+    /// All created contracts in this block.
+    pub contracts: BTreeMap<B256, Bytecode>,
+    /// Changes to revert
+    ///
+    /// **Note**: Inside vector is *not* sorted by address.
+    ///
+    /// But it is unique by address.
+    pub reverts: Vec<Vec<(Address, AccountRevertSorted)>>,
+    /// The size of the plain state in the bundle state
+    pub state_size: usize,
+    /// The size of reverts in the bundle state
+    pub reverts_size: usize,
+}
+
+/// Serializable version of `BundleAccount`
+#[derive(Debug, PartialEq, Eq)]
+struct BundleAccountSorted {
+    pub info: Option<AccountInfo>,
+    pub original_info: Option<AccountInfo>,
+    /// Contains both original and present state.
+    /// When extracting changeset we compare if original value is different from present value.
+    /// If it is different we add it to changeset.
+    /// If Account was destroyed we ignore original value and compare present state with
+    /// `U256::ZERO`.
+    pub storage: BTreeMap<U256, StorageSlot>,
+    /// Account status.
+    pub status: AccountStatus,
+}
+
+/// Serializable version of `AccountRevert`
+#[derive(Debug, PartialEq, Eq)]
+struct AccountRevertSorted {
+    pub account: AccountInfoRevert,
+    pub storage: BTreeMap<U256, RevertToSlot>,
+    pub previous_status: AccountStatus,
+    pub wipe_storage: bool,
+}
+
+/// Converts bundle state to sorted format for deterministic comparison
+fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSorted {
+    BundleStateSorted {
+        state: bundle_state
+            .state
+            .iter()
+            .map(|(addr, acc)| {
+                (
+                    *addr,
+                    BundleAccountSorted {
+                        info: acc.info.clone(),
+                        original_info: acc.original_info.clone(),
+                        storage: BTreeMap::from_iter(acc.storage.clone()),
+                        status: acc.status,
+                    },
+                )
+            })
+            .collect(),
+        contracts: BTreeMap::from_iter(bundle_state.contracts.clone()),
+        reverts: bundle_state
+            .reverts
+            .iter()
+            .map(|block| {
+                block
+                    .iter()
+                    .map(|(addr, rev)| {
+                        (
+                            *addr,
+                            AccountRevertSorted {
+                                account: rev.account.clone(),
+                                storage: BTreeMap::from_iter(rev.storage.clone()),
+                                previous_status: rev.previous_status,
+                                wipe_storage: rev.wipe_storage,
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .collect(),
+        state_size: bundle_state.state_size,
+        reverts_size: bundle_state.reverts_size,
+    }
 }
 
 /// Extracts execution data including codes, preimages, and hashed state from database
@@ -165,8 +231,8 @@ where
         block_prefix: &str,
         block_number: u64,
     ) -> eyre::Result<()> {
-        let re_executed_witness_path =
-            self.save_file(format!("{}.witness.re_executed.json", block_prefix), witness)?;
+        let filename = format!("{}.witness.re_executed.json", block_prefix);
+        let re_executed_witness_path = self.save_file(filename, witness)?;
 
         if let Some(healthy_node_client) = &self.healthy_node_client {
             let healthy_node_witness = futures::executor::block_on(async move {
@@ -177,17 +243,15 @@ where
                 .await
             })?;
 
+            let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(
-                format!("{}.witness.healthy.json", block_prefix),
+                filename,
                 &healthy_node_witness,
             )?;
 
             if witness != &healthy_node_witness {
-                let diff_path = self.save_diff(
-                    format!("{}.witness.diff", block_prefix),
-                    witness,
-                    &healthy_node_witness,
-                )?;
+                let filename = format!("{}.witness.diff", block_prefix);
+                let diff_path = self.save_diff(filename, witness, &healthy_node_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
                     diff_path = %diff_path.display(),
@@ -208,23 +272,22 @@ where
         block_prefix: &str,
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
+            let original_filename = format!("{}.bundle_state.original.json", block_prefix);
             let original_path = self.save_file(
-                format!("{}.bundle_state.original.json", block_prefix),
+                original_filename,
                 original_state,
             )?;
+            let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
             let re_executed_path = self.save_file(
-                format!("{}.bundle_state.re_executed.json", block_prefix),
+                re_executed_filename,
                 re_executed_state,
             )?;
 
             // Convert bundle state to sorted format for deterministic comparison
             let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
             let output_state_sorted = sort_bundle_state_for_comparison(original_state);
-            let diff_path = self.save_diff(
-                format!("{}.bundle_state.diff", block_prefix),
-                &bundle_state_sorted,
-                &output_state_sorted,
-            )?;
+            let filename = format!("{}.bundle_state.diff", block_prefix);
+            let diff_path = self.save_diff(filename, &bundle_state_sorted, &output_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
@@ -253,8 +316,9 @@ where
 
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
+                let filename = format!("{}.state_root.diff", block_prefix);
                 let diff_path = self.save_diff(
-                    format!("{}.state_root.diff", block_prefix),
+                    filename,
                     &re_executed_root,
                     &original_root,
                 )?;
@@ -262,8 +326,9 @@ where
             }
 
             if re_executed_root != block.state_root() {
+                let filename = format!("{}.header_state_root.diff", block_prefix);
                 let diff_path = self.save_diff(
-                    format!("{}.header_state_root.diff", block_prefix),
+                    filename,
                     &re_executed_root,
                     &block.state_root(),
                 )?;
@@ -451,28 +516,27 @@ mod tests {
         let sorted = sort_bundle_state_for_comparison(&bundle_state);
 
         // Verify state_size and reverts_size values match the fixture
-        assert_eq!(sorted["state_size"], 3);
-        assert_eq!(sorted["reverts_size"], 2);
+        assert_eq!(sorted.state_size, 3);
+        assert_eq!(sorted.reverts_size, 2);
 
         // Verify state contains our mock accounts
-        let state = sorted["state"].as_object().unwrap();
-        assert_eq!(state.len(), 3); // We added 3 accounts
+        assert_eq!(sorted.state.len(), 3); // We added 3 accounts
 
         // Verify contracts contains our mock contracts
-        let contracts = sorted["contracts"].as_object().unwrap();
-        assert_eq!(contracts.len(), 3); // We added 3 contracts
+        assert_eq!(sorted.contracts.len(), 3); // We added 3 contracts
 
         // Verify reverts is an array with multiple blocks of reverts
-        let reverts = sorted["reverts"].as_array().unwrap();
+        let reverts = &sorted.reverts;
         assert_eq!(reverts.len(), 2); // Fixture has two blocks of reverts
 
         // Verify that the state accounts have the expected structure
-        for (_addr_key, account_data) in state {
-            let account_obj = account_data.as_object().unwrap();
-            assert!(account_obj.contains_key("info"));
-            assert!(account_obj.contains_key("original_info"));
-            assert!(account_obj.contains_key("storage"));
-            assert!(account_obj.contains_key("status"));
+        for account_data in sorted.state.values() {
+            // BundleAccountSorted has info, original_info, storage, and status fields
+            // Just verify the structure exists by accessing the fields
+            let _info = &account_data.info;
+            let _original_info = &account_data.original_info;
+            let _storage = &account_data.storage;
+            let _status = &account_data.status;
         }
     }
 
