@@ -149,12 +149,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
             let mut rx_clone = rx.clone();
 
             // Wait up to 50ms for a new flashblock to arrive
-            if tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await.is_ok() {
-                let fresh = rx_clone.borrow();
-                if let Some(block) = self.extract_matching_block(fresh.as_ref(), parent_hash) {
-                    return Ok(Some(block));
-                }
-            }
+            let _ = tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await;
         }
 
         // Fall back to current block
