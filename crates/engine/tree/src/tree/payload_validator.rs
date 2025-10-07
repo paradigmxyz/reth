@@ -878,15 +878,14 @@ where
                 let spawn_start = Instant::now();
                 let (handle, strategy) = if trie_input.prefix_sets.is_empty() {
                     (
-                        self.payload_processor
-                            .spawn(
-                                env,
-                                txs,
-                                provider_builder,
-                                consistent_view,
-                                trie_input,
-                                &self.config,
-                            )?,
+                        self.payload_processor.spawn(
+                            env,
+                            txs,
+                            provider_builder,
+                            consistent_view,
+                            trie_input,
+                            &self.config,
+                        )?,
                         StateRootStrategy::StateRootTask,
                     )
                 // if prefix sets are not empty, we spawn a task that exclusively handles cache

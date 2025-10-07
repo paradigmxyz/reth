@@ -166,6 +166,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -847,18 +848,19 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor
-            .spawn(
-                Default::default(),
-                core::iter::empty::<
-                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                >(),
-                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                TrieInput::from_state(hashed_state),
-                &TreeConfig::default(),
-            )
-            .expect("failed to spawn payload processor task");
+        let mut handle =
+            payload_processor
+                .spawn(
+                    Default::default(),
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                    TrieInput::from_state(hashed_state),
+                    &TreeConfig::default(),
+                )
+                .expect("failed to spawn payload processor task");
 
         let mut state_hook = handle.state_hook();
 

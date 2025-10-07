@@ -5,7 +5,7 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender, SendError, TrySendError};
+use crossbeam_channel::{bounded, unbounded, Receiver, SendError, Sender, TrySendError};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -27,11 +27,11 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     fmt,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    marker::PhantomData,
     time::Instant,
 };
 use tokio::{runtime::Handle, task};
@@ -82,11 +82,11 @@ where
 
     let handle: ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx> =
         ProofTaskManagerHandle::new(
-        executor,
+            executor,
             task_sender,
-        Arc::new(AtomicUsize::new(0)),
-        #[cfg(feature = "metrics")]
-        Arc::new(ProofTaskMetrics::default()),
+            Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "metrics")]
+            Arc::new(ProofTaskMetrics::default()),
         );
 
     Ok(handle)
@@ -371,7 +371,6 @@ impl ProofTaskCtx {
 }
 
 /// Proof task kind dispatched via [`ProofTaskManagerHandle::queue_task`].
-#[derive(Debug)]
 pub enum ProofTaskKind {
     /// A storage proof request.
     StorageProof(StorageProofInput, Sender<StorageProofResult>),
@@ -449,15 +448,15 @@ where
     pub fn queue_task(&self, task: ProofTaskKind) {
         #[cfg(feature = "metrics")]
         {
-        match &task {
-            ProofTaskKind::BlindedAccountNode(_, _) => {
+            match &task {
+                ProofTaskKind::BlindedAccountNode(_, _) => {
                     self.metrics.account_nodes.fetch_add(1, Ordering::Relaxed);
-            }
-            ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                }
+                ProofTaskKind::BlindedStorageNode(_, _, _) => {
                     self.metrics.storage_nodes.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {}
             }
-            _ => {}
-        }
         }
 
         match self.task_sender.try_send(task) {
@@ -482,16 +481,16 @@ where
                                 "Failed to enqueue proof task: blocking send panicked"
                             );
                         }
-                                }
-                            });
-                        }
-                        Err(TrySendError::Disconnected(_)) => {
+                    }
+                });
+            }
+            Err(TrySendError::Disconnected(_)) => {
                 error!(
                     target: "trie::proof_task",
                     "Worker channel disconnected, dropping proof task"
                 );
-                }
             }
+        }
     }
 }
 
@@ -579,5 +578,102 @@ where
         }
 
         rx.recv().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::map::{B256Map, B256Set};
+    use crossbeam_channel::bounded;
+    use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
+    use reth_trie_common::{
+        updates::TrieUpdatesSorted, HashedAccountsSorted, HashedPostStateSorted,
+    };
+    use std::{sync::Arc, time::Duration};
+    use tokio::runtime::Runtime;
+
+    fn empty_task_ctx() -> ProofTaskCtx {
+        ProofTaskCtx::new(
+            Arc::new(TrieUpdatesSorted {
+                account_nodes: Vec::new(),
+                storage_tries: B256Map::default(),
+            }),
+            Arc::new(HashedPostStateSorted::new(
+                HashedAccountsSorted::default(),
+                B256Map::default(),
+            )),
+            Arc::new(TriePrefixSetsMut {
+                account_prefix_set: PrefixSetMut::default(),
+                storage_prefix_sets: B256Map::default(),
+                destroyed_accounts: B256Set::default(),
+            }),
+        )
+    }
+
+    #[test]
+    fn worker_pool_respects_storage_worker_limit() {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let runtime = Runtime::new().expect("failed to construct runtime");
+
+        let task_ctx = empty_task_ctx();
+        let handle = new_proof_task_handle(
+            runtime.handle().clone(),
+            consistent_view,
+            task_ctx,
+            4, // queue capacity
+            2, // storage worker count
+        )
+        .expect("failed to create proof task handle");
+
+        let (entered_tx, entered_rx) = bounded::<usize>(10);
+        let (release_tx, release_rx) = bounded::<()>(10);
+        let release_rx = Arc::new(release_rx);
+
+        for id in 0..2 {
+            let entered_tx = entered_tx.clone();
+            let release_rx = Arc::clone(&release_rx);
+            handle.queue_task(ProofTaskKind::Test(Box::new(move || {
+                entered_tx.send(id).unwrap();
+                release_rx.recv().unwrap();
+            })));
+        }
+
+        {
+            let entered_tx = entered_tx.clone();
+            let release_rx = Arc::clone(&release_rx);
+            handle.queue_task(ProofTaskKind::Test(Box::new(move || {
+                entered_tx.send(2).unwrap();
+                release_rx.recv().unwrap();
+            })));
+        }
+
+        drop(entered_tx);
+
+        let first =
+            entered_rx.recv_timeout(Duration::from_secs(1)).expect("first task not started");
+        let second =
+            entered_rx.recv_timeout(Duration::from_secs(1)).expect("second task not started");
+        assert_ne!(first, second, "tasks should be executed by distinct workers");
+
+        assert!(
+            entered_rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "third task started before workers were released"
+        );
+
+        release_tx.send(()).unwrap();
+
+        let third =
+            entered_rx.recv_timeout(Duration::from_secs(1)).expect("third task never started");
+        assert_eq!(third, 2);
+
+        release_tx.send(()).unwrap();
+        release_tx.send(()).unwrap();
+
+        drop(handle);
+        drop(release_tx);
+        drop(release_rx);
+        drop(runtime);
     }
 }
