@@ -15,9 +15,7 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
-use reth_provider::{
-    providers::ProviderNodeTypes, BlockNumReader, ProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{providers::ProviderNodeTypes, BlockNumReader, ProviderFactory};
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
     stages::ExecutionStage,
@@ -59,26 +57,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let components = components(provider_factory.chain_spec());
 
-        // Sanity check that we have static files available to unwind to the target block.
-        let highest_static_file_block =
-            provider_factory.static_file_provider().get_highest_static_files().max_block_num();
-        if highest_static_file_block
-            .filter(|highest_static_file_block| *highest_static_file_block > target)
-            .is_none()
-        {
-            return Err(eyre::eyre!("static files not available for target block {target}, highest is {highest_static_file_block:?}"));
-        }
-
         if self.offline {
             info!(target: "reth::cli", "Performing an unwind for offline-only data!");
         }
 
-        if let Some(highest_static_file_block) = highest_static_file_block {
-            info!(target: "reth::cli", ?target, ?highest_static_file_block, "Executing a pipeline unwind.");
-        } else {
-            info!(target: "reth::cli", ?target, "Executing a pipeline unwind.");
-        }
-        info!(target: "reth::cli", prune_config=?config.prune, "Using prune settings");
+        let highest_static_file_block = provider_factory.provider()?.last_block_number()?;
+        info!(target: "reth::cli", ?target, ?highest_static_file_block, prune_config=?config.prune,  "Executing a pipeline unwind.");
 
         // This will build an offline-only pipeline if the `offline` flag is enabled
         let mut pipeline =
