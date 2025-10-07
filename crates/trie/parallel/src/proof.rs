@@ -321,6 +321,17 @@ where
                 }
             }
         }
+
+        // Drain receivers for accounts the walker never touched (e.g. destroyed targets) so workers
+        // can deliver their results without hitting a closed channel.
+        for (hashed_address, rx) in storage_proof_receivers {
+            let decoded_storage_multiproof = rx.recv().map_err(|e| {
+                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                    DatabaseError::Other(format!("channel closed for {hashed_address}: {e}")),
+                ))
+            })??;
+            collected_decoded_storages.insert(hashed_address, decoded_storage_multiproof);
+        }
         let _ = hash_builder.root();
 
         let stats = tracker.finish();
