@@ -12,7 +12,7 @@ use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use reth_db_api::transaction::DbTx;
-use reth_execution_errors::SparseTrieError;
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
     ProviderResult,
@@ -319,9 +319,10 @@ where
 {
     /// Creates a new [`ProofTaskManager`] with pre-spawned storage proof workers.
     ///
-    /// The `max_concurrency` budget is split between pre-spawned storage workers and an
-    /// on-demand pool. At least one slot is always reserved for on-demand, so the actual
-    /// number of workers spawned is `min(storage_worker_count, max_concurrency - 1)`.
+    /// The `storage_worker_count` determines how many storage workers to spawn, and
+    /// `max_concurrency` determines the limit for on-demand operations (blinded nodes).
+    /// These are now independent - storage workers are spawned as requested, and on-demand
+    /// operations use a separate concurrency pool.
     /// Returns an error if the underlying provider fails to create the transactions required for
     /// spawning workers.
     pub fn new(
@@ -333,21 +334,19 @@ where
     ) -> ProviderResult<Self> {
         let (tx_sender, proof_task_rx) = channel();
 
-        let planned_workers = storage_worker_count.min(max_concurrency);
-
         // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
 
         tracing::info!(
             target: "trie::proof_task",
-            storage_worker_count = planned_workers,
+            storage_worker_count,
             max_concurrency,
             "Initializing storage worker pool with unbounded queue"
         );
 
         let mut spawned_workers = 0;
-        for worker_id in 0..planned_workers {
+        for worker_id in 0..storage_worker_count {
             let provider_ro = match view.provider_ro() {
                 Ok(provider_ro) => provider_ro,
                 Err(err) => {
@@ -355,7 +354,7 @@ where
                         target: "trie::proof_task",
                         worker_id,
                         ?err,
-                        requested = planned_workers,
+                        requested = storage_worker_count,
                         spawned_workers,
                         "Failed to create transaction for storage worker, falling back to on-demand execution"
                     );
@@ -379,8 +378,8 @@ where
             );
         }
 
-        // Allocate remaining capacity to on-demand pool for account trie operations.
-        let remaining_concurrency = max_concurrency.saturating_sub(spawned_workers);
+        // max_concurrency is now used solely for on-demand pool (account trie operations).
+        let remaining_concurrency = max_concurrency;
 
         Ok(Self {
             storage_work_tx,
@@ -955,31 +954,9 @@ mod tests {
         )
     }
 
-    /// Ensures the storage workers are capped by `max_concurrency`.
+    /// Ensures max_concurrency is independent of storage workers.
     #[test]
-    fn proof_task_manager_within_concurrency_limit() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let factory = create_test_provider_factory();
-            let view = ConsistentDbView::new(factory, None);
-            let ctx = test_ctx();
-
-            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 2, 2).unwrap();
-            // With max_concurrency=2 and storage_worker_count=2, we get 2 workers
-            assert_eq!(manager.storage_worker_count, 2);
-            // No remaining concurrency for on-demand
-            assert_eq!(manager.max_concurrency, 0);
-
-            drop(manager);
-            task::yield_now().await;
-        });
-    }
-
-    /// Ensures the manager caps storage workers to `max_concurrency` when requested count is
-    /// higher.
-    #[test]
-    fn proof_task_manager_handles_single_concurrency() {
+    fn proof_task_manager_independent_pools() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
@@ -988,10 +965,10 @@ mod tests {
             let ctx = test_ctx();
 
             let manager = ProofTaskManager::new(handle.clone(), view, ctx, 1, 5).unwrap();
-            // With max_concurrency=1 and storage_worker_count=5, we get 1 worker
-            assert_eq!(manager.storage_worker_count, 1);
-            // No remaining concurrency for on-demand
-            assert_eq!(manager.max_concurrency, 0);
+            // With storage_worker_count=5, we get exactly 5 workers
+            assert_eq!(manager.storage_worker_count, 5);
+            // max_concurrency=1 is for on-demand operations only
+            assert_eq!(manager.max_concurrency, 1);
 
             drop(manager);
             task::yield_now().await;
