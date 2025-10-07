@@ -52,15 +52,15 @@ type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 /// Internal message for storage proof workers.
 ///
 /// This is NOT exposed publicly. External callers still use `ProofTaskKind::StorageProof`
-/// which is routed through the manager's std::mpsc channel.
+/// which is routed through the manager's `std::mpsc` channel.
 #[derive(Debug)]
 struct StorageProofJob {
     /// Storage proof input parameters
     input: StorageProofInput,
     /// Channel to send result back to original caller
     ///
-    /// This is the same std::mpsc::Sender that the external caller provided in
-    /// ProofTaskKind::StorageProof(input, sender).
+    /// This is the same `std::mpsc::Sender` that the external caller provided in
+    /// `ProofTaskKind::StorageProof(input`, sender).
     result_sender: Sender<StorageProofResult>,
 }
 
@@ -69,6 +69,7 @@ struct StorageProofJob {
 /// These tasks are executed with lazily-created transactions that are
 /// returned to the pool after use (same as current behavior).
 #[derive(Debug)]
+#[allow(dead_code)]
 enum OnDemandTask {
     /// Fetch a blinded account node by path
     BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
@@ -96,7 +97,7 @@ enum OnDemandTask {
 ///
 /// The external API via `ProofTaskManagerHandle` is COMPLETELY UNCHANGED:
 /// - `queue_task(ProofTaskKind)` signature identical
-/// - Same std::mpsc message passing
+/// - Same `std::mpsc` message passing
 /// - Same return types and error handling
 ///
 /// All changes are internal routing optimizations.
@@ -105,7 +106,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     // ==================== STORAGE WORKER POOL (NEW) ====================
     /// Sender for storage proof tasks to worker pool.
     ///
-    /// Queue capacity = storage_worker_count * 2 (for 2x buffering)
+    /// Queue capacity = `storage_worker_count` * 2 (for 2x buffering)
     storage_work_tx: CrossbeamSender<StorageProofJob>,
 
     /// Number of storage workers successfully spawned.
@@ -116,7 +117,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     // ==================== ON-DEMAND TRANSACTION POOL (REFACTORED) ====================
     /// Maximum number of on-demand transactions for blinded node fetches.
     ///
-    /// Calculated as: max_concurrency - storage_worker_count
+    /// Calculated as: `max_concurrency` - `storage_worker_count`
     max_on_demand_txs: usize,
 
     /// Currently available on-demand transactions (reused after return).
@@ -129,8 +130,8 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
 
     /// Queue of pending on-demand tasks waiting for available transaction.
     ///
-    /// Replaces the old `pending_tasks` VecDeque which held all task types.
-    /// TODO: Change to VecDeque<OnDemandTask> in Phase 8 when implementing proper task routing
+    /// Replaces the old `pending_tasks` `VecDeque` which held all task types.
+    /// TODO: Change to `VecDeque`<OnDemandTask> in Phase 8 when implementing proper task routing
     pending_on_demand: VecDeque<ProofTaskKind>,
 
     // ==================== SHARED RESOURCES  ====================
@@ -145,7 +146,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
 
     /// A receiver for new proof task messages from external callers.
     ///
-    /// This is the std::mpsc channel connected to ProofTaskManagerHandle.
+    /// This is the `std::mpsc` channel connected to [`ProofTaskManagerHandle`].
     /// UNCHANGED - maintains interface compatibility.
     proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
 
@@ -172,7 +173,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
 /// Each worker:
 /// 1. Receives `StorageProofJob` from crossbeam bounded channel
 /// 2. Computes proof using its dedicated long-lived transaction
-/// 3. Sends result directly to original caller via std::mpsc
+/// 3. Sends result directly to original caller via `std::mpsc`
 /// 4. Repeats until channel closes (graceful shutdown)
 ///
 /// # Transaction Reuse
@@ -238,7 +239,7 @@ fn storage_worker_loop<Tx>(
         // ==================== RESULT DELIVERY ====================
         // Send result directly to original caller's std::mpsc::Receiver
         // If receiver is dropped (caller cancelled), log and continue
-        if let Err(_) = result_sender.send(result) {
+        if result_sender.send(result).is_err() {
             tracing::debug!(
                 target: "trie::proof_task",
                 worker_id,
@@ -685,7 +686,7 @@ where
     /// 1. Borrows self immutably
     /// 2. Computes the proof using the owned transaction
     /// 3. Returns only the result (transaction remains owned)
-    /// 4. Can be called repeatedly on the same ProofTaskTx instance
+    /// 4. Can be called repeatedly on the same [`ProofTaskTx`] instance
     ///
     /// # Usage
     ///

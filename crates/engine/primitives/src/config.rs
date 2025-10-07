@@ -38,7 +38,7 @@ const MAX_STORAGE_PROOF_WORKERS: usize = 12;
 /// Minimum number of storage proof workers
 const MIN_STORAGE_PROOF_WORKERS: usize = 2;
 
-/// Default ratio of storage proof workers to max_proof_task_concurrency
+/// Default ratio of storage proof workers to `max_proof_task_concurrency`
 const DEFAULT_STORAGE_PROOF_WORKER_RATIO: f32 = 0.5;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
@@ -131,7 +131,7 @@ pub struct TreeConfig {
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
     /// Number of dedicated storage proof workers.
-    /// If None, defaults to half of max_proof_task_concurrency.
+    /// If None, defaults to half of `max_proof_task_concurrency`.
     storage_proof_workers: Option<usize>,
 }
 
@@ -484,7 +484,7 @@ impl TreeConfig {
 
     /// Get the number of storage proof workers.
     ///
-    /// Defaults to half of max_proof_task_concurrency, clamped to valid range.
+    /// Defaults to half of `max_proof_task_concurrency`, clamped to valid range.
     pub fn storage_proof_workers(&self) -> usize {
         self.storage_proof_workers.unwrap_or_else(|| {
             let derived = (self.max_proof_task_concurrency as f32 *
@@ -495,7 +495,7 @@ impl TreeConfig {
 
     /// Set the number of storage proof workers explicitly.
     ///
-    /// Value is clamped to [MIN_STORAGE_PROOF_WORKERS, MAX_STORAGE_PROOF_WORKERS].
+    /// Value is clamped to [`MIN_STORAGE_PROOF_WORKERS`, `MAX_STORAGE_PROOF_WORKERS`].
     pub const fn with_storage_proof_workers(mut self, workers: usize) -> Self {
         // Note: Can't use clamp in const fn, so we'll do manual clamping
         let clamped = if workers < MIN_STORAGE_PROOF_WORKERS {
