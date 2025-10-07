@@ -96,8 +96,6 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     storage_worker_count: usize,
 
     /// Maximum number of on-demand transactions for blinded node fetches.
-    ///
-    /// Calculated as: `max_concurrency` - `storage_worker_count`
     max_on_demand_txs: usize,
 
     /// On-demand transaction pool for blinded node fetches.
@@ -935,7 +933,7 @@ mod tests {
     /// Ensures the storage worker pool plus on-demand pool never exceed the requested concurrency
     /// when the storage worker count saturates the budget.
     #[test]
-    fn proof_task_manager_respects_concurrency_budget() {
+    fn proof_task_manager_within_concurrency_limit() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
