@@ -306,9 +306,9 @@ where
             );
         }
 
-        // Note: Transaction return to pool is handled by dispatch_task() after spawn_blocking
-        // completes. The Arc<ProofTaskTx> is moved into the closure and returned as the result,
-        // then sent back to the pool automatically. No explicit return needed here.
+        // Note: Transaction return to pool is handled automatically.
+        // The Arc<ProofTaskTx> is moved into the closure and returned as the result,
+        // then sent back to the pool. No explicit return needed here.
     }
 }
 
