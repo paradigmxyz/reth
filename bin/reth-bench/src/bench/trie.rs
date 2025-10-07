@@ -207,6 +207,7 @@ impl Command {
                                     Some(account.into()),
                                     storages
                                         .into_iter()
+                                        .take(self.changed_storages)
                                         .map(|result| {
                                             let StorageEntry { key, value } = result?.1;
 
