@@ -1,14 +1,11 @@
 //! Config traits for various node components.
 
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, ETHEREUM_BLOCK_GAS_LIMIT_36M};
 use alloy_primitives::Bytes;
 use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
-
-/// 60M gas limit
-const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 
 /// A trait that provides payload builder settings.
 ///
@@ -43,9 +40,9 @@ pub trait PayloadBuilderConfig {
 
         match chain.kind() {
             ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi) => {
-                ETHEREUM_BLOCK_GAS_LIMIT_60M
+                ETHEREUM_BLOCK_GAS_LIMIT_30M
             }
-            ChainKind::Named(NamedChain::Mainnet) => ETHEREUM_BLOCK_GAS_LIMIT_60M,
+            ChainKind::Named(NamedChain::Mainnet) => ETHEREUM_BLOCK_GAS_LIMIT_30M,
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
         }
     }
@@ -87,4 +84,89 @@ pub trait RethTransactionPoolConfig {
 
     /// Returns max batch size for transaction batch insertion.
     fn max_batch_size(&self) -> usize;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{borrow::Cow, time::Duration};
+
+    #[derive(Default)]
+    struct DummyConfig;
+
+    impl PayloadBuilderConfig for DummyConfig {
+        fn extra_data(&self) -> Cow<'_, str> {
+            Cow::Borrowed("")
+        }
+
+        fn interval(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn gas_limit(&self) -> Option<u64> {
+            None
+        }
+
+        fn max_payload_tasks(&self) -> usize {
+            1
+        }
+    }
+
+    #[derive(Default)]
+    struct OverrideConfig(u64);
+
+    impl PayloadBuilderConfig for OverrideConfig {
+        fn extra_data(&self) -> Cow<'_, str> {
+            Cow::Borrowed("")
+        }
+
+        fn interval(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        fn gas_limit(&self) -> Option<u64> {
+            Some(self.0)
+        }
+
+        fn max_payload_tasks(&self) -> usize {
+            1
+        }
+    }
+
+    #[test]
+    fn default_gas_limits_match_chain_expectations() {
+        let cfg = DummyConfig;
+
+        assert_eq!(
+            cfg.gas_limit_for(Chain::from_named(NamedChain::Mainnet)),
+            ETHEREUM_BLOCK_GAS_LIMIT_30M
+        );
+        assert_eq!(
+            cfg.gas_limit_for(Chain::from_named(NamedChain::Sepolia)),
+            ETHEREUM_BLOCK_GAS_LIMIT_30M
+        );
+        assert_eq!(
+            cfg.gas_limit_for(Chain::from_named(NamedChain::Holesky)),
+            ETHEREUM_BLOCK_GAS_LIMIT_30M
+        );
+        assert_eq!(
+            cfg.gas_limit_for(Chain::from_named(NamedChain::Hoodi)),
+            ETHEREUM_BLOCK_GAS_LIMIT_30M
+        );
+        assert_eq!(cfg.gas_limit_for(Chain::from(1337u64)), ETHEREUM_BLOCK_GAS_LIMIT_36M);
+    }
+
+    #[test]
+    fn explicit_gas_limit_is_respected() {
+        let cfg = OverrideConfig(42);
+        assert_eq!(cfg.gas_limit_for(Chain::from_named(NamedChain::Mainnet)), 42);
+    }
 }
