@@ -495,7 +495,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     }
 
     /// Returns `true` if the handle is connected to a background state root task.
-    pub fn supports_state_root(&self) -> bool {
+    pub const fn supports_state_root(&self) -> bool {
         self.state_root.is_some()
     }
 
