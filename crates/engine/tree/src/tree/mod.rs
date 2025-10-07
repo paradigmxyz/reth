@@ -61,7 +61,8 @@ mod cached_state;
 pub mod error;
 mod instrumented_state;
 mod invalid_headers;
-mod metrics;
+/// Metrics for the engine tree.
+pub mod metrics;
 mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;

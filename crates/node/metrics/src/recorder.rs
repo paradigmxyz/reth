@@ -17,8 +17,11 @@ pub fn install_prometheus_recorder() -> &'static PrometheusRecorder {
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
-static PROMETHEUS_RECORDER_HANDLE: LazyLock<PrometheusRecorder> =
-    LazyLock::new(|| PrometheusRecorder::install().unwrap());
+static PROMETHEUS_RECORDER_HANDLE: LazyLock<PrometheusRecorder> = LazyLock::new(|| {
+    // Register all histogram buckets before installing the recorder
+    crate::buckets::register_default_histogram_buckets();
+    PrometheusRecorder::install().unwrap()
+});
 
 /// A handle to the Prometheus recorder.
 ///
@@ -75,7 +78,16 @@ impl PrometheusRecorder {
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install() -> eyre::Result<Self> {
-        let recorder = PrometheusBuilder::new().build_recorder();
+        let mut builder = PrometheusBuilder::new();
+
+        // Apply all registered bucket configurations
+        for bucket_config in crate::buckets::get_registered_buckets() {
+            builder = builder
+                .set_buckets_for_metric(bucket_config.matcher, &bucket_config.buckets)
+                .wrap_err("Failed to set histogram buckets")?;
+        }
+
+        let recorder = builder.build_recorder();
         let handle = recorder.handle();
 
         // Build metrics stack

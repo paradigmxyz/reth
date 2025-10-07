@@ -204,7 +204,7 @@ impl BlockValidationMetrics {
 /// EF execution Metrics
 #[derive(Metrics)]
 #[metrics(scope = "ef_execution")]
-pub(crate) struct EfExecutionMetrics {
+pub struct EfExecutionMetrics {
     /// Total number of inclusion list transactions received in payload
     pub(crate) inclusion_list_transactions_received_in_payload_total: Counter,
     /// Total number of valid inclusion list transactions
@@ -250,8 +250,6 @@ impl EfExecutionMetrics {
         self.inclusion_list_unsatisfied_blocks_total.increment(1);
     }
 }
-
-
 
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]

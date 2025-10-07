@@ -22,6 +22,7 @@ jsonrpsee-server.workspace = true
 http.workspace = true
 tower.workspace = true
 
+parking_lot.workspace = true
 tracing.workspace = true
 eyre.workspace = true
 

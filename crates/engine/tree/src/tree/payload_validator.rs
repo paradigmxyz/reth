@@ -1211,7 +1211,7 @@ where
         S: StateProvider,
     {
         let mut invalid_count = 0;
-        
+
         // 1) Gather all tx hashes already in the block
         let included: BTreeSet<_> =
             block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
@@ -1225,19 +1225,19 @@ where
             let h = tx.tx_hash();
 
             // Skip if already included
-            if included.contains(h){
+            if included.contains(h) {
                 continue
             }
-            
+
             // Skip blob (EIP-4844) transactions
             if tx.is_eip4844() {
-                invalid_count +=1;
+                invalid_count += 1;
                 continue
             }
-            
+
             //Skip if not enough gas
             if tx.gas_limit() > remaining {
-                invalid_count +=1;
+                invalid_count += 1;
                 continue
             }
 
@@ -1248,10 +1248,10 @@ where
             let account_nonce = match state_provider.account_nonce(&sender) {
                 Ok(Some(nonce)) => nonce,
                 // account does not exist or error reading nonce, skip
-                Ok(None) | Err(_) =>{ 
-                    invalid_count +=1;
+                Ok(None) | Err(_) => {
+                    invalid_count += 1;
                     continue
-                }, 
+                }
             };
 
             // Check nonce
@@ -1264,9 +1264,9 @@ where
                 let account_balance = match state_provider.account_balance(&sender) {
                     Ok(Some(balance)) => balance,
                     Ok(None) | Err(_) => {
-                        invalid_count +=1;
+                        invalid_count += 1;
                         continue
-                    }, /* account does not exist or error reading balance, skip */
+                    } /* account does not exist or error reading balance, skip */
                 };
 
                 if account_balance >= max_cost {
@@ -1285,7 +1285,7 @@ where
         let valid_count = il_len - invalid_count;
         self.metrics.ef_excution.record_invalid_inclusion_list_transactions(invalid_count);
         self.metrics.ef_excution.record_valid_inclusion_list_transactions(valid_count);
-        
+
         Ok(())
     }
 }

@@ -105,11 +105,11 @@ impl MetricServer {
                     let service = tower::service_fn(move |_| {
                         (hook)();
                         let mut metrics = handle.handle().render();
-                       
+
                         // TODO: find a better fix for EF execution metrics
                         // For EF metrics remove the reth and EF prefix
                         metrics = metrics.replace("reth_ef_", "");
-                        
+
                         let mut response = Response::new(metrics);
                         response
                             .headers_mut()
