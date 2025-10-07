@@ -16,9 +16,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-};
+use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -35,12 +33,15 @@ use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, HeaderProvider,
-    ProviderError, StateProvider, StateProviderFactory, StateReader, StateRootProvider,
+    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateProvider, StateProviderFactory,
+    StateReader, StateRootProvider, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
+use reth_trie::{
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, KeccakKeyHasher, TrieInput,
+};
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -166,7 +167,7 @@ where
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader>
+    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader>
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
@@ -282,7 +283,7 @@ where
         input: BlockOrPayload<T>,
         execution_err: InsertBlockErrorKind,
         parent_block: &SealedHeader<N::BlockHeader>,
-    ) -> Result<ExecutedBlockWithTrieUpdates<N>, InsertPayloadError<N::Block>>
+    ) -> Result<ExecutedBlock<N>, InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
@@ -395,15 +396,12 @@ where
         // Plan the strategy used for state root computation.
         let state_root_plan = self.plan_state_root_computation(&input, &ctx);
         let persisting_kind = state_root_plan.persisting_kind;
-        let has_ancestors_with_missing_trie_updates =
-            state_root_plan.has_ancestors_with_missing_trie_updates;
         let strategy = state_root_plan.strategy;
 
         debug!(
             target: "engine::tree",
             block=?block_num_hash,
             ?strategy,
-            ?has_ancestors_with_missing_trie_updates,
             "Deciding which state root algorithm to run"
         );
 
@@ -558,38 +556,11 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(&output.state));
 
-        // If the block doesn't connect to the database tip, we don't save its trie updates, because
-        // they may be incorrect as they were calculated on top of the forked block.
-        //
-        // We also only save trie updates if all ancestors have trie updates, because otherwise the
-        // trie updates may be incorrect.
-        //
-        // Instead, they will be recomputed on persistence.
-        let connects_to_last_persisted =
-            ensure_ok_post_block!(self.block_connects_to_last_persisted(ctx, &block), block);
-        let should_discard_trie_updates =
-            !connects_to_last_persisted || has_ancestors_with_missing_trie_updates;
-        debug!(
-            target: "engine::tree",
-            block = ?block_num_hash,
-            connects_to_last_persisted,
-            has_ancestors_with_missing_trie_updates,
-            should_discard_trie_updates,
-            "Checking if should discard trie updates"
-        );
-        let trie_updates = if should_discard_trie_updates {
-            ExecutedTrieUpdates::Missing
-        } else {
-            ExecutedTrieUpdates::Present(Arc::new(trie_output))
-        };
-
-        Ok(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block),
-                execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-                hashed_state: Arc::new(hashed_state),
-            },
-            trie: trie_updates,
+        Ok(ExecutedBlock {
+            recovered_block: Arc::new(block),
+            execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_output),
         })
     }
 
@@ -715,51 +686,6 @@ where
         input.append_ref(hashed_state);
 
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
-    }
-
-    /// Checks if the given block connects to the last persisted block, i.e. if the last persisted
-    /// block is the ancestor of the given block.
-    ///
-    /// This checks the database for the actual last persisted block, not [`PersistenceState`].
-    fn block_connects_to_last_persisted(
-        &self,
-        ctx: TreeCtx<'_, N>,
-        block: &RecoveredBlock<N::Block>,
-    ) -> ProviderResult<bool> {
-        let provider = self.provider.database_provider_ro()?;
-        let last_persisted_block = provider.best_block_number()?;
-        let last_persisted_hash = provider
-            .block_hash(last_persisted_block)?
-            .ok_or(ProviderError::HeaderNotFound(last_persisted_block.into()))?;
-        let last_persisted = NumHash::new(last_persisted_block, last_persisted_hash);
-
-        let parent_num_hash = |hash: B256| -> ProviderResult<NumHash> {
-            let parent_num_hash =
-                if let Some(header) = ctx.state().tree_state.sealed_header_by_hash(&hash) {
-                    Some(header.parent_num_hash())
-                } else {
-                    provider.sealed_header_by_hash(hash)?.map(|header| header.parent_num_hash())
-                };
-
-            parent_num_hash.ok_or(ProviderError::BlockHashNotFound(hash))
-        };
-
-        let mut parent_block = block.parent_num_hash();
-        while parent_block.number > last_persisted.number {
-            parent_block = parent_num_hash(parent_block.hash)?;
-        }
-
-        let connects = parent_block == last_persisted;
-
-        debug!(
-            target: "engine::tree",
-            num_hash = ?block.num_hash(),
-            ?last_persisted,
-            ?parent_block,
-            "Checking if block connects to last persisted block"
-        );
-
-        Ok(connects)
     }
 
     /// Validates the block after execution.
@@ -926,27 +852,6 @@ where
         }
     }
 
-    /// Check if the given block has any ancestors with missing trie updates.
-    fn has_ancestors_with_missing_trie_updates(
-        &self,
-        target_header: BlockWithParent,
-        state: &EngineApiTreeState<N>,
-    ) -> bool {
-        // Walk back through the chain starting from the parent of the target block
-        let mut current_hash = target_header.parent;
-        while let Some(block) = state.tree_state.blocks_by_hash.get(&current_hash) {
-            // Check if this block is missing trie updates
-            if block.trie.is_missing() {
-                return true;
-            }
-
-            // Move to the parent block
-            current_hash = block.recovered_block().parent_hash();
-        }
-
-        false
-    }
-
     /// Creates a `StateProviderBuilder` for the given parent hash.
     ///
     /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
@@ -997,20 +902,12 @@ where
         let can_run_parallel =
             persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
 
-        // Check for ancestors with missing trie updates
-        let has_ancestors_with_missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(input.block_with_parent(), ctx.state());
-
         // Decide on the strategy.
         // Use state root task only if:
         // 1. No persistence is in progress
         // 2. Config allows it
-        // 3. No ancestors with missing trie updates. If any exist, it will mean that every state
-        //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
-        //    It's cheaper to run a parallel state root that does one walk over trie tables while
-        //    accounting for the prefix sets.
         let strategy = if can_run_parallel {
-            if self.config.use_state_root_task() && !has_ancestors_with_missing_trie_updates {
+            if self.config.use_state_root_task() {
                 StateRootStrategy::StateRootTask
             } else {
                 StateRootStrategy::Parallel
@@ -1023,11 +920,10 @@ where
             target: "engine::tree",
             block=?input.num_hash(),
             ?strategy,
-            has_ancestors_with_missing_trie_updates,
             "Planned state root computation strategy"
         );
 
-        StateRootPlan { strategy, has_ancestors_with_missing_trie_updates, persisting_kind }
+        StateRootPlan { strategy, persisting_kind }
     }
 
     /// Called when an invalid block is encountered during validation.
@@ -1061,7 +957,7 @@ where
     ///    block.
     /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
     ///    [`HashedPostState`] from them.
-    fn compute_trie_input<TP: DBProvider + BlockNumReader>(
+    fn compute_trie_input<TP: DBProvider + BlockNumReader + TrieReader>(
         &self,
         persisting_kind: PersistingKind,
         provider: TP,
@@ -1118,17 +1014,19 @@ where
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         // Retrieve revert state for historical block.
-        let revert_state = if block_number == best_block_number {
+        let (revert_state, revert_trie) = if block_number == best_block_number {
             // We do not check against the `last_block_number` here because
-            // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+            // `HashedPostState::from_reverts` / `trie_reverts` only use the database tables, and
+            // not static files.
             debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
-            HashedPostState::default()
+            (HashedPostState::default(), TrieUpdatesSorted::default())
         } else {
             let revert_state = HashedPostState::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 block_number + 1..,
             )
             .map_err(ProviderError::from)?;
+            let revert_trie = provider.trie_reverts(block_number + 1)?;
             debug!(
                 target: "engine::tree",
                 block_number,
@@ -1137,9 +1035,10 @@ where
                 storages = revert_state.storages.len(),
                 "Non-empty revert state"
             );
-            revert_state
+            (revert_state, revert_trie)
         };
-        input.append(revert_state);
+
+        input.append_cached(revert_trie.into(), revert_state);
 
         // Extend with contents of parent in-memory blocks.
         input.extend_with_blocks(
@@ -1151,8 +1050,7 @@ where
 }
 
 /// Output of block or payload validation.
-pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> =
-    Result<ExecutedBlockWithTrieUpdates<N>, E>;
+pub type ValidationOutcome<N, E = InsertPayloadError<BlockTy<N>>> = Result<ExecutedBlock<N>, E>;
 
 /// Strategy describing how to compute the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1169,8 +1067,6 @@ enum StateRootStrategy {
 struct StateRootPlan {
     /// Strategy that should be attempted for computing the state root.
     strategy: StateRootStrategy,
-    /// Whether ancestors have missing trie updates.
-    has_ancestors_with_missing_trie_updates: bool,
     /// The persisting kind for this block.
     persisting_kind: PersistingKind,
 }
@@ -1228,7 +1124,7 @@ pub trait EngineValidator<
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader>
+    P: DatabaseProviderFactory<Provider: BlockReader + TrieReader>
         + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader

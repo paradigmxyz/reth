@@ -32,7 +32,7 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -62,12 +62,17 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    trie_cursor::{InMemoryTrieCursor, TrieCursor, TrieCursorIter},
+    trie_cursor::{
+        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
+        TrieCursorIter,
+    },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
     TrieChangeSetsEntry,
 };
-use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
+use reth_trie_db::{
+    DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
+};
 use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -256,10 +261,7 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Writes executed blocks and state to storage.
-    pub fn save_blocks(
-        &self,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
-    ) -> ProviderResult<()> {
+    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
             return Ok(())
@@ -283,12 +285,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock { recovered_block, execution_output, hashed_state },
-            mut trie,
-        } in blocks
+        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates } in
+            blocks
         {
-            let block_hash = recovered_block.hash();
             let block_number = recovered_block.number();
             self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
 
@@ -298,9 +297,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // insert hashes and intermediate merkle nodes
             self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
-
-            let trie_updates =
-                trie.take_present().ok_or(ProviderError::MissingTrieUpdates(block_hash))?;
 
             // sort trie updates and insert changesets
             let trie_updates_sorted = (*trie_updates).clone().into_sorted();
@@ -2224,7 +2220,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted> {
         let tx = self.tx_ref();
 
@@ -2272,6 +2268,72 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider
             .collect();
 
         Ok(TrieUpdatesSorted { account_nodes, storage_tries })
+    }
+
+    fn get_block_trie_updates(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<TrieUpdatesSorted> {
+        let tx = self.tx_ref();
+
+        // Step 1: Get the trie reverts for the state after the target block
+        let reverts = self.trie_reverts(block_number + 1)?;
+
+        // Step 2: Create an InMemoryTrieCursorFactory with the reverts
+        // This gives us the trie state as it was after the target block was processed
+        let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+        let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+
+        // Step 3: Collect all account trie nodes that changed in the target block
+        let mut trie_updates = TrieUpdatesSorted::default();
+
+        // Walk through all account trie changes for this block
+        let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
+        let mut account_cursor = cursor_factory.account_trie_cursor()?;
+
+        for entry in accounts_trie_cursor.walk_dup(Some(block_number), None)? {
+            let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
+            // Look up the current value of this trie node using the overlay cursor
+            let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
+            trie_updates.account_nodes.push((nibbles.0, node_value));
+        }
+
+        // Step 4: Collect all storage trie nodes that changed in the target block
+        let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
+        let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
+        let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
+
+        let mut current_hashed_address = None;
+        let mut storage_cursor = None;
+
+        for entry in storages_trie_cursor.walk_range(storage_range_start..storage_range_end)? {
+            let (
+                BlockNumberHashedAddress((_, hashed_address)),
+                TrieChangeSetsEntry { nibbles, .. },
+            ) = entry?;
+
+            // Check if we need to create a new storage cursor for a different account
+            if current_hashed_address != Some(hashed_address) {
+                storage_cursor = Some(cursor_factory.storage_trie_cursor(hashed_address)?);
+                current_hashed_address = Some(hashed_address);
+            }
+
+            // Look up the current value of this storage trie node
+            let cursor =
+                storage_cursor.as_mut().expect("storage_cursor was just initialized above");
+            let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
+            trie_updates
+                .storage_tries
+                .entry(hashed_address)
+                .or_insert_with(|| StorageTrieUpdatesSorted {
+                    storage_nodes: Vec::new(),
+                    is_deleted: false,
+                })
+                .storage_nodes
+                .push((nibbles.0, node_value));
+        }
+
+        Ok(trie_updates)
     }
 }
 
@@ -4320,5 +4382,278 @@ mod tests {
         assert_eq!(storage_entries2.len(), 0, "Storage address2 should be empty after wipe");
 
         provider_rw.commit().unwrap();
+    }
+
+    #[test]
+    fn test_get_block_trie_updates() {
+        use reth_db_api::models::BlockNumberHashedAddress;
+        use reth_trie::{BranchNodeCompact, StorageTrieEntry};
+
+        let factory = create_test_provider_factory();
+        let provider_rw = factory.provider_rw().unwrap();
+
+        let target_block = 2u64;
+        let next_block = 3u64;
+
+        // Create test nibbles and nodes for accounts
+        let account_nibbles1 = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+        let account_nibbles2 = Nibbles::from_nibbles([0x5, 0x6, 0x7, 0x8]);
+        let account_nibbles3 = Nibbles::from_nibbles([0x9, 0xa, 0xb, 0xc]);
+
+        let node1 = BranchNodeCompact::new(
+            0b1111_1111_0000_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let node2 = BranchNodeCompact::new(
+            0b0000_0000_1111_1111,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let node3 = BranchNodeCompact::new(
+            0b1010_1010_1010_1010,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Pre-populate AccountsTrie with nodes that will be the final state
+        {
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
+            cursor.insert(StoredNibbles(account_nibbles1), &node1).unwrap();
+            cursor.insert(StoredNibbles(account_nibbles2), &node2).unwrap();
+            // account_nibbles3 will be deleted (not in final state)
+        }
+
+        // Insert trie changesets for target_block
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>().unwrap();
+            // nibbles1 was updated in target_block (old value stored)
+            cursor
+                .append_dup(
+                    target_block,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(account_nibbles1),
+                        node: Some(BranchNodeCompact::new(
+                            0b1111_0000_0000_0000, // old value
+                            0b0000_0000_0000_0000,
+                            0b0000_0000_0000_0000,
+                            vec![],
+                            None,
+                        )),
+                    },
+                )
+                .unwrap();
+            // nibbles2 was created in target_block (no old value)
+            cursor
+                .append_dup(
+                    target_block,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(account_nibbles2),
+                        node: None,
+                    },
+                )
+                .unwrap();
+        }
+
+        // Insert trie changesets for next_block (to test overlay)
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::AccountsTrieChangeSets>().unwrap();
+            // nibbles3 was deleted in next_block (old value stored)
+            cursor
+                .append_dup(
+                    next_block,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(account_nibbles3),
+                        node: Some(node3),
+                    },
+                )
+                .unwrap();
+        }
+
+        // Storage trie updates
+        let storage_address1 = B256::from([1u8; 32]);
+        let storage_nibbles1 = Nibbles::from_nibbles([0xa, 0xb]);
+        let storage_nibbles2 = Nibbles::from_nibbles([0xc, 0xd]);
+
+        let storage_node1 = BranchNodeCompact::new(
+            0b1111_1111_1111_0000,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        let storage_node2 = BranchNodeCompact::new(
+            0b0101_0101_0101_0101,
+            0b0000_0000_0000_0000,
+            0b0000_0000_0000_0000,
+            vec![],
+            None,
+        );
+
+        // Pre-populate StoragesTrie with final state
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            cursor
+                .upsert(
+                    storage_address1,
+                    &StorageTrieEntry {
+                        nibbles: StoredNibblesSubKey(storage_nibbles1),
+                        node: storage_node1.clone(),
+                    },
+                )
+                .unwrap();
+            // storage_nibbles2 was deleted in next_block, so it's not in final state
+        }
+
+        // Insert storage trie changesets for target_block
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>().unwrap();
+            let key = BlockNumberHashedAddress((target_block, storage_address1));
+
+            // storage_nibbles1 was updated
+            cursor
+                .append_dup(
+                    key,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(storage_nibbles1),
+                        node: Some(BranchNodeCompact::new(
+                            0b0000_0000_1111_1111, // old value
+                            0b0000_0000_0000_0000,
+                            0b0000_0000_0000_0000,
+                            vec![],
+                            None,
+                        )),
+                    },
+                )
+                .unwrap();
+
+            // storage_nibbles2 was created
+            cursor
+                .append_dup(
+                    key,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(storage_nibbles2),
+                        node: None,
+                    },
+                )
+                .unwrap();
+        }
+
+        // Insert storage trie changesets for next_block (to test overlay)
+        {
+            let mut cursor =
+                provider_rw.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>().unwrap();
+            let key = BlockNumberHashedAddress((next_block, storage_address1));
+
+            // storage_nibbles2 was deleted in next_block
+            cursor
+                .append_dup(
+                    key,
+                    TrieChangeSetsEntry {
+                        nibbles: StoredNibblesSubKey(storage_nibbles2),
+                        node: Some(BranchNodeCompact::new(
+                            0b0101_0101_0101_0101, // value that was deleted
+                            0b0000_0000_0000_0000,
+                            0b0000_0000_0000_0000,
+                            vec![],
+                            None,
+                        )),
+                    },
+                )
+                .unwrap();
+        }
+
+        provider_rw.commit().unwrap();
+
+        // Now test get_block_trie_updates
+        let provider = factory.provider().unwrap();
+        let result = provider.get_block_trie_updates(target_block).unwrap();
+
+        // Verify account trie updates
+        assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");
+
+        // Check nibbles1 - should have the current value (node1)
+        let nibbles1_update = result
+            .account_nodes
+            .iter()
+            .find(|(n, _)| n == &account_nibbles1)
+            .expect("Should find nibbles1");
+        assert!(nibbles1_update.1.is_some(), "nibbles1 should have a value");
+        assert_eq!(
+            nibbles1_update.1.as_ref().unwrap().state_mask,
+            node1.state_mask,
+            "nibbles1 should have current value"
+        );
+
+        // Check nibbles2 - should have the current value (node2)
+        let nibbles2_update = result
+            .account_nodes
+            .iter()
+            .find(|(n, _)| n == &account_nibbles2)
+            .expect("Should find nibbles2");
+        assert!(nibbles2_update.1.is_some(), "nibbles2 should have a value");
+        assert_eq!(
+            nibbles2_update.1.as_ref().unwrap().state_mask,
+            node2.state_mask,
+            "nibbles2 should have current value"
+        );
+
+        // nibbles3 should NOT be in the result (it was changed in next_block, not target_block)
+        assert!(
+            !result.account_nodes.iter().any(|(n, _)| n == &account_nibbles3),
+            "nibbles3 should not be in target_block updates"
+        );
+
+        // Verify storage trie updates
+        assert_eq!(result.storage_tries.len(), 1, "Should have 1 storage trie");
+        let storage_updates = result
+            .storage_tries
+            .get(&storage_address1)
+            .expect("Should have storage updates for address1");
+
+        assert_eq!(storage_updates.storage_nodes.len(), 2, "Should have 2 storage node updates");
+
+        // Check storage_nibbles1 - should have current value
+        let storage1_update = storage_updates
+            .storage_nodes
+            .iter()
+            .find(|(n, _)| n == &storage_nibbles1)
+            .expect("Should find storage_nibbles1");
+        assert!(storage1_update.1.is_some(), "storage_nibbles1 should have a value");
+        assert_eq!(
+            storage1_update.1.as_ref().unwrap().state_mask,
+            storage_node1.state_mask,
+            "storage_nibbles1 should have current value"
+        );
+
+        // Check storage_nibbles2 - was created in target_block, will be deleted in next_block
+        // So it should have a value (the value that will be deleted)
+        let storage2_update = storage_updates
+            .storage_nodes
+            .iter()
+            .find(|(n, _)| n == &storage_nibbles2)
+            .expect("Should find storage_nibbles2");
+        assert!(
+            storage2_update.1.is_some(),
+            "storage_nibbles2 should have a value (the node that will be deleted in next block)"
+        );
+        assert_eq!(
+            storage2_update.1.as_ref().unwrap().state_mask,
+            storage_node2.state_mask,
+            "storage_nibbles2 should have the value that was created and will be deleted"
+        );
     }
 }

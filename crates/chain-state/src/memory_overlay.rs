@@ -1,4 +1,4 @@
-use super::ExecutedBlockWithTrieUpdates;
+use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_errors::ProviderResult;
@@ -24,7 +24,7 @@ pub struct MemoryOverlayStateProviderRef<
     /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
+    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_input: OnceLock<TrieInput>,
 }
@@ -41,10 +41,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
-    pub fn new(
-        historical: Box<dyn StateProvider + 'a>,
-        in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
-    ) -> Self {
+    pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
         Self { historical, in_memory, trie_input: OnceLock::new() }
     }
 
@@ -60,7 +57,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
                 self.in_memory
                     .iter()
                     .rev()
-                    .map(|block| (block.hashed_state.as_ref(), block.trie.as_ref())),
+                    .map(|block| (block.hashed_state.as_ref(), block.trie_updates.as_ref())),
             )
         })
     }

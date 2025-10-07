@@ -26,7 +26,7 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::HashedPostState;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -147,7 +147,7 @@ struct TestHarness {
     >,
     to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
-    blocks: Vec<ExecutedBlockWithTrieUpdates>,
+    blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
     block_builder: TestBlockBuilder,
     provider: MockEthProvider,
@@ -227,7 +227,7 @@ impl TestHarness {
         }
     }
 
-    fn with_blocks(mut self, blocks: Vec<ExecutedBlockWithTrieUpdates>) -> Self {
+    fn with_blocks(mut self, blocks: Vec<ExecutedBlock>) -> Self {
         let mut blocks_by_hash = HashMap::default();
         let mut blocks_by_number = BTreeMap::new();
         let mut state_by_hash = HashMap::default();
@@ -252,7 +252,6 @@ impl TestHarness {
             blocks_by_number,
             current_canonical_head: blocks.last().unwrap().recovered_block().num_hash(),
             parent_to_child,
-            persisted_trie_updates: HashMap::default(),
             engine_kind: EngineApiKind::Ethereum,
         };
 
@@ -403,18 +402,22 @@ impl ValidatorTestHarness {
     }
 
     /// Configure `PersistenceState` for specific `PersistingKind` scenarios
-    fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
-        use crate::tree::persistence_state::CurrentPersistenceAction;
+    fn start_persistence_operation(
+        &mut self,
+        action: crate::tree::persistence_state::CurrentPersistenceAction,
+    ) {
         use tokio::sync::oneshot;
 
         // Create a dummy receiver for testing - it will never receive a value
         let (_tx, rx) = oneshot::channel();
 
         match action {
-            CurrentPersistenceAction::SavingBlocks { highest } => {
+            crate::tree::persistence_state::CurrentPersistenceAction::SavingBlocks { highest } => {
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
-            CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
+            crate::tree::persistence_state::CurrentPersistenceAction::RemovingBlocks {
+                new_tip_num,
+            } => {
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -686,6 +689,7 @@ async fn test_holesky_payload() {
 
 #[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
+    use crate::tree::persistence_state::CurrentPersistenceAction;
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
 
@@ -827,25 +831,21 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
     for block in &chain_a {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block.clone()),
-                execution_output: Arc::new(ExecutionOutcome::default()),
-                hashed_state: Arc::new(HashedPostState::default()),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
+            recovered_block: Arc::new(block.clone()),
+            execution_output: Arc::new(ExecutionOutcome::default()),
+            hashed_state: Arc::new(HashedPostState::default()),
+            trie_updates: Arc::new(TrieUpdates::default()),
         });
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlockWithTrieUpdates {
-            block: ExecutedBlock {
-                recovered_block: Arc::new(block.clone()),
-                execution_output: Arc::new(ExecutionOutcome::default()),
-                hashed_state: Arc::new(HashedPostState::default()),
-            },
-            trie: ExecutedTrieUpdates::empty(),
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
+            recovered_block: Arc::new(block.clone()),
+            execution_output: Arc::new(ExecutionOutcome::default()),
+            hashed_state: Arc::new(HashedPostState::default()),
+            trie_updates: Arc::new(TrieUpdates::default()),
         });
     }
 
@@ -876,6 +876,7 @@ fn test_tree_state_on_new_head_deep_fork() {
 
 #[tokio::test]
 async fn test_get_canonical_blocks_to_persist() {
+    use crate::tree::persistence_state::CurrentPersistenceAction;
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
