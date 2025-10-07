@@ -28,7 +28,7 @@ pub use log::{ColorMode, LogArgs, Verbosity};
 mod trace;
 pub use trace::TraceArgs;
 
-/// `MetricArgs` to configure telemetry metrics.
+/// `MetricArgs` to configure metrics.
 mod metric;
 pub use metric::MetricArgs;
 
