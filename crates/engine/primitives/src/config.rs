@@ -414,7 +414,7 @@ impl TreeConfig {
     }
 
     /// Setter for the number of reserved CPU cores for any non-reth processes
-    pub fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
+    pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
         self
     }
