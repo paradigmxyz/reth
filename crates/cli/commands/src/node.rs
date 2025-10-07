@@ -38,7 +38,7 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     )]
     pub chain: Arc<C::ChainSpec>,
 
-    /// Enable metrics export.
+    /// Prometheus metrics configuration.
     #[command(flatten)]
     pub metrics: MetricArgs,
 
