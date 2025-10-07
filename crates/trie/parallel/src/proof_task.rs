@@ -303,9 +303,6 @@ where
             );
         }
 
-        // Note: Transaction return to pool is handled automatically.
-        // The Arc<ProofTaskTx> is moved into the closure and returned as the result,
-        // then sent back to the pool. No explicit return needed here.
     }
 }
 
