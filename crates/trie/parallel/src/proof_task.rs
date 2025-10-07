@@ -928,7 +928,8 @@ mod tests {
         });
     }
 
-    /// Ensures the manager caps storage workers to `max_concurrency` when requested count is higher.
+    /// Ensures the manager caps storage workers to `max_concurrency` when requested count is
+    /// higher.
     #[test]
     fn proof_task_manager_handles_single_concurrency() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
