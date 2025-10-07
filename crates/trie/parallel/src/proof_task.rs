@@ -73,6 +73,32 @@ enum StorageWorkerJob {
     },
 }
 
+impl StorageWorkerJob {
+    /// Sends an error back to the caller when worker pool is unavailable.
+    ///
+    /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
+    /// dropped.
+    fn send_worker_unavailable_error(&self) -> Result<(), ()> {
+        match self {
+            Self::StorageProof { result_sender, .. } => {
+                let error = ParallelStateRootError::Other(
+                    "Storage proof worker pool unavailable".to_string(),
+                );
+                result_sender.send(Err(error)).map_err(|_| ())
+            }
+            Self::BlindedStorageNode { result_sender, .. } => {
+                let error = SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(
+                    std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "Storage worker pool unavailable",
+                    ),
+                )));
+                result_sender.send(Err(error)).map_err(|_| ())
+            }
+        }
+    }
+}
+
 /// Manager for coordinating proof request execution across different task types.
 ///
 /// # Architecture
@@ -468,18 +494,7 @@ where
                                         );
 
                                         // Send error back to caller
-                                        if let StorageWorkerJob::StorageProof {
-                                            result_sender,
-                                            ..
-                                        } = job
-                                        {
-                                            let _ = result_sender.send(Err(
-                                                ParallelStateRootError::Other(
-                                                    "Storage proof worker pool unavailable"
-                                                        .to_string(),
-                                                ),
-                                            ));
-                                        }
+                                        let _ = job.send_worker_unavailable_error();
                                     }
                                 }
                             }
@@ -515,19 +530,7 @@ where
                                         );
 
                                         // Send error back to caller
-                                        if let StorageWorkerJob::BlindedStorageNode {
-                                            result_sender,
-                                            ..
-                                        } = job
-                                        {
-                                            let _ = result_sender.send(Err(SparseTrieError::from(
-                                                Box::new(std::io::Error::new(
-                                                    std::io::ErrorKind::BrokenPipe,
-                                                    "Storage worker pool unavailable",
-                                                ))
-                                                    as Box<dyn std::error::Error + Send>,
-                                            )));
-                                        }
+                                        let _ = job.send_worker_unavailable_error();
                                     }
                                 }
                             }
