@@ -213,7 +213,7 @@ where
                 // If we cannot bootstrap the proof task manager, continue with cache prewarming
                 // only; the caller will detect the missing state root channel and fall back to the
                 // parallel state root algorithm.
-                tracing::warn!(
+                tracing::error!(
                     target: "engine::tree",
                     ?error,
                     max_concurrency = max_proof_task_concurrency,
