@@ -15,6 +15,9 @@ pub enum PruneSegment {
     TransactionLookup,
     /// Prune segment responsible for all rows in `Receipts` table.
     Receipts,
+    /// Prune segment responsible for all rows in `AccountsTrieChangeSets` and
+    /// `StoragesTrieChangeSets` table.
+    MerkleChangeSets,
     /// Prune segment responsible for some rows in `Receipts` table filtered by logs.
     ContractLogs,
     /// Prune segment responsible for the `AccountChangeSets` and `AccountsHistory` tables.
@@ -44,9 +47,10 @@ impl PruneSegment {
                 0
             }
             Self::Receipts if purpose.is_static_file() => 0,
-            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
-                MINIMUM_PRUNING_DISTANCE
-            }
+            Self::ContractLogs |
+            Self::AccountHistory |
+            Self::StorageHistory |
+            Self::MerkleChangeSets |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
         }
     }
