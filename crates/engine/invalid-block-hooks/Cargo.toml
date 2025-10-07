@@ -39,6 +39,7 @@ jsonrpsee.workspace = true
 pretty_assertions.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+revm-state.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

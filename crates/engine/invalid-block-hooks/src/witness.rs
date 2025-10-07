@@ -244,10 +244,7 @@ where
             })?;
 
             let filename = format!("{}.witness.healthy.json", block_prefix);
-            let healthy_path = self.save_file(
-                filename,
-                &healthy_node_witness,
-            )?;
+            let healthy_path = self.save_file(filename, &healthy_node_witness)?;
 
             if witness != &healthy_node_witness {
                 let filename = format!("{}.witness.diff", block_prefix);
@@ -273,15 +270,9 @@ where
     ) -> eyre::Result<()> {
         if re_executed_state != original_state {
             let original_filename = format!("{}.bundle_state.original.json", block_prefix);
-            let original_path = self.save_file(
-                original_filename,
-                original_state,
-            )?;
+            let original_path = self.save_file(original_filename, original_state)?;
             let re_executed_filename = format!("{}.bundle_state.re_executed.json", block_prefix);
-            let re_executed_path = self.save_file(
-                re_executed_filename,
-                re_executed_state,
-            )?;
+            let re_executed_path = self.save_file(re_executed_filename, re_executed_state)?;
 
             // Convert bundle state to sorted format for deterministic comparison
             let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
@@ -317,21 +308,13 @@ where
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
                 let filename = format!("{}.state_root.diff", block_prefix);
-                let diff_path = self.save_diff(
-                    filename,
-                    &re_executed_root,
-                    &original_root,
-                )?;
+                let diff_path = self.save_diff(filename, &re_executed_root, &original_root)?;
                 warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
             }
 
             if re_executed_root != block.state_root() {
                 let filename = format!("{}.header_state_root.diff", block_prefix);
-                let diff_path = self.save_diff(
-                    filename,
-                    &re_executed_root,
-                    &block.state_root(),
-                )?;
+                let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root())?;
                 warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
 
