@@ -153,6 +153,17 @@ impl StaticFileSegment {
     }
 }
 
+/// A changeset offset, also with the number of elements in the offset for convenience
+// TODO: should this be replaced with a method in SegmentHeader?
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct ChangesetOffset {
+    /// Offset for the row for this block
+    offset: usize,
+
+    /// Number of changes in this changeset
+    num_changes: usize,
+}
+
 /// A segment header that contains information common to all segments. Used for storage.
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone)]
 pub struct SegmentHeader {
@@ -167,6 +178,10 @@ pub struct SegmentHeader {
     tx_range: Option<SegmentRangeInclusive>,
     /// Segment type
     segment: StaticFileSegment,
+    /// List of offsets, for where each block's changeset starts.
+    ///
+    /// This is used to determine where in the file to index, and can also be used to
+    changeset_offsets: Option<ChangesetOffset>,
 }
 
 impl SegmentHeader {
@@ -177,7 +192,7 @@ impl SegmentHeader {
         tx_range: Option<SegmentRangeInclusive>,
         segment: StaticFileSegment,
     ) -> Self {
-        Self { expected_block_range, block_range, tx_range, segment }
+        Self { expected_block_range, block_range, tx_range, segment, changeset_offsets: None }
     }
 
     /// Returns the static file segment kind.
@@ -315,23 +330,6 @@ pub struct SegmentConfig {
     pub compression: Compression,
 }
 
-/// Helper type to handle inclusive ranges in changesets keyed by block number and address.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
-pub struct ChangesetSegmentRangeInclusive {
-    start: BlockNumberAddress,
-    end: BlockNumberAddress,
-}
-
-/// Helper type for block number and address pairs
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Hash, Clone, Copy)]
-pub struct BlockNumberAddress {
-    /// Block number
-    block_number: BlockNumber,
-
-    /// Address
-    address: Address,
-}
-
 /// Helper type to handle segment transaction and block INCLUSIVE ranges.
 ///
 /// They can be modified on a hot loop, which makes the `std::ops::RangeInclusive` a poor fit.
@@ -464,6 +462,7 @@ mod tests {
                     block_range: Some(SegmentRangeInclusive::new(0, 499999)),
                     tx_range: None,
                     segment: StaticFileSegment::Headers,
+                    changeset_offsets: None,
                 },
                 headers.user_header()
             );
@@ -477,6 +476,7 @@ mod tests {
                     block_range: Some(SegmentRangeInclusive::new(0, 499999)),
                     tx_range: Some(SegmentRangeInclusive::new(0, 500020)),
                     segment: StaticFileSegment::Transactions,
+                    changeset_offsets: None,
                 },
                 transactions.user_header()
             );
@@ -489,6 +489,7 @@ mod tests {
                     block_range: Some(SegmentRangeInclusive::new(0, 0)),
                     tx_range: None,
                     segment: StaticFileSegment::Receipts,
+                    changeset_offsets: None,
                 },
                 receipts.user_header()
             );
