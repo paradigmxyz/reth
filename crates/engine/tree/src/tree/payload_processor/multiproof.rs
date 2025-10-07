@@ -1236,7 +1236,7 @@ mod tests {
             config.consistent_view.clone(),
             task_ctx,
             1,
-            1, // storage_worker_count: 1 for tests
+            1,
         );
         let channel = channel();
 
