@@ -1,7 +1,6 @@
 use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
@@ -75,8 +74,8 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     }
 }
 
-impl EthChainSpec for ChainSpec {
-    type Header = Header;
+impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {
+    type Header = H;
 
     fn chain(&self) -> Chain {
         self.chain
