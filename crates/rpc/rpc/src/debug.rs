@@ -881,7 +881,8 @@ where
         });
         let gas_limit = tx_env.gas_limit();
         let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-        let gas_used = res.result.gas_used();
+        // For failed transactions, we need to use the gas limit as gas used
+        let gas_used = if res.result.is_success() { res.result.gas_used() } else { gas_limit };
         let return_value = res.result.into_output().unwrap_or_default();
         inspector.set_transaction_gas_limit(gas_limit);
         let frame = inspector.geth_builder().geth_traces(gas_used, return_value, *config);
