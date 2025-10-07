@@ -17,6 +17,7 @@ use reth_db::static_file::{
 use reth_db_api::table::{Decompress, Value};
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
+use reth_storage_api::AccountReader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -86,10 +87,13 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     }
 }
 
-
+// TODO(rjected): implement this - see static file provider iempls, check if those are better spots
 impl<N: NodePrimitives> ChangeSetReader for StaticFileJarProvider<'_, N> {
-    fn account_block_changeset(&self, block_number: BlockNumber) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx> > {
-        // TODO: we have to use the header here to get the rows for the block then do the lookups
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx>> {
+        todo!()
     }
 }
 
