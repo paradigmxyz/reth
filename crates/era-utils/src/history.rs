@@ -286,16 +286,12 @@ where
 {
     let mut last_header_number = match block_numbers.start_bound() {
         Bound::Included(&number) => number,
-        Bound::Excluded(&number) => number.saturating_sub(1),
+        Bound::Excluded(&number) => number.saturating_add(1),
         Bound::Unbounded => 0,
     };
-    // Convert the end bound to an exclusive upper bound to avoid off-by-one issues.
-    // Included(end) => end_exclusive = Some(end + 1) (None if overflow)
-    // Excluded(end) => end_exclusive = Some(end)
-    // Unbounded      => end_exclusive = None
-    let end_exclusive = match block_numbers.end_bound() {
-        Bound::Included(&number) => number.checked_add(1),
-        Bound::Excluded(&number) => Some(number),
+    let target = match block_numbers.end_bound() {
+        Bound::Included(&number) => Some(number),
+        Bound::Excluded(&number) => Some(number.saturating_sub(1)),
         Bound::Unbounded => None,
     };
 
@@ -306,8 +302,8 @@ where
         if number <= last_header_number {
             continue;
         }
-        if let Some(end_exclusive) = end_exclusive &&
-            number >= end_exclusive
+        if let Some(target) = target &&
+            number > target
         {
             break;
         }
