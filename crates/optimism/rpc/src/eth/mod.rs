@@ -53,7 +53,7 @@ use tokio::sync::watch;
 use tracing::info;
 
 /// Maximum duration to wait for a fresh flashblock when one is being built.
-const MAX_WAIT_DURATION: Duration = Duration::from_millis(20);
+const MAX_WAIT_DURATION: Duration = Duration::from_millis(50);
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N, Rpc> = EthApiInner<N, Rpc>;
@@ -148,7 +148,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         if self.is_flashblock_building() {
             let mut rx_clone = rx.clone();
 
-            // Wait up to 20ms for a new flashblock to arrive
+            // Wait up to 50ms for a new flashblock to arrive
             if tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await.is_ok() {
                 let fresh = rx_clone.borrow();
                 if let Some(block) = self.extract_matching_block(fresh.as_ref(), parent_hash) {
