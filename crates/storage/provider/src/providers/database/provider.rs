@@ -2105,7 +2105,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     ///
     /// Returns the number of entries modified.
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
-        if trie_updates.account_nodes.is_empty() && trie_updates.storage_tries.is_empty() {
+        if trie_updates.is_empty() {
             return Ok(0)
         }
 

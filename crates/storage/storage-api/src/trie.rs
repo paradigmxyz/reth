@@ -157,10 +157,10 @@ pub trait StorageTrieWriter: Send + Sync {
     ) -> ProviderResult<usize>;
 
     /// Records the current values of all trie nodes which will be updated using the
-    /// [`StorageTrieUpdates`] into the storage trie changesets table.
+    /// [`StorageTrieUpdatesSorted`] into the storage trie changesets table.
     ///
     /// The intended usage of this method is to call it _prior_ to calling
-    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdates`].
+    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdatesSorted`].
     ///
     /// The `updates_overlay` parameter allows providing additional in-memory trie updates that
     /// should be considered when looking up current node values. When provided, these overlay
