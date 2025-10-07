@@ -349,7 +349,7 @@ where
                         ?err,
                         requested = storage_worker_count,
                         spawned_workers,
-                        "Failed to create transaction for storage worker, falling back to on-demand execution"
+                        "Failed to create transaction for storage worker"
                     );
                     return Err(err);
                 }
