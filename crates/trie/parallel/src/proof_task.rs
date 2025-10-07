@@ -225,18 +225,14 @@ type ProofFactories<'a, Tx> = (
 pub struct ProofTaskTx<Tx> {
     /// The tx that is reused for proof calculations.
     tx: Tx,
-
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
-
-    /// Identifier for the tx within the context of a single [`ProofTaskManager`], used only for
-    /// tracing.
+    /// Identifier for the tx within the pool, used only for tracing.
     id: usize,
 }
 
 impl<Tx> ProofTaskTx<Tx> {
-    /// Initializes a [`ProofTaskTx`] using the given transaction and a [`ProofTaskCtx`]. The id is
-    /// used only for tracing.
+    /// Initializes a [`ProofTaskTx`] using the given transaction and a [`ProofTaskCtx`].
     const fn new(tx: Tx, task_ctx: ProofTaskCtx, id: usize) -> Self {
         Self { tx, task_ctx, id }
     }
@@ -445,8 +441,7 @@ pub struct StorageProofInput {
 }
 
 impl StorageProofInput {
-    /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
-    /// slots.
+    /// Creates a new [`StorageProofInput`] with the given parameters.
     pub const fn new(
         hashed_address: B256,
         prefix_set: PrefixSet,
@@ -467,8 +462,7 @@ impl StorageProofInput {
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
 #[derive(Debug, Clone)]
 pub struct ProofTaskCtx {
-    /// The sorted collection of cached in-memory intermediate trie nodes that can be reused for
-    /// computation.
+    /// The sorted collection of cached in-memory intermediate trie nodes.
     nodes_sorted: Arc<TrieUpdatesSorted>,
     /// The sorted in-memory overlay hashed state.
     state_sorted: Arc<HashedPostStateSorted>,
@@ -514,9 +508,9 @@ pub enum ProofTaskKind {
     BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
 }
 
-/// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
-/// number of active handles went to zero.
-#[derive(Debug)]
+/// A handle for dispatching proof tasks using a transaction pool and Tokio's blocking threadpool.
+///
+/// Tasks are dispatched directly without an intermediate manager loop.
 pub struct ProofTaskManagerHandle<Tx> {
     /// The sender for the proof task manager.
     sender: Sender<ProofTaskMessage<Tx>>,
