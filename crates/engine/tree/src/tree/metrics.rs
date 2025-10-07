@@ -27,7 +27,7 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) executor: ExecutorMetrics,
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
-    /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
+    /// Canonical chain and reorg related metrics
     pub tree: TreeMetrics,
 }
 

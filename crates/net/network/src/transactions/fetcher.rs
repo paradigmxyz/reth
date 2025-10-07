@@ -146,13 +146,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
     /// Removes the specified hashes from inflight tracking.
     #[inline]
-    pub fn remove_hashes_from_transaction_fetcher<I>(&mut self, hashes: I)
+    pub fn remove_hashes_from_transaction_fetcher<'a, I>(&mut self, hashes: I)
     where
-        I: IntoIterator<Item = TxHash>,
+        I: IntoIterator<Item = &'a TxHash>,
     {
         for hash in hashes {
-            self.hashes_fetch_inflight_and_pending_fetch.remove(&hash);
-            self.hashes_pending_fetch.remove(&hash);
+            self.hashes_fetch_inflight_and_pending_fetch.remove(hash);
+            self.hashes_pending_fetch.remove(hash);
         }
     }
 

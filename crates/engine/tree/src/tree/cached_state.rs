@@ -329,12 +329,26 @@ impl ExecutionCache {
         key: StorageKey,
         value: Option<StorageValue>,
     ) {
+        self.insert_storage_bulk(address, [(key, value)]);
+    }
+
+    /// Insert multiple storage values into hierarchical cache for a single account
+    ///
+    /// This method is optimized for inserting multiple storage values for the same address
+    /// by doing the account cache lookup only once instead of for each key-value pair.
+    pub(crate) fn insert_storage_bulk<I>(&self, address: Address, storage_entries: I)
+    where
+        I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
+    {
         let account_cache = self.storage_cache.get(&address).unwrap_or_else(|| {
             let account_cache = AccountStorageCache::default();
             self.storage_cache.insert(address, account_cache.clone());
             account_cache
         });
-        account_cache.insert_storage(key, value);
+
+        for (key, value) in storage_entries {
+            account_cache.insert_storage(key, value);
+        }
     }
 
     /// Invalidate storage for specific account
@@ -396,11 +410,14 @@ impl ExecutionCache {
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
-            for (storage_key, slot) in &account.storage {
+            // Use bulk insertion to optimize cache lookups - only lookup the account cache once
+            // instead of for each storage key
+            let storage_entries = account.storage.iter().map(|(storage_key, slot)| {
                 // We convert the storage key from U256 to B256 because that is how it's represented
                 // in the cache
-                self.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
-            }
+                ((*storage_key).into(), Some(slot.present_value))
+            });
+            self.insert_storage_bulk(*addr, storage_entries);
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
@@ -447,25 +464,9 @@ impl ExecutionCacheBuilder {
             .build_with_hasher(DefaultHashBuilder::default());
 
         let account_cache = CacheBuilder::new(self.account_cache_entries)
-            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
-                match value {
-                    Some(account) => {
-                        let mut weight = 40;
-                        if account.nonce != 0 {
-                            weight += 32;
-                        }
-                        if !account.balance.is_zero() {
-                            weight += 32;
-                        }
-                        if account.bytecode_hash.is_some() {
-                            weight += 33; // size of Option<B256>
-                        } else {
-                            weight += 8; // size of None variant
-                        }
-                        weight as u32
-                    }
-                    None => 8, // size of None variant
-                }
+            .weigher(|_key: &Address, _value: &Option<Account>| -> u32 {
+                // Account has a fixed size (none, balance,code_hash)
+                size_of::<Option<Account>>() as u32
             })
             .max_capacity(account_cache_size)
             .time_to_live(EXPIRY_TIME)
@@ -664,7 +665,7 @@ mod tests {
 
         unsafe impl GlobalAlloc for TrackingAllocator {
             unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                let ret = self.inner.alloc(layout);
+                let ret = unsafe { self.inner.alloc(layout) };
                 if !ret.is_null() {
                     self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
                     self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
@@ -674,7 +675,7 @@ mod tests {
 
             unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
                 self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
-                self.inner.dealloc(ptr, layout)
+                unsafe { self.inner.dealloc(ptr, layout) }
             }
         }
     }

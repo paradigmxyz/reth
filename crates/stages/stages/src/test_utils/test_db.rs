@@ -19,7 +19,7 @@ use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -101,6 +101,11 @@ impl TestStageDB {
                 .walk(Some(T::Key::default()))?
                 .collect::<Result<Vec<_>, DbError>>()?)
         })
+    }
+
+    /// Return the number of entries in the table or static file segment
+    pub fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
+        self.factory.provider()?.count_entries::<T>()
     }
 
     /// Check that there is no table entry above a given

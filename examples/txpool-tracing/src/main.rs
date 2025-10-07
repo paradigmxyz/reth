@@ -44,17 +44,17 @@ fn main() {
                     let tx = event.transaction;
                     println!("Transaction received: {tx:?}");
 
-                    if let Some(recipient) = tx.to() {
-                        if args.is_match(&recipient) {
-                            // trace the transaction with `trace_call`
-                            let callrequest =
-                                TransactionRequest::from_recovered_transaction(tx.to_consensus());
-                            let tracerequest = TraceCallRequest::new(callrequest)
-                                .with_trace_type(TraceType::Trace);
-                            if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
-                                let hash = tx.hash();
-                                println!("trace result for transaction {hash}: {trace_result:?}");
-                            }
+                    if let Some(recipient) = tx.to() &&
+                        args.is_match(&recipient)
+                    {
+                        // trace the transaction with `trace_call`
+                        let callrequest =
+                            TransactionRequest::from_recovered_transaction(tx.to_consensus());
+                        let tracerequest =
+                            TraceCallRequest::new(callrequest).with_trace_type(TraceType::Trace);
+                        if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {
+                            let hash = tx.hash();
+                            println!("trace result for transaction {hash}: {trace_result:?}");
                         }
                     }
                 }
