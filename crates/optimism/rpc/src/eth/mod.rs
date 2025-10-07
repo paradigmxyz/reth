@@ -168,7 +168,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     ///
     /// If flashblocks receiver is not set, then it always returns `None`.
     ///
-    /// It may wait up to 20ms for a fresh flashblock if one is currently being built.
+    /// It may wait up to 50ms for a fresh flashblock if one is currently being built.
     pub async fn pending_flashblock(&self) -> eyre::Result<Option<PendingBlock<N::Primitives>>>
     where
         OpEthApiError: FromEvmError<N::Evm>,
