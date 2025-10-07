@@ -247,9 +247,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
-                StaticFileSegment::AccountChangeSets => {
-                    self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
-                }
+                StaticFileSegment::AccountChangeSets => self.prune_account_changeset_data(
+                    to_delete,
+                    last_block_number.expect("should exist"),
+                )?,
             }
         }
 
