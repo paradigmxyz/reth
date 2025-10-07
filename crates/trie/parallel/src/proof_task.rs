@@ -482,7 +482,7 @@ where
                             // Drop storage_work_tx to signal workers to shut down
                             drop(self.storage_work_tx);
 
-                            tracing::info!(
+                            tracing::debug!(
                                 target: "trie::proof_task",
                                 storage_worker_count = self.storage_worker_count,
                                 "Shutting down proof task manager, signaling workers to terminate"
