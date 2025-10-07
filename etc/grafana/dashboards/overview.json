@@ -11961,7 +11961,7 @@
                             "uid": "${datasource}"
                         },
                         "editorMode": "code",
-                        "expr": "increase(reth_execution_inclusion_list_transactions_valid_total{$instance_label=\"$instance\"}[$__interval])",
+                        "expr": "increase(execution_inclusion_list_transactions_valid_total{$instance_label=\"$instance\"}[$__interval])",
                         "hide": false,
                         "instant": false,
                         "legendFormat": "Valid (tx/min)",
@@ -11974,7 +11974,7 @@
                             "uid": "${datasource}"
                         },
                         "editorMode": "code",
-                        "expr": "increase(reth_execution_inclusion_list_transactions_invalid_total{$instance_label=\"$instance\"}[$__interval])",
+                        "expr": "increase(execution_inclusion_list_transactions_invalid_total{$instance_label=\"$instance\"}[$__interval])",
                         "hide": false,
                         "instant": false,
                         "legendFormat": "Invalid (tx/min)",
@@ -12073,7 +12073,7 @@
                             "uid": "${datasource}"
                         },
                         "editorMode": "code",
-                        "expr": "rate(reth_execution_inclusion_list_transactions_validation_time_seconds_sum{$instance_label=\"$instance\"}[$__interval]) / rate(reth_execution_inclusion_list_transactions_validation_time_seconds_count{$instance_label=\"$instance\"}[$__interval])",
+                        "expr": "rate(execution_inclusion_list_transactions_validation_time_seconds_sum{$instance_label=\"$instance\"}[$__interval]) / rate(execution_inclusion_list_transactions_validation_time_seconds_count{$instance_label=\"$instance\"}[$__interval])",
                         "hide": false,
                         "instant": false,
                         "legendFormat": "Average Validation Time",
@@ -12172,7 +12172,7 @@
                             "uid": "${datasource}"
                         },
                         "editorMode": "code",
-                        "expr": "reth_execution_inclusion_list_unsatisfied_blocks_total{$instance_label=\"$instance\"}",
+                        "expr": "execution_inclusion_list_unsatisfied_blocks_total{$instance_label=\"$instance\"}",
                         "hide": false,
                         "instant": false,
                         "legendFormat": "Unsatisfied Blocks",
@@ -12270,7 +12270,7 @@
                             "uid": "${datasource}"
                         },
                         "editorMode": "code",
-                        "expr": "increase(reth_execution_transactions_received_in_payload_total{$instance_label=\"$instance\"}[$__interval])",
+                        "expr": "increase(execution_transactions_received_in_payload_total{$instance_label=\"$instance\"}[$__interval])",
                         "hide": false,
                         "instant": false,
                         "legendFormat": "Received in Payload (tx/min)",

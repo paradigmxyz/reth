@@ -513,7 +513,7 @@ where
         if let Some(inclusion_list) = payload.inclusion_list() {
             let inclusion_list_tx_count = inclusion_list.len() as u64;
             self.metrics
-                .inclusion_list
+                .ef_excution
                 .record_inclusion_list_transactions_received(inclusion_list_tx_count);
         }
 

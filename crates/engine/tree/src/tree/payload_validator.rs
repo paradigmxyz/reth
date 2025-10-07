@@ -474,7 +474,7 @@ where
 
         // Record EIP-7805 metrics for transactions received in payload
         let transaction_count = block.body().transactions().len() as u64;
-        self.metrics.inclusion_list.record_transactions_received(transaction_count);
+        self.metrics.ef_excution.record_transactions_received(transaction_count);
 
         // Inclusion list verification
         if let Some(il) = &il {
@@ -483,15 +483,15 @@ where
                 Ok(()) => {
                     // Record successful validation time
                     self.metrics
-                        .inclusion_list
+                        .ef_excution
                         .record_inclusion_list_validation_time(validation_start.elapsed());
                 }
                 Err(err) => {
                     // Record failed validation time and unsatisfied block
                     self.metrics
-                        .inclusion_list
+                        .ef_excution
                         .record_inclusion_list_validation_time(validation_start.elapsed());
-                    self.metrics.inclusion_list.record_unsatisfied_inclusion_list_blocks();
+                    self.metrics.ef_excution.record_unsatisfied_inclusion_list_blocks();
 
                     warn!("Block failed inclusionlist test.");
                     self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
@@ -1283,8 +1283,8 @@ where
         // Record invalid and invalid inclusion list transactions
         let il_len = il.as_ref().len() as u64;
         let valid_count = il_len - invalid_count;
-        self.metrics.inclusion_list.record_invalid_inclusion_list_transactions(invalid_count);
-        self.metrics.inclusion_list.record_valid_inclusion_list_transactions(valid_count);
+        self.metrics.ef_excution.record_invalid_inclusion_list_transactions(invalid_count);
+        self.metrics.ef_excution.record_valid_inclusion_list_transactions(valid_count);
         
         Ok(())
     }

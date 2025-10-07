@@ -28,7 +28,7 @@ pub(crate) struct EngineApiMetrics {
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
     /// EIP-7805 Inclusion List metrics
-    pub(crate) inclusion_list: InclusionListMetrics,
+    pub(crate) ef_excution: EfExecutionMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub tree: TreeMetrics,
 }
@@ -201,10 +201,10 @@ impl BlockValidationMetrics {
     }
 }
 
-/// EIP-7805 Inclusion List Metrics for execution layer
+/// EF execution Metrics
 #[derive(Metrics)]
-#[metrics(scope = "execution")]
-pub(crate) struct InclusionListMetrics {
+#[metrics(scope = "ef_execution")]
+pub(crate) struct EfExecutionMetrics {
     /// Total number of inclusion list transactions received in payload
     pub(crate) inclusion_list_transactions_received_in_payload_total: Counter,
     /// Total number of valid inclusion list transactions
@@ -219,7 +219,7 @@ pub(crate) struct InclusionListMetrics {
     pub(crate) transactions_received_in_payload_total: Counter,
 }
 
-impl InclusionListMetrics {
+impl EfExecutionMetrics {
     /// Record the number of inclusion list transactions received in a payload
     pub(crate) fn record_inclusion_list_transactions_received(&self, count: u64) {
         self.inclusion_list_transactions_received_in_payload_total.increment(count);
