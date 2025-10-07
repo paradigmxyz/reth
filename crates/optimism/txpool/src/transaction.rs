@@ -83,12 +83,6 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     pub fn encoded_2718(&self) -> &Bytes {
         self.encoded_2718.get_or_init(|| self.inner.transaction().encoded_2718().into())
     }
-
-    /// Conditional setter.
-    pub fn with_conditional(mut self, conditional: TransactionConditional) -> Self {
-        self.conditional = Some(Box::new(conditional));
-        self
-    }
 }
 
 impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
