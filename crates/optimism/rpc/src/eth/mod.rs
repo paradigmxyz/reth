@@ -23,8 +23,8 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    BuildStateRx, ExecutionPayloadBaseV1, FlashBlockCompleteSequenceRx, FlashBlockService,
-    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    BuildStateRx, ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx,
+    FlashBlockService, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -119,9 +119,9 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.flashblock_rx.as_ref().map(|rx| rx.resubscribe())
     }
 
-    /// Checks if a flashblock build is currently in progress.
-    fn is_flashblock_building(&self) -> bool {
-        self.inner.build_state_rx.as_ref().map(|rx| *rx.borrow()).unwrap_or(false)
+    /// Returns information about the flashblock currently being built, if any.
+    fn flashblock_build_info(&self) -> Option<FlashBlockBuildInfo> {
+        self.inner.build_state_rx.as_ref().and_then(|rx| *rx.borrow())
     }
 
     /// Extracts pending block if it matches the expected parent hash.
@@ -145,11 +145,19 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
     ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
         let Some(rx) = self.inner.pending_block_rx.as_ref() else { return Ok(None) };
 
-        if self.is_flashblock_building() {
-            let mut rx_clone = rx.clone();
+        // Check if a flashblock is being built
+        if let Some(build_info) = self.flashblock_build_info() {
+            let current_index = rx.borrow().as_ref().map(|b| b.last_flashblock_index);
 
-            // Wait up to 50ms for a new flashblock to arrive
-            let _ = tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await;
+            // Check if this is the first flashblock or the next consecutive index
+            let is_next_index = current_index.is_none_or(|idx| build_info.index == idx + 1);
+
+            // Wait only for relevant flashblocks: matching parent and next in sequence
+            if build_info.parent_hash == parent_hash && is_next_index {
+                let mut rx_clone = rx.clone();
+                // Wait up to 50ms for a new flashblock to arrive
+                let _ = tokio::time::timeout(MAX_WAIT_DURATION, rx_clone.changed()).await;
+            }
         }
 
         // Fall back to current block

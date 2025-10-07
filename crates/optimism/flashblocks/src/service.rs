@@ -53,11 +53,22 @@ pub struct FlashBlockService<
     /// executions within the same block.
     cached_state: Option<(B256, CachedReads)>,
     /// Signals when a block build is in progress
-    build_state_tx: watch::Sender<bool>,
+    build_state_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
     /// Enable state root calculation from flashblock with index [`FB_STATE_ROOT_FROM_INDEX`]
     compute_state_root: bool,
+}
+
+/// Information for a flashblock currently built
+#[derive(Debug, Clone, Copy)]
+pub struct FlashBlockBuildInfo {
+    /// Parent block hash
+    pub parent_hash: B256,
+    /// Flashblock index within the current block's sequence
+    pub index: u64,
+    /// Block number of the flashblock being built.
+    pub block_number: u64,
 }
 
 impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
@@ -80,7 +91,7 @@ where
 {
     /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
     pub fn new(rx: S, evm_config: EvmConfig, provider: Provider, spawner: TaskExecutor) -> Self {
-        let (build_state_tx, _) = watch::channel(false);
+        let (build_state_tx, _) = watch::channel(None);
         Self {
             rx,
             current: None,
@@ -232,8 +243,8 @@ where
             };
             // reset job
             this.job.take();
-
-            let _ = this.build_state_tx.send(false);
+            // No build in progress
+            let _ = this.build_state_tx.send(None);
 
             if let Some((now, result)) = result {
                 match result {
@@ -310,7 +321,13 @@ where
                 let now = Instant::now();
 
                 // Signal that a flashblock build has started
-                let _ = this.build_state_tx.send(true);
+
+                let fb_info = FlashBlockBuildInfo {
+                    parent_hash: args.base.parent_hash,
+                    index: args.last_flashblock_index,
+                    block_number: args.base.block_number,
+                };
+                let _ = this.build_state_tx.send(Some(fb_info));
                 let (tx, rx) = oneshot::channel();
                 let builder = this.builder.clone();
 
