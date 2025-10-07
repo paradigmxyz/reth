@@ -1,21 +1,35 @@
 use reth_metrics::{metrics::Histogram, Metrics};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Metrics for blinded node fetching for the duration of the proof task manager.
-#[derive(Clone, Debug, Default)]
+/// `AtomicUsize` because we want to be able to add to these counts from concurrent workers.
+#[derive(Debug, Default)]
 pub struct ProofTaskMetrics {
     /// The actual metrics for blinded nodes.
     pub task_metrics: ProofTaskTrieMetrics,
     /// Count of blinded account node requests.
-    pub account_nodes: usize,
+    pub account_nodes: AtomicUsize,
     /// Count of blinded storage node requests.
-    pub storage_nodes: usize,
+    pub storage_nodes: AtomicUsize,
+}
+
+/// Implements `Clone` for `ProofTaskMetrics`.
+/// Uses `Ordering::Relaxed` for atomics since no synchronization is required.
+impl Clone for ProofTaskMetrics {
+    fn clone(&self) -> Self {
+        Self {
+            task_metrics: self.task_metrics.clone(),
+            account_nodes: AtomicUsize::new(self.account_nodes.load(Ordering::Relaxed)),
+            storage_nodes: AtomicUsize::new(self.storage_nodes.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl ProofTaskMetrics {
     /// Record the blinded node counts into the histograms.
     pub fn record(&self) {
-        self.task_metrics.record_account_nodes(self.account_nodes);
-        self.task_metrics.record_storage_nodes(self.storage_nodes);
+        self.task_metrics.record_account_nodes(self.account_nodes.load(Ordering::Relaxed));
+        self.task_metrics.record_storage_nodes(self.storage_nodes.load(Ordering::Relaxed));
     }
 }
 
