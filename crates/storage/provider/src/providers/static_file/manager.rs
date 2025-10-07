@@ -40,7 +40,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, ChangeSetReader, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -1116,6 +1116,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     {
         let mut result = Vec::with_capacity((range.end - range.start).min(100) as usize);
 
+        // TODO(rjected): what kind of change do we need here for account changeset?
         /// Resolves to the provider for the given block or transaction number.
         ///
         /// If the static file is missing, the `result` is returned.
@@ -1376,6 +1377,31 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued()
+    }
+}
+
+impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
+    fn account_block_changeset(&self, block_number: BlockNumber) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx> > {
+        let provider = match self.get_segment_provider_from_block(StaticFileSegment::AccountChangeSets, block_number, None) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(Vec::new()),
+            Err(err) => return Err(err),
+        };
+
+        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+            let mut cursor = provider.cursor()?;
+            let mut changeset = Vec::with_capacity(offset.num_changes() as usize);
+
+            for i in offset.changeset_range() {
+                if let Some(change) = cursor.get_one::<reth_db::static_file::AccountChangesetMask>(i.into())? {
+                    changeset.push(change)
+                }
+            }
+            Ok(changeset)
+
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
 
