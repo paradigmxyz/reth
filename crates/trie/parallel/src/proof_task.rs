@@ -271,15 +271,26 @@ where
 
         let mut spawned_workers = 0;
         for worker_id in 0..planned_workers {
-            match view.provider_ro() {
-                Ok(provider_ro) => {
+            let provider_ro = match view.provider_ro() {
+                Ok(provider_ro) => provider_ro,
+                Err(err) => {
+                    tracing::error!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?err,
+                        requested = planned_workers,
+                        spawned_workers,
+                        "Failed to create transaction for storage worker, falling back to on-demand execution"
+                    );
+                    return Err(err);
+                }
+            };
+
                     let tx = provider_ro.into_tx();
                     let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
                     let work_rx = storage_work_rx.clone();
 
-                    executor.spawn_blocking(move || {
-                        storage_worker_loop(proof_task_tx, work_rx, worker_id)
-                    });
+            executor.spawn_blocking(move || storage_worker_loop(proof_task_tx, work_rx, worker_id));
 
                     spawned_workers += 1;
 
@@ -290,44 +301,17 @@ where
                         "Storage worker spawned successfully"
                     );
                 }
-                Err(err) => {
-                    tracing::warn!(
-                        target: "trie::proof_task",
-                        worker_id,
-                        ?err,
-                        requested = planned_workers,
-                        spawned_workers,
-                        "Failed to create transaction for storage worker, continuing with fewer workers"
-                    );
-                }
-            }
-        }
 
-        if spawned_workers == 0 {
-            tracing::error!(
-                target: "trie::proof_task",
-                requested = planned_workers,
-                "Failed to spawn any storage workers - all work will execute on-demand"
-            );
-        } else if spawned_workers < planned_workers {
-            tracing::warn!(
-                target: "trie::proof_task",
-                requested = planned_workers,
-                spawned = spawned_workers,
-                "Spawned fewer storage workers than requested"
-            );
-        }
-
-        // Allocate remaining capacity to on-demand pool.
-        let max_on_demand_txs = max_concurrency.saturating_sub(spawned_workers);
+        // Allocate remaining capacity to on-demand pool for account trie operations.
+        let remaining_concurrency = max_concurrency.saturating_sub(spawned_workers);
 
         Self {
             storage_work_tx,
             storage_worker_count: spawned_workers,
-            max_on_demand_txs,
-            on_demand_txs: Vec::with_capacity(max_on_demand_txs),
-            on_demand_tx_count: 0,
-            on_demand_queue: VecDeque::new(),
+            max_concurrency: remaining_concurrency,
+            total_transactions: 0,
+            pending_tasks: VecDeque::new(),
+            proof_task_txs: Vec::with_capacity(remaining_concurrency),
             view,
             task_ctx,
             executor,
