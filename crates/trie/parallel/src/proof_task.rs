@@ -181,7 +181,7 @@ where
             // same hashed address, and we want to differentiate them during trace analysis.
             span_id = self.id,
         );
-        let _span_guard: tracing::span::Entered<'_> = span.enter();
+        let span_guard = span.enter();
 
         let target_slots_len = target_slots.len();
         let proof_start = Instant::now();
@@ -212,6 +212,8 @@ where
             proof_time = ?proof_start.elapsed(),
             "Completed storage proof task calculation"
         );
+
+        drop(span_guard);
 
         // Send the result back (log error if receiver dropped)
         if let Err(e) = result_sender.send(decoded_result) {
