@@ -55,13 +55,12 @@ pub fn new_proof_task_handle<Factory>(
     view: ConsistentDbView<Factory>,
     task_ctx: ProofTaskCtx,
     max_concurrency: usize,
-    storage_worker_count: usize,
 ) -> ProviderResult<ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx>>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     let queue_capacity = max_concurrency.max(1);
-    let worker_count = storage_worker_count.max(1).min(queue_capacity);
+    let worker_count = queue_capacity / 2; // Right now we are only using half of the queue capacity for storage proofs. TODO: Update this when we have account proof workers.
 
     let (task_sender, task_receiver) = bounded(queue_capacity);
 
@@ -618,8 +617,7 @@ mod tests {
             runtime.handle().clone(),
             consistent_view,
             task_ctx,
-            4, // queue capacity
-            2, // storage worker count
+            2, // queue capacity (and worker count)
         )
         .expect("failed to create proof task handle");
 

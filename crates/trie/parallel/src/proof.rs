@@ -461,7 +461,6 @@ mod tests {
             consistent_view.clone(),
             task_ctx,
             1, // max_concurrency for test
-            1, // storage worker count for test
         )
         .expect("Failed to create proof task");
 
