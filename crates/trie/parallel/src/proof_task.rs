@@ -49,7 +49,8 @@ type ProofFactories<'a, Tx> = (
     HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
 );
 
-/// Builds the worker-pool handle that queues proof tasks and reuses a fixed set of database transactions.
+/// Builds the worker-pool handle that queues proof tasks and reuses a fixed set of database
+/// transactions.
 pub fn new_proof_task_handle<Factory>(
     executor: Handle,
     view: ConsistentDbView<Factory>,
@@ -60,7 +61,8 @@ where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
 {
     let queue_capacity = max_concurrency.max(1);
-    let worker_count = queue_capacity / 2; // Right now we are only using half of the queue capacity for storage proofs. TODO: Update this when we have account proof workers.
+    let worker_count = (queue_capacity / 2).max(1); // Right now we are only using half of the queue capacity for storage proofs. TODO: Update this
+                                                    // when we have account proof workers.
 
     let (task_sender, task_receiver) = bounded(queue_capacity);
 
@@ -344,7 +346,8 @@ impl StorageProofInput {
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
 #[derive(Debug, Clone)]
 pub struct ProofTaskCtx {
-    /// The sorted collection of cached in-memory intermediate trie nodes.
+    /// The sorted collection of cached in-memory intermediate trie nodes that can be reused for
+    /// computation.
     nodes_sorted: Arc<TrieUpdatesSorted>,
     /// The sorted in-memory overlay hashed state.
     state_sorted: Arc<HashedPostStateSorted>,
@@ -617,7 +620,7 @@ mod tests {
             runtime.handle().clone(),
             consistent_view,
             task_ctx,
-            2, // queue capacity (and worker count)
+            4, // max_concurrency (results in worker_count = 4/2 = 2)
         )
         .expect("failed to create proof task handle");
 
