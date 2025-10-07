@@ -120,17 +120,17 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Calculated as: `max_concurrency` - `storage_worker_count`
     max_on_demand_txs: usize,
 
-    /// Currently available on-demand transactions (reused after return).
+    /// On-demand transaction pool for blinded node fetches.
     on_demand_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
 
     /// Total on-demand transactions created (for ID assignment).
     on_demand_tx_count: usize,
 
-    /// Queue of pending on-demand tasks waiting for available transaction.
+    /// Queue of tasks waiting for on-demand transaction assignment.
     ///
     /// Holds `ProofTaskKind` for both blinded node fetches and storage proof
     /// fallbacks (when worker pool is full/unavailable).
-    pending_on_demand: VecDeque<ProofTaskKind>,
+    on_demand_queue: VecDeque<ProofTaskKind>,
 
     /// Consistent view provider used for creating transactions on-demand.
     view: ConsistentDbView<Factory>,
@@ -141,14 +141,10 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// The underlying handle from which to spawn proof tasks.
     executor: Handle,
 
-    /// A receiver for new proof task messages from external callers.
-    ///
-    /// This is the `std::mpsc` channel connected to [`ProofTaskManagerHandle`].
+    /// Receives proof task requests from [`ProofTaskManagerHandle`].
     proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
 
-    /// A sender for internal messaging (transaction returns).
-    ///
-    /// Used by on-demand tasks to return transactions to pool.
+    /// Internal channel for on-demand tasks to return transactions after use.
     tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
 
     /// The number of active handles.
@@ -264,36 +260,12 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
 {
-    /// Creates a new [`ProofTaskManager`] with the given configuration.
+    /// Creates a new [`ProofTaskManager`] with pre-spawned storage proof workers.
     ///
-    /// # Arguments
-    ///
-    /// * `executor` - Tokio runtime handle for spawning workers and tasks
-    /// * `view` - Consistent database view for creating read-only transactions
-    /// * `task_ctx` - Shared context (trie updates, hashed state, prefix sets)
-    /// * `max_concurrency` - Total transaction budget across all execution paths
-    /// * `storage_worker_count` - Number of storage proof workers to pre-spawn
-    ///
-    /// # Transaction Budget Allocation
-    ///
-    /// The total `max_concurrency` is split between storage workers (pre-allocated)
-    /// and the on-demand pool (lazy). We always reserve at least one slot for the
-    /// on-demand path, so the number of workers actually spawned is capped at
-    /// `max_concurrency - 1`.
-    ///
-    /// For example, if `max_concurrency = 8` and `storage_worker_count = 8`, then
-    /// 8 workers are requested but only 7 can be accommodated while leaving one
-    /// on-demand slot, so 7 workers are spawned and the remaining slot is reserved
-    /// for on-demand transactions (e.g. blinded nodes).
-    ///
-    /// # Worker Spawn Resilience
-    ///
-    /// If some workers fail to spawn, the on-demand pool is adjusted accordingly
-    /// and the system continues with fewer workers.
-    ///
-    /// # Panics
-    ///
-    /// Does not panic. All errors are logged and handled gracefully.
+    /// The `max_concurrency` budget is split between pre-spawned storage workers and an
+    /// on-demand pool. At least one slot is always reserved for on-demand, so the actual
+    /// number of workers spawned is `min(storage_worker_count, max_concurrency - 1)`.
+    /// If workers fail to spawn, the system continues with fewer workers.
     pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
@@ -400,7 +372,7 @@ where
             max_on_demand_txs,
             on_demand_txs: Vec::with_capacity(max_on_demand_txs),
             on_demand_tx_count: 0,
-            pending_on_demand: VecDeque::new(),
+            on_demand_queue: VecDeque::new(),
             view,
             task_ctx,
             executor,
@@ -413,7 +385,7 @@ where
         }
     }
 
-    /// Returns a handle for sending new proof tasks to the manager.
+    /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
     pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
         ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
     }
@@ -425,7 +397,7 @@ where
 {
     /// Inserts the task into the pending tasks queue.
     pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
-        self.pending_on_demand.push_back(task);
+        self.on_demand_queue.push_back(task);
     }
 
     /// Gets either the next available transaction, or creates a new one if all are in use and the
@@ -452,11 +424,11 @@ where
     /// This will return an error if a transaction must be created on-demand and the consistent view
     /// provider fails.
     pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_on_demand.pop_front() else { return Ok(()) };
+        let Some(task) = self.on_demand_queue.pop_front() else { return Ok(()) };
 
         let Some(proof_task_tx) = self.get_or_create_tx()? else {
             // if there are no txs available, requeue the proof task
-            self.pending_on_demand.push_front(task);
+            self.on_demand_queue.push_front(task);
             return Ok(())
         };
 
@@ -495,11 +467,6 @@ where
                     match message {
                         ProofTaskMessage::QueueTask(task) => match task {
                             ProofTaskKind::StorageProof(input, sender) => {
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.storage_proofs += 1;
-                                }
-
                                 match self
                                     .storage_work_tx
                                     .try_send(StorageProofJob { input, result_sender: sender })
@@ -516,12 +483,7 @@ where
                                             "Worker pool queue full, spawning on-demand"
                                         );
 
-                                        #[cfg(feature = "metrics")]
-                                        {
-                                            self.metrics.on_demand_fallback += 1;
-                                        }
-
-                                        self.pending_on_demand.push_back(
+                                        self.on_demand_queue.push_back(
                                             ProofTaskKind::StorageProof(
                                                 job.input,
                                                 job.result_sender,
@@ -535,12 +497,7 @@ where
                                             "Worker pool disconnected (no workers available), falling back to on-demand"
                                         );
 
-                                        #[cfg(feature = "metrics")]
-                                        {
-                                            self.metrics.on_demand_fallback += 1;
-                                        }
-
-                                        self.pending_on_demand.push_back(
+                                        self.on_demand_queue.push_back(
                                             ProofTaskKind::StorageProof(
                                                 job.input,
                                                 job.result_sender,
@@ -709,9 +666,6 @@ where
         );
 
         decoded_result
-
-        // NOTE: self is NOT consumed - transaction remains owned by worker
-        // No ProofTaskMessage::Transaction sent
     }
 
     /// Calculates a storage proof for the given hashed address, and desired prefix set.
@@ -1067,5 +1021,71 @@ impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
         }
 
         rx.recv().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::map::B256Map;
+    use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
+    use reth_trie_common::{
+        prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedAccountsSorted,
+        HashedPostStateSorted,
+    };
+    use std::sync::Arc;
+    use tokio::{runtime::Builder, task};
+
+    fn test_ctx() -> ProofTaskCtx {
+        ProofTaskCtx::new(
+            Arc::new(TrieUpdatesSorted::default()),
+            Arc::new(HashedPostStateSorted::new(
+                HashedAccountsSorted::default(),
+                B256Map::default(),
+            )),
+            Arc::new(TriePrefixSetsMut::default()),
+        )
+    }
+
+    /// Ensures the storage worker pool plus on-demand pool never exceed the requested concurrency
+    /// when the storage worker count saturates the budget.
+    #[test]
+    fn proof_task_manager_respects_concurrency_budget() {
+        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let handle = tokio::runtime::Handle::current();
+            let factory = create_test_provider_factory();
+            let view = ConsistentDbView::new(factory, None);
+            let ctx = test_ctx();
+
+            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 2, 2);
+            assert_eq!(manager.storage_worker_count, 1);
+            assert_eq!(manager.max_on_demand_txs, 1);
+            assert!(manager.storage_worker_count + manager.max_on_demand_txs <= 2);
+
+            drop(manager);
+            task::yield_now().await;
+        });
+    }
+
+    /// Ensures the manager falls back to on-demand transactions when the budget only allows a
+    /// single concurrent transaction.
+    #[test]
+    fn proof_task_manager_handles_single_concurrency() {
+        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        runtime.block_on(async {
+            let handle = tokio::runtime::Handle::current();
+            let factory = create_test_provider_factory();
+            let view = ConsistentDbView::new(factory, None);
+            let ctx = test_ctx();
+
+            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 1, 5);
+            assert_eq!(manager.storage_worker_count, 0);
+            assert_eq!(manager.max_on_demand_txs, 1);
+            assert!(manager.storage_worker_count + manager.max_on_demand_txs <= 1);
+
+            drop(manager);
+            task::yield_now().await;
+        });
     }
 }
