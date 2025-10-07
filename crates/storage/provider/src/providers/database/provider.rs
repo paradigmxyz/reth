@@ -336,11 +336,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // Unwind account history indices.
         self.unwind_account_history_indices(changed_accounts.iter())?;
 
-        let storage_range = BlockNumberAddress::range(from..);
+        let storage_start = BlockNumberAddress((from, Address::ZERO));
         let changed_storages = self
             .tx
             .cursor_read::<tables::StorageChangeSets>()?
-            .walk_range(storage_range)?
+            .walk_range(storage_start..)?
             .collect::<Result<Vec<_>, _>>()?;
 
         // Unwind storage hashes.
