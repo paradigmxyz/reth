@@ -319,7 +319,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(())
     }
 
-    /// Unwinds trie state for the given range.
+    /// Unwinds trie state starting at and including the given block.
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
