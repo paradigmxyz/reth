@@ -300,20 +300,7 @@ where
     ) -> ProviderResult<Self> {
         let (tx_sender, proof_task_rx) = channel();
 
-        // Calculate how many workers to spawn.
-        // We use the full max_concurrency for workers if needed, since on-demand operations
-        // (BlindedAccountNode) are less frequent and can share the budget.
         let planned_workers = storage_worker_count.min(max_concurrency);
-
-        if planned_workers < storage_worker_count {
-            tracing::debug!(
-                target: "trie::proof_task",
-                requested = storage_worker_count,
-                capped = planned_workers,
-                max_concurrency,
-                "Adjusted storage worker count to fit concurrency budget"
-            );
-        }
 
         // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
