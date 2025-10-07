@@ -62,7 +62,7 @@ macro_rules! db_ro_exec {
     ($env:expr, $tool:ident, $N:ident, $command:block) => {
         let Environment { provider_factory, .. } = $env.init::<$N>(AccessRights::RO)?;
 
-        let $tool = DbTool::new(provider_factory.clone())?;
+        let $tool = DbTool::new(provider_factory)?;
         $command;
     };
 }

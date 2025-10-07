@@ -12,7 +12,7 @@ use reth_db_api::{
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_db_common::DbTool;
-use reth_node_api::{ReceiptTy, TxTy};
+use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;
@@ -96,7 +96,7 @@ impl Command {
                         } else {
                             match segment {
                                 StaticFileSegment::Headers => {
-                                    let header = Header::decompress(content[0].as_slice())?;
+                                    let header = HeaderTy::<N>::decompress(content[0].as_slice())?;
                                     let block_hash = BlockHash::decompress(content[1].as_slice())?;
                                     println!(
                                         "Header\n{}\n\nBlockHash\n{}",

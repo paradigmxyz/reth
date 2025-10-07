@@ -149,6 +149,7 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{create_test_provider_factory, MockEthProvider},
+        BlockWriter,
     };
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 
@@ -190,7 +191,7 @@ mod tests {
         let provider_rw = factory.provider_rw().expect("failed to get provider_rw");
         for block in &blocks {
             provider_rw
-                .insert_historical_block(
+                .insert_block(
                     block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
@@ -228,7 +229,7 @@ mod tests {
         let provider_rw = factory.provider_rw().expect("failed to get provider_rw");
         for block in &blocks {
             provider_rw
-                .insert_historical_block(
+                .insert_block(
                     block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
@@ -274,7 +275,7 @@ mod tests {
         let provider_rw = factory.provider_rw().expect("failed to get provider_rw");
         for block in &blocks {
             provider_rw
-                .insert_historical_block(
+                .insert_block(
                     block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
@@ -310,7 +311,7 @@ mod tests {
         let provider_rw = factory.provider_rw().expect("failed to get provider_rw");
         for block in &blocks {
             provider_rw
-                .insert_historical_block(
+                .insert_block(
                     block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
