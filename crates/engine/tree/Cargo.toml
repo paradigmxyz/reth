@@ -59,6 +59,7 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+dashmap.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true

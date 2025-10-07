@@ -176,7 +176,7 @@ where
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
             ctx.chain_spec(),
-            MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
+            MyEvmFactory { precompile_cache: self.precompile_cache },
         );
         Ok(evm_config)
     }

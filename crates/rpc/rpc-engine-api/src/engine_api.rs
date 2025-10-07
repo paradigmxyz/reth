@@ -580,7 +580,13 @@ where
                     end = best_block;
                 }
 
+            // Check if the requested range starts before the earliest available block due to pruning/expiry
+            let earliest_block = inner.provider.earliest_block_number().unwrap_or(0);
             for num in start..=end {
+                if num < earliest_block {
+                    result.push(None);
+                    continue;
+                }
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
