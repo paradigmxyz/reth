@@ -320,13 +320,12 @@ where
             if let Some(args) = this.build_args() {
                 let now = Instant::now();
 
-                // Signal that a flashblock build has started
-
                 let fb_info = FlashBlockBuildInfo {
                     parent_hash: args.base.parent_hash,
                     index: args.last_flashblock_index,
                     block_number: args.base.block_number,
                 };
+                // Signal that a flashblock build has started with build metadata
                 let _ = this.build_state_tx.send(Some(fb_info));
                 let (tx, rx) = oneshot::channel();
                 let builder = this.builder.clone();
