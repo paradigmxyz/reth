@@ -885,6 +885,10 @@ where
                         trie_input,
                         &self.config,
                     );
+                    // The payload processor will silently downgrade to cache-only mode if the proof
+                    // task manager fails to initialize (e.g. provider error). Detect that here and
+                    // fall back to the legacy parallel state root computation so we still attempt
+                    // to reuse the caching pipeline.
                     let strategy = if handle.supports_state_root() {
                         StateRootStrategy::StateRootTask
                     } else {
