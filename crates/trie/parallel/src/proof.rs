@@ -14,8 +14,7 @@ use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -34,7 +33,7 @@ use reth_trie_common::{
     proof::{DecodedProofNodes, ProofRetainer},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
+use std::sync::Arc;
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -59,7 +58,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    storage_proof_task_handle: ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -75,7 +74,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        storage_proof_task_handle: ProofTaskManagerHandle<<Factory::Provider as DBProvider>::Tx>,
     ) -> Self {
         Self {
             view,
@@ -118,18 +117,17 @@ where
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-    ) -> Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>> {
+    ) -> crossbeam_channel::Receiver<Result<DecodedStorageMultiProof, ParallelStateRootError>> {
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
-            Arc::new(target_slots),
+            target_slots,
             self.collect_branch_node_masks,
             self.multi_added_removed_keys.clone(),
         );
 
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let _ =
-            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
         receiver
     }
 
@@ -368,7 +366,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use crate::proof_task::{new_proof_task_handle, ProofTaskCtx};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder},
@@ -447,19 +445,13 @@ mod tests {
 
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = new_proof_task_handle(
             rt.handle().clone(),
             consistent_view.clone(),
             task_ctx,
-            1,
-            1, // storage_worker_count for test
+            1, // max_concurrency for test
         )
         .expect("Failed to create proof task");
-        let proof_task_handle = proof_task.handle();
-
-        // keep the join handle around to make sure it does not return any errors
-        // after we compute the state root
-        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let parallel_result = ParallelProof::new(
             consistent_view,
@@ -495,9 +487,8 @@ mod tests {
         // then compare the entire thing for any mask differences
         assert_eq!(parallel_result, sequential_result_decoded);
 
-        // drop the handle to terminate the task and then block on the proof task handle to make
-        // sure it does not return any errors
+        // Drop the handle to release transaction pool resources
+        // Note: No manager loop to join in the new design - handle manages lifecycle via Drop
         drop(proof_task_handle);
-        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 }

@@ -1204,7 +1204,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie::{MultiProof, TrieInput};
-    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
+    use reth_trie_parallel::proof_task::{new_proof_task_handle, ProofTaskCtx};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
@@ -1231,17 +1231,16 @@ mod tests {
             config.state_sorted.clone(),
             config.prefix_sets.clone(),
         );
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = new_proof_task_handle(
             executor.handle().clone(),
             config.consistent_view.clone(),
             task_ctx,
-            1,
-            1, // storage_worker_count for test
+            1, // max_concurrency for test
         )
-        .expect("Failed to create ProofTaskManager for multiproof test");
+        .expect("Failed to create proof task handle for multiproof test");
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
+        MultiProofTask::new(config, executor, proof_task_handle, channel.0, 1, None)
     }
 
     #[test]

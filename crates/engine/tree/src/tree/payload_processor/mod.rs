@@ -32,7 +32,7 @@ use reth_provider::{
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
 use reth_trie_parallel::{
-    proof_task::{ProofTaskCtx, ProofTaskManager},
+    proof_task::{new_proof_task_handle, ProofTaskCtx},
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
@@ -196,15 +196,13 @@ where
             state_root_config.prefix_sets.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
-        let storage_worker_count = config.storage_proof_workers();
-        let proof_task = ProofTaskManager::new(
+        let proof_task_handle = new_proof_task_handle(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
             max_proof_task_concurrency,
-            storage_worker_count,
         )
-        .expect("Failed to create ProofTaskManager with storage workers");
+        .expect("Failed to create proof task handle");
 
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
@@ -212,7 +210,7 @@ where
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
-            proof_task.handle(),
+            proof_task_handle.clone(),
             to_sparse_trie,
             max_multi_proof_task_concurrency,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
@@ -241,19 +239,7 @@ where
         let (state_root_tx, state_root_rx) = channel();
 
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
-
-        // spawn the proof task
-        self.executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
-                // At least log if there is an error at any point
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof task returned an error"
-                );
-            }
-        });
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx);
 
         PayloadHandle {
             to_multi_proof,
