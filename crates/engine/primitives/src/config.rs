@@ -20,12 +20,6 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
-/// Maximum number of storage proof workers
-const MAX_STORAGE_PROOF_WORKERS: usize = 12;
-
-/// Default ratio of storage proof workers to `max_proof_task_concurrency`
-const DEFAULT_STORAGE_PROOF_WORKER_RATIO: f32 = 0.5;
-
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -115,9 +109,6 @@ pub struct TreeConfig {
     prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of dedicated storage proof workers.
-    /// If None, defaults to half of `max_proof_task_concurrency`.
-    storage_proof_workers: Option<usize>,
 }
 
 impl Default for TreeConfig {
@@ -144,7 +135,6 @@ impl Default for TreeConfig {
             always_process_payload_attributes_on_canonical_head: false,
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
-            storage_proof_workers: None,
         }
     }
 }
@@ -174,7 +164,6 @@ impl TreeConfig {
         always_process_payload_attributes_on_canonical_head: bool,
         prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
-        storage_proof_workers: Option<usize>,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -198,7 +187,6 @@ impl TreeConfig {
             always_process_payload_attributes_on_canonical_head,
             prewarm_max_concurrency,
             allow_unwind_canonical_header,
-            storage_proof_workers,
         }
     }
 
@@ -463,40 +451,5 @@ impl TreeConfig {
     /// Return the prewarm max concurrency.
     pub const fn prewarm_max_concurrency(&self) -> usize {
         self.prewarm_max_concurrency
-    }
-
-    /// Get the number of storage proof workers.
-    ///
-    /// Defaults to half of `max_proof_task_concurrency`, clamped to valid range and leaving at
-    /// least one slot for on-demand work.
-    pub fn storage_proof_workers(&self) -> usize {
-        let max_allowed = self.max_proof_task_concurrency.saturating_sub(1) as usize;
-        if max_allowed == 0 {
-            return 0;
-        }
-
-        self.storage_proof_workers.unwrap_or_else(|| {
-            let derived = (self.max_proof_task_concurrency as f32 *
-                DEFAULT_STORAGE_PROOF_WORKER_RATIO) as usize;
-            let capped = derived.min(MAX_STORAGE_PROOF_WORKERS);
-
-            capped.clamp(1, max_allowed)
-        })
-    }
-
-    /// Set the number of storage proof workers explicitly.
-    ///
-    /// Value is clamped to the remaining concurrency budget (leaving one on-demand slot).
-    pub const fn with_storage_proof_workers(mut self, workers: usize) -> Self {
-        let max_allowed = self.max_proof_task_concurrency.saturating_sub(1) as usize;
-        let clamped = if workers > MAX_STORAGE_PROOF_WORKERS {
-            MAX_STORAGE_PROOF_WORKERS
-        } else if workers > max_allowed {
-            max_allowed
-        } else {
-            workers
-        };
-        self.storage_proof_workers = Some(clamped);
-        self
     }
 }
