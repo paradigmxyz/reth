@@ -198,8 +198,7 @@ where
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         // Default to half of max concurrency, leaving room for on-demand tasks (Accountproof and
         // blinded nodes)
-        let storage_worker_count = (max_proof_task_concurrency / 2)
-            .max(1);
+        let storage_worker_count = (max_proof_task_concurrency / 2).max(1);
         let proof_task = match ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
