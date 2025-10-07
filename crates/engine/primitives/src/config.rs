@@ -32,6 +32,15 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
+/// Maximum number of storage proof workers
+const MAX_STORAGE_PROOF_WORKERS: usize = 12;
+
+/// Minimum number of storage proof workers
+const MIN_STORAGE_PROOF_WORKERS: usize = 2;
+
+/// Default ratio of storage proof workers to max_proof_task_concurrency
+const DEFAULT_STORAGE_PROOF_WORKER_RATIO: f32 = 0.5;
+
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
@@ -121,8 +130,9 @@ pub struct TreeConfig {
     prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
-    /// Number of storage proof worker threads.
-    storage_worker_count: usize,
+    /// Number of dedicated storage proof workers.
+    /// If None, defaults to half of max_proof_task_concurrency.
+    storage_proof_workers: Option<usize>,
 }
 
 impl Default for TreeConfig {
@@ -149,7 +159,7 @@ impl Default for TreeConfig {
             always_process_payload_attributes_on_canonical_head: false,
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
-            storage_worker_count: default_storage_worker_count(),
+            storage_proof_workers: None,
         }
     }
 }
@@ -179,7 +189,7 @@ impl TreeConfig {
         always_process_payload_attributes_on_canonical_head: bool,
         prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
-        storage_worker_count: usize,
+        storage_proof_workers: Option<usize>,
     ) -> Self {
         assert!(max_proof_task_concurrency > 0, "max_proof_task_concurrency must be at least 1");
         Self {
@@ -204,7 +214,7 @@ impl TreeConfig {
             always_process_payload_attributes_on_canonical_head,
             prewarm_max_concurrency,
             allow_unwind_canonical_header,
-            storage_worker_count,
+            storage_proof_workers,
         }
     }
 
@@ -472,14 +482,30 @@ impl TreeConfig {
         self.prewarm_max_concurrency
     }
 
-    /// Return the number of storage proof worker threads.
-    pub const fn storage_worker_count(&self) -> usize {
-        self.storage_worker_count
+    /// Get the number of storage proof workers.
+    ///
+    /// Defaults to half of max_proof_task_concurrency, clamped to valid range.
+    pub fn storage_proof_workers(&self) -> usize {
+        self.storage_proof_workers.unwrap_or_else(|| {
+            let derived = (self.max_proof_task_concurrency as f32 *
+                DEFAULT_STORAGE_PROOF_WORKER_RATIO) as usize;
+            derived.clamp(MIN_STORAGE_PROOF_WORKERS, MAX_STORAGE_PROOF_WORKERS)
+        })
     }
 
-    /// Setter for the number of storage proof worker threads.
-    pub const fn with_storage_worker_count(mut self, storage_worker_count: usize) -> Self {
-        self.storage_worker_count = storage_worker_count;
+    /// Set the number of storage proof workers explicitly.
+    ///
+    /// Value is clamped to [MIN_STORAGE_PROOF_WORKERS, MAX_STORAGE_PROOF_WORKERS].
+    pub const fn with_storage_proof_workers(mut self, workers: usize) -> Self {
+        // Note: Can't use clamp in const fn, so we'll do manual clamping
+        let clamped = if workers < MIN_STORAGE_PROOF_WORKERS {
+            MIN_STORAGE_PROOF_WORKERS
+        } else if workers > MAX_STORAGE_PROOF_WORKERS {
+            MAX_STORAGE_PROOF_WORKERS
+        } else {
+            workers
+        };
+        self.storage_proof_workers = Some(clamped);
         self
     }
 }
