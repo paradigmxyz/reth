@@ -465,15 +465,16 @@ where
         };
 
         let tx_sender = self.tx_sender.clone();
+
         self.executor.spawn_blocking(move || match task {
             ProofTaskKind::BlindedAccountNode(path, sender) => {
                 proof_task_tx.blinded_account_node(path, sender, tx_sender);
             }
-            // Storage trie operations and account multiproofs should never reach here as they're
-            // routed to worker pools
-            ProofTaskKind::BlindedStorageNode(_, _, _)
-            | ProofTaskKind::StorageProof(_, _)
-            | ProofTaskKind::AccountMultiproof(_, _) => {
+            // Worker pool operations should never reach here as they're routed to their respective
+            // worker pools
+            ProofTaskKind::AccountMultiproof(_, _) |
+            ProofTaskKind::BlindedStorageNode(_, _, _) |
+            ProofTaskKind::StorageProof(_, _) => {
                 unreachable!("Worker pool operations should be routed to their respective pools")
             }
         });
@@ -486,15 +487,17 @@ where
     /// # Task Routing
     ///
     /// - **Storage Trie Operations** (`StorageProof` and `BlindedStorageNode`): Routed to
-    ///   pre-spawned worker pool via unbounded channel. Only falls back to `pending_tasks` if
-    ///   workers are disconnected (e.g., all workers panicked).
+    ///   pre-spawned storage worker pool via unbounded channel. Returns error if workers are
+    ///   disconnected (e.g., all workers panicked).
+    /// - **Account Multiproof Operations** (`AccountMultiproof`): Routed to pre-spawned account
+    ///   worker pool via unbounded channel. Returns error if workers are disconnected.
     /// - **Account Trie Operations** (`BlindedAccountNode`): Queued for on-demand execution via
     ///   `pending_tasks`.
     ///
     /// # Shutdown
     ///
-    /// On termination, `storage_work_tx` is dropped, closing the channel and
-    /// signaling all workers to shut down gracefully.
+    /// On termination, `storage_work_tx` and `account_work_tx` are dropped, closing the channels
+    /// and signaling all workers to shut down gracefully.
     pub fn run(mut self) -> ProviderResult<()> {
         loop {
             match self.proof_task_rx.recv() {
@@ -571,11 +574,27 @@ where
                             }
 
                             ProofTaskKind::AccountMultiproof(input, sender) => {
-                                #[cfg(feature = "metrics")]
+                                match self
+                                    .account_work_tx
+                                    .send(AccountMultiproofJob { input, result_sender: sender })
                                 {
-                                    self.metrics.account_nodes += 1;
+                                    Ok(_) => {
+                                        tracing::trace!(
+                                            target: "trie::proof_task",
+                                            "Account multiproof dispatched to worker pool"
+                                        );
                                 }
-                                self.queue_proof_task(ProofTaskKind::AccountMultiproof(input, sender));
+                                    Err(crossbeam_channel::SendError(job)) => {
+                                        tracing::error!(
+                                            target: "trie::proof_task",
+                                            account_worker_count = self.account_worker_count,
+                                            "Account worker pool disconnected"
+                                        );
+
+                                        // Send error back to caller
+                                        let _ = job.send_worker_unavailable_error();
+                                    }
+                                }
                             }
                         },
                         ProofTaskMessage::Transaction(tx) => {
@@ -583,12 +602,14 @@ where
                             self.proof_task_txs.push(tx);
                         }
                         ProofTaskMessage::Terminate => {
-                            // Drop storage_work_tx to signal workers to shut down
+                            // Drop worker channels to signal workers to shut down
                             drop(self.storage_work_tx);
+                            drop(self.account_work_tx);
 
                             tracing::debug!(
                                 target: "trie::proof_task",
                                 storage_worker_count = self.storage_worker_count,
+                                account_worker_count = self.account_worker_count,
                                 "Shutting down proof task manager, signaling workers to terminate"
                             );
 
@@ -769,7 +790,7 @@ where
 }
 
 /// This represents an input for a storage proof.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
     hashed_address: B256,
@@ -823,6 +844,19 @@ struct AccountMultiproofJob {
     input: AccountMultiproofInput,
     /// Channel to send result back to original caller
     result_sender: Sender<AccountMultiproofResult>,
+}
+
+impl AccountMultiproofJob {
+    /// Sends an error back to the caller when worker pool is unavailable.
+    ///
+    /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
+    /// dropped.
+    fn send_worker_unavailable_error(&self) -> Result<(), ()> {
+        let error = ParallelStateRootError::Other(
+            "Account worker pool unavailable".to_string(),
+        );
+        self.result_sender.send(Err(error)).map_err(|_| ())
+    }
 }
 
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
@@ -994,7 +1028,7 @@ mod tests {
         )
     }
 
-    /// Ensures `max_concurrency` is independent of storage workers.
+    /// Ensures `max_concurrency` is independent of storage and account workers.
     #[test]
     fn proof_task_manager_independent_pools() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
@@ -1004,9 +1038,11 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 1, 5).unwrap();
-            // With storage_worker_count=5, we get exactly 5 workers
+            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 1, 5, 3).unwrap();
+            // With storage_worker_count=5, we get exactly 5 storage workers
             assert_eq!(manager.storage_worker_count, 5);
+            // With account_worker_count=3, we get exactly 3 account workers
+            assert_eq!(manager.account_worker_count, 3);
             // max_concurrency=1 is for on-demand operations only
             assert_eq!(manager.max_concurrency, 1);
 
