@@ -40,7 +40,6 @@ use reth_trie_common::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
-    collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, SendError, Sender},
@@ -133,17 +132,14 @@ impl StorageWorkerJob {
 ///
 /// This manager handles three distinct execution paths:
 ///
-/// 1. **Worker Pools** (for storage and account operations):
+/// **Worker Pools** (for all trie operations):
 ///    - Pre-spawned workers with dedicated long-lived transactions
 ///    - **Storage pool**: Handles `StorageProof` and `BlindedStorageNode` requests
-///    - **Account pool**: Handles `AccountMultiproof` requests, delegates to storage pool
+///    - **Account pool**: Handles `AccountMultiproof` and `BlindedAccountNode` requests, delegates
+///      storage proof computation to storage pool
 ///    - Tasks queued via crossbeam unbounded channels
 ///    - Workers continuously process without transaction overhead
 ///    - Returns error if worker pool is unavailable (all workers panicked)
-///
-/// 2. **On-Demand Execution** (for blinded account node operations):
-///    - Lazy transaction creation for `BlindedAccountNode` requests
-///    - Transactions returned to pool after use for reuse
 ///
 /// # Public Interface
 ///
@@ -162,38 +158,16 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     storage_worker_count: usize,
 
     /// Sender for account worker jobs to worker pool.
-    account_work_tx: CrossbeamSender<AccountMultiproofJob>,
+    account_work_tx: CrossbeamSender<AccountWorkerJob>,
 
     /// Number of account workers successfully spawned.
     account_worker_count: usize,
 
-    /// Max number of database transactions to create for on-demand account trie operations.
-    max_concurrency: usize,
-
-    /// Number of database transactions created for on-demand operations.
-    total_transactions: usize,
-
-    /// Proof tasks pending execution (account trie operations only).
-    pending_tasks: VecDeque<ProofTaskKind>,
-
-    /// The proof task transactions, containing owned cursor factories that are reused for proof
-    /// calculation (account trie operations only).
-    proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
-
-    /// Consistent view provider used for creating transactions on-demand.
-    view: ConsistentDbView<Factory>,
-
-    /// Proof task context shared across all proof tasks.
-    task_ctx: ProofTaskCtx,
-
-    /// The underlying handle from which to spawn proof tasks.
-    executor: Handle,
-
     /// Receives proof task requests from [`ProofTaskManagerHandle`].
     proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
 
-    /// Internal channel for on-demand tasks to return transactions after use.
-    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    /// Sender for creating handles that can queue tasks.
+    proof_task_tx: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
 
     /// The number of active handles.
     ///
@@ -350,9 +324,32 @@ fn storage_worker_loop<Tx>(
 
 // TODO: Refactor this with storage_worker_loop. ProofTaskManager should be removed in the following
 // pr and `MultiproofManager` should be used instead to dispatch jobs directly.
+/// Worker loop for account trie operations.
+///
+/// # Lifecycle
+///
+/// Each worker:
+/// 1. Receives `AccountWorkerJob` from crossbeam unbounded channel
+/// 2. Computes result using its dedicated long-lived transaction
+/// 3. Sends result directly to original caller via `std::mpsc`
+/// 4. Repeats until channel closes (graceful shutdown)
+///
+/// # Transaction Reuse
+///
+/// Reuses the same transaction and cursor factories across multiple operations
+/// to avoid transaction creation and cursor factory setup overhead.
+///
+/// # Panic Safety
+///
+/// If this function panics, the worker thread terminates but other workers
+/// continue operating and the system degrades gracefully.
+///
+/// # Shutdown
+///
+/// Worker shuts down when the crossbeam channel closes (all senders dropped).
 fn account_worker_loop<Tx>(
     proof_tx: ProofTaskTx<Tx>,
-    work_rx: CrossbeamReceiver<AccountMultiproofJob>,
+    work_rx: CrossbeamReceiver<AccountWorkerJob>,
     storage_proof_handle: ProofTaskManagerHandle<Tx>,
     worker_id: usize,
 ) where
@@ -361,87 +358,135 @@ fn account_worker_loop<Tx>(
     tracing::debug!(
         target: "trie::proof_task",
         worker_id,
-        "Account multiproof worker started"
+        "Account worker started"
     );
 
+    // Create factories once at worker startup to avoid recreation overhead.
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+
+    // Create blinded provider factory once for all blinded node requests
+    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory.clone(),
+        proof_tx.task_ctx.prefix_sets.clone(),
+    );
+
     let mut account_proofs_processed = 0u64;
+    let mut account_nodes_processed = 0u64;
 
-    while let Ok(AccountMultiproofJob { mut input, result_sender }) = work_rx.recv() {
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            targets = input.targets.len(),
-            "Processing account multiproof"
-        );
+    while let Ok(job) = work_rx.recv() {
+        match job {
+            AccountWorkerJob::AccountMultiproof { mut input, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    targets = input.targets.len(),
+                    "Processing account multiproof"
+                );
 
-        let proof_start = Instant::now();
-        let mut tracker = ParallelTrieTracker::default();
+                let proof_start = Instant::now();
+                let mut tracker = ParallelTrieTracker::default();
 
-        let storage_root_targets_len = StorageRootTargets::new(
-            input
-                .prefix_sets
-                .account_prefix_set
-                .iter()
-                .map(|nibbles| B256::from_slice(&nibbles.pack())),
-            input.prefix_sets.storage_prefix_sets.clone(),
-        )
-        .len();
-        tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
+                let storage_root_targets_len = StorageRootTargets::new(
+                    input
+                        .prefix_sets
+                        .account_prefix_set
+                        .iter()
+                        .map(|nibbles| B256::from_slice(&nibbles.pack())),
+                    input.prefix_sets.storage_prefix_sets.clone(),
+                )
+                .len();
+                tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let storage_proofs = match collect_storage_proofs(
-            &proof_tx,
-            &storage_proof_handle,
-            &input.targets,
-            &input.prefix_sets,
-            input.collect_branch_node_masks,
-            input.multi_added_removed_keys.clone(),
-        ) {
-            Ok(proofs) => proofs,
-            Err(error) => {
-                let _ = result_sender.send(Err(error));
-                continue;
+                let storage_proofs = match collect_storage_proofs(
+                    &proof_tx,
+                    &storage_proof_handle,
+                    &input.targets,
+                    &input.prefix_sets,
+                    input.collect_branch_node_masks,
+                    input.multi_added_removed_keys.clone(),
+                ) {
+                    Ok(proofs) => proofs,
+                    Err(error) => {
+                        let _ = result_sender.send(Err(error));
+                        continue;
+                    }
+                };
+
+                // Use the missed leaves cache passed from the multiproof manager
+                let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
+
+                let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
+
+                let result = crate::proof::build_account_multiproof_with_storage_roots(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    &input.targets,
+                    account_prefix_set,
+                    input.collect_branch_node_masks,
+                    input.multi_added_removed_keys.as_ref(),
+                    storage_proofs,
+                    missed_leaves_storage_roots,
+                    &mut tracker,
+                );
+
+                let proof_elapsed = proof_start.elapsed();
+                let stats = tracker.finish();
+                let result = result.map(|proof| (proof, stats));
+                account_proofs_processed += 1;
+
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        account_proofs_processed,
+                        "Account multiproof receiver dropped, discarding result"
+                    );
+                }
+
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    proof_time_us = proof_elapsed.as_micros(),
+                    total_processed = account_proofs_processed,
+                    "Account multiproof completed"
+                );
             }
-        };
 
-        // Use the missed leaves cache passed from the multiproof manager
-        let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
+            AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?path,
+                    "Processing blinded account node"
+                );
 
-        let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
+                let start = Instant::now();
+                let result = blinded_provider_factory.account_node_provider().trie_node(&path);
+                let elapsed = start.elapsed();
 
-        let result = crate::proof::build_account_multiproof_with_storage_roots(
-            trie_cursor_factory.clone(),
-            hashed_cursor_factory.clone(),
-            &input.targets,
-            account_prefix_set,
-            input.collect_branch_node_masks,
-            input.multi_added_removed_keys.as_ref(),
-            storage_proofs,
-            missed_leaves_storage_roots,
-            &mut tracker,
-        );
+                account_nodes_processed += 1;
 
-        let proof_elapsed = proof_start.elapsed();
-        let stats = tracker.finish();
-        let result = result.map(|proof| (proof, stats));
-        account_proofs_processed += 1;
+                if result_sender.send(result).is_err() {
+                    tracing::debug!(
+                        target: "trie::proof_task",
+                        worker_id,
+                        ?path,
+                        account_nodes_processed,
+                        "Blinded account node receiver dropped, discarding result"
+                    );
+                }
 
-        if result_sender.send(result).is_err() {
-            tracing::debug!(
-                target: "trie::proof_task",
-                worker_id,
-                account_proofs_processed,
-                "Account multiproof receiver dropped, discarding result"
-            );
+                trace!(
+                    target: "trie::proof_task",
+                    worker_id,
+                    ?path,
+                    node_time_us = elapsed.as_micros(),
+                    total_processed = account_nodes_processed,
+                    "Blinded account node completed"
+                );
+            }
         }
-
-        trace!(
-            target: "trie::proof_task",
-            worker_id,
-            proof_time_us = proof_elapsed.as_micros(),
-            total_processed = account_proofs_processed,
-            "Account multiproof completed"
-        );
     }
 
     tracing::debug!(
@@ -532,31 +577,28 @@ where
 {
     /// Creates a new [`ProofTaskManager`] with pre-spawned storage and account proof workers.
     ///
-    /// The `storage_worker_count` determines how many storage workers to spawn,
-    /// `account_worker_count` determines how many account workers to spawn, and
-    /// `max_concurrency` determines the limit for on-demand operations (blinded account nodes).
+    /// The `storage_worker_count` determines how many storage workers to spawn, and
+    /// `account_worker_count` determines how many account workers to spawn.
     /// Returns an error if the underlying provider fails to create the transactions required for
     /// spawning workers.
     pub fn new(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
-        max_concurrency: usize,
         storage_worker_count: usize,
         account_worker_count: usize,
     ) -> ProviderResult<Self> {
-        let (tx_sender, proof_task_rx) = channel();
+        let (proof_task_tx, proof_task_rx) = channel();
 
         // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
-        let (account_work_tx, account_work_rx) = unbounded::<AccountMultiproofJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountWorkerJob>();
 
         tracing::info!(
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
-            max_concurrency,
             "Initializing storage and account worker pools with unbounded queues"
         );
 
@@ -583,10 +625,10 @@ where
             account_work_rx,
             WorkerType::Account,
             {
-                let tx_sender = tx_sender.clone();
+                let task_tx = proof_task_tx.clone();
                 move |proof_tx, work_rx, worker_id| {
                     let storage_handle = ProofTaskManagerHandle::new(
-                        tx_sender.clone(),
+                        task_tx.clone(),
                         worker_handles_counter.clone(),
                     );
                     account_worker_loop(proof_tx, work_rx, storage_handle, worker_id)
@@ -599,16 +641,8 @@ where
             storage_worker_count: spawned_storage_workers,
             account_work_tx,
             account_worker_count: spawned_account_workers,
-            max_concurrency,
-            total_transactions: 0,
-            pending_tasks: VecDeque::new(),
-            proof_task_txs: Vec::with_capacity(max_concurrency), /* used for on-demand account
-                                                                  * trie operations */
-            view,
-            task_ctx,
-            executor,
             proof_task_rx,
-            tx_sender,
+            proof_task_tx,
             active_handles: Arc::new(AtomicUsize::new(0)),
 
             #[cfg(feature = "metrics")]
@@ -618,7 +652,7 @@ where
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
     pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
+        ProofTaskManagerHandle::new(self.proof_task_tx.clone(), self.active_handles.clone())
     }
 
     /// Spawns a pool of workers with dedicated database transactions.
@@ -682,62 +716,7 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
 {
-    /// Inserts the task into the pending tasks queue.
-    pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
-        self.pending_tasks.push_back(task);
-    }
-
-    /// Gets either the next available transaction, or creates a new one if all are in use and the
-    /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
-        if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Ok(Some(proof_task_tx));
-        }
-
-        // if we can create a new tx within our concurrency limits, create one on-demand
-        if self.total_transactions < self.max_concurrency {
-            let provider_ro = self.view.provider_ro()?;
-            let tx = provider_ro.into_tx();
-            self.total_transactions += 1;
-            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone(), self.total_transactions)));
-        }
-
-        Ok(None)
-    }
-
-    /// Spawns the next queued proof task on the executor with the given input, if there are any
-    /// transactions available.
-    ///
-    /// This will return an error if a transaction must be created on-demand and the consistent view
-    /// provider fails.
-    pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(task) = self.pending_tasks.pop_front() else { return Ok(()) };
-
-        let Some(proof_task_tx) = self.get_or_create_tx()? else {
-            // if there are no txs available, requeue the proof task
-            self.pending_tasks.push_front(task);
-            return Ok(())
-        };
-
-        let tx_sender = self.tx_sender.clone();
-
-        self.executor.spawn_blocking(move || match task {
-            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                proof_task_tx.blinded_account_node(path, sender, tx_sender);
-            }
-            // Worker pool operations should never reach here as they're routed to their respective
-            // worker pools
-            ProofTaskKind::AccountMultiproof(_, _) |
-            ProofTaskKind::BlindedStorageNode(_, _, _) |
-            ProofTaskKind::StorageProof(_, _) => {
-                unreachable!("Worker pool operations should be routed to their respective pools")
-            }
-        });
-
-        Ok(())
-    }
-
-    /// Loops, managing the proof tasks, and sending new tasks to the executor.
+    /// Loops, managing the proof tasks, routing them to the appropriate worker pools.
     ///
     /// # Task Routing
     ///
@@ -818,20 +797,46 @@ where
                                 }
                             }
 
-                            ProofTaskKind::BlindedAccountNode(_, _) => {
-                                // Route account trie operations to pending_tasks
+                            ProofTaskKind::BlindedAccountNode(path, sender) => {
                                 #[cfg(feature = "metrics")]
                                 {
                                     self.metrics.account_nodes += 1;
                                 }
-                                self.queue_proof_task(task);
+
+                                match self.account_work_tx.send(
+                                    AccountWorkerJob::BlindedAccountNode {
+                                        path,
+                                        result_sender: sender,
+                                    },
+                                ) {
+                                    Ok(_) => {
+                                        tracing::trace!(
+                                            target: "trie::proof_task",
+                                            ?path,
+                                            "Blinded account node dispatched to worker pool"
+                                        );
+                                    }
+                                    Err(crossbeam_channel::SendError(job)) => {
+                                        tracing::warn!(
+                                            target: "trie::proof_task",
+                                            account_worker_count = self.account_worker_count,
+                                            ?path,
+                                            "Worker pool disconnected, cannot process blinded account node"
+                                        );
+
+                                        // Send error back to caller
+                                        let _ = job.send_worker_unavailable_error();
+                                    }
+                                }
                             }
 
                             ProofTaskKind::AccountMultiproof(input, sender) => {
-                                match self
-                                    .account_work_tx
-                                    .send(AccountMultiproofJob { input, result_sender: sender })
-                                {
+                                match self.account_work_tx.send(
+                                    AccountWorkerJob::AccountMultiproof {
+                                        input,
+                                        result_sender: sender,
+                                    },
+                                ) {
                                     Ok(_) => {
                                         tracing::trace!(
                                             target: "trie::proof_task",
@@ -851,10 +856,6 @@ where
                                 }
                             }
                         },
-                        ProofTaskMessage::Transaction(tx) => {
-                            // Return transaction to pending_tasks pool
-                            self.proof_task_txs.push(tx);
-                        }
                         ProofTaskMessage::Terminate => {
                             // Drop worker channels to signal workers to shut down
                             drop(self.storage_work_tx);
@@ -873,15 +874,15 @@ where
 
                             return Ok(())
                         }
+                        ProofTaskMessage::_Phantom(_) => {
+                            unreachable!("_Phantom variant should never be constructed")
+                        }
                     }
                 }
                 // All senders are disconnected, so we can terminate
                 // However this should never happen, as this struct stores a sender
                 Err(_) => return Ok(()),
             };
-
-            // Try spawning pending account trie tasks
-            self.try_spawn_next()?;
         }
     }
 }
@@ -1004,7 +1005,7 @@ where
         self,
         path: Nibbles,
         result_sender: Sender<TrieNodeProviderResult>,
-        tx_sender: Sender<ProofTaskMessage<Tx>>,
+        _tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         trace!(
             target: "trie::proof_task",
@@ -1038,8 +1039,7 @@ where
             );
         }
 
-        // send the tx back
-        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
+        // Transaction is no longer returned - BlindedAccountNode now uses worker pool
     }
 }
 
@@ -1101,10 +1101,10 @@ pub struct AccountMultiproofInput {
 enum AccountWorkerJob {
     /// Account multiproof computation request
     AccountMultiproof {
-    /// Account multiproof input parameters
-    input: AccountMultiproofInput,
-    /// Channel to send result back to original caller
-    result_sender: Sender<AccountMultiproofResult>,
+        /// Account multiproof input parameters
+        input: AccountMultiproofInput,
+        /// Channel to send result back to original caller
+        result_sender: Sender<AccountMultiproofResult>,
     },
     /// Blinded account node retrieval request
     BlindedAccountNode {
@@ -1170,10 +1170,10 @@ impl ProofTaskCtx {
 pub enum ProofTaskMessage<Tx> {
     /// A request to queue a proof task.
     QueueTask(ProofTaskKind),
-    /// A returned database transaction.
-    Transaction(ProofTaskTx<Tx>),
     /// A request to terminate the proof task manager.
     Terminate,
+    #[doc(hidden)]
+    _Phantom(std::marker::PhantomData<Tx>),
 }
 
 /// Proof task kind.
@@ -1319,13 +1319,11 @@ mod tests {
             let view = ConsistentDbView::new(factory, None);
             let ctx = test_ctx();
 
-            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 1, 5, 3).unwrap();
+            let manager = ProofTaskManager::new(handle.clone(), view, ctx, 5, 3).unwrap();
             // With storage_worker_count=5, we get exactly 5 storage workers
             assert_eq!(manager.storage_worker_count, 5);
             // With account_worker_count=3, we get exactly 3 account workers
             assert_eq!(manager.account_worker_count, 3);
-            // max_concurrency=1 is for on-demand operations only
-            assert_eq!(manager.max_concurrency, 1);
 
             drop(manager);
             task::yield_now().await;

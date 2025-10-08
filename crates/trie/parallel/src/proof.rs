@@ -473,7 +473,7 @@ mod tests {
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1, 1).unwrap();
+            ProofTaskManager::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1).unwrap();
         let proof_task_handle = proof_task.handle();
 
         // keep the join handle around to make sure it does not return any errors

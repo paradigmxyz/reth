@@ -202,14 +202,13 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
+        let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = match ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),
             task_ctx,
-            max_proof_task_concurrency,
             storage_worker_count,
             account_worker_count,
         ) {
