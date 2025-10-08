@@ -365,16 +365,14 @@ where
             );
         }
 
-        // max_concurrency is now used solely for on-demand pool (account trie operations).
-        let remaining_concurrency = max_concurrency;
-
         Ok(Self {
             storage_work_tx,
             storage_worker_count: spawned_workers,
-            max_concurrency: remaining_concurrency,
+            max_concurrency,
             total_transactions: 0,
             pending_tasks: VecDeque::new(),
-            proof_task_txs: Vec::with_capacity(remaining_concurrency),
+            proof_task_txs: Vec::with_capacity(max_concurrency), /* used for on-demand account
+                                                                  * trie operations */
             view,
             task_ctx,
             executor,
