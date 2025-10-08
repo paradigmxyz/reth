@@ -1000,47 +1000,6 @@ where
         decoded_result
     }
 
-    /// Retrieves blinded account node by path.
-    fn blinded_account_node(
-        self,
-        path: Nibbles,
-        result_sender: Sender<TrieNodeProviderResult>,
-        _tx_sender: Sender<ProofTaskMessage<Tx>>,
-    ) {
-        trace!(
-            target: "trie::proof_task",
-            ?path,
-            "Starting blinded account node retrieval"
-        );
-
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
-        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            self.task_ctx.prefix_sets.clone(),
-        );
-
-        let start = Instant::now();
-        let result = blinded_provider_factory.account_node_provider().trie_node(&path);
-        trace!(
-            target: "trie::proof_task",
-            ?path,
-            elapsed = ?start.elapsed(),
-            "Completed blinded account node retrieval"
-        );
-
-        if let Err(error) = result_sender.send(result) {
-            tracing::error!(
-                target: "trie::proof_task",
-                ?path,
-                ?error,
-                "Failed to send blinded account node result"
-            );
-        }
-
-        // Transaction is no longer returned - BlindedAccountNode now uses worker pool
-    }
 }
 
 /// This represents an input for a storage proof.
