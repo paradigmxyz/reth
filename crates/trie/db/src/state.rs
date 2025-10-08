@@ -11,6 +11,8 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_storage_api::ChangeSetReader;
+use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
@@ -270,6 +272,71 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 
         Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
     }
+}
+
+/// Load hashed post state from reverts using a provider that implements ChangeSetReader.
+/// This function can read changesets from both static files and database.
+pub fn hashed_post_state_from_reverts_with_provider<Provider, KH>(
+    provider: &Provider,
+    tx: &impl DbTx,
+    range: impl RangeBounds<BlockNumber>,
+) -> Result<HashedPostState, ProviderError>
+where
+    Provider: ChangeSetReader,
+    KH: KeyHasher,
+{
+    // Convert range bounds to concrete range for the provider
+    let start = match range.start_bound() {
+        std::ops::Bound::Included(&n) => n,
+        std::ops::Bound::Excluded(&n) => n + 1,
+        std::ops::Bound::Unbounded => 0,
+    };
+
+    let end = match range.end_bound() {
+        std::ops::Bound::Included(&n) => n + 1,
+        std::ops::Bound::Excluded(&n) => n,
+        std::ops::Bound::Unbounded => BlockNumber::MAX,
+    };
+
+    // Get account changesets using the provider (handles static files + database)
+    let account_changesets = provider.account_changesets_range(start..end)?;
+
+    // Build accounts map from changesets - record value before first occurring change
+    let mut accounts = HashMap::new();
+    for (_, AccountBeforeTx { address, info }) in account_changesets {
+        accounts.entry(address).or_insert(info);
+    }
+
+    // Storage changesets still use direct cursor (no static files for storage yet)
+    let storage_range: BlockNumberAddressRange = range.into();
+    let mut storages = AddressMap::<B256Map<U256>>::default();
+    let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+    for entry in storage_changesets_cursor.walk_range(storage_range)? {
+        let (BlockNumberAddress((_, address)), storage) = entry?;
+        let account_storage = storages.entry(address).or_default();
+        account_storage.entry(storage.key).or_insert(storage.value);
+    }
+
+    let hashed_accounts =
+        accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
+
+    let hashed_storages = storages
+        .into_iter()
+        .map(|(address, storage)| {
+            (
+                KH::hash_key(address),
+                HashedStorage::from_iter(
+                    // The `wiped` flag indicates only whether previous storage entries
+                    // should be looked up in db or not. For reverts it's a noop since all
+                    // wiped changes had been written as storage reverts.
+                    false,
+                    storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
+                ),
+            )
+        })
+        .collect();
+
+    Ok(HashedPostState { accounts: hashed_accounts, storages: hashed_storages })
 }
 
 #[cfg(test)]
