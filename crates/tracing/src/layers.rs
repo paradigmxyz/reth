@@ -1,6 +1,6 @@
 use crate::formatter::LogFormat;
 #[cfg(feature = "otlp")]
-use reth_tracing_otlp::span_layer;
+use reth_tracing_otlp::{span_layer, TraceOutput};
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
@@ -129,7 +129,7 @@ impl Layers {
     pub fn with_span_layer(
         &mut self,
         service_name: String,
-        output_type: reth_tracing_otlp::TraceOutput,
+        output_type: TraceOutput,
     ) -> eyre::Result<()> {
         // Create the span provider
         let span_layer = span_layer(service_name, output_type)
