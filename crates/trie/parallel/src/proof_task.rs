@@ -945,7 +945,7 @@ mod tests {
         )
     }
 
-    /// Ensures max_concurrency is independent of storage workers.
+    /// Ensures `max_concurrency` is independent of storage workers.
     #[test]
     fn proof_task_manager_independent_pools() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();

@@ -166,6 +166,10 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    ///
+    /// Returns an error with the original transactions iterator if the proof task manager fails to
+    /// initialize.
+    #[allow(clippy::type_complexity)]
     pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
@@ -174,7 +178,10 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> Result<
+        PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>,
+        (reth_provider::ProviderError, I, ExecutionEnv<Evm>, StateProviderBuilder<N, P>),
+    >
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -204,19 +211,15 @@ where
             max_proof_task_concurrency,
             storage_worker_count,
         ) {
-            Ok(proof_task) => proof_task,
+            Ok(task) => task,
             Err(error) => {
-                // If we cannot bootstrap the proof task manager, continue with cache prewarming
-                // only; the caller will detect the missing state root channel and fall back to the
-                // parallel state root algorithm.
+                // Fall back to parallel state root if proof task manager fails to initialize
                 tracing::error!(
                     target: "engine::tree",
                     ?error,
-                    max_concurrency = max_proof_task_concurrency,
-                    requested_workers = storage_worker_count,
-                    "Failed to initialize proof task manager, falling back to cache-only mode"
+                    "Failed to initialize proof task manager, falling back to parallel state root"
                 );
-                return self.spawn_cache_exclusive(env, transactions, provider_builder);
+                return Err((error, transactions, env, provider_builder));
             }
         };
 
@@ -269,12 +272,12 @@ where
             }
         });
 
-        PayloadHandle {
+        Ok(PayloadHandle {
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
-        }
+        })
     }
 
     /// Spawns a task that exclusively handles cache prewarming for transaction execution.
@@ -879,14 +882,20 @@ mod tests {
             PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-            &TreeConfig::default(),
-        );
+        let mut handle =
+            payload_processor
+                .spawn(
+                    Default::default(),
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                    TrieInput::from_state(hashed_state),
+                    &TreeConfig::default(),
+                )
+                .map_err(|(err, ..)| err)
+                .expect("failed to spawn payload processor");
 
         let mut state_hook = handle.state_hook();
 
