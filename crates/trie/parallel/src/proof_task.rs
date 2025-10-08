@@ -440,11 +440,8 @@ where
                 proof_task_tx.blinded_account_node(path, sender, tx_sender);
             }
             // Storage trie operations should never reach here as they're routed to worker pool
-            ProofTaskKind::BlindedStorageNode(_, _, _) => {
-                unreachable!("BlindedStorageNode should be routed to worker pool")
-            }
-            ProofTaskKind::StorageProof(_, _) => {
-                unreachable!("StorageProof should be routed to worker pool")
+            ProofTaskKind::BlindedStorageNode(_, _, _) | ProofTaskKind::StorageProof(_, _) => {
+                unreachable!("Storage trie operations should be routed to worker pool")
             }
         });
 
