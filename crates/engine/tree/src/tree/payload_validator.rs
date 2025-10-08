@@ -44,7 +44,7 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInpu
 use reth_trie_db::DatabaseHashedPostState;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
-use tracing::{debug, debug_span, error, info, trace, warn};
+use tracing::{debug, error, info, trace, trace_span, warn};
 
 /// Context providing access to tree state during validation.
 ///
@@ -331,6 +331,18 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        let block_num_hash = input.num_hash();
+        let parent_hash = input.parent_hash();
+
+        // Create parent span for the entire payload validation process
+        let _span = trace_span!(
+            target: "engine::tree",
+            "payload_validation",
+            block_number = %block_num_hash.number,
+            block_hash = %block_num_hash.hash,
+            parent_hash = %parent_hash
+        )
+        .entered();
         /// A helper macro that returns the block in case there was an error
         /// This macro is used for early returns before block conversion
         macro_rules! ensure_ok {
@@ -360,9 +372,6 @@ where
                 }
             };
         }
-
-        let parent_hash = input.parent_hash();
-        let block_num_hash = input.num_hash();
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?parent_hash, "Fetching block state provider");
         let Some(provider_builder) =
@@ -411,6 +420,16 @@ where
         let txs = self.tx_iterator_for(&input)?;
 
         // Spawn the appropriate processor based on strategy
+        let prewarming_span = trace_span!(
+            target: "engine::tree",
+            "prewarming",
+            block_number = %block_num_hash.number,
+            block_hash = %block_num_hash.hash,
+            ?strategy
+        );
+        let _prewarming_guard = prewarming_span.enter();
+
+        trace!(target: "engine::tree", "Starting payload processor prewarming");
         let (mut handle, strategy) = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
             txs,
@@ -421,6 +440,8 @@ where
             block_num_hash,
             strategy,
         ));
+        trace!(target: "engine::tree", "Payload processor prewarming completed");
+        drop(_prewarming_guard);
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
@@ -455,6 +476,16 @@ where
 
         debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
+        let state_root_span = trace_span!(
+            target: "engine::tree",
+            "state_root_computation",
+            block_number = %block_num_hash.number,
+            block_hash = %block_num_hash.hash,
+            ?strategy
+        );
+        let _state_root_guard = state_root_span.enter();
+
+        trace!(target: "engine::tree", "Starting state root computation");
         let root_time = Instant::now();
 
         let mut maybe_state_root = None;
@@ -532,7 +563,8 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+        trace!(target: "engine::tree", ?root_elapsed, block_number = %block_num_hash.number, state_root = %state_root, "State root computation completed");
+        drop(_state_root_guard);
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -612,6 +644,16 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
+        let _span = trace_span!(
+            target: "engine::tree",
+            "pre_execution_validation",
+            block_number = %block.number(),
+            block_hash = %block.hash()
+        )
+        .entered();
+
+        trace!(target: "engine::tree", "Starting pre-execution validation");
+
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
@@ -622,6 +664,7 @@ where
             return Err(e)
         }
 
+        trace!(target: "engine::tree", "Pre-execution validation completed successfully");
         Ok(())
     }
 
@@ -642,9 +685,15 @@ where
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
 
-        let span = debug_span!(target: "engine::tree", "execute_block", num = ?num_hash.number, hash = ?num_hash.hash);
+        let span = trace_span!(
+            target: "engine::tree",
+            "evm_execution",
+            block_number = %num_hash.number,
+            block_hash = %num_hash.hash,
+            parent_hash = %env.parent_hash
+        );
         let _enter = span.enter();
-        debug!(target: "engine::tree", "Executing block");
+        trace!(target: "engine::tree", "Starting EVM execution");
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
@@ -683,7 +732,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        debug!(target: "engine::tree", elapsed = ?execution_time, number=?num_hash.number, "Executed block");
+        trace!(target: "engine::tree", elapsed = ?execution_time, block_number = %num_hash.number, "EVM execution completed");
         Ok(output)
     }
 
@@ -778,9 +827,17 @@ where
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
+        let _span = trace_span!(
+            target: "engine::tree",
+            "post_execution_validation",
+            block_number = %block.number(),
+            block_hash = %block.hash()
+        )
+        .entered();
+
         let start = Instant::now();
 
-        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
+        trace!(target: "engine::tree", "Starting post-execution validation");
         // validate block consensus rules
         if let Err(e) = self.validate_block_inner(block) {
             return Err(e.into())
@@ -816,6 +873,7 @@ where
             .post_execution_validation_duration
             .record(start.elapsed().as_secs_f64());
 
+        trace!(target: "engine::tree", elapsed = ?start.elapsed(), "Post-execution validation completed");
         Ok(hashed_state)
     }
 
