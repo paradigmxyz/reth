@@ -34,6 +34,10 @@ jobs:
           repository: ethereum/hive
           path: hivetests
 
+      - name: Get hive commit hash
+        id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
@@ -44,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ./hive_assets
-          key: hive-assets-${{ hashFiles('hivetests/**', '.github/assets/hive/build_simulators.sh') }}
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
 
       - name: Build hive assets
         if: steps.cache-hive.outputs.cache-hit != 'true'
