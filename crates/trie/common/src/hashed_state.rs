@@ -464,8 +464,8 @@ impl AsRef<Self> for HashedPostStateSorted {
 /// Sorted account state optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
-    /// Sorted collection of hashed addresses and their account info. None indicates that an account
-    /// was destroyed.
+    /// Sorted collection of hashed addresses and their account info. None indicates that an
+    /// account was destroyed.
     pub accounts: Vec<(B256, Option<Account>)>,
 }
 
