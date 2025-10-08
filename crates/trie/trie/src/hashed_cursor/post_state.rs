@@ -52,6 +52,8 @@ pub struct HashedPostStateAccountCursor<'a, C> {
     cursor: C,
     /// Forward-only in-memory cursor over accounts.
     post_state_cursor: ForwardInMemoryCursor<'a, B256, Option<Account>>,
+    /// Reference to the original accounts data for safe searching.
+    accounts_data: &'a [(B256, Option<Account>)],
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
@@ -63,8 +65,16 @@ where
 {
     /// Create new instance of [`HashedPostStateAccountCursor`].
     pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
-        Self { cursor, post_state_cursor, last_account: None }
+        let accounts_data = &post_state_accounts.accounts;
+        let post_state_cursor = ForwardInMemoryCursor::new(accounts_data);
+        Self { cursor, post_state_cursor, accounts_data, last_account: None }
+    }
+
+    /// Check if the account was destroyed in post state without advancing the cursor.
+    fn is_account_destroyed(&self, account: &B256) -> bool {
+        // Create a temporary cursor to search without modifying the main cursor position
+        let mut temp_cursor = ForwardInMemoryCursor::new(self.accounts_data);
+        temp_cursor.seek(account).is_some_and(|(addr, acc)| addr == *account && acc.is_none())
     }
 
 
@@ -82,10 +92,7 @@ where
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
         let mut db_entry = self.cursor.seek(key)?;
-        while db_entry.as_ref().is_some_and(|(address, _)| {
-            // Check if this account was destroyed in post state
-            self.post_state_cursor.seek(address).is_some_and(|(_, account)| account.is_none())
-        }) {
+        while db_entry.as_ref().is_some_and(|(address, _)| self.is_account_destroyed(address)) {
             db_entry = self.cursor.next()?;
         }
 
@@ -103,9 +110,7 @@ where
         // If post state was given precedence or account was cleared, move the cursor forward.
         let mut db_entry = self.cursor.seek(last_account)?;
         while db_entry.as_ref().is_some_and(|(address, _)| {
-            address <= &last_account ||
-            // Check if this account was destroyed in post state
-            self.post_state_cursor.seek(address).is_some_and(|(_, account)| account.is_none())
+            address <= &last_account || self.is_account_destroyed(address)
         }) {
             db_entry = self.cursor.next()?;
         }
@@ -186,6 +191,8 @@ pub struct HashedPostStateStorageCursor<'a, C> {
     cursor: C,
     /// Forward-only in-memory cursor over account storage slots.
     post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, U256>>,
+    /// Reference to the original storage data for safe searching.
+    storage_data: Option<&'a [(B256, U256)]>,
     /// Flag indicating whether database storage was wiped.
     storage_wiped: bool,
     /// The last slot that has been returned by the cursor.
@@ -199,10 +206,19 @@ where
 {
     /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
     pub fn new(cursor: C, post_state_storage: Option<&'a HashedStorageSorted>) -> Self {
-        let post_state_cursor =
-            post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.storage_slots));
+        let storage_data = post_state_storage.map(|s| s.storage_slots.as_slice());
+        let post_state_cursor = storage_data.map(ForwardInMemoryCursor::new);
         let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
-        Self { cursor, post_state_cursor, storage_wiped, last_slot: None }
+        Self { cursor, post_state_cursor, storage_data, storage_wiped, last_slot: None }
+    }
+
+    /// Check if the slot was zeroed out in post state without advancing the cursor.
+    fn is_slot_zeroed(&self, slot: &B256) -> bool {
+        // Create a temporary cursor to search without modifying the main cursor position
+        self.storage_data.map_or(false, |data| {
+            let mut temp_cursor = ForwardInMemoryCursor::new(data);
+            temp_cursor.seek(slot).is_some_and(|(s, value)| s == *slot && value.is_zero())
+        })
     }
 
 
@@ -220,11 +236,7 @@ where
         // It's not an exact match and storage was not wiped,
         // reposition to the first greater or equal account.
         let mut db_entry = self.cursor.seek(subkey)?;
-        while db_entry.as_ref().is_some_and(|entry| {
-            // Check if this slot was zeroed out in post state
-            self.post_state_cursor.as_mut().and_then(|c| c.seek(&entry.0))
-                .is_some_and(|(_, value)| value.is_zero())
-        }) {
+        while db_entry.as_ref().is_some_and(|entry| self.is_slot_zeroed(&entry.0)) {
             db_entry = self.cursor.next()?;
         }
 
@@ -251,12 +263,7 @@ where
         let mut db_entry = self.cursor.seek(last_slot)?;
         while db_entry
             .as_ref()
-            .is_some_and(|entry| {
-                entry.0 == last_slot ||
-                // Check if this slot was zeroed out in post state
-                self.post_state_cursor.as_mut().and_then(|c| c.seek(&entry.0))
-                    .is_some_and(|(_, value)| value.is_zero())
-            })
+            .is_some_and(|entry| entry.0 == last_slot || self.is_slot_zeroed(&entry.0))
         {
             db_entry = self.cursor.next()?;
         }
