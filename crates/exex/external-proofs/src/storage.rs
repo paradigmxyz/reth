@@ -49,6 +49,13 @@ pub trait ExternalHashedCursor: Send + Sync {
     fn next(&mut self) -> ExternalStorageResult<Option<(B256, Self::Value)>>;
 }
 
+/// Diff of trie updates and post state for a block.
+#[derive(Debug, Clone)]
+pub struct BlockStateDiff {
+    pub trie_updates: TrieUpdates,
+    pub post_state: HashedPostState,
+}
+
 /// Trait for reading trie nodes from the database.
 ///
 /// Only leaf nodes and some branch nodes are stored. The bottom layer of branch nodes
@@ -127,30 +134,25 @@ pub trait ExternalStorage: Send + Sync + Debug {
     async fn store_trie_updates(
         &self,
         block_number: u64,
-        trie_updates: TrieUpdates,
-        post_state: HashedPostState,
+        block_state_diff: BlockStateDiff,
     ) -> ExternalStorageResult<()>;
 
     /// Fetch all updates for a given block number.
-    async fn fetch_trie_updates(
-        &self,
-        block_number: u64,
-    ) -> ExternalStorageResult<(TrieUpdates, HashedPostState)>;
+    async fn fetch_trie_updates(&self, block_number: u64) -> ExternalStorageResult<BlockStateDiff>;
 
-    /// Applies `TrieUpdates` to the earliest state (updating/deleting nodes) and updates the
+    /// Applies `BlockStateDiff` to the earliest state (updating/deleting nodes) and updates the
     /// earliest block number.
     async fn prune_earliest_state(
         &self,
         new_earliest_block_number: u64,
-        branches_diff: TrieUpdates,
-        leaves_diff: HashedPostState,
+        diff: BlockStateDiff,
     ) -> ExternalStorageResult<()>;
 
-    /// Deletes all updates > `latest_common_block_number` and
+    /// Deletes all updates > `latest_common_block_number` and replaces them with the new updates.
     async fn replace_updates(
         &self,
         latest_common_block_number: u64,
-        blocks_to_add: HashMap<u64, TrieUpdates>,
+        blocks_to_add: HashMap<u64, BlockStateDiff>,
     ) -> ExternalStorageResult<()>;
 
     /// Set the earliest block number and hash that has been stored
