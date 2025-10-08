@@ -1535,6 +1535,22 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Ok(None)
         }
     }
+
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+
+        for block_num in range {
+            let block_changesets = self.account_block_changeset(block_num)?;
+            for changeset in block_changesets {
+                changesets.push((block_num, changeset));
+            }
+        }
+
+        Ok(changesets)
+    }
 }
 
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvider<N> {
