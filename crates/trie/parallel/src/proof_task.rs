@@ -367,7 +367,7 @@ fn account_worker_loop<Tx>(
     let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
     let mut account_proofs_processed = 0u64;
 
-    while let Ok(AccountMultiproofJob { input, result_sender }) = work_rx.recv() {
+    while let Ok(AccountMultiproofJob { mut input, result_sender }) = work_rx.recv() {
         trace!(
             target: "trie::proof_task",
             worker_id,
@@ -376,6 +376,18 @@ fn account_worker_loop<Tx>(
         );
 
         let proof_start = Instant::now();
+        let mut tracker = ParallelTrieTracker::default();
+
+        let storage_root_targets_len = StorageRootTargets::new(
+            input
+                .prefix_sets
+                .account_prefix_set
+                .iter()
+                .map(|nibbles| B256::from_slice(&nibbles.pack())),
+            input.prefix_sets.storage_prefix_sets.clone(),
+        )
+        .len();
+        tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
         let storage_proofs = match collect_storage_proofs(
             &proof_tx,
@@ -395,14 +407,13 @@ fn account_worker_loop<Tx>(
         // Use the missed leaves cache passed from the multiproof manager
         let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
 
-        // Create tracker for metrics (workers don't use stats, but function requires it)
-        let mut tracker = crate::stats::ParallelTrieTracker::default();
+        let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
 
         let result = crate::proof::build_account_multiproof_with_storage_roots(
             trie_cursor_factory.clone(),
             hashed_cursor_factory.clone(),
             &input.targets,
-            &input.prefix_sets.account_prefix_set,
+            account_prefix_set,
             input.collect_branch_node_masks,
             input.multi_added_removed_keys.as_ref(),
             storage_proofs,
@@ -411,6 +422,8 @@ fn account_worker_loop<Tx>(
         );
 
         let proof_elapsed = proof_start.elapsed();
+        let stats = tracker.finish();
+        let result = result.map(|proof| (proof, stats));
         account_proofs_processed += 1;
 
         if result_sender.send(result).is_err() {
@@ -437,6 +450,79 @@ fn account_worker_loop<Tx>(
         account_proofs_processed,
         "Account multiproof worker shutting down"
     );
+}
+
+/// Collects storage proofs for all accounts in the targets by queueing to storage workers.
+///
+/// Queues storage proof tasks to the storage worker pool and collects results.
+/// Propagates errors up if queuing fails, workers return errors, or channels are dropped.
+/// No inline fallback - fails fast if storage workers are unavailable.
+fn collect_storage_proofs<Tx>(
+    _proof_tx: &ProofTaskTx<Tx>,
+    storage_proof_handle: &ProofTaskManagerHandle<Tx>,
+    targets: &MultiProofTargets,
+    prefix_sets: &TriePrefixSets,
+    with_branch_node_masks: bool,
+    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+) -> Result<B256Map<DecodedStorageMultiProof>, ParallelStateRootError>
+where
+    Tx: DbTx,
+{
+    let mut storage_proofs = B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+    let mut pending = Vec::with_capacity(targets.len()); // (address, receiver)
+
+    // Queue all storage proofs to worker pool
+    for (hashed_address, target_slots) in targets.iter() {
+        let prefix_set =
+            prefix_sets.storage_prefix_sets.get(hashed_address).cloned().unwrap_or_default();
+
+        // Always queue a storage proof so we obtain the storage root even when no slots are
+        // requested.
+        let input = StorageProofInput::new(
+            *hashed_address,
+            prefix_set,
+            target_slots.clone(),
+            with_branch_node_masks,
+            multi_added_removed_keys.clone(),
+        );
+
+        let (sender, receiver) = channel();
+
+        // If queuing fails, propagate error up (no fallback)
+        storage_proof_handle.queue_task(ProofTaskKind::StorageProof(input, sender)).map_err(
+            |_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {}: storage worker pool unavailable",
+                    hashed_address
+                ))
+            },
+        )?;
+
+        pending.push((*hashed_address, receiver));
+    }
+
+    // Collect all results
+    for (hashed_address, receiver) in pending {
+        // If receiving fails or worker returns error, propagate up (no fallback)
+        let proof = receiver
+            .recv()
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Storage proof channel dropped for {}: worker died or pool shutdown",
+                    hashed_address
+                ))
+            })?
+            .map_err(|e| {
+                ParallelStateRootError::Other(format!(
+                    "Storage proof computation failed for {}: {}",
+                    hashed_address, e
+                ))
+            })?;
+
+        storage_proofs.insert(hashed_address, proof);
+    }
+
+    Ok(storage_proofs)
 }
 
 impl<Factory> ProofTaskManager<Factory>
@@ -751,7 +837,7 @@ where
                                             target: "trie::proof_task",
                                             "Account multiproof dispatched to worker pool"
                                         );
-                                }
+                                    }
                                     Err(crossbeam_channel::SendError(job)) => {
                                         tracing::error!(
                                             target: "trie::proof_task",

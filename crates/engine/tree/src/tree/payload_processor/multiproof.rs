@@ -580,8 +580,8 @@ where
                 receiver
                     .recv()
                     .map_err(|_| {
-                    ParallelStateRootError::Other("Account multiproof channel closed".into())
-                })?
+                        ParallelStateRootError::Other("Account multiproof channel closed".into())
+                    })?
                     .map(|(proof, _stats)| proof)
             })();
             let elapsed = start.elapsed();
