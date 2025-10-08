@@ -213,12 +213,6 @@ where
         ) {
             Ok(task) => task,
             Err(error) => {
-                // Fall back to parallel state root if proof task manager fails to initialize
-                tracing::error!(
-                    target: "engine::tree",
-                    ?error,
-                    "Failed to initialize proof task manager, falling back to parallel state root"
-                );
                 return Err((error, transactions, env, provider_builder));
             }
         };
@@ -484,11 +478,6 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
             .expect("state_root is None")
             .recv()
             .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
-    }
-
-    /// Returns `true` if the handle is connected to a background state root task.
-    pub const fn supports_state_root(&self) -> bool {
-        self.state_root.is_some()
     }
 
     /// Returns a state hook to be used to send state updates to this task.
