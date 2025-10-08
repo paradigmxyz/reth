@@ -1441,6 +1441,10 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             Ok(Vec::new())
         }
     }
+
+    fn get_account_before_block(&self, block_number: BlockNumber, address: Address) -> ProviderResult<Option<reth_db::models::AccountBeforeTx> > {
+        todo!()
+    }
 }
 
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvider<N> {
