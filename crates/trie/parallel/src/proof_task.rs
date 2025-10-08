@@ -478,7 +478,7 @@ where
                                         );
                                     }
                                     Err(crossbeam_channel::SendError(job)) => {
-                                        tracing::warn!(
+                                        tracing::error!(
                                             target: "trie::proof_task",
                                             storage_worker_count = self.storage_worker_count,
                                             "Worker pool disconnected, cannot process storage proof"
