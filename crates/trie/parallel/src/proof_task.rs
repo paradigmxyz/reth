@@ -1025,13 +1025,11 @@ impl ProofTaskCtx {
 
 /// Message used to communicate with [`ProofTaskManager`].
 #[derive(Debug)]
-pub enum ProofTaskMessage<Tx> {
+pub enum ProofTaskMessage {
     /// A request to queue a proof task.
     QueueTask(ProofTaskKind),
     /// A request to terminate the proof task manager.
     Terminate,
-    #[doc(hidden)]
-    _Phantom(std::marker::PhantomData<Tx>),
 }
 
 /// Proof task kind.
@@ -1053,22 +1051,22 @@ pub enum ProofTaskKind {
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
 /// number of active handles went to zero.
 #[derive(Debug)]
-pub struct ProofTaskManagerHandle<Tx> {
+pub struct ProofTaskManagerHandle {
     /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage<Tx>>,
+    sender: Sender<ProofTaskMessage>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
 }
 
-impl<Tx> ProofTaskManagerHandle<Tx> {
+impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(sender: Sender<ProofTaskMessage>, active_handles: Arc<AtomicUsize>) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self { sender, active_handles }
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage>> {
         self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
@@ -1078,13 +1076,13 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
+impl Clone for ProofTaskManagerHandle {
     fn clone(&self) -> Self {
         Self::new(self.sender.clone(), self.active_handles.clone())
     }
 }
 
-impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
+impl Drop for ProofTaskManagerHandle {
     fn drop(&mut self) {
         // Decrement the number of active handles and terminate the manager if it was the last
         // handle.
@@ -1094,9 +1092,9 @@ impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskTrieNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
+impl TrieNodeProviderFactory for ProofTaskManagerHandle {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
@@ -1109,22 +1107,22 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
 
 /// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskTrieNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskMessage>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage<Tx>>,
+        sender: Sender<ProofTaskMessage>,
     },
 }
 
-impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
+impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let (tx, rx) = channel();
         match self {
