@@ -1,6 +1,9 @@
 //! CLI definition and entrypoint to executable
 
-use crate::chainspec::EthereumChainSpecParser;
+use crate::{
+    app::{run_commands_with, CliApp},
+    chainspec::EthereumChainSpecParser,
+};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -9,17 +12,17 @@ use reth_cli_commands::{
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
-    p2p, prune, re_execute, recover, stage,
+    p2p, prune, re_execute, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{args::LogArgs, version::version_metadata};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::FileWorkerGuard;
-use std::{ffi::OsString, fmt, future::Future, sync::Arc};
+use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
 use tracing::info;
 
 /// The main reth cli interface.
@@ -27,8 +30,11 @@ use tracing::info;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<
+    C: ChainSpecParser = EthereumChainSpecParser,
+    Ext: clap::Args + fmt::Debug = NoArgs,
+    Rpc: RpcModuleValidator = DefaultRpcModuleValidator,
+> {
     /// The command to run
     #[command(subcommand)]
     pub command: Commands<C, Ext>,
@@ -36,6 +42,10 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
     /// The logging configuration for the CLI.
     #[command(flatten)]
     pub logs: LogArgs,
+
+    /// Type marker for the RPC module validator
+    #[arg(skip)]
+    pub _phantom: PhantomData<Rpc>,
 }
 
 impl Cli {
@@ -54,7 +64,18 @@ impl Cli {
     }
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> Cli<C, Ext, Rpc> {
+    /// Configures the CLI and returns a [`CliApp`] instance.
+    ///
+    /// This method is used to prepare the CLI for execution by wrapping it in a
+    /// [`CliApp`] that can be further configured before running.
+    pub fn configure(self) -> CliApp<C, Ext, Rpc>
+    where
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
+    {
+        CliApp::new(self)
+    }
+
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -152,15 +173,9 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         Fut: Future<Output = eyre::Result<()>>,
         C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
-        let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
-        };
-
-        self.with_runner_and_components::<EthereumNode>(
-            runner,
-            components,
-            async move |builder, ext| launcher(builder, ext).await,
-        )
+        let mut app = self.configure();
+        app.set_runner(runner);
+        app.run(FnLauncher::new::<C, Ext>(async move |builder, ext| launcher(builder, ext).await))
     }
 
     /// Execute the configured cli command with the provided [`CliRunner`] and
@@ -189,41 +204,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        match self.command {
-            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
-            }),
-            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
-            }
-            Commands::ImportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::ExportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<N>())
-            }
-            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
-            Commands::Stage(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
-            }
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-            #[cfg(feature = "dev")]
-            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
-            }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
-            Commands::ReExecute(command) => {
-                runner.run_until_ctrl_c(command.execute::<N>(components))
-            }
-        }
+        // Use the shared standalone function to avoid duplication
+        run_commands_with::<C, Ext, Rpc, N>(self, runner, components, launcher)
     }
 
     /// Initializes tracing with the configured options.
@@ -278,9 +260,6 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
-    /// Scripts for node recovery
-    #[command(name = "recover")]
-    Recover(recover::Command<C>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
@@ -307,7 +286,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
             Self::Config(_) => None,
-            Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
         }
@@ -319,6 +297,7 @@ mod tests {
     use super::*;
     use crate::chainspec::SUPPORTED_CHAINS;
     use clap::CommandFactory;
+    use reth_chainspec::SEPOLIA;
     use reth_node_core::args::ColorMode;
 
     #[test]
@@ -416,5 +395,120 @@ mod tests {
         ])
         .unwrap();
         assert!(reth.run(async move |_, _| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn test_rpc_module_validation() {
+        use reth_rpc_server_types::RethRpcModule;
+
+        // Test that standard modules are accepted
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "eth,admin,debug"]).unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                // Should contain the expected modules
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Admin));
+                assert!(modules.contains(&RethRpcModule::Debug));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+
+        // Test that unknown modules are parsed as Other variant
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "eth,customrpc"]).unwrap();
+
+        if let Commands::Node(command) = &cli.command {
+            if let Some(http_api) = &command.rpc.http_api {
+                let modules = http_api.to_selection();
+                assert!(modules.contains(&RethRpcModule::Eth));
+                assert!(modules.contains(&RethRpcModule::Other("customrpc".to_string())));
+            } else {
+                panic!("Expected http.api to be set");
+            }
+        } else {
+            panic!("Expected Node command");
+        }
+    }
+
+    #[test]
+    fn test_rpc_module_unknown_rejected() {
+        use reth_cli_runner::CliRunner;
+
+        // Test that unknown module names are rejected during validation
+        let cli =
+            Cli::try_parse_args_from(["reth", "node", "--http.api", "unknownmodule"]).unwrap();
+
+        // When we try to run the CLI with validation, it should fail
+        let runner = CliRunner::try_default_runtime().unwrap();
+        let result = cli.with_runner(runner, |_, _| async { Ok(()) });
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+
+        // The error should mention it's an unknown module
+        assert!(
+            err_msg.contains("Unknown RPC module"),
+            "Error should mention unknown module: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("'unknownmodule'"),
+            "Error should mention the module name: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn parse_unwind_chain() {
+        let cli = Cli::try_parse_args_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
+    }
+
+    #[test]
+    fn parse_empty_supported_chains() {
+        #[derive(Debug, Clone, Default)]
+        struct FileChainSpecParser;
+
+        impl ChainSpecParser for FileChainSpecParser {
+            type ChainSpec = ChainSpec;
+
+            const SUPPORTED_CHAINS: &'static [&'static str] = &[];
+
+            fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+                EthereumChainSpecParser::parse(s)
+            }
+        }
+
+        let cli = Cli::<FileChainSpecParser>::try_parse_from([
+            "reth", "stage", "unwind", "--chain", "sepolia", "to-block", "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Stage(cmd) => match cmd.command {
+                stage::Subcommands::Unwind(cmd) => {
+                    assert_eq!(cmd.chain_spec().unwrap().chain_id(), SEPOLIA.chain_id());
+                }
+                _ => panic!("Expected Unwind command"),
+            },
+            _ => panic!("Expected Stage command"),
+        };
     }
 }

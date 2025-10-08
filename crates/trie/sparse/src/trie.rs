@@ -42,7 +42,7 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum SparseTrie<T = SerialSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
@@ -130,6 +130,13 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// ```
     pub const fn blind() -> Self {
         Self::Blind(None)
+    }
+
+    /// Creates a new blind sparse trie, clearing and later reusing the given
+    /// [`SparseTrieInterface`].
+    pub fn blind_from(mut trie: T) -> Self {
+        trie.clear();
+        Self::Blind(Some(Box::new(trie)))
     }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
@@ -814,38 +821,17 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
-                        if self.nodes.get(&child_path).unwrap().is_hash() {
-                            debug!(
-                                target: "trie::sparse",
-                                ?child_path,
-                                leaf_full_path = ?full_path,
-                                "Branch node child not revealed in remove_leaf, falling back to db",
-                            );
-                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.trie_node(&child_path)?
-                            {
-                                let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(
-                                    target: "trie::sparse",
-                                    ?child_path,
-                                    ?decoded,
-                                    ?tree_mask,
-                                    ?hash_mask,
-                                    "Revealing remaining blinded branch child"
-                                );
-                                self.reveal_node(
-                                    child_path,
-                                    decoded,
-                                    TrieMasks { hash_mask, tree_mask },
-                                )?;
-                            }
-                        }
-
-                        // Get the only child node.
-                        let child = self.nodes.get(&child_path).unwrap();
+                        // If the remaining child node is not yet revealed then we have to reveal
+                        // it here, otherwise it's not possible to know how to collapse the branch.
+                        let child = self.reveal_remaining_child_on_leaf_removal(
+                            &provider,
+                            full_path,
+                            &child_path,
+                            true, // recurse_into_extension
+                        )?;
 
                         let mut delete_child = false;
-                        let new_node = match child {
+                        let new_node = match &child {
                             SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                             &SparseNode::Hash(hash) => {
                                 return Err(SparseTrieErrorKind::BlindedNode {
@@ -968,14 +954,14 @@ impl SparseTrieInterface for SerialSparseTrie {
             expected_value: Option<&Vec<u8>>,
             path: &Nibbles,
         ) -> Result<(), LeafLookupError> {
-            if let Some(expected) = expected_value {
-                if actual_value != expected {
-                    return Err(LeafLookupError::ValueMismatch {
-                        path: *path,
-                        expected: Some(expected.clone()),
-                        actual: actual_value.clone(),
-                    });
-                }
+            if let Some(expected) = expected_value &&
+                actual_value != expected
+            {
+                return Err(LeafLookupError::ValueMismatch {
+                    path: *path,
+                    expected: Some(expected.clone()),
+                    actual: actual_value.clone(),
+                });
             }
             Ok(())
         }
@@ -1247,6 +1233,87 @@ impl SerialSparseTrie {
         }
 
         Ok(nodes)
+    }
+
+    /// Called when a leaf is removed on a branch which has only one other remaining child. That
+    /// child must be revealed in order to properly collapse the branch.
+    ///
+    /// If `recurse_into_extension` is true, and the remaining child is an extension node, then its
+    /// child will be ensured to be revealed as well.
+    ///
+    /// ## Returns
+    ///
+    /// The node of the remaining child, whether it was already revealed or not.
+    fn reveal_remaining_child_on_leaf_removal<P: TrieNodeProvider>(
+        &mut self,
+        provider: P,
+        full_path: &Nibbles, // only needed for logs
+        remaining_child_path: &Nibbles,
+        recurse_into_extension: bool,
+    ) -> SparseTrieResult<SparseNode> {
+        let remaining_child_node = match self.nodes.get(remaining_child_path).unwrap() {
+            SparseNode::Hash(_) => {
+                debug!(
+                    target: "trie::parallel_sparse",
+                    child_path = ?remaining_child_path,
+                    leaf_full_path = ?full_path,
+                    "Node child not revealed in remove_leaf, falling back to db",
+                );
+                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                    provider.trie_node(remaining_child_path)?
+                {
+                    let decoded = TrieNode::decode(&mut &node[..])?;
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?remaining_child_path,
+                        ?decoded,
+                        ?tree_mask,
+                        ?hash_mask,
+                        "Revealing remaining blinded branch child"
+                    );
+                    self.reveal_node(
+                        *remaining_child_path,
+                        decoded,
+                        TrieMasks { hash_mask, tree_mask },
+                    )?;
+                    self.nodes.get(remaining_child_path).unwrap().clone()
+                } else {
+                    return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                        path: *remaining_child_path,
+                    }
+                    .into())
+                }
+            }
+            node => node.clone(),
+        };
+
+        // If `recurse_into_extension` is true, and the remaining child is an extension node, then
+        // its child will be ensured to be revealed as well. This is required for generation of
+        // trie updates; without revealing the grandchild branch it's not always possible to know
+        // if the tree mask bit should be set for the child extension on its parent branch.
+        if let SparseNode::Extension { key, .. } = &remaining_child_node &&
+            recurse_into_extension
+        {
+            let mut remaining_grandchild_path = *remaining_child_path;
+            remaining_grandchild_path.extend(key);
+
+            trace!(
+                target: "trie::parallel_sparse",
+                remaining_grandchild_path = ?remaining_grandchild_path,
+                child_path = ?remaining_child_path,
+                leaf_full_path = ?full_path,
+                "Revealing child of extension node, which is the last remaining child of the branch"
+            );
+
+            self.reveal_remaining_child_on_leaf_removal(
+                provider,
+                full_path,
+                &remaining_grandchild_path,
+                false, // recurse_into_extension
+            )?;
+        }
+
+        Ok(remaining_child_node)
     }
 
     /// Recalculates and updates the RLP hashes of nodes deeper than or equal to the specified

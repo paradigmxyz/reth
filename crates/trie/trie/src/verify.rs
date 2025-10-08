@@ -28,7 +28,7 @@ enum BranchNode {
 /// of the trie tables.
 ///
 /// [`BranchNode`]s are iterated over such that:
-/// * Account nodes and storage nodes may be interspersed.
+/// * Account nodes and storage nodes may be interleaved.
 /// * Storage nodes for the same account will be ordered by ascending path relative to each other.
 /// * Account nodes will be ordered by ascending path relative to each other.
 /// * All storage nodes for one account will finish before storage nodes for another account are
@@ -73,14 +73,14 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
         loop {
             // If we already started iterating through a storage trie's updates, continue doing
             // so.
-            if let Some((account, storage_updates)) = self.curr_storage.as_mut() {
-                if let Some((path, node)) = storage_updates.pop() {
-                    let node = BranchNode::Storage(*account, path, node);
-                    return Some(Ok(node))
-                }
+            if let Some((account, storage_updates)) = self.curr_storage.as_mut() &&
+                let Some((path, node)) = storage_updates.pop()
+            {
+                let node = BranchNode::Storage(*account, path, node);
+                return Some(Ok(node))
             }
 
-            // If there's not a storage trie already being iterated over than check if there's a
+            // If there's not a storage trie already being iterated over then check if there's a
             // storage trie we could start iterating over.
             if let Some((account, storage_updates)) = self.storage_tries.pop() {
                 debug_assert!(!storage_updates.is_empty());
@@ -135,7 +135,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
                 .collect::<Vec<_>>();
 
             // `root_with_progress` will output storage updates ordered by their account hash. If
-            // `root_with_progress` only returns a partial result then it will pick up with where
+            // `root_with_progress` only returns a partial result then it will pick up where
             // it left off in the storage trie on the next run.
             //
             // By sorting by the account we ensure that we continue with the partially processed
@@ -155,7 +155,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 pub enum Output {
     /// An extra account node was found.
     AccountExtra(Nibbles, BranchNodeCompact),
-    /// A extra storage node was found.
+    /// An extra storage node was found.
     StorageExtra(B256, Nibbles, BranchNodeCompact),
     /// An account node had the wrong value.
     AccountWrong {
@@ -261,7 +261,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
                     return Ok(())
                 }
                 Ordering::Equal => {
-                    // If the the current path matches the given one (happy path) but the nodes
+                    // If the current path matches the given one (happy path) but the nodes
                     // aren't equal then we produce a wrong node. Either way we want to move the
                     // iterator forward.
                     if *curr_node != node {
@@ -298,7 +298,7 @@ impl<C: TrieCursor> SingleVerifier<DepthFirstTrieIterator<C>> {
 }
 
 /// Checks that data stored in the trie database is consistent, using hashed accounts/storages
-/// database tables as the source of truth. This will iteratively re-compute the entire trie based
+/// database tables as the source of truth. This will iteratively recompute the entire trie based
 /// on the hashed state, and produce any discovered [`Output`]s via the `next` method.
 #[derive(Debug)]
 pub struct Verifier<T: TrieCursorFactory, H> {

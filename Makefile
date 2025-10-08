@@ -30,6 +30,11 @@ EF_TESTS_TAG := v17.0
 EF_TESTS_URL := https://github.com/ethereum/tests/archive/refs/tags/$(EF_TESTS_TAG).tar.gz
 EF_TESTS_DIR := ./testing/ef-tests/ethereum-tests
 
+# The release tag of https://github.com/ethereum/execution-spec-tests to use for EEST tests
+EEST_TESTS_TAG := v4.5.0
+EEST_TESTS_URL := https://github.com/ethereum/execution-spec-tests/releases/download/$(EEST_TESTS_TAG)/fixtures_stable.tar.gz
+EEST_TESTS_DIR := ./testing/ef-tests/execution-spec-tests
+
 # The docker image name
 DOCKER_IMAGE_NAME ?= ghcr.io/paradigmxyz/reth
 
@@ -59,34 +64,25 @@ install-op: ## Build and install the op-reth binary under `$(CARGO_HOME)/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
+.PHONY: build-reth
+build-reth: ## Build the reth binary (alias for build target).
+	$(MAKE) build
+
 # Environment variables for reproducible builds
-# Initialize RUSTFLAGS
-RUST_BUILD_FLAGS =
-# Enable static linking to ensure reproducibility across builds
-RUST_BUILD_FLAGS += --C target-feature=+crt-static
-# Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
-# Remove build ID from the binary to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
-# Remove metadata hash from symbol names to ensure reproducible builds
-RUST_BUILD_FLAGS += -C metadata=''
 # Set timestamp from last git commit for reproducible builds
 SOURCE_DATE ?= $(shell git log -1 --pretty=%ct)
-# Disable incremental compilation to avoid non-deterministic artifacts
-CARGO_INCREMENTAL_VAL = 0
-# Set C locale for consistent string handling and sorting
-LOCALE_VAL = C
-# Set UTC timezone for consistent time handling across builds
-TZ_VAL = UTC
 
-.PHONY: build-reproducible
-build-reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
+# `reproducible` only supports reth on x86_64-unknown-linux-gnu
+build-%-reproducible:
+	@if [ "$*" != "reth" ]; then \
+		echo "Error: Reproducible builds are only supported for reth, not $*"; \
+		exit 1; \
+	fi
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
-	RUSTFLAGS="${RUST_BUILD_FLAGS} --remap-path-prefix $$(pwd)=." \
-	CARGO_INCREMENTAL=${CARGO_INCREMENTAL_VAL} \
-	LC_ALL=${LOCALE_VAL} \
-	TZ=${TZ_VAL} \
-	cargo build --bin reth --features "$(FEATURES)" --profile "release" --locked --target x86_64-unknown-linux-gnu
+	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=." \
+	LC_ALL=C \
+	TZ=UTC \
+	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
@@ -150,6 +146,22 @@ op-build-x86_64-apple-darwin:
 op-build-aarch64-apple-darwin:
 	$(MAKE) op-build-native-aarch64-apple-darwin
 
+build-deb-%:
+	@case "$*" in \
+		x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|riscv64gc-unknown-linux-gnu) \
+			echo "Building debian package for $*"; \
+			;; \
+		*) \
+			echo "Error: Debian packages are only supported for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, and riscv64gc-unknown-linux-gnu, not $*"; \
+			exit 1; \
+			;; \
+	esac
+	cargo install cargo-deb@3.6.0 --locked
+	cargo deb --profile $(PROFILE) --no-build --no-dbgsym --no-strip \
+		--target $* \
+		$(if $(VERSION),--deb-version "1~$(VERSION)") \
+		$(if $(VERSION),--output "target/$*/$(PROFILE)/reth-$(VERSION)-$*-$(PROFILE).deb")
+
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
 	cp $(CARGO_TARGET_DIR)/$(1)/$(PROFILE)/$(2) $(BIN_DIR)/$(2)
@@ -202,9 +214,18 @@ $(EF_TESTS_DIR):
 	tar -xzf ethereum-tests.tar.gz --strip-components=1 -C $(EF_TESTS_DIR)
 	rm ethereum-tests.tar.gz
 
+# Downloads and unpacks EEST tests in the `$(EEST_TESTS_DIR)` directory.
+#
+# Requires `wget` and `tar`
+$(EEST_TESTS_DIR):
+	mkdir $(EEST_TESTS_DIR)
+	wget $(EEST_TESTS_URL) -O execution-spec-tests.tar.gz
+	tar -xzf execution-spec-tests.tar.gz --strip-components=1 -C $(EEST_TESTS_DIR)
+	rm execution-spec-tests.tar.gz
+
 .PHONY: ef-tests
-ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
-	cargo nextest run -p ef-tests --features ef-tests
+ef-tests: $(EF_TESTS_DIR) $(EEST_TESTS_DIR) ## Runs Legacy and EEST tests.
+	cargo nextest run -p ef-tests --release --features ef-tests
 
 ##@ reth-bench
 

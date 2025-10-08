@@ -323,7 +323,7 @@ async fn test_eth_config() -> eyre::Result<()> {
 
     let config = provider.client().request_noparams::<EthConfig>("eth_config").await?;
 
-    assert_eq!(config.last.unwrap().activation_time, 0);
+    assert_eq!(config.last.unwrap().activation_time, osaka_timestamp);
     assert_eq!(config.current.activation_time, prague_timestamp);
     assert_eq!(config.next.unwrap().activation_time, osaka_timestamp);
 

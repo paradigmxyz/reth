@@ -490,7 +490,7 @@ mod tests {
             ExecOutput {
                 checkpoint: StageCheckpoint::new(expected_progress).with_entities_stage_checkpoint(
                     EntitiesCheckpoint {
-                        processed: runner.db.table::<tables::TransactionSenders>().unwrap().len()
+                        processed: runner.db.count_entries::<tables::TransactionSenders>().unwrap()
                             as u64,
                         total: total_transactions
                     }

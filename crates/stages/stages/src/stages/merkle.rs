@@ -402,10 +402,19 @@ where
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
 
-            // TODO(alexey): update entities checkpoint
+            // Update entities checkpoint to reflect the unwind operation
+            // Since we're unwinding, we need to recalculate the total entities at the target block
+            let accounts = tx.entries::<tables::HashedAccounts>()?;
+            let storages = tx.entries::<tables::HashedStorages>()?;
+            let total = (accounts + storages) as u64;
+            entities_checkpoint.total = total;
+            entities_checkpoint.processed = total;
         }
 
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+        })
     }
 }
 
@@ -484,8 +493,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 
@@ -524,8 +533,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 
@@ -566,8 +575,8 @@ mod tests {
                 done: true
             }) if block_number == previous_stage && processed == total &&
                 total == (
-                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
-                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                    runner.db.count_entries::<tables::HashedAccounts>().unwrap() +
+                    runner.db.count_entries::<tables::HashedStorages>().unwrap()
                 ) as u64
         );
 

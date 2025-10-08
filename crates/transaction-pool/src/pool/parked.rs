@@ -44,13 +44,9 @@ pub struct ParkedPool<T: ParkedOrd> {
 
 impl<T: ParkedOrd> ParkedPool<T> {
     /// Adds a new transactions to the pending queue.
-    ///
-    /// # Panics
-    ///
-    /// If the transaction is already included.
     pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
-        assert!(
+        debug_assert!(
             !self.contains(&id),
             "transaction already included {:?}",
             self.get(&id).unwrap().transaction.transaction
@@ -251,7 +247,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         assert_eq!(
             self.last_sender_submission.len(),
             self.sender_transaction_count.len(),
-            "last_sender_transaction.len() != sender_to_last_transaction.len()"
+            "last_sender_submission.len() != sender_transaction_count.len()"
         );
     }
 }

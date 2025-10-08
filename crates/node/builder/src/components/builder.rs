@@ -7,6 +7,7 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
+use reth_chainspec::EthChainSpec;
 use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
@@ -515,10 +516,10 @@ where
 
     async fn build_network(
         self,
-        _ctx: &BuilderContext<N>,
+        ctx: &BuilderContext<N>,
         _pool: Pool,
     ) -> eyre::Result<Self::Network> {
-        Ok(NoopNetwork::new())
+        Ok(NoopNetwork::new().with_chain_id(ctx.chain_spec().chain_id()))
     }
 }
 

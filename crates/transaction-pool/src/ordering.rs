@@ -1,5 +1,4 @@
 use crate::traits::PoolTransaction;
-use alloy_primitives::U256;
 use std::{cmp::Ordering, fmt::Debug, marker::PhantomData};
 
 /// Priority of the transaction that can be missing.
@@ -71,7 +70,7 @@ impl<T> TransactionOrdering for CoinbaseTipOrdering<T>
 where
     T: PoolTransaction + 'static,
 {
-    type PriorityValue = U256;
+    type PriorityValue = u128;
     type Transaction = T;
 
     /// Source: <https://github.com/ethereum/go-ethereum/blob/7f756dc1185d7f1eeeacb1d12341606b7135f9ea/core/txpool/legacypool/list.go#L469-L482>.
@@ -82,7 +81,7 @@ where
         transaction: &Self::Transaction,
         base_fee: u64,
     ) -> Priority<Self::PriorityValue> {
-        transaction.effective_tip_per_gas(base_fee).map(U256::from).into()
+        transaction.effective_tip_per_gas(base_fee).into()
     }
 }
 
