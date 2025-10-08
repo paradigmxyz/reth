@@ -560,6 +560,7 @@ where
             + 'static,
     {
         let mut spawned_workers = 0;
+        // spawns workers that will execute worker_fn
         for worker_id in 0..worker_count {
             let provider_ro = view.provider_ro()?;
             let tx = provider_ro.into_tx();
@@ -997,6 +998,8 @@ pub struct AccountMultiproofInput {
     pub collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    /// Cached storage proof roots for missed leaves encountered during account trie walk.
+    pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
 }
 
 /// Internal job for account multiproof workers.
