@@ -1,4 +1,4 @@
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::transaction::{Recovered, TxHashRef};
 use alloy_eips::Encodable2718;
 use alloy_consensus::{BlobTransactionValidationError, Typed2718};
 use alloy_eips::eip2718::WithEncoded;

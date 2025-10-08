@@ -8,6 +8,7 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
+use core::convert::Infallible;
 use alloy_consensus::Header;
 use alloy_consensus::{BlockHeader as _, Transaction as _};
 use alloy_primitives::U256;
@@ -124,7 +125,7 @@ where
         &self.block_assembler
     }
 
-    fn evm_env(&self, header: &<N as NodePrimitives>::BlockHeader) -> EvmEnv<SpecId> {
+    fn evm_env(&self, header: &<N as NodePrimitives>::BlockHeader) -> Result<EvmEnv<SpecId>, Infallible> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(header.timestamp());
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
@@ -138,7 +139,7 @@ where
             basefee: header.base_fee_per_gas().unwrap_or_default(),
             blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
-        EvmEnv { cfg_env, block_env }
+        Ok(EvmEnv { cfg_env, block_env })
     }
 
     fn next_evm_env(
@@ -162,28 +163,28 @@ where
         };
         Ok(EvmEnv { cfg_env, block_env })
     }
-    fn context_for_block(&self, block: &'_ SealedBlock<BlockTy<Self::Primitives>>) -> ArbBlockExecutionCtx {
-        ArbBlockExecutionCtx {
+    fn context_for_block(&self, block: &'_ SealedBlock<BlockTy<Self::Primitives>>) -> Result<ArbBlockExecutionCtx, Infallible> {
+        Ok(ArbBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             extra_data: block.header().extra_data.clone().into(),
             delayed_messages_read: 0,
             l1_block_number: 0,
-        }
+        })
     }
 
     fn context_for_next_block(
         &self,
         parent: &SealedHeader<<Self::Primitives as reth_primitives_traits::NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> ArbBlockExecutionCtx {
-        ArbBlockExecutionCtx {
+    ) -> Result<ArbBlockExecutionCtx, Infallible> {
+        Ok(ArbBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             extra_data: attributes.extra_data.into(),
             delayed_messages_read: attributes.delayed_messages_read,
             l1_block_number: attributes.l1_block_number,
-        }
+        })
     }
 
 }
@@ -201,7 +202,7 @@ where
     fn evm_env_for_payload(
         &self,
         payload: &ArbExecutionData,
-    ) -> EvmEnvFor<Self> {
+    ) -> Result<EvmEnvFor<Self>, Infallible> {
         let chain_id = self.chain_spec().chain_id() as u64;
         let spec = self.chain_spec().spec_id_by_timestamp(payload.payload.timestamp());
         let mut cfg_env = CfgEnv::new().with_chain_id(chain_id).with_spec(spec);
@@ -215,27 +216,27 @@ where
             basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
             blob_excess_gas_and_price: Some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 0 }),
         };
-        EvmEnv { cfg_env, block_env }
+        Ok(EvmEnv { cfg_env, block_env })
     }
 
     fn context_for_payload<'a>(
         &self,
         payload: &'a ArbExecutionData,
-    ) -> ExecutionCtxFor<'a, Self> {
-        ArbBlockExecutionCtx {
+    ) -> Result<ExecutionCtxFor<'a, Self>, Infallible> {
+        Ok(ArbBlockExecutionCtx {
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root,
             extra_data: payload.payload.as_v1().extra_data.clone().into(),
             delayed_messages_read: 0,
             l1_block_number: 0,
-        }
+        })
     }
 
     fn tx_iterator_for_payload(
         &self,
         payload: &ArbExecutionData,
-    ) -> impl ExecutableTxIterator<Self> {
-        payload
+    ) -> Result<impl ExecutableTxIterator<Self>, Infallible> {
+        Ok(payload
             .payload
             .transactions()
             .clone()
@@ -245,7 +246,7 @@ where
                     .map_err(AnyError::new)?;
                 let signer = tx.try_recover().map_err(AnyError::new)?;
                 Ok::<_, AnyError>(WithEncoded::new(encoded.into(), tx.with_signer(signer)))
-            })
+            }))
     }
 }
 impl<ChainSpec: ArbitrumChainSpec, N, R: Clone> ArbEvmConfig<ChainSpec, N, R> {

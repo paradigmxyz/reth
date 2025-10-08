@@ -13,7 +13,7 @@ use reth_provider::{
 };
 use reth_storage_api::{
     errors::ProviderResult, BlockBodyReader, BlockBodyWriter, ChainStorageReader,
-    ChainStorageWriter, DBProvider, ReadBodyInput, StorageLocation,
+    ChainStorageWriter, DBProvider, ReadBodyInput,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -63,7 +63,6 @@ where
         &self,
         _provider: &Provider,
         _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
-        _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         Ok(())
     }
@@ -72,7 +71,6 @@ where
         &self,
         _provider: &Provider,
         _block: BlockNumber,
-        _remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         Ok(())
     }

@@ -667,6 +667,10 @@ impl ArbTransactionSigned {
     pub fn new_unhashed(transaction: ArbTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction, input_cache: Default::default() }
     }
+    
+    pub const fn signature(&self) -> &Signature {
+        &self.signature
+    }
 
     pub const fn tx_type(&self) -> ArbTxType {
         match &self.transaction {
