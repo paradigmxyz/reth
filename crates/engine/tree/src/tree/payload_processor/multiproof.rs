@@ -1237,6 +1237,7 @@ mod tests {
             task_ctx,
             1,
             1,
+            1,
         )
         .expect("Failed to create ProofTaskManager");
         let channel = channel();
