@@ -97,6 +97,9 @@ pub trait ExternalStorage: Send + Sync + Debug {
     /// All earliest block numbers are stored in 0 to reduce updates required to prune trie nodes.
     async fn get_earliest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>>;
 
+    /// Get the latest block number and hash that has been stored
+    async fn get_latest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>>;
+
     /// Get a trie cursor for the storage backend
     fn trie_cursor(
         &self,
