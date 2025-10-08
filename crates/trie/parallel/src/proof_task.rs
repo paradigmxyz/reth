@@ -339,15 +339,18 @@ where
         // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
         let (storage_work_tx, storage_work_rx) = unbounded::<StorageWorkerJob>();
+        let (account_work_tx, account_work_rx) = unbounded::<AccountMultiproofJob>();
 
         tracing::info!(
             target: "trie::proof_task",
             storage_worker_count,
+            account_worker_count,
             max_concurrency,
-            "Initializing storage worker pool with unbounded queue"
+            "Initializing storage and account worker pools with unbounded queues"
         );
 
-        let mut spawned_workers = 0;
+        // Spawn storage workers
+        let mut spawned_storage_workers = 0;
         for worker_id in 0..storage_worker_count {
             let provider_ro = view.provider_ro()?;
 
@@ -357,19 +360,46 @@ where
 
             executor.spawn_blocking(move || storage_worker_loop(proof_task_tx, work_rx, worker_id));
 
-            spawned_workers += 1;
+            spawned_storage_workers += 1;
 
             tracing::debug!(
                 target: "trie::proof_task",
                 worker_id,
-                spawned_workers,
+                spawned_storage_workers,
                 "Storage worker spawned successfully"
+            );
+        }
+
+        // Spawn account workers
+        let mut spawned_account_workers = 0;
+        for worker_id in 0..account_worker_count {
+            let provider_ro = view.provider_ro()?;
+
+            let tx = provider_ro.into_tx();
+            let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
+            let work_rx = account_work_rx.clone();
+            let storage_handle =
+                ProofTaskManagerHandle::new(tx_sender.clone(), Arc::new(AtomicUsize::new(1)));
+
+            executor.spawn_blocking(move || {
+                account_worker_loop(proof_task_tx, work_rx, storage_handle, worker_id)
+            });
+
+            spawned_account_workers += 1;
+
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                spawned_account_workers,
+                "Account worker spawned successfully"
             );
         }
 
         Ok(Self {
             storage_work_tx,
-            storage_worker_count: spawned_workers,
+            storage_worker_count: spawned_storage_workers,
+            account_work_tx,
+            account_worker_count: spawned_account_workers,
             max_concurrency,
             total_transactions: 0,
             pending_tasks: VecDeque::new(),
