@@ -450,8 +450,7 @@ where
     /// # Task Routing
     ///
     /// - **Storage Trie Operations** (`StorageProof` and `BlindedStorageNode`): Routed to
-    ///   pre-spawned worker pool via unbounded channel. Only falls back to `pending_tasks` if
-    ///   workers are disconnected (e.g., all workers panicked).
+    ///   pre-spawned worker pool via unbounded channel.
     /// - **Account Trie Operations** (`BlindedAccountNode`): Queued for on-demand execution via
     ///   `pending_tasks`.
     ///
