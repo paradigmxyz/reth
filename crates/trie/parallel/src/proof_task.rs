@@ -116,11 +116,13 @@ impl StorageWorkerJob {
             ParallelStateRootError::Other("Storage proof worker pool unavailable".to_string());
 
         match self {
-            Self::StorageProof { result_sender, .. } => result_sender.send(Err(error)),
+            Self::StorageProof { result_sender, .. } => {
+                result_sender.send(Err(error)).map_err(|_| ())
+            }
             Self::BlindedStorageNode { result_sender, .. } => result_sender
-                .send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(error))))),
+                .send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(error)))))
+                .map_err(|_| ()),
         }
-        .map_err(|_| ())
     }
 }
 
