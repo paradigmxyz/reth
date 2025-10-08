@@ -20,7 +20,7 @@ use alloy_primitives::{
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
-use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
+use reth_execution_errors::SparseTrieError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
     ProviderResult,
@@ -98,32 +98,6 @@ enum StorageWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
-}
-
-impl StorageWorkerJob {
-    /// Sends an error back to the caller when worker pool is unavailable.
-    ///
-    /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
-    /// dropped.
-    fn send_worker_unavailable_error(&self) -> Result<(), ()> {
-        match self {
-            Self::StorageProof { result_sender, .. } => {
-                let error = ParallelStateRootError::Other(
-                    "Storage proof worker pool unavailable".to_string(),
-                );
-                result_sender.send(Err(error)).map_err(|_| ())
-            }
-            Self::BlindedStorageNode { result_sender, .. } => {
-                let error = SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(
-                    std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "Storage worker pool unavailable",
-                    ),
-                )));
-                result_sender.send(Err(error)).map_err(|_| ())
-            }
-        }
-    }
 }
 
 /// Manager for coordinating proof request execution across different task types.
@@ -736,126 +710,92 @@ where
             match self.proof_task_rx.recv() {
                 Ok(message) => {
                     match message {
-                        ProofTaskMessage::QueueTask(task) => match task {
-                            ProofTaskKind::StorageProof(input, sender) => {
-                                match self.storage_work_tx.send(StorageWorkerJob::StorageProof {
-                                    input,
-                                    result_sender: sender,
-                                }) {
-                                    Ok(_) => {
-                                        tracing::trace!(
-                                            target: "trie::proof_task",
-                                            "Storage proof dispatched to worker pool"
-                                        );
-                                    }
-                                    Err(crossbeam_channel::SendError(job)) => {
-                                        tracing::error!(
-                                            target: "trie::proof_task",
-                                            storage_worker_count = self.storage_worker_count,
-                                            "Worker pool disconnected, cannot process storage proof"
-                                        );
+                        ProofTaskMessage::QueueTask(task) => {
+                            // SAFETY: Storage worker sends cannot fail because:
+                            // 1. Unbounded channel created during initialization (line 595)
+                            // 2. Workers only exit when channel closes (storage_worker_loop recv()
+                            //    returns Err)
+                            // 3. Channel only closes when all senders are dropped
+                            // 4. self.storage_work_tx is only dropped on Terminate (line 861)
+                            // 5. If we're processing QueueTask messages, Terminate hasn't occurred
+                            //    yet
+                            // Therefore, the channel is guaranteed open with workers receiving.
+                            //
+                            // Same logic applies to account workers (unbounded channel at line 596,
+                            // dropped at line 862).
 
-                                        // Send error back to caller
-                                        let _ = job.send_worker_unavailable_error();
+                            match task {
+                                ProofTaskKind::StorageProof(input, sender) => {
+                                    self.storage_work_tx
+                                        .send(StorageWorkerJob::StorageProof {
+                                            input,
+                                            result_sender: sender,
+                                        })
+                                        .expect("storage workers are running until Terminate");
+
+                                    tracing::trace!(
+                                        target: "trie::proof_task",
+                                        "Storage proof dispatched to worker pool"
+                                    );
+                                }
+
+                                ProofTaskKind::BlindedStorageNode(account, path, sender) => {
+                                    #[cfg(feature = "metrics")]
+                                    {
+                                        self.metrics.storage_nodes += 1;
                                     }
+
+                                    self.storage_work_tx
+                                        .send(StorageWorkerJob::BlindedStorageNode {
+                                            account,
+                                            path,
+                                            result_sender: sender,
+                                        })
+                                        .expect("storage workers are running until Terminate");
+
+                                    tracing::trace!(
+                                        target: "trie::proof_task",
+                                        ?account,
+                                        ?path,
+                                        "Blinded storage node dispatched to worker pool"
+                                    );
+                                }
+
+                                ProofTaskKind::BlindedAccountNode(path, sender) => {
+                                    #[cfg(feature = "metrics")]
+                                    {
+                                        self.metrics.account_nodes += 1;
+                                    }
+
+                                    self.account_work_tx
+                                        .send(AccountWorkerJob::BlindedAccountNode {
+                                            path,
+                                            result_sender: sender,
+                                        })
+                                        .expect("account workers are running until Terminate");
+
+                                    tracing::trace!(
+                                        target: "trie::proof_task",
+                                        ?path,
+                                        "Blinded account node dispatched to worker pool"
+                                    );
+                                }
+
+                                ProofTaskKind::AccountMultiproof(input, sender) => {
+                                    self.account_work_tx
+                                        .send(AccountWorkerJob::AccountMultiproof {
+                                            input,
+                                            result_sender: sender,
+                                        })
+                                        .expect("account workers are running until Terminate");
+
+                                    tracing::trace!(
+                                        target: "trie::proof_task",
+                                        "Account multiproof dispatched to worker pool"
+                                    );
                                 }
                             }
-
-                            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.storage_nodes += 1;
-                                }
-
-                                match self.storage_work_tx.send(
-                                    StorageWorkerJob::BlindedStorageNode {
-                                        account,
-                                        path,
-                                        result_sender: sender,
-                                    },
-                                ) {
-                                    Ok(_) => {
-                                        tracing::trace!(
-                                            target: "trie::proof_task",
-                                            ?account,
-                                            ?path,
-                                            "Blinded storage node dispatched to worker pool"
-                                        );
-                                    }
-                                    Err(crossbeam_channel::SendError(job)) => {
-                                        tracing::error!(
-                                            target: "trie::proof_task",
-                                            storage_worker_count = self.storage_worker_count,
-                                            ?account,
-                                            ?path,
-                                            "Worker pool disconnected, cannot process blinded storage node"
-                                        );
-
-                                        // Send error back to caller
-                                        let _ = job.send_worker_unavailable_error();
-                                    }
-                                }
-                            }
-
-                            ProofTaskKind::BlindedAccountNode(path, sender) => {
-                                #[cfg(feature = "metrics")]
-                                {
-                                    self.metrics.account_nodes += 1;
-                                }
-
-                                match self.account_work_tx.send(
-                                    AccountWorkerJob::BlindedAccountNode {
-                                        path,
-                                        result_sender: sender,
-                                    },
-                                ) {
-                                    Ok(_) => {
-                                        tracing::trace!(
-                                            target: "trie::proof_task",
-                                            ?path,
-                                            "Blinded account node dispatched to worker pool"
-                                        );
-                                    }
-                                    Err(crossbeam_channel::SendError(job)) => {
-                                        tracing::error!(
-                                            target: "trie::proof_task",
-                                            account_worker_count = self.account_worker_count,
-                                            ?path,
-                                            "Worker pool disconnected, cannot process blinded account node"
-                                        );
-
-                                        // Send error back to caller
-                                        let _ = job.send_worker_unavailable_error();
-                                    }
-                                }
-                            }
-
-                            ProofTaskKind::AccountMultiproof(input, sender) => {
-                                match self.account_work_tx.send(
-                                    AccountWorkerJob::AccountMultiproof {
-                                        input,
-                                        result_sender: sender,
-                                    },
-                                ) {
-                                    Ok(_) => {
-                                        tracing::trace!(
-                                            target: "trie::proof_task",
-                                            "Account multiproof dispatched to worker pool"
-                                        );
-                                    }
-                                    Err(crossbeam_channel::SendError(job)) => {
-                                        tracing::error!(
-                                            target: "trie::proof_task",
-                                            account_worker_count = self.account_worker_count,
-                                            "Account worker pool disconnected"
-                                        );
-
-                                        // Send error back to caller
-                                        let _ = job.send_worker_unavailable_error();
-                                    }
-                                }
-                            }
-                        },
+                        }
                         ProofTaskMessage::Terminate => {
                             // Drop worker channels to signal workers to shut down
                             drop(self.storage_work_tx);
@@ -1071,31 +1011,6 @@ enum AccountWorkerJob {
         /// Channel to send result back to original caller
         result_sender: Sender<TrieNodeProviderResult>,
     },
-}
-
-impl AccountWorkerJob {
-    /// Sends an error back to the caller when worker pool is unavailable.
-    ///
-    /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
-    /// dropped.
-    fn send_worker_unavailable_error(&self) -> Result<(), ()> {
-        match self {
-            Self::AccountMultiproof { result_sender, .. } => {
-                let error =
-                    ParallelStateRootError::Other("Account worker pool unavailable".to_string());
-                result_sender.send(Err(error)).map_err(|_| ())
-            }
-            Self::BlindedAccountNode { result_sender, .. } => {
-                let error = SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(
-                    std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "Account worker pool unavailable",
-                    ),
-                )));
-                result_sender.send(Err(error)).map_err(|_| ())
-            }
-        }
-    }
 }
 
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
