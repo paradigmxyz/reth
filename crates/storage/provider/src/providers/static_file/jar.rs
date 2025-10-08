@@ -87,16 +87,6 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     }
 }
 
-// TODO(rjected): implement this - see static file provider iempls, check if those are better spots
-impl<N: NodePrimitives> ChangeSetReader for StaticFileJarProvider<'_, N> {
-    fn account_block_changeset(
-        &self,
-        block_number: BlockNumber,
-    ) -> ProviderResult<Vec<reth_db::models::AccountBeforeTx>> {
-        todo!()
-    }
-}
-
 impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileJarProvider<'_, N> {
     type Header = N::BlockHeader;
 
