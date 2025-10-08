@@ -19,11 +19,12 @@ use reth_provider::{
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    prefix_set::TriePrefixSetsMut,
+    prefix_set::{TriePrefixSets, TriePrefixSetsMut},
     proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
+    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets,
+    Nibbles,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -48,6 +49,7 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
+type AccountMultiproofResult = Result<DecodedMultiProof, ParallelStateRootError>;
 
 /// Internal message for storage workers.
 ///
@@ -437,9 +439,12 @@ where
             ProofTaskKind::BlindedAccountNode(path, sender) => {
                 proof_task_tx.blinded_account_node(path, sender, tx_sender);
             }
-            // Storage trie operations should never reach here as they're routed to worker pool
-            ProofTaskKind::BlindedStorageNode(_, _, _) | ProofTaskKind::StorageProof(_, _) => {
-                unreachable!("Storage trie operations should be routed to worker pool")
+            // Storage trie operations and account multiproofs should never reach here as they're
+            // routed to worker pools
+            ProofTaskKind::BlindedStorageNode(_, _, _)
+            | ProofTaskKind::StorageProof(_, _)
+            | ProofTaskKind::AccountMultiproof(_, _) => {
+                unreachable!("Worker pool operations should be routed to their respective pools")
             }
         });
 
@@ -533,6 +538,14 @@ where
                                     self.metrics.account_nodes += 1;
                                 }
                                 self.queue_proof_task(task);
+                            }
+
+                            ProofTaskKind::AccountMultiproof(input, sender) => {
+                                #[cfg(feature = "metrics")]
+                                {
+                                    self.metrics.account_nodes += 1;
+                                }
+                                self.queue_proof_task(ProofTaskKind::AccountMultiproof(input, sender));
                             }
                         },
                         ProofTaskMessage::Transaction(tx) => {
@@ -760,6 +773,28 @@ impl StorageProofInput {
     }
 }
 
+/// Input parameters for account multiproof computation.
+#[derive(Debug, Clone)]
+pub struct AccountMultiproofInput {
+    /// The targets for which to compute the multiproof.
+    pub targets: MultiProofTargets,
+    /// The prefix sets for the proof calculation.
+    pub prefix_sets: TriePrefixSets,
+    /// Whether or not to collect branch node masks.
+    pub collect_branch_node_masks: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+}
+
+/// Internal job for account multiproof workers.
+#[derive(Debug)]
+struct AccountMultiproofJob {
+    /// Account multiproof input parameters
+    input: AccountMultiproofInput,
+    /// Channel to send result back to original caller
+    result_sender: Sender<AccountMultiproofResult>,
+}
+
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
 #[derive(Debug, Clone)]
 pub struct ProofTaskCtx {
@@ -808,6 +843,8 @@ pub enum ProofTaskKind {
     BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
     /// A blinded storage node request.
     BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
+    /// An account multiproof request.
+    AccountMultiproof(AccountMultiproofInput, Sender<AccountMultiproofResult>),
 }
 
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
