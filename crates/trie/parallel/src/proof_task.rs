@@ -106,6 +106,28 @@ enum StorageWorkerJob {
     },
 }
 
+impl StorageWorkerJob {
+    /// Sends an error back to the caller when worker pool is unavailable.
+    ///
+    /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
+    /// dropped.
+    fn send_worker_unavailable_error(&self) -> Result<(), ()> {
+        let error_msg = "Storage proof worker pool unavailable";
+
+        match self {
+            Self::StorageProof { result_sender, .. } => {
+                result_sender.send(Err(ParallelStateRootError::Other(error_msg.to_string())))
+            }
+            Self::BlindedStorageNode { result_sender, .. } => {
+                result_sender.send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(
+                    Box::new(std::io::Error::new(std::io::ErrorKind::BrokenPipe, error_msg))
+                ))))
+            }
+        }
+        .map_err(|_| ())
+    }
+}
+
 /// Manager for coordinating proof request execution across different task types.
 ///
 /// # Architecture
