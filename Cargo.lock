@@ -8687,7 +8687,7 @@ dependencies = [
 
 [[package]]
 name = "reth-log-index"
-version = "1.7.0"
+version = "1.8.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -8707,7 +8707,7 @@ dependencies = [
 
 [[package]]
 name = "reth-log-index-common"
-version = "1.7.0"
+version = "1.8.2"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",

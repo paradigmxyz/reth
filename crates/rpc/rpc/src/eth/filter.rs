@@ -736,22 +736,23 @@ where
             // size check but only if range is multiple blocks, so we always return all
             // logs of a single block
             let is_multi_block_range = from_block != to_block;
-            if let Some(max_logs_per_response) = limits.max_logs_per_response {
-                if is_multi_block_range && all_logs.len() > max_logs_per_response {
-                    debug!(
-                        target: "rpc::eth::filter",
-                        logs_found = all_logs.len(),
-                        max_logs_per_response,
-                        from_block,
-                        to_block = num_hash.number.saturating_sub(1),
-                        "Query exceeded max logs per response limit"
-                    );
-                    return Err(EthFilterError::QueryExceedsMaxResults {
-                        max_logs: max_logs_per_response,
-                        from_block,
-                        to_block: num_hash.number.saturating_sub(1),
-                    });
-                }
+            if let Some(max_logs_per_response) = limits.max_logs_per_response &&
+                is_multi_block_range &&
+                all_logs.len() > max_logs_per_response
+            {
+                debug!(
+                    target: "rpc::eth::filter",
+                    logs_found = all_logs.len(),
+                    max_logs_per_response,
+                    from_block,
+                    to_block = num_hash.number.saturating_sub(1),
+                    "Query exceeded max logs per response limit"
+                );
+                return Err(EthFilterError::QueryExceedsMaxResults {
+                    max_logs: max_logs_per_response,
+                    from_block,
+                    to_block: num_hash.number.saturating_sub(1),
+                });
             }
         }
 
