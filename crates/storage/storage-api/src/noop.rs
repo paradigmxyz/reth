@@ -237,6 +237,10 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         Ok(Vec::new())
     }
+
+    fn block_by_transaction_id(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Ok(None)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C, N> {
@@ -343,7 +347,7 @@ impl<C: Send + Sync, N: NodePrimitives> ReceiptProviderIdExt for NoopProvider<C,
 impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
     type Header = N::BlockHeader;
 
-    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+    fn header(&self, _block_hash: BlockHash) -> ProviderResult<Option<Self::Header>> {
         Ok(None)
     }
 
@@ -351,7 +355,7 @@ impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
+    fn header_td(&self, _hash: BlockHash) -> ProviderResult<Option<U256>> {
         Ok(None)
     }
 
@@ -394,6 +398,14 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         _block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
         Ok(Vec::default())
+    }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        Ok(None)
     }
 }
 
@@ -625,6 +637,12 @@ impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<Chai
 
     fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+
+    fn commit(self) -> ProviderResult<bool> {
+        use reth_db_api::transaction::DbTx;
+
+        Ok(self.tx.commit()?)
     }
 }
 

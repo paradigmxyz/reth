@@ -6,8 +6,8 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
+    DBProvider, DatabaseProviderFactory, ProviderFactory,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -57,7 +57,7 @@ where
         Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
     }
 
-    /// Prunes block data before the given block hash according to the configured prune
+    /// Prunes block data before the given block number according to the configured prune
     /// configuration.
     fn prune_before(&mut self, block_num: u64) -> Result<PrunerOutput, PrunerError> {
         debug!(target: "engine::persistence", ?block_num, "Running pruner");
@@ -128,11 +128,10 @@ where
         debug!(target: "engine::persistence", ?new_tip_num, "Removing blocks");
         let start_time = Instant::now();
         let provider_rw = self.provider.database_provider_rw()?;
-        let sf_provider = self.provider.static_file_provider();
 
         let new_tip_hash = provider_rw.block_hash(new_tip_num)?;
-        UnifiedStorageWriter::from(&provider_rw, &sf_provider).remove_blocks_above(new_tip_num)?;
-        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+        provider_rw.remove_block_and_execution_above(new_tip_num)?;
+        provider_rw.commit()?;
 
         debug!(target: "engine::persistence", ?new_tip_num, ?new_tip_hash, "Removed blocks from disk");
         self.metrics.remove_blocks_above_duration_seconds.record(start_time.elapsed());
@@ -152,10 +151,9 @@ where
 
         if last_block_hash_num.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
-            let static_file_provider = self.provider.static_file_provider();
 
-            UnifiedStorageWriter::from(&provider_rw, &static_file_provider).save_blocks(blocks)?;
-            UnifiedStorageWriter::commit(provider_rw)?;
+            provider_rw.save_blocks(blocks)?;
+            provider_rw.commit()?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block_hash_num)
@@ -273,7 +271,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
-    /// Persists the finalized block number on disk.
+    /// Persists the safe block number on disk.
     pub fn save_safe_block_number(
         &self,
         safe_block: u64,

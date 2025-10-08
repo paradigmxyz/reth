@@ -40,7 +40,7 @@ use std::{
     time::Instant,
 };
 use tokio::runtime::Handle;
-use tracing::debug;
+use tracing::{debug, trace};
 
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::ProofTaskMetrics;
@@ -214,6 +214,12 @@ where
     }
 }
 
+/// Type alias for the factory tuple returned by `create_factories`
+type ProofFactories<'a, Tx> = (
+    InMemoryTrieCursorFactory<DatabaseTrieCursorFactory<&'a Tx>, &'a TrieUpdatesSorted>,
+    HashedPostStateCursorFactory<DatabaseHashedCursorFactory<&'a Tx>, &'a HashedPostStateSorted>,
+);
+
 /// This contains all information shared between all storage proof instances.
 #[derive(Debug)]
 pub struct ProofTaskTx<Tx> {
@@ -240,20 +246,15 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn create_factories(
-        &self,
-    ) -> (
-        InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
-    ) {
+    fn create_factories(&self) -> ProofFactories<'_, Tx> {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
-            &self.task_ctx.nodes_sorted,
+            self.task_ctx.nodes_sorted.as_ref(),
         );
 
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(&self.tx),
-            &self.task_ctx.state_sorted,
+            self.task_ctx.state_sorted.as_ref(),
         );
 
         (trie_cursor_factory, hashed_cursor_factory)
@@ -266,7 +267,7 @@ where
         result_sender: Sender<StorageProofResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             "Starting storage proof task calculation"
@@ -313,7 +314,7 @@ where
             })
         });
 
-        debug!(
+        trace!(
             target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             prefix_set = ?input.prefix_set.len(),
@@ -344,7 +345,7 @@ where
         result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?path,
             "Starting blinded account node retrieval"
@@ -360,7 +361,7 @@ where
 
         let start = Instant::now();
         let result = blinded_provider_factory.account_node_provider().trie_node(&path);
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?path,
             elapsed = ?start.elapsed(),
@@ -388,7 +389,7 @@ where
         result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?account,
             ?path,
@@ -405,7 +406,7 @@ where
 
         let start = Instant::now();
         let result = blinded_provider_factory.storage_node_provider(account).trie_node(&path);
-        debug!(
+        trace!(
             target: "trie::proof_task",
             ?account,
             ?path,

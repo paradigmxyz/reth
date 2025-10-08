@@ -160,7 +160,7 @@ impl ConfigureEvm for MockEvmConfig {
         self.inner.block_assembler()
     }
 
-    fn evm_env(&self, header: &Header) -> EvmEnvFor<Self> {
+    fn evm_env(&self, header: &Header) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env(header)
     }
 
@@ -175,7 +175,7 @@ impl ConfigureEvm for MockEvmConfig {
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
-    ) -> reth_evm::ExecutionCtxFor<'a, Self> {
+    ) -> Result<reth_evm::ExecutionCtxFor<'a, Self>, Self::Error> {
         self.inner.context_for_block(block)
     }
 
@@ -183,21 +183,27 @@ impl ConfigureEvm for MockEvmConfig {
         &self,
         parent: &SealedHeader,
         attributes: Self::NextBlockEnvCtx,
-    ) -> reth_evm::ExecutionCtxFor<'_, Self> {
+    ) -> Result<reth_evm::ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner.context_for_next_block(parent, attributes)
     }
 }
 
 impl ConfigureEngineEvm<ExecutionData> for MockEvmConfig {
-    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self> {
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> Result<EvmEnvFor<Self>, Self::Error> {
         self.inner.evm_env_for_payload(payload)
     }
 
-    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self> {
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a ExecutionData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
         self.inner.context_for_payload(payload)
     }
 
-    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self> {
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &ExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         self.inner.tx_iterator_for_payload(payload)
     }
 }

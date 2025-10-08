@@ -107,6 +107,23 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
+    /// Executes the EVM with the given input and accepts a state closure that is always invoked
+    /// with the EVM state after execution, even after failure.
+    fn execute_with_state_closure_always<F>(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
+        let result = self.execute_one(block);
+        let mut state = self.into_state();
+        f(&state);
+
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result: result? })
+    }
+
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_hook<F>(
@@ -559,6 +576,7 @@ where
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?
             .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -577,6 +595,7 @@ where
         let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
+            .map_err(BlockExecutionError::other)?
             .with_state_hook(Some(Box::new(state_hook)))
             .execute_block(block.transactions_recovered())?;
 

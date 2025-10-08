@@ -7,25 +7,29 @@ use reth_trie_common::{HashedAccountsSorted, HashedPostStateSorted, HashedStorag
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
-pub struct HashedPostStateCursorFactory<'a, CF> {
+pub struct HashedPostStateCursorFactory<CF, T> {
     cursor_factory: CF,
-    post_state: &'a HashedPostStateSorted,
+    post_state: T,
 }
 
-impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
+impl<CF, T> HashedPostStateCursorFactory<CF, T> {
     /// Create a new factory.
-    pub const fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
+    pub const fn new(cursor_factory: CF, post_state: T) -> Self {
         Self { cursor_factory, post_state }
     }
 }
 
-impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
+impl<'a, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'a T>
+where
+    CF: HashedCursorFactory,
+    T: AsRef<HashedPostStateSorted>,
+{
     type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
     type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
+        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.as_ref().accounts))
     }
 
     fn hashed_storage_cursor(
@@ -33,7 +37,10 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
+        Ok(HashedPostStateStorageCursor::new(
+            cursor,
+            self.post_state.as_ref().storages.get(&hashed_address),
+        ))
     }
 }
 

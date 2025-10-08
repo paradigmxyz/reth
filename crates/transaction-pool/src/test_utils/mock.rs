@@ -1476,8 +1476,8 @@ impl MockFeeRange {
         max_fee_blob: Range<u128>,
     ) -> Self {
         assert!(
-            max_fee.start <= priority_fee.end,
-            "max_fee_range should be strictly below the priority fee range"
+            max_fee.start >= priority_fee.end,
+            "max_fee_range should be strictly above the priority fee range"
         );
         Self {
             gas_price: gas_price.try_into().unwrap(),

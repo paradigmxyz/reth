@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
@@ -162,7 +162,14 @@ where
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
         let mut trie_input = TrieInput::default();
         for block in executed_ancestors.into_iter().rev() {
-            trie_input.append_cached_ref(block.trie.as_ref().unwrap(), &block.hashed_state);
+            if let Some(trie_updates) = block.trie.as_ref() {
+                trie_input.append_cached_ref(trie_updates, &block.hashed_state);
+            } else {
+                trace!(target: "reth::ress_provider", ancestor = ?block.recovered_block().num_hash(), "Missing trie updates for ancestor block");
+                return Err(ProviderError::TrieWitnessError(
+                    "missing trie updates for ancestor".to_owned(),
+                ));
+            }
         }
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);

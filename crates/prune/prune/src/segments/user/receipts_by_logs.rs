@@ -232,7 +232,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
+    use reth_provider::{
+        DBProvider, DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider,
+    };
     use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{

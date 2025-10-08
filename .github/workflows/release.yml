@@ -22,6 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/reth
   DOCKER_OP_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/op-reth
+  DEB_SUPPORTED_TARGETS: x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu riscv64gc-unknown-linux-gnu
 
 jobs:
   dry-run:
@@ -73,6 +74,10 @@ jobs:
             os: ubuntu-24.04
             profile: maxperf
             allow_fail: false
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            profile: reproducible
+            allow_fail: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
@@ -119,12 +124,34 @@ jobs:
           echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
       - name: Build Reth
-        run: make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}
+        if: ${{ !(matrix.build.binary == 'op-reth' && matrix.configs.profile == 'reproducible') }}
+        run: |
+          if [[ "${{ matrix.build.binary }}" == "reth" && "${{ matrix.configs.profile }}" == "reproducible" ]]; then
+            make build-reth-reproducible
+          else
+            make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}
+          fi
+
+      - name: Build Reth deb package
+        if: ${{ matrix.build.binary == 'reth' && contains(env.DEB_SUPPORTED_TARGETS, matrix.configs.target) }}
+        run: make build-deb-${{ matrix.configs.target }} PROFILE=${{ matrix.configs.profile }} VERSION=${{ needs.extract-version.outputs.VERSION }}
+
       - name: Move binary
         run: |
           mkdir artifacts
           [[ "${{ matrix.configs.target }}" == *windows* ]] && ext=".exe"
-          mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
+
+          # Handle reproducible builds which always target x86_64-unknown-linux-gnu
+          if [[ "${{ matrix.build.binary }}" == "reth" && "${{ matrix.configs.profile }}" == "reproducible" ]]; then
+            mv "target/x86_64-unknown-linux-gnu/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
+          else
+            mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
+          fi
+
+          # Move deb packages if they exist
+          if [[ "${{ matrix.build.binary }}" == "reth" && "${{ env.DEB_SUPPORTED_TARGETS }}" == *"${{ matrix.configs.target }}"* ]]; then
+            mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb" ./artifacts
+          fi
 
       - name: Configure GPG and create artifacts
         env:
@@ -134,9 +161,12 @@ jobs:
           export GPG_TTY=$(tty)
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
           cd artifacts
-          tar -czf ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz ${{ matrix.build.binary }}*
+          tar -czf ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz ${{ matrix.build.binary }}*[!.deb]
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
-          mv *tar.gz* ..
+          if [[ -f "${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb" ]]; then
+            echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb
+          fi
+          mv *tar.gz* *.deb* ..
         shell: bash
 
       - name: Upload artifact
@@ -152,6 +182,20 @@ jobs:
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
+
+      - name: Upload deb package
+        if: ${{ github.event.inputs.dry_run != 'true' && matrix.build.binary == 'reth' && contains(env.DEB_SUPPORTED_TARGETS, matrix.configs.target) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb
+          path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb
+
+      - name: Upload deb package signature
+        if: ${{ github.event.inputs.dry_run != 'true' && matrix.build.binary == 'reth' && contains(env.DEB_SUPPORTED_TARGETS, matrix.configs.target) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb.asc
+          path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}-${{ matrix.configs.profile }}.deb.asc
 
   draft-release:
     name: draft release

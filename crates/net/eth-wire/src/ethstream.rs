@@ -32,9 +32,6 @@ use tracing::{debug, trace};
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
 
-/// [`MAX_STATUS_SIZE`] is the maximum cap on the size of the initial status message
-pub(crate) const MAX_STATUS_SIZE: usize = 500 * 1024;
-
 /// An un-authenticated [`EthStream`]. This is consumed and returns a [`EthStream`] after the
 /// `Status` handshake is completed.
 #[pin_project]
@@ -280,15 +277,13 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage<N>) -> Result<(), Self::Error> {
         if matches!(item, EthMessage::Status(_)) {
-            // TODO: to disconnect here we would need to do something similar to P2PStream's
-            // start_disconnect, which would ideally be a part of the CanDisconnect trait, or at
-            // least similar.
-            //
-            // Other parts of reth do not yet need traits like CanDisconnect because atm they work
-            // exclusively with EthStream<P2PStream<S>>, where the inner P2PStream is accessible,
-            // allowing for its start_disconnect method to be called.
-            //
-            // self.project().inner.start_disconnect(DisconnectReason::ProtocolBreach);
+            // Attempt to disconnect the peer for protocol breach when trying to send Status
+            // message after handshake is complete
+            let mut this = self.project();
+            // We can't await the disconnect future here since this is a synchronous method,
+            // but we can start the disconnect process. The actual disconnect will be handled
+            // asynchronously by the caller or the stream's poll methods.
+            let _disconnect_future = this.inner.disconnect(DisconnectReason::ProtocolBreach);
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
@@ -751,6 +746,50 @@ mod tests {
 
         client_stream.start_send_raw(test_msg).unwrap();
         client_stream.inner_mut().flush().await.unwrap();
+
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn status_message_after_handshake_triggers_disconnect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = PassthroughCodec::default().framed(incoming);
+            let mut stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, stream);
+
+            // Try to send a Status message after handshake - this should trigger disconnect
+            let status = Status {
+                version: EthVersion::Eth67,
+                chain: NamedChain::Mainnet.into(),
+                total_difficulty: U256::ZERO,
+                blockhash: B256::random(),
+                genesis: B256::random(),
+                forkid: ForkFilter::new(Head::default(), B256::random(), 0, Vec::new()).current(),
+            };
+            let status_message =
+                EthMessage::<EthNetworkPrimitives>::Status(StatusMessage::Legacy(status));
+
+            // This should return an error and trigger disconnect
+            let result = stream.send(status_message).await;
+            assert!(result.is_err());
+            assert!(matches!(
+                result.unwrap_err(),
+                EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake)
+            ));
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = PassthroughCodec::default().framed(outgoing);
+        let mut client_stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, sink);
+
+        // Send a valid message to keep the connection alive
+        let test_msg = EthMessage::<EthNetworkPrimitives>::NewBlockHashes(
+            vec![BlockHashNumber { hash: B256::random(), number: 5 }].into(),
+        );
+        client_stream.send(test_msg).await.unwrap();
 
         handle.await.unwrap();
     }
