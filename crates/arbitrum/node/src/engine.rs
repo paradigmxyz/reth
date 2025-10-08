@@ -104,7 +104,7 @@ where
     ) -> eyre::Result<Self::EngineValidator> {
         tree_config = tree_config
             .with_state_root_fallback(true)
-            .with_enable_parallel_sparse_trie(false)
+            .with_disable_parallel_sparse_trie(true)
             .with_legacy_state_root(true);
 
         tracing::info!(

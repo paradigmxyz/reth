@@ -1,10 +1,8 @@
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
-use reth_provider::writer::UnifiedStorageWriter;
 use reth_provider::DatabaseProviderFactory;
 use reth_provider::DBProvider;
 use reth_storage_api::{
     BlockWriter, StateWriter, TrieWriter, HistoryWriter, StageCheckpointWriter, BlockExecutionWriter,
-    StorageLocation,
 };
 use reth_provider::OriginalValuesKnown;
 use reth_provider::providers::ProviderFactory;
@@ -14,6 +12,7 @@ use reth_provider::StaticFileWriter;
 
 use alloy_consensus::BlockHeader;
 use alloy_consensus::Transaction;
+use alloy_consensus::transaction::TxHashRef;
 
 use alloy_primitives::Sealable;
 use reth_arbitrum_rpc::ArbNitroApiServer;
@@ -58,7 +57,6 @@ use reth_node_builder::{DebugNode, Node};
 use reth_provider::providers::ProviderFactoryBuilder;
 use reth_rpc_api::servers::DebugApiServer;
 use reth_rpc_server_types::RethRpcModule;
-use reth_trie_db::MerklePatriciaTrie;
 
 use crate::engine::ArbEngineTypes;
 use crate::follower::FollowerExecutor;
@@ -74,7 +72,6 @@ use alloy_eips::eip2718::Decodable2718;
 impl NodeTypes for ArbNode {
     type Primitives = reth_arbitrum_primitives::ArbPrimitives;
     type ChainSpec = ChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
     type Storage = ArbStorage;
     type Payload = crate::engine::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes>;
 }
@@ -856,7 +853,6 @@ where
             Vec::new(),
         );
         let hashed_sorted = outcome.hashed_state.clone().into_sorted();
-        let trie_updates = outcome.trie_updates.clone();
         {
             let provider_rw = db_factory.provider_rw().map_err(|e| eyre::eyre!("provider_rw error: {e}"))?;
             provider_rw
@@ -864,7 +860,6 @@ where
                     vec![outcome.block.clone()],
                     &exec_outcome,
                     hashed_sorted,
-                    trie_updates,
                 )
                 .map_err(|e| eyre::eyre!("append_blocks_with_state error: {e}"))?;
         }

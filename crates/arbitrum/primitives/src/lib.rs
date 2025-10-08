@@ -11,7 +11,7 @@ use alloy_consensus::{
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
 use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, U256, B256};
 use alloy_rlp::{Decodable, Encodable, Header};
-use alloy_consensus::transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx};
+use alloy_consensus::transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, TxHashRef};
 
 use core::hash::{Hash, Hasher};
 use core::ops::Deref;
@@ -667,6 +667,10 @@ impl ArbTransactionSigned {
     pub fn new_unhashed(transaction: ArbTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction, input_cache: Default::default() }
     }
+    
+    pub const fn signature(&self) -> &Signature {
+        &self.signature
+    }
 
     pub const fn tx_type(&self) -> ArbTxType {
         match &self.transaction {
@@ -779,9 +783,15 @@ impl alloy_consensus::transaction::SignerRecoverable for ArbTransactionSigned {
 }
 
 
-impl SignedTransaction for ArbTransactionSigned {
+impl alloy_consensus::transaction::TxHashRef for ArbTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
+    }
+}
+
+impl SignedTransaction for ArbTransactionSigned {
+    fn recalculate_hash(&self) -> B256 {
+        alloy_primitives::keccak256(self.encoded_2718())
     }
 }
 

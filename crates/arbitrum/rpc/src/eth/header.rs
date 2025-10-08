@@ -9,7 +9,9 @@ use reth_arbitrum_evm::header::extract_send_root_from_header_extra;
 pub struct ArbHeaderConverter;
 
 impl HeaderConverter<alloy_consensus::Header, WithOtherFields<RpcHeader<alloy_consensus::Header>>> for ArbHeaderConverter {
-    fn convert_header(&self, header: SealedHeader<alloy_consensus::Header>, block_size: usize) -> WithOtherFields<RpcHeader<alloy_consensus::Header>> {
+    type Err = std::convert::Infallible;
+
+    fn convert_header(&self, header: SealedHeader<alloy_consensus::Header>, block_size: usize) -> Result<WithOtherFields<RpcHeader<alloy_consensus::Header>>, Self::Err> {
         let base = RpcHeader::from_consensus(header.clone().into(), None, Some(U256::from(block_size)));
         let mut out = WithOtherFields::new(base);
 
@@ -30,6 +32,6 @@ impl HeaderConverter<alloy_consensus::Header, WithOtherFields<RpcHeader<alloy_co
         let _ = out.other.insert_value("sendCount".to_string(), U256::from(send_count));
         let _ = out.other.insert_value("l1BlockNumber".to_string(), U256::from(l1_block_number));
 
-        out
+        Ok(out)
     }
 }

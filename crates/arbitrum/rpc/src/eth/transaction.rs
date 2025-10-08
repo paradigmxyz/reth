@@ -62,6 +62,10 @@ where
         self.eth_api().signers()
     }
 
+    fn send_raw_transaction_sync_timeout(&self) -> std::time::Duration {
+        self.eth_api().send_raw_transaction_sync_timeout()
+    }
+
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
 

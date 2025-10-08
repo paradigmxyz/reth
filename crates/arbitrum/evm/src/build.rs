@@ -16,7 +16,8 @@ use revm_database::{BundleAccount, AccountStatus};
 use revm::{
     context::TxEnv,
     inspector::Inspector,
-    interpreter::interpreter::EthInterpreter
+    interpreter::interpreter::EthInterpreter,
+    context::result::{ExecutionResult, ResultAndState},
 };
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, WithTxEnv, ExecutorTx};
 use reth_execution_errors::BlockExecutionError;
@@ -28,7 +29,6 @@ use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor, CommitChanges, Ex
 use crate::arb_evm::ArbEvmExt;
 use alloy_evm::eth::{EthBlockExecutionCtx, EthBlockExecutor};
 use alloy_evm::ToTxEnv;
-use revm::context::result::ExecutionResult;
 use alloy_primitives::Log as AlloyLog;
 
 use crate::predeploys::PredeployRegistry;
@@ -110,6 +110,21 @@ where
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<ResultAndState<<Self::Evm as reth_evm::Evm>::HaltReason>, BlockExecutionError> {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: ResultAndState<<Self::Evm as reth_evm::Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
     }
 
     fn execute_transaction_with_commit_condition(

@@ -17,8 +17,7 @@ use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::{PendingEnvBuilder, BuildPendingEnv},
-        spec::SignersForApi,
+        pending_block::{PendingEnvBuilder, BuildPendingEnv, LoadPendingBlock},
         AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
@@ -121,11 +120,7 @@ where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-    type Transaction = ProviderTx<Self::Provider>;
-    type Rpc = Rpc::Network;
-
     fn starting_block(&self) -> U256 { self.inner.eth_api.starting_block() }
-    fn signers(&self) -> &SignersForApi<Self> { self.inner.eth_api.signers() }
 }
 
 impl<N, Rpc> SpawnBlocking for ArbEthApi<N, Rpc>
@@ -153,14 +148,16 @@ where
 impl<N, Rpc> LoadState for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = ArbEthApiError>,
+    Self: LoadPendingBlock,
 {
 }
 
 impl<N, Rpc> EthState for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = ArbEthApiError>,
+    Self: LoadPendingBlock,
 {
     fn max_proof_window(&self) -> u64 { self.inner.eth_api.eth_proof_window() }
 }
@@ -177,7 +174,7 @@ impl<N, Rpc> Trace for ArbEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     ArbEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = ArbEthApiError>,
 {
 }
 impl<N, Rpc> AddDevSigners for ArbEthApi<N, Rpc>
@@ -234,11 +231,14 @@ impl<NetworkT> ArbEthApiBuilder<NetworkT> {
 
 impl<N, NetworkT> EthApiBuilder<N> for ArbEthApiBuilder<NetworkT>
 where
-    N: FullNodeComponents<Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>>,
+    N: FullNodeComponents<
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
+        Types: reth_node_api::NodeTypes<ChainSpec: reth_chainspec::Hardforks + reth_chainspec::EthereumHardforks>,
+    >,
     NetworkT: RpcTypes,
     ArbRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
     ArbEthApi<N, ArbRpcConvert<N, NetworkT>>:
-        FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+        FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
     type EthApi = ArbEthApi<N, ArbRpcConvert<N, NetworkT>>;
 
@@ -278,7 +278,6 @@ where
         async move {
             use reth_rpc_eth_types::EthApiError;
             use reth_rpc_convert::transaction::ConvertReceiptInput;
-            use std::borrow::Cow;
 
             let hash = meta.block_hash;
             let all_receipts = this
@@ -302,7 +301,7 @@ where
             let input = ConvertReceiptInput {
                 tx: recovered_ref,
                 gas_used: receipt.cumulative_gas_used() - gas_used,
-                receipt: Cow::Owned(receipt),
+                receipt,
                 next_log_index,
                 meta,
             };

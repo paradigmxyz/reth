@@ -25,36 +25,9 @@ where
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.eth_api().pending_env_builder()
     }
+    
     #[inline]
     fn pending_block_kind(&self) -> PendingBlockKind {
         self.eth_api().pending_block_kind()
-    }
-
-
-    async fn local_pending_block(
-        &self,
-    ) -> Result<
-        Option<(
-            Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
-            Arc<Vec<ProviderReceipt<Self::Provider>>>,
-        )>,
-        Self::Error,
-    > {
-        let latest = self
-            .provider()
-            .latest_header()?
-            .ok_or_else(|| ArbEthApiError::Eth(EthApiError::HeaderNotFound(alloy_eips::BlockNumberOrTag::Latest.into())))?;
-        let block_id = latest.hash().into();
-        let block = self
-            .provider()
-            .recovered_block(block_id, Default::default())?
-            .ok_or_else(|| ArbEthApiError::Eth(EthApiError::HeaderNotFound(block_id.into())))?;
-
-        let receipts = self
-            .provider()
-            .receipts_by_block(block_id)?
-            .ok_or_else(|| ArbEthApiError::Eth(EthApiError::ReceiptsNotFound(block_id.into())))?;
-
-        Ok(Some((Arc::new(block), Arc::new(receipts))))
     }
 }

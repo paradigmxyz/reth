@@ -39,8 +39,8 @@ where
                 {
                     return Ok(Some(Arc::new(pending_block)));
                 }
-                if let Some((block, _)) = self.local_pending_block().await? {
-                    return Ok(Some(block));
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some(pending.block));
                 }
                 return Ok(None);
             }
