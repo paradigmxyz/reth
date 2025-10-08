@@ -368,15 +368,6 @@ where
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
-            let in_mem = ctx.state().tree_state.block_by_hash(parent_hash).is_some();
-            let db_hdr = self.provider.header(&parent_hash).ok().flatten().map(|h| h.number());
-            tracing::error!(
-                target: "engine::tree",
-                parent=?parent_hash,
-                in_memory_parent_present=in_mem,
-                db_header_number=?db_hdr,
-                "payload_validator: state_provider_builder returned None; will map to HeaderNotFound"
-            );
             return Err(InsertBlockError::new(
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
@@ -389,15 +380,6 @@ where
         // fetch parent block
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
-            let in_mem = ctx.state().tree_state.block_by_hash(parent_hash).is_some();
-            let db_hdr = self.provider.header(&parent_hash).ok().flatten().map(|h| h.number());
-            tracing::error!(
-                target: "engine::tree",
-                parent=?parent_hash,
-                in_memory_parent_present=in_mem,
-                db_header_number=?db_hdr,
-                "payload_validator: sealed_header_by_hash returned None; will map to HeaderNotFound"
-            );
             return Err(InsertBlockError::new(
                 self.convert_to_block(input)?.into_sealed_block(),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
