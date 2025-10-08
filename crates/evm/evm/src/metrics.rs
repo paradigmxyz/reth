@@ -50,7 +50,7 @@ impl ExecutorMetrics {
 
         // Update gas metrics.
         self.gas_processed_total.increment(gas_used);
-        self.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.gas_per_second.set(if execution_duration > 0.0 { gas_used as f64 / execution_duration } else { 0.0 });
         self.gas_used_histogram.record(gas_used as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
