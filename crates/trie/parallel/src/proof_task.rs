@@ -84,11 +84,8 @@ impl StorageWorkerJob {
 
         match self {
             Self::StorageProof { result_sender, .. } => result_sender.send(Err(error)),
-            Self::BlindedStorageNode { result_sender, .. } => {
-                result_sender.send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(
-                    Box::new(error),
-                ))))
-            }
+            Self::BlindedStorageNode { result_sender, .. } => result_sender
+                .send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(error))))),
         }
         .map_err(|_| ())
     }
