@@ -266,7 +266,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl core::ops::Deref for ChainSpec {
+impl<H: BlockHeader> core::ops::Deref for ChainSpec<H> {
     type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
@@ -1033,7 +1033,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-impl EthExecutorSpec for ChainSpec {
+impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
     fn deposit_contract_address(&self) -> Option<Address> {
         self.deposit_contract.map(|deposit_contract| deposit_contract.address)
     }
