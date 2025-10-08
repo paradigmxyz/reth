@@ -211,19 +211,15 @@ where
             max_proof_task_concurrency,
             storage_worker_count,
         ) {
-            Ok(proof_task) => proof_task,
+            Ok(task) => task,
             Err(error) => {
-                // If we cannot bootstrap the proof task manager, continue with cache prewarming
-                // only; the caller will detect the missing state root channel and fall back to the
-                // parallel state root algorithm.
+                // Fall back to parallel state root if proof task manager fails to initialize
                 tracing::error!(
                     target: "engine::tree",
                     ?error,
-                    max_concurrency = max_proof_task_concurrency,
-                    requested_workers = storage_worker_count,
-                    "Failed to initialize proof task manager, falling back to cache-only mode"
+                    "Failed to initialize proof task manager, falling back to parallel state root"
                 );
-                return self.spawn_cache_exclusive(env, transactions, provider_builder);
+                return Err((error, transactions, env, provider_builder));
             }
         };
 
