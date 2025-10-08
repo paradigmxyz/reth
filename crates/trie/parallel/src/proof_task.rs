@@ -207,6 +207,16 @@ fn storage_worker_loop<Tx>(
         "Storage worker started"
     );
 
+    // Create factories once at worker startup to avoid recreation overhead.
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+
+    // Create blinded provider factory once for all blinded node requests
+    let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
+        trie_cursor_factory.clone(),
+        hashed_cursor_factory.clone(),
+        proof_tx.task_ctx.prefix_sets.clone(),
+    );
+
     let mut storage_proofs_processed = 0u64;
     let mut storage_nodes_processed = 0u64;
 
@@ -225,7 +235,11 @@ fn storage_worker_loop<Tx>(
                 );
 
                 let proof_start = Instant::now();
-                let result = proof_tx.compute_storage_proof(input);
+                let result = proof_tx.compute_storage_proof(
+                    input,
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                );
 
                 let proof_elapsed = proof_start.elapsed();
                 storage_proofs_processed += 1;
@@ -257,13 +271,6 @@ fn storage_worker_loop<Tx>(
                     ?account,
                     ?path,
                     "Processing blinded storage node"
-                );
-
-                let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
-                let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
-                    trie_cursor_factory,
-                    hashed_cursor_factory,
-                    proof_tx.task_ctx.prefix_sets.clone(),
                 );
 
                 let start = Instant::now();
@@ -629,9 +636,12 @@ where
     /// Used by storage workers in the worker pool to avoid transaction creation
     /// overhead on each proof computation.
     #[inline]
-    fn compute_storage_proof(&self, input: StorageProofInput) -> StorageProofResult {
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
-
+    fn compute_storage_proof(
+        &self,
+        input: StorageProofInput,
+        trie_cursor_factory: impl TrieCursorFactory,
+        hashed_cursor_factory: impl HashedCursorFactory,
+    ) -> StorageProofResult {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput {
             hashed_address,
