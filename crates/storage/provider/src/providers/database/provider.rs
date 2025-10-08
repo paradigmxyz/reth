@@ -929,9 +929,13 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        // TODO: switch for static files
+        // Try static files first
+        let static_changesets = self.static_file_provider.account_block_changeset(block_number)?;
+        if !static_changesets.is_empty() {
+            return Ok(static_changesets);
+        }
 
-        // self.static_file_provider.
+        // Fall back to database
         let range = block_number..=block_number;
         self.tx
             .cursor_read::<tables::AccountChangeSets>()?
@@ -948,6 +952,14 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
+        // Try static files first
+        if let Some(account) =
+            self.static_file_provider.get_account_before_block(block_number, address)?
+        {
+            return Ok(Some(account));
+        }
+
+        // Fall back to database
         self.tx
             .cursor_dup_read::<tables::AccountChangeSets>()?
             .seek_by_key_subkey(block_number, address)?

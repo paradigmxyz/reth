@@ -599,7 +599,6 @@ mod tests {
             // Create test data for multiple blocks
             let test_blocks = 10u64;
             let addresses_per_block = 5;
-            let mut expected_changesets = Vec::new();
 
             for block_num in 0..test_blocks {
                 // Generate unique addresses for each block
@@ -613,7 +612,6 @@ mod tests {
                     .collect();
 
                 let changeset = generate_test_changesets(block_num, addresses.clone());
-                expected_changesets.push((block_num, changeset.clone()));
 
                 // Increment block and write changeset
                 writer.increment_block(block_num).unwrap();

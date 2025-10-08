@@ -346,18 +346,18 @@ impl SegmentHeader {
                     range.end = range.end.saturating_sub(num);
 
                     // Update changeset offsets for account changesets
-                    if self.segment.is_account_changesets() {
-                        if let Some(offsets) = &mut self.changeset_offsets {
-                            // Calculate how many blocks we're removing
-                            let blocks_to_remove = old_end - range.end;
-                            // Remove the last `blocks_to_remove` entries from offsets
-                            let new_len = offsets.len().saturating_sub(blocks_to_remove as usize);
-                            offsets.truncate(new_len);
+                    if self.segment.is_account_changesets() &&
+                        let Some(offsets) = &mut self.changeset_offsets
+                    {
+                        // Calculate how many blocks we're removing
+                        let blocks_to_remove = old_end - range.end;
+                        // Remove the last `blocks_to_remove` entries from offsets
+                        let new_len = offsets.len().saturating_sub(blocks_to_remove as usize);
+                        offsets.truncate(new_len);
 
-                            // If we removed all offsets, set to None
-                            if offsets.is_empty() {
-                                self.changeset_offsets = None;
-                            }
+                        // If we removed all offsets, set to None
+                        if offsets.is_empty() {
+                            self.changeset_offsets = None;
                         }
                     }
                 }
@@ -372,6 +372,7 @@ impl SegmentHeader {
     }
 
     /// Sets a new `block_range`.
+    #[allow(clippy::missing_const_for_fn)] // False positive: function mutates self
     pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
