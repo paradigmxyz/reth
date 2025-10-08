@@ -74,7 +74,7 @@ impl EngineNodeLauncher {
         >,
         CB: NodeComponentsBuilder<T>,
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-            + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents {
@@ -117,7 +117,6 @@ impl EngineNodeLauncher {
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
-
         // Try to expire pre-merge transaction history if configured
         ctx.expire_pre_merge_transactions()?;
 
@@ -158,9 +157,7 @@ impl EngineNodeLauncher {
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
-        if std::env::var("RETH_DISABLE_STATIC_FILES").is_err() {
-            pipeline.move_to_static_files()?;
-        }
+        pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
 
@@ -253,28 +250,14 @@ impl EngineNodeLauncher {
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        // create a never-ending empty stream by keeping the sender alive.
-        let (mut built_payloads, keepalive_tx) = match ctx
+        let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
             .subscribe()
             .await
-        {
-            Ok(events) => (events.into_built_payload_stream().fuse(), None),
-            Err(e) => {
-                reth_tracing::tracing::warn!(
-                    target: "reth::cli",
-                    "Payload builder subscription unavailable ({:?}); running consensus engine without built payloads",
-                    e
-                );
-                use futures::StreamExt;
-                use reth_payload_builder_primitives::{Events as PbEvents, PayloadEvents};
-                use tokio::sync::broadcast;
-                let (tx, rx) = broadcast::channel::<PbEvents<<Types as reth_node_api::NodeTypes>::Payload>>(1);
-                let empty_events = PayloadEvents { receiver: rx };
-                (empty_events.into_built_payload_stream().fuse(), Some(tx))
-            }
-        };
+            .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
+            .into_built_payload_stream()
+            .fuse();
 
         let chainspec = ctx.chain_spec();
         let provider = ctx.blockchain_db().clone();
@@ -283,7 +266,6 @@ impl EngineNodeLauncher {
 
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
-            let _keepalive_tx = keepalive_tx;
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
@@ -391,8 +373,8 @@ where
     >,
     CB: NodeComponentsBuilder<T> + 'static,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
-        + 'static,
+    + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+    + 'static,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
     type Future = Pin<Box<dyn Future<Output = eyre::Result<Self::Node>> + Send>>;

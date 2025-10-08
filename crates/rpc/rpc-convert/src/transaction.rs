@@ -70,8 +70,15 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
 
 /// A type that knows how to convert a consensus header into an RPC header.
 pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+    /// An associated RPC conversion error.
+    type Err: error::Error;
+
     /// Converts a consensus header into an RPC header.
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err>;
 }
 
 /// Default implementation of [`HeaderConverter`] that uses [`FromConsensusHeader`] to convert
@@ -80,8 +87,14 @@ impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
 where
     Rpc: FromConsensusHeader<Consensus>,
 {
-    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc {
-        Rpc::from_consensus_header(header, block_size)
+    type Err = Infallible;
+
+    fn convert_header(
+        &self,
+        header: SealedHeader<Consensus>,
+        block_size: usize,
+    ) -> Result<Rpc, Self::Err> {
+        Ok(Rpc::from_consensus_header(header, block_size))
     }
 }
 
@@ -205,10 +218,12 @@ pub trait IntoRpcTx<T> {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `self` with `signer` and `tx_info`. See [`IntoRpcTx`]
     /// for details.
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> T;
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<T, Self::Err>;
 }
 
 /// Converts `T` into `self`. It is reciprocal of [`IntoRpcTx`].
@@ -222,23 +237,30 @@ pub trait IntoRpcTx<T> {
 /// Prefer using [`IntoRpcTx`] over using [`FromConsensusTx`] when specifying trait bounds on a
 /// generic function. This way, types that directly implement [`IntoRpcTx`] can be used as arguments
 /// as well.
-pub trait FromConsensusTx<T> {
+pub trait FromConsensusTx<T>: Sized {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
+    /// An associated RPC conversion error.
+    type Err: error::Error;
 
     /// Performs the conversion consuming `tx` with `signer` and `tx_info`. See [`FromConsensusTx`]
     /// for details.
-    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Result<Self, Self::Err>;
 }
 
 impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<TxIn>>
     FromConsensusTx<TxIn> for Transaction<T>
 {
     type TxInfo = TransactionInfo;
+    type Err = Infallible;
 
-    fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
+    fn from_consensus_tx(
+        tx: TxIn,
+        signer: Address,
+        tx_info: Self::TxInfo,
+    ) -> Result<Self, Self::Err> {
+        Ok(Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
     }
 }
 
@@ -246,10 +268,12 @@ impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
 where
     ConsensusTx: alloy_consensus::Transaction,
     RpcTx: FromConsensusTx<Self>,
+    <RpcTx as FromConsensusTx<ConsensusTx>>::Err: Debug,
 {
     type TxInfo = RpcTx::TxInfo;
+    type Err = <RpcTx as FromConsensusTx<ConsensusTx>>::Err;
 
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> RpcTx {
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Result<RpcTx, Self::Err> {
         RpcTx::from_consensus_tx(self, signer, tx_info)
     }
 }
@@ -285,7 +309,7 @@ impl<Tx, RpcTx> RpcTxConverter<Tx, RpcTx, Tx::TxInfo> for ()
 where
     Tx: IntoRpcTx<RpcTx>,
 {
-    type Err = Infallible;
+    type Err = Tx::Err;
 
     fn convert_rpc_tx(
         &self,
@@ -293,7 +317,7 @@ where
         signer: Address,
         tx_info: Tx::TxInfo,
     ) -> Result<RpcTx, Self::Err> {
-        Ok(tx.into_rpc_tx(signer, tx_info))
+        tx.into_rpc_tx(signer, tx_info)
     }
 }
 
@@ -893,6 +917,7 @@ where
                        + From<TxEnv::Error>
                        + From<<Map as TxInfoMapper<TxTy<N>>>::Err>
                        + From<RpcTx::Err>
+                       + From<Header::Err>
                        + Error
                        + Unpin
                        + Sync
@@ -924,7 +949,7 @@ where
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
-        Ok(self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info)?)
+        self.rpc_tx_converter.convert_rpc_tx(tx, signer, tx_info).map_err(Into::into)
     }
 
     fn build_simulate_v1_transaction(
@@ -966,7 +991,7 @@ where
         header: SealedHeaderFor<Self::Primitives>,
         block_size: usize,
     ) -> Result<RpcHeader<Self::Network>, Self::Error> {
-        Ok(self.header_converter.convert_header(header, block_size))
+        Ok(self.header_converter.convert_header(header, block_size)?)
     }
 }
 
@@ -1016,9 +1041,14 @@ pub mod op {
         for op_alloy_rpc_types::Transaction<T>
     {
         type TxInfo = OpTransactionInfo;
+        type Err = Infallible;
 
-        fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
-            Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
+        fn from_consensus_tx(
+            tx: T,
+            signer: Address,
+            tx_info: Self::TxInfo,
+        ) -> Result<Self, Self::Err> {
+            Ok(Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info))
         }
     }
 

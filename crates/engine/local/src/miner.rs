@@ -194,7 +194,7 @@ where
     /// through newPayload.
     async fn advance(&mut self) -> eyre::Result<()> {
         let timestamp = std::cmp::max(
-            self.last_timestamp + 1,
+            self.last_timestamp.saturating_add(1),
             std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("cannot be earlier than UNIX_EPOCH")

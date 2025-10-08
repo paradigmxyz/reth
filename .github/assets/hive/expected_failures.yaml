@@ -28,7 +28,6 @@ engine-withdrawals:
   - Withdraw zero amount (Paris) (reth)
   - Empty Withdrawals (Paris) (reth)
   - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
-  - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
 
 engine-api: []
@@ -36,7 +35,7 @@ engine-api: []
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  # the test fails with older verions of the code for which it passed before, probably related to changes
+  # the test fails with older versions of the code for which it passed before, probably related to changes
   # in hive or its dependencies
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
 

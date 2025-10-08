@@ -9,10 +9,16 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 0;
 /// Default maximum concurrency for proof tasks
 pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
+/// The size of proof targets chunk to spawn in one multiproof calculation.
+pub const DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE: usize = 10;
+
 /// Default number of reserved CPU cores for non-reth processes.
 ///
 /// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
+
+/// Default maximum concurrency for prewarm task.
+pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
@@ -75,6 +81,10 @@ pub struct TreeConfig {
     has_enough_parallelism: bool,
     /// Maximum number of concurrent proof tasks
     max_proof_task_concurrency: u64,
+    /// Whether multiproof task should chunk proof targets.
+    multiproof_chunking_enabled: bool,
+    /// Multiproof task chunk size for proof targets.
+    multiproof_chunk_size: usize,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
     /// Whether to disable the precompile cache
@@ -95,6 +105,8 @@ pub struct TreeConfig {
     /// where immediate payload regeneration is desired despite the head not changing or moving to
     /// an ancestor.
     always_process_payload_attributes_on_canonical_head: bool,
+    /// Maximum concurrency for the prewarm task.
+    prewarm_max_concurrency: usize,
     /// Whether to unwind canonical header to ancestor during forkchoice updates.
     allow_unwind_canonical_header: bool,
 }
@@ -115,10 +127,13 @@ impl Default for TreeConfig {
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
+            multiproof_chunking_enabled: true,
+            multiproof_chunk_size: DEFAULT_MULTIPROOF_TASK_CHUNK_SIZE,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
             always_process_payload_attributes_on_canonical_head: false,
+            prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
         }
     }
@@ -141,10 +156,13 @@ impl TreeConfig {
         cross_block_cache_size: u64,
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
+        multiproof_chunking_enabled: bool,
+        multiproof_chunk_size: usize,
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
         always_process_payload_attributes_on_canonical_head: bool,
+        prewarm_max_concurrency: usize,
         allow_unwind_canonical_header: bool,
     ) -> Self {
         Self {
@@ -161,10 +179,13 @@ impl TreeConfig {
             cross_block_cache_size,
             has_enough_parallelism,
             max_proof_task_concurrency,
+            multiproof_chunking_enabled,
+            multiproof_chunk_size,
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
             always_process_payload_attributes_on_canonical_head,
+            prewarm_max_concurrency,
             allow_unwind_canonical_header,
         }
     }
@@ -197,6 +218,16 @@ impl TreeConfig {
     /// Return the maximum proof task concurrency.
     pub const fn max_proof_task_concurrency(&self) -> u64 {
         self.max_proof_task_concurrency
+    }
+
+    /// Return whether the multiproof task chunking is enabled.
+    pub const fn multiproof_chunking_enabled(&self) -> bool {
+        self.multiproof_chunking_enabled
+    }
+
+    /// Return the multiproof task chunk size.
+    pub const fn multiproof_chunk_size(&self) -> usize {
+        self.multiproof_chunk_size
     }
 
     /// Return the number of reserved CPU cores for non-reth processes
@@ -367,6 +398,21 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for whether multiproof task should chunk proof targets.
+    pub const fn with_multiproof_chunking_enabled(
+        mut self,
+        multiproof_chunking_enabled: bool,
+    ) -> Self {
+        self.multiproof_chunking_enabled = multiproof_chunking_enabled;
+        self
+    }
+
+    /// Setter for multiproof task chunk size for proof targets.
+    pub const fn with_multiproof_chunk_size(mut self, multiproof_chunk_size: usize) -> Self {
+        self.multiproof_chunk_size = multiproof_chunk_size;
+        self
+    }
+
     /// Setter for the number of reserved CPU cores for any non-reth processes
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
@@ -394,5 +440,16 @@ impl TreeConfig {
     /// Whether or not to use state root task
     pub const fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
+    }
+
+    /// Setter for prewarm max concurrency.
+    pub const fn with_prewarm_max_concurrency(mut self, prewarm_max_concurrency: usize) -> Self {
+        self.prewarm_max_concurrency = prewarm_max_concurrency;
+        self
+    }
+
+    /// Return the prewarm max concurrency.
+    pub const fn prewarm_max_concurrency(&self) -> usize {
+        self.prewarm_max_concurrency
     }
 }

@@ -9,6 +9,20 @@ repository.workspace = true
 description = "Reth node implementation"
 default-run = "reth"
 
+[package.metadata.deb]
+maintainer = "reth team"
+depends = "$auto"
+section = "network"
+priority = "optional"
+maintainer-scripts = "../../pkg/reth/debian/"
+assets = [
+    "$auto",
+    ["../../README.md", "usr/share/doc/reth/", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
+    ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
+]
+systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
+
 [lints]
 workspace = true
 

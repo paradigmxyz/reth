@@ -157,7 +157,7 @@ pub enum Eip4844PoolTransactionError {
     /// Thrown if an EIP-4844 transaction without any blobs arrives
     #[error("blobless blob transaction")]
     NoEip4844Blobs,
-    /// Thrown if an EIP-4844 transaction without any blobs arrives
+    /// Thrown if an EIP-4844 transaction arrives with too many blobs
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
@@ -225,7 +225,7 @@ pub enum InvalidPoolTransactionError {
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
     ExceedsFeeCap {
-        /// max fee in wei of new tx submitted to the pull (e.g. 0.11534 ETH)
+        /// max fee in wei of new tx submitted to the pool (e.g. 0.11534 ETH)
         max_tx_fee_wei: u128,
         /// configured tx fee cap in wei (e.g. 1.0 ETH)
         tx_fee_cap_wei: u128,

@@ -308,7 +308,7 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        if self.provider.is_known(&self.initial_exex_head.block.hash)? &&
+        if self.provider.is_known(self.initial_exex_head.block.hash)? &&
             self.initial_exex_head.block.number <= self.initial_local_head.number
         {
             // we have the targeted block and that block is below the current head
@@ -457,7 +457,7 @@ mod tests {
     use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DatabaseProviderFactory, StorageLocation,
+        Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
@@ -483,8 +483,7 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw
-            .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
+        provider_rw.insert_block(node_head_block.clone().try_recover()?)?;
         provider_rw.commit()?;
 
         let node_head = node_head_block.num_hash();
@@ -614,7 +613,7 @@ mod tests {
         .try_recover()?;
         let node_head = node_head_block.num_hash();
         let provider_rw = provider.database_provider_rw()?;
-        provider_rw.insert_block(node_head_block, StorageLocation::Database)?;
+        provider_rw.insert_block(node_head_block)?;
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(
