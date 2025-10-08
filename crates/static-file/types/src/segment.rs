@@ -2,6 +2,7 @@ use crate::{BlockNumber, Compression};
 use alloc::{
     format,
     string::{String, ToString},
+    vec::Vec,
 };
 use alloy_primitives::TxNumber;
 use core::{
