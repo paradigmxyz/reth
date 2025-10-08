@@ -32,8 +32,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::RwLock;
 
 use super::storage::{
-    ExternalHashedCursor, ExternalStorage, ExternalStorageError, ExternalStorageResult,
-    ExternalTrieCursor,
+    BlockStateDiff, ExternalHashedCursor, ExternalStorage, ExternalStorageError,
+    ExternalStorageResult, ExternalTrieCursor,
 };
 
 /// In-memory implementation of `ExternalStorage` for testing purposes
@@ -439,36 +439,34 @@ impl ExternalStorage for InMemoryExternalStorage {
     async fn store_trie_updates(
         &self,
         block_number: u64,
-        trie_updates: TrieUpdates,
-        post_state: HashedPostState,
+        block_state_diff: BlockStateDiff,
     ) -> ExternalStorageResult<()> {
         let mut inner = self.inner.write().await;
 
-        inner.trie_updates.insert(block_number, trie_updates);
-        inner.post_states.insert(block_number, post_state);
+        inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
+        inner.post_states.insert(block_number, block_state_diff.post_state);
 
         Ok(())
     }
 
-    async fn fetch_trie_updates(
-        &self,
-        block_number: u64,
-    ) -> ExternalStorageResult<(TrieUpdates, HashedPostState)> {
+    async fn fetch_trie_updates(&self, block_number: u64) -> ExternalStorageResult<BlockStateDiff> {
         let inner = self.inner.read().await;
 
         let trie_updates = inner.trie_updates.get(&block_number).cloned().unwrap_or_default();
         let post_state = inner.post_states.get(&block_number).cloned().unwrap_or_default();
 
-        Ok((trie_updates, post_state))
+        Ok(BlockStateDiff { trie_updates, post_state })
     }
 
     async fn prune_earliest_state(
         &self,
         new_earliest_block_number: u64,
-        branches_diff: TrieUpdates,
-        leaves_diff: HashedPostState,
+        diff: BlockStateDiff,
     ) -> ExternalStorageResult<()> {
         let mut inner = self.inner.write().await;
+
+        let branches_diff = diff.trie_updates;
+        let leaves_diff = diff.post_state;
 
         // Apply branch updates to the earliest state (block 0)
         for (path, branch) in &branches_diff.account_nodes {
@@ -530,7 +528,7 @@ impl ExternalStorage for InMemoryExternalStorage {
     async fn replace_updates(
         &self,
         latest_common_block_number: u64,
-        blocks_to_add: HashMap<u64, TrieUpdates>,
+        blocks_to_add: HashMap<u64, BlockStateDiff>,
     ) -> ExternalStorageResult<()> {
         let mut inner = self.inner.write().await;
 
@@ -543,8 +541,9 @@ impl ExternalStorage for InMemoryExternalStorage {
         inner.hashed_storages.retain(|(block, _, _), _| *block <= latest_common_block_number);
 
         // Add new updates
-        for (block_number, trie_updates) in blocks_to_add {
-            inner.trie_updates.insert(block_number, trie_updates);
+        for (block_number, block_state_diff) in blocks_to_add {
+            inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
+            inner.post_states.insert(block_number, block_state_diff.post_state);
         }
 
         Ok(())
@@ -595,12 +594,14 @@ mod tests {
 
         let trie_updates = TrieUpdates::default();
         let post_state = HashedPostState::default();
+        let block_state_diff =
+            BlockStateDiff { trie_updates: trie_updates.clone(), post_state: post_state.clone() };
 
-        storage.store_trie_updates(5, trie_updates.clone(), post_state.clone()).await?;
+        storage.store_trie_updates(5, block_state_diff).await?;
 
-        let (retrieved_updates, retrieved_state) = storage.fetch_trie_updates(5).await?;
-        assert_eq!(retrieved_updates, trie_updates);
-        assert_eq!(retrieved_state, post_state);
+        let retrieved_diff = storage.fetch_trie_updates(5).await?;
+        assert_eq!(retrieved_diff.trie_updates, trie_updates);
+        assert_eq!(retrieved_diff.post_state, post_state);
 
         Ok(())
     }

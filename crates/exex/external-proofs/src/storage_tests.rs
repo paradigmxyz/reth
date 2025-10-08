@@ -5,7 +5,8 @@ mod tests {
     use crate::{
         in_memory::InMemoryExternalStorage,
         storage::{
-            ExternalHashedCursor, ExternalStorage, ExternalStorageError, ExternalTrieCursor,
+            BlockStateDiff, ExternalHashedCursor, ExternalStorage, ExternalStorageError,
+            ExternalTrieCursor,
         },
     };
     use alloy_primitives::{B256, U256};
@@ -97,14 +98,16 @@ mod tests {
         let block_number = 50;
         let trie_updates = TrieUpdates::default();
         let post_state = HashedPostState::default();
+        let block_state_diff =
+            BlockStateDiff { trie_updates: trie_updates.clone(), post_state: post_state.clone() };
 
         // Store trie updates
-        storage.store_trie_updates(block_number, trie_updates.clone(), post_state.clone()).await?;
+        storage.store_trie_updates(block_number, block_state_diff).await?;
 
         // Retrieve and verify
-        let (retrieved_updates, retrieved_state) = storage.fetch_trie_updates(block_number).await?;
-        assert_eq!(retrieved_updates, trie_updates);
-        assert_eq!(retrieved_state, post_state);
+        let retrieved_diff = storage.fetch_trie_updates(block_number).await?;
+        assert_eq!(retrieved_diff.trie_updates, trie_updates);
+        assert_eq!(retrieved_diff.post_state, post_state);
 
         Ok(())
     }

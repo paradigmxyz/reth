@@ -57,7 +57,9 @@ pub trait ExternalHashedCursor: Send + Sync {
 /// Diff of trie updates and post state for a block.
 #[derive(Debug, Clone)]
 pub struct BlockStateDiff {
+    /// Trie updates for branch nodes
     pub trie_updates: TrieUpdates,
+    /// Post state for leaf nodes (accounts and storage)
     pub post_state: HashedPostState,
 }
 
