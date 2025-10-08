@@ -77,7 +77,6 @@ where
         temp_cursor.seek(account).is_some_and(|(addr, acc)| addr == *account && acc.is_none())
     }
 
-
     fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
@@ -86,7 +85,9 @@ where
         // It's an exact match, return the account from post state without looking up in the
         // database.
         if post_state_entry.is_some_and(|entry| entry.0 == key) {
-            return Ok(post_state_entry.and_then(|(address, account)| account.map(|acc| (address, acc))))
+            return Ok(
+                post_state_entry.and_then(|(address, account)| account.map(|acc| (address, acc)))
+            )
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
@@ -215,12 +216,11 @@ where
     /// Check if the slot was zeroed out in post state without advancing the cursor.
     fn is_slot_zeroed(&self, slot: &B256) -> bool {
         // Create a temporary cursor to search without modifying the main cursor position
-        self.storage_data.map_or(false, |data| {
+        self.storage_data.is_some_and(|data| {
             let mut temp_cursor = ForwardInMemoryCursor::new(data);
             temp_cursor.seek(slot).is_some_and(|(s, value)| s == *slot && value.is_zero())
         })
     }
-
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
     fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
@@ -241,10 +241,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(
-            post_state_entry.filter(|(_, value)| !value.is_zero()),
-            db_entry,
-        ))
+        Ok(Self::compare_entries(post_state_entry.filter(|(_, value)| !value.is_zero()), db_entry))
     }
 
     /// Find the storage entry that is right after current cursor position.
@@ -269,10 +266,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(
-            post_state_entry.filter(|(_, value)| !value.is_zero()),
-            db_entry,
-        ))
+        Ok(Self::compare_entries(post_state_entry.filter(|(_, value)| !value.is_zero()), db_entry))
     }
 
     /// Return the storage entry with the lowest hashed storage key (hashed slot).
