@@ -711,77 +711,76 @@ where
                 Ok(message) => {
                     match message {
                         ProofTaskMessage::QueueTask(task) => match task {
-                                ProofTaskKind::StorageProof(input, sender) => {
-                                    self.storage_work_tx
-                                        .send(StorageWorkerJob::StorageProof {
-                                            input,
-                                            result_sender: sender,
-                                        })
-                                        .expect("storage workers are running until Terminate");
+                            ProofTaskKind::StorageProof(input, sender) => {
+                                self.storage_work_tx
+                                    .send(StorageWorkerJob::StorageProof {
+                                        input,
+                                        result_sender: sender,
+                                    })
+                                    .expect("storage workers are running until Terminate");
 
-                                    tracing::trace!(
-                                        target: "trie::proof_task",
-                                        "Storage proof dispatched to worker pool"
-                                    );
-                                }
-
-                                ProofTaskKind::BlindedStorageNode(account, path, sender) => {
-                                    #[cfg(feature = "metrics")]
-                                    {
-                                        self.metrics.storage_nodes += 1;
-                                    }
-
-                                    self.storage_work_tx
-                                        .send(StorageWorkerJob::BlindedStorageNode {
-                                            account,
-                                            path,
-                                            result_sender: sender,
-                                        })
-                                        .expect("storage workers are running until Terminate");
-
-                                    tracing::trace!(
-                                        target: "trie::proof_task",
-                                        ?account,
-                                        ?path,
-                                        "Blinded storage node dispatched to worker pool"
-                                    );
-                                }
-
-                                ProofTaskKind::BlindedAccountNode(path, sender) => {
-                                    #[cfg(feature = "metrics")]
-                                    {
-                                        self.metrics.account_nodes += 1;
-                                    }
-
-                                    self.account_work_tx
-                                        .send(AccountWorkerJob::BlindedAccountNode {
-                                            path,
-                                            result_sender: sender,
-                                        })
-                                        .expect("account workers are running until Terminate");
-
-                                    tracing::trace!(
-                                        target: "trie::proof_task",
-                                        ?path,
-                                        "Blinded account node dispatched to worker pool"
-                                    );
-                                }
-
-                                ProofTaskKind::AccountMultiproof(input, sender) => {
-                                    self.account_work_tx
-                                        .send(AccountWorkerJob::AccountMultiproof {
-                                            input,
-                                            result_sender: sender,
-                                        })
-                                        .expect("account workers are running until Terminate");
-
-                                    tracing::trace!(
-                                        target: "trie::proof_task",
-                                        "Account multiproof dispatched to worker pool"
-                                    );
-                                }
+                                tracing::trace!(
+                                    target: "trie::proof_task",
+                                    "Storage proof dispatched to worker pool"
+                                );
                             }
-                        }
+
+                            ProofTaskKind::BlindedStorageNode(account, path, sender) => {
+                                #[cfg(feature = "metrics")]
+                                {
+                                    self.metrics.storage_nodes += 1;
+                                }
+
+                                self.storage_work_tx
+                                    .send(StorageWorkerJob::BlindedStorageNode {
+                                        account,
+                                        path,
+                                        result_sender: sender,
+                                    })
+                                    .expect("storage workers are running until Terminate");
+
+                                tracing::trace!(
+                                    target: "trie::proof_task",
+                                    ?account,
+                                    ?path,
+                                    "Blinded storage node dispatched to worker pool"
+                                );
+                            }
+
+                            ProofTaskKind::BlindedAccountNode(path, sender) => {
+                                #[cfg(feature = "metrics")]
+                                {
+                                    self.metrics.account_nodes += 1;
+                                }
+
+                                self.account_work_tx
+                                    .send(AccountWorkerJob::BlindedAccountNode {
+                                        path,
+                                        result_sender: sender,
+                                    })
+                                    .expect("account workers are running until Terminate");
+
+                                tracing::trace!(
+                                    target: "trie::proof_task",
+                                    ?path,
+                                    "Blinded account node dispatched to worker pool"
+                                );
+                            }
+
+                            ProofTaskKind::AccountMultiproof(input, sender) => {
+                                self.account_work_tx
+                                    .send(AccountWorkerJob::AccountMultiproof {
+                                        input,
+                                        result_sender: sender,
+                                    })
+                                    .expect("account workers are running until Terminate");
+
+                                tracing::trace!(
+                                    target: "trie::proof_task",
+                                    "Account multiproof dispatched to worker pool"
+                                );
+                            }
+                        },
                         ProofTaskMessage::Terminate => {
                             // Drop worker channels to signal workers to shut down
                             drop(self.storage_work_tx);
