@@ -8,7 +8,7 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap, HashSet},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
@@ -322,21 +322,8 @@ impl HashedPostState {
     }
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
-    pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut accounts = Vec::new();
-        for (hashed_address, info) in self.accounts {
-            accounts.push((hashed_address, info));
-        }
-        accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts };
-
-        let storages = self
-            .storages
-            .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
-            .collect();
-
-        HashedPostStateSorted { accounts, storages }
+    pub fn into_sorted(mut self) -> HashedPostStateSorted {
+        self.drain_into_sorted()
     }
 
     /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by
@@ -432,10 +419,7 @@ impl HashedStorage {
 
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut storage_slots = Vec::new();
-        for (hashed_slot, value) in self.storage {
-            storage_slots.push((hashed_slot, value));
-        }
+        let mut storage_slots = self.storage.into_iter().collect::<Vec<_>>();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
