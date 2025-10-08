@@ -710,8 +710,7 @@ where
             match self.proof_task_rx.recv() {
                 Ok(message) => {
                     match message {
-                        ProofTaskMessage::QueueTask(task) => {
-                            match task {
+                        ProofTaskMessage::QueueTask(task) => match task {
                                 ProofTaskKind::StorageProof(input, sender) => {
                                     self.storage_work_tx
                                         .send(StorageWorkerJob::StorageProof {
