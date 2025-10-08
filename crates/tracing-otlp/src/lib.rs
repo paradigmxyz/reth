@@ -11,7 +11,7 @@ use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator,
-    trace::{Sampler, SdkTracer, SdkTracerProvider},
+    trace::{SdkTracer, SdkTracerProvider},
     Resource,
 };
 use opentelemetry_semantic_conventions::{attribute::SERVICE_VERSION, SCHEMA_URL};
@@ -32,13 +32,12 @@ where
     for<'span> S: Subscriber + LookupSpan<'span>,
 {
     global::set_text_map_propagator(TraceContextPropagator::new());
+
     let resource = build_resource(service_name);
 
-    let mut provider_builder =
-        SdkTracerProvider::builder().with_resource(resource).with_sampler(Sampler::AlwaysOn);
+    let mut provider_builder = SdkTracerProvider::builder().with_resource(resource);
 
     provider_builder = if let TraceOutput::Otlp(url) = output {
-        println!("Exporting traces to OTLP endpoint: {}", url);
         let span_exporter =
             SpanExporter::builder().with_http().with_endpoint(url.to_string()).build()?;
         provider_builder.with_batch_exporter(span_exporter)
