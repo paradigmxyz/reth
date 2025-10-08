@@ -479,7 +479,7 @@ impl HashedAccountsSorted {
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
-    /// Sorted hashed storage slots. U256::ZERO indicates that a slot was deleted.
+    /// Sorted hashed storage slots. `U256::ZERO` indicates that a slot was deleted.
     pub storage_slots: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
