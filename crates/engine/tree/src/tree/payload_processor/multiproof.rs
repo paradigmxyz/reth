@@ -475,8 +475,7 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let proof_result = ParallelProof::new(
-                config.consistent_view,
+            let proof_result = ParallelProof::<Factory>::new(
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
