@@ -1238,7 +1238,7 @@ mod tests {
             1,
             1,
         )
-        .unwrap();
+        .expect("Failed to create ProofTaskManager");
         let channel = channel();
 
         MultiProofTask::new(config, executor, proof_task.handle(), channel.0, 1, None)
