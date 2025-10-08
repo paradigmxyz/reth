@@ -711,19 +711,6 @@ where
                 Ok(message) => {
                     match message {
                         ProofTaskMessage::QueueTask(task) => {
-                            // SAFETY: Storage worker sends cannot fail because:
-                            // 1. Unbounded channel created during initialization (line 595)
-                            // 2. Workers only exit when channel closes (storage_worker_loop recv()
-                            //    returns Err)
-                            // 3. Channel only closes when all senders are dropped
-                            // 4. self.storage_work_tx is only dropped on Terminate (line 861)
-                            // 5. If we're processing QueueTask messages, Terminate hasn't occurred
-                            //    yet
-                            // Therefore, the channel is guaranteed open with workers receiving.
-                            //
-                            // Same logic applies to account workers (unbounded channel at line 596,
-                            // dropped at line 862).
-
                             match task {
                                 ProofTaskKind::StorageProof(input, sender) => {
                                     self.storage_work_tx
