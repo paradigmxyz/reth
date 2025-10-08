@@ -404,7 +404,9 @@ mod tests {
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
+        providers::ConsistentDbView,
+        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
+        HashingWriter, ProviderFactory,
     };
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -478,7 +480,7 @@ mod tests {
         let task_ctx =
             ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task =
-            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1, 1, 1)
+            ProofTaskManager::new(rt.handle().clone(), consistent_view, task_ctx, 1, 1, 1)
                 .unwrap();
         let proof_task_handle = proof_task.handle();
 
@@ -486,7 +488,8 @@ mod tests {
         // after we compute the state root
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
-        let parallel_result = ParallelProof::new(
+        type Factory = ProviderFactory<MockNodeTypesWithDB>;
+        let parallel_result = ParallelProof::<Factory>::new(
             Default::default(),
             Default::default(),
             Default::default(),
