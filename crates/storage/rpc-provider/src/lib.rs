@@ -1764,6 +1764,14 @@ where
     ) -> Result<Vec<reth_db_api::models::AccountBeforeTx>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn get_account_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+    ) -> ProviderResult<Option<reth_db_api::models::AccountBeforeTx>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
