@@ -343,6 +343,97 @@ fn storage_worker_loop<Tx>(
     );
 }
 
+// TODO: Refactor this with storage_worker_loop. ProofTaskManager should be removed in the following
+// pr and `MultiproofManager` should be used instead to dispatch jobs directly.
+fn account_worker_loop<Tx>(
+    proof_tx: ProofTaskTx<Tx>,
+    work_rx: CrossbeamReceiver<AccountMultiproofJob>,
+    storage_proof_handle: ProofTaskManagerHandle<Tx>,
+    worker_id: usize,
+) where
+    Tx: DbTx,
+{
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        "Account multiproof worker started"
+    );
+
+    let (trie_cursor_factory, hashed_cursor_factory) = proof_tx.create_factories();
+    let mut account_proofs_processed = 0u64;
+
+    while let Ok(AccountMultiproofJob { input, result_sender }) = work_rx.recv() {
+        trace!(
+            target: "trie::proof_task",
+            worker_id,
+            targets = input.targets.len(),
+            "Processing account multiproof"
+        );
+
+        let proof_start = Instant::now();
+
+        let storage_proofs = match collect_storage_proofs(
+            &proof_tx,
+            &storage_proof_handle,
+            &input.targets,
+            &input.prefix_sets,
+            input.collect_branch_node_masks,
+            input.multi_added_removed_keys.clone(),
+        ) {
+            Ok(proofs) => proofs,
+            Err(error) => {
+                let _ = result_sender.send(Err(error));
+                continue;
+            }
+        };
+
+        // Use the missed leaves cache passed from the multiproof manager
+        let missed_leaves_storage_roots = &input.missed_leaves_storage_roots;
+
+        // Create tracker for metrics (workers don't use stats, but function requires it)
+        let mut tracker = crate::stats::ParallelTrieTracker::default();
+
+        let result = crate::proof::build_account_multiproof_with_storage_roots(
+            trie_cursor_factory.clone(),
+            hashed_cursor_factory.clone(),
+            &input.targets,
+            &input.prefix_sets.account_prefix_set,
+            input.collect_branch_node_masks,
+            input.multi_added_removed_keys.as_ref(),
+            storage_proofs,
+            missed_leaves_storage_roots,
+            &mut tracker,
+        );
+
+        let proof_elapsed = proof_start.elapsed();
+        account_proofs_processed += 1;
+
+        if result_sender.send(result).is_err() {
+            tracing::debug!(
+                target: "trie::proof_task",
+                worker_id,
+                account_proofs_processed,
+                "Account multiproof receiver dropped, discarding result"
+            );
+        }
+
+        trace!(
+            target: "trie::proof_task",
+            worker_id,
+            proof_time_us = proof_elapsed.as_micros(),
+            total_processed = account_proofs_processed,
+            "Account multiproof completed"
+        );
+    }
+
+    tracing::debug!(
+        target: "trie::proof_task",
+        worker_id,
+        account_proofs_processed,
+        "Account multiproof worker shutting down"
+    );
+}
+
 impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>,
