@@ -999,7 +999,6 @@ where
 
         decoded_result
     }
-
 }
 
 /// This represents an input for a storage proof.
