@@ -6,6 +6,7 @@
 //! applications. It allows for easily capturing and exporting distributed traces to compatible
 //! backends like Jaeger, Zipkin, or any other OpenTelemetry-compatible tracing system.
 
+use eyre::{ensure, WrapErr};
 use opentelemetry::{global, trace::TracerProvider, KeyValue, Value};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{
@@ -18,15 +19,6 @@ use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::registry::LookupSpan;
 use url::Url;
-
-/// Destination for exported trace spans.
-#[derive(Debug, Clone)]
-pub enum TraceOutput {
-    /// Export traces as JSON to stdout.
-    Stdout,
-    /// Export traces to an OTLP collector at the specified URL.
-    Otlp(Url),
-}
 
 /// Creates a tracing [`OpenTelemetryLayer`] that exports spans to an OTLP endpoint.
 ///
@@ -69,4 +61,36 @@ fn build_resource(service_name: impl Into<Value>) -> Resource {
         .with_service_name(service_name)
         .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION"))], SCHEMA_URL)
         .build()
+}
+
+/// Destination for exported trace spans.
+#[derive(Debug, Clone)]
+pub enum TraceOutput {
+    /// Export traces as JSON to stdout.
+    Stdout,
+    /// Export traces to an OTLP collector at the specified URL.
+    Otlp(Url),
+}
+
+impl TraceOutput {
+    /// Parses the trace output destination from a string.
+    ///
+    /// Returns `TraceOutput::Stdout` for "stdout", or `TraceOutput::Otlp` for valid OTLP URLs.
+    /// OTLP URLs must end with `/v1/traces` per the OTLP specification.
+    pub fn parse(s: &str) -> eyre::Result<Self> {
+        if s == "stdout" {
+            return Ok(Self::Stdout);
+        }
+
+        let url = Url::parse(s).wrap_err("Invalid URL for trace output")?;
+
+        // OTLP specification requires the `/v1/traces` path for trace endpoints
+        ensure!(
+            url.path().ends_with("/v1/traces"),
+            "OTLP trace endpoint must end with /v1/traces, got path: {}",
+            url.path()
+        );
+
+        Ok(Self::Otlp(url))
+    }
 }
