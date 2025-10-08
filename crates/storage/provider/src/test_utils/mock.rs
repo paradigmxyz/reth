@@ -992,6 +992,13 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
     }
+
+    fn account_changesets_range(
+        &self,
+        _range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
 }
 
 impl<T: NodePrimitives, ChainSpec: Send + Sync> StateReader for MockEthProvider<T, ChainSpec> {
