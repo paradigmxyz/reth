@@ -448,7 +448,8 @@ fn account_worker_loop<Tx>(
         target: "trie::proof_task",
         worker_id,
         account_proofs_processed,
-        "Account multiproof worker shutting down"
+        account_nodes_processed,
+        "Account worker shutting down"
     );
 }
 
@@ -743,10 +744,9 @@ where
     /// - **Storage Trie Operations** (`StorageProof` and `BlindedStorageNode`): Routed to
     ///   pre-spawned storage worker pool via unbounded channel. Returns error if workers are
     ///   disconnected (e.g., all workers panicked).
-    /// - **Account Multiproof Operations** (`AccountMultiproof`): Routed to pre-spawned account
-    ///   worker pool via unbounded channel. Returns error if workers are disconnected.
-    /// - **Account Trie Operations** (`BlindedAccountNode`): Queued for on-demand execution via
-    ///   `pending_tasks`.
+    /// - **Account Trie Operations** (`AccountMultiproof` and `BlindedAccountNode`): Routed to
+    ///   pre-spawned account worker pool via unbounded channel. Returns error if workers are
+    ///   disconnected.
     ///
     /// # Shutdown
     ///
@@ -1093,23 +1093,50 @@ pub struct AccountMultiproofInput {
     pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
 }
 
-/// Internal job for account multiproof workers.
+/// Internal message for account workers.
+///
+/// This is NOT exposed publicly. External callers use `ProofTaskKind::AccountMultiproof` or
+/// `ProofTaskKind::BlindedAccountNode` which are routed through the manager's `std::mpsc` channel.
 #[derive(Debug)]
-struct AccountMultiproofJob {
+enum AccountWorkerJob {
+    /// Account multiproof computation request
+    AccountMultiproof {
     /// Account multiproof input parameters
     input: AccountMultiproofInput,
     /// Channel to send result back to original caller
     result_sender: Sender<AccountMultiproofResult>,
+    },
+    /// Blinded account node retrieval request
+    BlindedAccountNode {
+        /// Path to the account node
+        path: Nibbles,
+        /// Channel to send result back to original caller
+        result_sender: Sender<TrieNodeProviderResult>,
+    },
 }
 
-impl AccountMultiproofJob {
+impl AccountWorkerJob {
     /// Sends an error back to the caller when worker pool is unavailable.
     ///
     /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
     /// dropped.
     fn send_worker_unavailable_error(&self) -> Result<(), ()> {
-        let error = ParallelStateRootError::Other("Account worker pool unavailable".to_string());
-        self.result_sender.send(Err(error)).map_err(|_| ())
+        match self {
+            Self::AccountMultiproof { result_sender, .. } => {
+                let error =
+                    ParallelStateRootError::Other("Account worker pool unavailable".to_string());
+                result_sender.send(Err(error)).map_err(|_| ())
+            }
+            Self::BlindedAccountNode { result_sender, .. } => {
+                let error = SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(
+                    std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "Account worker pool unavailable",
+                    ),
+                )));
+                result_sender.send(Err(error)).map_err(|_| ())
+            }
+        }
     }
 }
 
