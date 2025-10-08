@@ -14,7 +14,6 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
-opentelemetry-stdout = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tracing.workspace = true
@@ -34,6 +33,5 @@ otlp = [
     "opentelemetry_sdk",
     "opentelemetry-otlp",
     "opentelemetry-semantic-conventions",
-    "opentelemetry-stdout",
     "tracing-opentelemetry",
 ]
