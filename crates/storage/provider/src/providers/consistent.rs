@@ -1422,6 +1422,52 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
             self.storage_provider.account_block_changeset(block_number)
         }
     }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        if let Some(state) =
+            self.head_block.as_ref().and_then(|b| b.block_on_chain(block_number.into()))
+        {
+            // Search in-memory state for the account changeset
+            let changeset = state
+                .block_ref()
+                .execution_output
+                .bundle
+                .reverts
+                .clone()
+                .to_plain_state_reverts()
+                .accounts
+                .into_iter()
+                .flatten()
+                .find(|(addr, _)| addr == &address)
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) });
+            Ok(changeset)
+        } else {
+            // Perform checks on whether or not changesets exist for the block.
+            // No prune checkpoint means history should exist and we should `unwrap_or(true)`
+            let account_history_exists = self
+                .storage_provider
+                .get_prune_checkpoint(PruneSegment::AccountHistory)?
+                .and_then(|checkpoint| {
+                    // return true if the block number is ahead of the prune checkpoint.
+                    //
+                    // The checkpoint stores the highest pruned block number, so we should make
+                    // sure the block_number is strictly greater.
+                    checkpoint.block_number.map(|checkpoint| block_number > checkpoint)
+                })
+                .unwrap_or(true);
+
+            if !account_history_exists {
+                return Err(ProviderError::StateAtBlockPruned(block_number))
+            }
+
+            // Delegate to the storage provider for database lookups
+            self.storage_provider.get_account_before_block(block_number, address)
+        }
+    }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
