@@ -39,7 +39,7 @@ where
             static_file_writer.increment_block(block)?;
 
             let account_changeset = provider.account_block_changeset(block)?;
-            static_file_writer.append_account_changeset(account_changeset);
+            static_file_writer.append_account_changeset(account_changeset)?;
 
             // let block_body_indices = provider
             //     .block_body_indices(block)?
