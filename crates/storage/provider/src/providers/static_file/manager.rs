@@ -1318,6 +1318,46 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
+
+    /// Get account changesets for a range of blocks, checking both static files and database.
+    pub fn get_account_changesets_range<FD>(
+        &self,
+        block_range: Range<BlockNumber>,
+        mut fetch_from_database: FD,
+    ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>
+    where
+        FD: FnMut(
+            Range<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumber, reth_db::models::AccountBeforeTx)>>,
+    {
+        let mut changesets = Vec::new();
+        let highest_static_block =
+            self.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+        if let Some(highest) = highest_static_block {
+            // Get from static files for blocks that are available
+            let static_end = block_range.end.min(highest + 1);
+            if block_range.start < static_end {
+                for block in block_range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
+            }
+
+            // Get remaining from database
+            if block_range.end > highest + 1 {
+                let db_range = (highest + 1)..block_range.end;
+                changesets.extend(fetch_from_database(db_range)?);
+            }
+        } else {
+            // All from database
+            changesets = fetch_from_database(block_range)?;
+        }
+
+        Ok(changesets)
+    }
 }
 
 /// Helper trait to manage different [`StaticFileProviderRW`] of an `Arc<StaticFileProvider`
@@ -1451,15 +1491,14 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
                 }
             }
 
-            if low < range.end {
-                if let Some(change) =
-                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
-                {
-                    if change.address == address {
-                        return Ok(Some(change));
-                    }
-                }
+            if low < range.end &&
+                let Some(change) = cursor
+                    .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                    .filter(|change| change.address == address)
+            {
+                return Ok(Some(change));
             }
+
             Ok(None)
         } else {
             // TODO(rjected) right thing to return here?
