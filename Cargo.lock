@@ -9018,7 +9018,6 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-tracing",
- "reth-tracing-otlp",
  "reth-transaction-pool",
  "secp256k1 0.30.0",
  "serde",
@@ -10588,6 +10587,7 @@ dependencies = [
  "tracing-journald",
  "tracing-logfmt",
  "tracing-subscriber 0.3.20",
+ "url",
 ]
 
 [[package]]

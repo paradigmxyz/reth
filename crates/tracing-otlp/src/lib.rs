@@ -26,7 +26,7 @@ use url::Url;
 /// with OTLP export to an url.
 pub fn span_layer<S>(
     service_name: impl Into<Value>,
-    output: TraceOutput,
+    endpoint: &Url,
 ) -> eyre::Result<OpenTelemetryLayer<S, SdkTracer>>
 where
     for<'span> S: Subscriber + LookupSpan<'span>,
@@ -35,18 +35,13 @@ where
 
     let resource = build_resource(service_name);
 
-    let mut provider_builder = SdkTracerProvider::builder().with_resource(resource);
+    let span_exporter =
+        SpanExporter::builder().with_http().with_endpoint(endpoint.to_string()).build()?;
 
-    provider_builder = if let TraceOutput::Otlp(url) = output {
-        let span_exporter =
-            SpanExporter::builder().with_http().with_endpoint(url.to_string()).build()?;
-        provider_builder.with_batch_exporter(span_exporter)
-    } else {
-        let stdout_exporter = opentelemetry_stdout::SpanExporter::default();
-        provider_builder.with_simple_exporter(stdout_exporter)
-    };
-
-    let tracer_provider = provider_builder.build();
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(span_exporter)
+        .build();
 
     global::set_tracer_provider(tracer_provider.clone());
 

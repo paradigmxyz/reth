@@ -1,6 +1,6 @@
 use crate::formatter::LogFormat;
 #[cfg(feature = "otlp")]
-use reth_tracing_otlp::{span_layer, TraceOutput};
+use reth_tracing_otlp::span_layer;
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use std::{
     fmt,
@@ -8,6 +8,7 @@ use std::{
 };
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+use url::Url;
 
 /// A worker guard returned by the file layer.
 ///
@@ -129,10 +130,10 @@ impl Layers {
     pub fn with_span_layer(
         &mut self,
         service_name: String,
-        output_type: TraceOutput,
+        endpoint_exporter: Url,
     ) -> eyre::Result<()> {
         // Create the span provider
-        let span_layer = span_layer(service_name, output_type)
+        let span_layer = span_layer(service_name, &endpoint_exporter)
             .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?;
 
         self.add_layer(span_layer);

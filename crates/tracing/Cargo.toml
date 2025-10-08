@@ -26,6 +26,7 @@ tracing-logfmt.workspace = true
 clap = { workspace = true, features = ["derive"] }
 eyre.workspace = true
 rolling-file.workspace = true
+url.workspace = true
 
 [features]
 default = ["otlp"]
