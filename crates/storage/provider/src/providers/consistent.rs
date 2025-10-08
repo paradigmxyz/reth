@@ -617,7 +617,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 ?block_hash,
                 anchor_num=anchor.number,
                 anchor_hash=?anchor.hash,
-                block_num=block_state.block_ref().block().number(),
+                block_num=block_state.block_ref().recovered_block().number(),
                 "Found block in canonical in-memory state, using anchor"
             );
             let latest_historical = into_history_at_block_hash(anchor.hash)?;
