@@ -217,8 +217,19 @@ impl InMemoryStorageCursor {
             }
         }
 
-        let mut entries: Vec<(B256, U256)> =
-            slot_to_latest.into_iter().map(|(slot, (_, value))| (slot, value)).collect();
+        // Filter out zero values - they represent deleted/empty storage slots
+        let mut entries: Vec<(B256, U256)> = slot_to_latest
+            .into_iter()
+            .filter_map(
+                |(slot, (_, value))| {
+                    if value.is_zero() {
+                        None
+                    } else {
+                        Some((slot, value))
+                    }
+                },
+            )
+            .collect();
 
         entries.sort_by_key(|(slot, _)| *slot);
 
@@ -375,6 +386,18 @@ impl ExternalStorage for InMemoryExternalStorage {
     async fn get_earliest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>> {
         let inner = self.inner.read().await;
         Ok(inner.earliest_block)
+    }
+
+    async fn get_latest_block_number(&self) -> ExternalStorageResult<Option<(u64, B256)>> {
+        let inner = self.inner.read().await;
+        // Find the latest block number from trie_updates
+        let latest_block = inner.trie_updates.keys().max().copied();
+        if let Some(block) = latest_block {
+            // We don't have a hash stored, so return a default
+            Ok(Some((block, B256::ZERO)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn trie_cursor(

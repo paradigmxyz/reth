@@ -980,10 +980,62 @@ mod tests {
         let result75 = cursor75.seek(storage_key)?.unwrap();
         assert_eq!(result75.1, U256::from(100));
 
-        // Cursor after deletion should see zero
+        // Cursor after deletion should NOT see the entry (zero values are skipped)
         let mut cursor150 = storage.storage_hashed_cursor(hashed_address, 150)?;
-        let result150 = cursor150.seek(storage_key)?.unwrap();
-        assert_eq!(result150.1, U256::ZERO);
+        let result150 = cursor150.seek(storage_key)?;
+        assert!(result150.is_none(), "Zero values should be skipped/deleted");
+
+        Ok(())
+    }
+
+    /// Test that zero values are skipped during iteration
+    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[tokio::test]
+    async fn test_storage_cursor_skips_zero_values<S: ExternalStorage>(
+        storage: S,
+    ) -> Result<(), ExternalStorageError> {
+        let hashed_address = B256::repeat_byte(0x01);
+
+        // Create a mix of non-zero and zero value storage slots
+        let storage_slots = vec![
+            (B256::repeat_byte(0x10), U256::from(100)), // Non-zero
+            (B256::repeat_byte(0x20), U256::ZERO),      // Zero value - should be skipped
+            (B256::repeat_byte(0x30), U256::from(300)), // Non-zero
+            (B256::repeat_byte(0x40), U256::ZERO),      // Zero value - should be skipped
+            (B256::repeat_byte(0x50), U256::from(500)), // Non-zero
+        ];
+
+        // Store all slots
+        storage.store_hashed_storages(hashed_address, storage_slots.clone(), 50).await?;
+
+        // Create cursor and iterate through all entries
+        let mut cursor = storage.storage_hashed_cursor(hashed_address, 100)?;
+        let mut found_slots = Vec::new();
+        while let Some((key, value)) = cursor.next()? {
+            found_slots.push((key, value));
+        }
+
+        // Should only find 3 non-zero values
+        assert_eq!(found_slots.len(), 3, "Zero values should be skipped during iteration");
+
+        // Verify the non-zero values are the ones we stored
+        assert_eq!(found_slots[0], (B256::repeat_byte(0x10), U256::from(100)));
+        assert_eq!(found_slots[1], (B256::repeat_byte(0x30), U256::from(300)));
+        assert_eq!(found_slots[2], (B256::repeat_byte(0x50), U256::from(500)));
+
+        // Verify seeking to a zero-value slot returns None or skips to next non-zero
+        let mut seek_cursor = storage.storage_hashed_cursor(hashed_address, 100)?;
+        let seek_result = seek_cursor.seek(B256::repeat_byte(0x20))?;
+
+        // Should either return None or skip to the next non-zero value (0x30)
+        if let Some((key, value)) = seek_result {
+            assert_eq!(
+                key,
+                B256::repeat_byte(0x30),
+                "Should skip zero value and find next non-zero"
+            );
+            assert_eq!(value, U256::from(300));
+        }
 
         Ok(())
     }
