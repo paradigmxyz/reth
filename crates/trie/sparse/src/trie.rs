@@ -1287,6 +1287,10 @@ impl SerialSparseTrie {
             node => node.clone(),
         };
 
+        // If `recurse_into_extension` is true, and the remaining child is an extension node, then
+        // its child will be ensured to be revealed as well. This is required for generation of
+        // trie updates; without revealing the grandchild branch it's not always possible to know
+        // if the tree mask bit should be set for the child extension on its parent branch.
         if let SparseNode::Extension { key, .. } = &remaining_child_node &&
             recurse_into_extension
         {
