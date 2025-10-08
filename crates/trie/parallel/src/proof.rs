@@ -1,29 +1,27 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput},
+    proof_task::{
+        AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle, StorageProofInput,
+    },
     root::ParallelStateRootError,
     stats::ParallelTrieTracker,
     StorageRootTargets,
 };
 use alloy_primitives::{
-    map::{B256Map, B256Set, HashMap},
+    map::{B256Map, B256Set},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use dashmap::DashMap;
-use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderError,
-};
+use reth_provider::{BlockReader, DatabaseProviderFactory, FactoryTx, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     proof::StorageProof,
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::TrieCursorFactory,
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
@@ -33,8 +31,10 @@ use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     proof::{DecodedProofNodes, ProofRetainer},
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Receiver, Arc};
+use std::sync::{
+    mpsc::{channel, Receiver},
+    Arc,
+};
 use tracing::trace;
 
 /// Parallel proof calculator.
@@ -43,8 +43,6 @@ use tracing::trace;
 /// that has proof targets.
 #[derive(Debug)]
 pub struct ParallelProof<Factory: DatabaseProviderFactory> {
-    /// Consistent view of the database.
-    view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.
     pub nodes_sorted: Arc<TrieUpdatesSorted>,
@@ -70,7 +68,6 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
 impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Create new state proof generator.
     pub fn new(
-        view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
@@ -78,7 +75,6 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         Self {
-            view,
             nodes_sorted,
             state_sorted,
             prefix_sets,
@@ -167,16 +163,16 @@ where
         proof_result
     }
 
-    /// Generate a state multiproof according to specified targets.
-    pub fn decoded_multiproof(
-        self,
-        targets: MultiProofTargets,
-    ) -> Result<DecodedMultiProof, ParallelStateRootError> {
-        let mut tracker = ParallelTrieTracker::default();
-
-        // Extend prefix sets with targets
-        let mut prefix_sets = (*self.prefix_sets).clone();
-        prefix_sets.extend(TriePrefixSetsMut {
+    /// Extends prefix sets with the given multiproof targets and returns the frozen result.
+    ///
+    /// This is a helper function used to prepare prefix sets before computing multiproofs.
+    /// Returns frozen (immutable) prefix sets ready for use in proof computation.
+    pub fn extend_prefix_sets_with_targets(
+        base_prefix_sets: &TriePrefixSetsMut,
+        targets: &MultiProofTargets,
+    ) -> TriePrefixSets {
+        let mut extended = base_prefix_sets.clone();
+        extended.extend(TriePrefixSetsMut {
             account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
             storage_prefix_sets: targets
                 .iter()
@@ -187,7 +183,18 @@ where
                 .collect(),
             destroyed_accounts: Default::default(),
         });
-        let prefix_sets = prefix_sets.freeze();
+        extended.freeze()
+    }
+
+    /// Generate a state multiproof according to specified targets.
+    pub fn decoded_multiproof(
+        self,
+        targets: MultiProofTargets,
+    ) -> Result<DecodedMultiProof, ParallelStateRootError> {
+        let mut tracker = ParallelTrieTracker::default();
+
+        // Extend prefix sets with targets
+        let prefix_sets = Self::extend_prefix_sets_with_targets(&self.prefix_sets, &targets);
 
         let storage_root_targets = StorageRootTargets::new(
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
@@ -371,13 +378,16 @@ mod tests {
     use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
     use alloy_primitives::{
         keccak256,
-        map::{B256Set, DefaultHashBuilder},
+        map::{B256Set, DefaultHashBuilder, HashMap},
         Address, U256,
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{
+        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
+    };
     use reth_trie::proof::Proof;
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use tokio::runtime::Runtime;
 
     #[test]
@@ -457,7 +467,6 @@ mod tests {
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         let parallel_result = ParallelProof::new(
-            consistent_view,
             Default::default(),
             Default::default(),
             Default::default(),
