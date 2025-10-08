@@ -347,12 +347,7 @@ where
 
         let mut spawned_workers = 0;
         for worker_id in 0..storage_worker_count {
-            let provider_ro = match view.provider_ro() {
-                Ok(provider_ro) => provider_ro,
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            let provider_ro = view.provider_ro()?;
 
             let tx = provider_ro.into_tx();
             let proof_task_tx = ProofTaskTx::new(tx, task_ctx.clone(), worker_id);
