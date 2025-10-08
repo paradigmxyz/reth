@@ -66,7 +66,7 @@ pub trait ChangeSetReader {
 
     /// Get all account changesets in a range of blocks.
     ///
-    /// Returns a vector of (block_number, changeset) pairs.
+    /// Returns a vector of (`block_number`, changeset) pairs.
     fn account_changesets_range(
         &self,
         range: core::ops::Range<BlockNumber>,

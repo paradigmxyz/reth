@@ -98,7 +98,7 @@ where
     Ok(collector)
 }
 
-/// Collects account history indices using a provider that implements ChangeSetReader.
+/// Collects account history indices using a provider that implements `ChangeSetReader`.
 /// This version can read changesets from both static files and database.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
