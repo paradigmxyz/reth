@@ -14,6 +14,8 @@ use crate::{backfill::BackfillJob, in_memory::InMemoryExternalStorage};
 
 mod backfill;
 mod in_memory;
+mod proof;
+mod provider;
 mod storage;
 
 #[cfg(test)]

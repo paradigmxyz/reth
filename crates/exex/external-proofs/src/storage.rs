@@ -52,6 +52,10 @@ pub trait ExternalHashedCursor: Send + Sync {
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> ExternalStorageResult<Option<(B256, Self::Value)>>;
+
+    fn is_storage_empty(&mut self) -> ExternalStorageResult<bool> {
+        Ok(self.seek(B256::ZERO)?.is_none())
+    }
 }
 
 /// Diff of trie updates and post state for a block.

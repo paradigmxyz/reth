@@ -20,11 +20,14 @@ alloy-primitives = { workspace = true }
 # reth
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
+reth-evm.workspace = true
 reth-node-types.workspace = true
 reth-node-api.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-revm.workspace = true
 reth-trie.workspace = true
+reth-execution-errors.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -38,6 +41,7 @@ tracing.workspace = true
 
 # dev dependencies
 [dev-dependencies]
+reth-db = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = [
     "test-util",
     "rt-multi-thread",
@@ -45,7 +49,6 @@ tokio = { workspace = true, features = [
 ] }
 test-case.workspace = true
 futures.workspace = true
-reth-db = { workspace = true, features = ["test-utils"] }
 
 [features]
 test-utils = [
