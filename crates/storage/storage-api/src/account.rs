@@ -63,4 +63,12 @@ pub trait ChangeSetReader {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>>;
+
+    /// Get all account changesets in a range of blocks.
+    ///
+    /// Returns a vector of (block_number, changeset) pairs.
+    fn account_changesets_range(
+        &self,
+        range: core::ops::Range<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
 }
