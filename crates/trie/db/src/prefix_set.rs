@@ -86,7 +86,7 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
     }
 }
 
-/// Load prefix sets using a provider that implements ChangeSetReader.
+/// Load prefix sets using a provider that implements `ChangeSetReader`.
 /// This function can read changesets from both static files and database.
 pub fn load_prefix_sets_with_provider<Provider, KH>(
     provider: &Provider,
