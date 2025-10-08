@@ -16,6 +16,10 @@ fn default_storage_worker_count() -> usize {
     {
         std::thread::available_parallelism().map(|n| (n.get() / 2).clamp(2, 8)).unwrap_or(4)
     }
+    #[cfg(not(feature = "std"))]
+    {
+        4
+    }
 }
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
