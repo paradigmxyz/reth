@@ -18,10 +18,10 @@ use reth_provider::{
     ProviderResult,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     prefix_set::TriePrefixSetsMut,
     proof::{ProofTrieNodeProviderFactory, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
@@ -237,8 +237,8 @@ fn storage_worker_loop<Tx>(
                 let proof_start = Instant::now();
                 let result = proof_tx.compute_storage_proof(
                     input,
-                    &trie_cursor_factory,
-                    &hashed_cursor_factory,
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
                 );
 
                 let proof_elapsed = proof_start.elapsed();
@@ -642,14 +642,8 @@ where
     fn compute_storage_proof(
         &self,
         input: StorageProofInput,
-        trie_cursor_factory: &InMemoryTrieCursorFactory<
-            DatabaseTrieCursorFactory<&Tx>,
-            &TrieUpdatesSorted,
-        >,
-        hashed_cursor_factory: &HashedPostStateCursorFactory<
-            DatabaseHashedCursorFactory<&Tx>,
-            &HashedPostStateSorted,
-        >,
+        trie_cursor_factory: impl TrieCursorFactory,
+        hashed_cursor_factory: impl HashedCursorFactory,
     ) -> StorageProofResult {
         // Consume the input so we can move large collections (e.g. target slots) without cloning.
         let StorageProofInput {
@@ -676,16 +670,13 @@ where
         let proof_start = Instant::now();
 
         // Compute raw storage multiproof
-        let raw_proof_result = StorageProof::new_hashed(
-            trie_cursor_factory.clone(),
-            hashed_cursor_factory.clone(),
-            hashed_address,
-        )
-        .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
-        .with_branch_node_masks(with_branch_node_masks)
-        .with_added_removed_keys(added_removed_keys)
-        .storage_multiproof(target_slots)
-        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        let raw_proof_result =
+            StorageProof::new_hashed(trie_cursor_factory, hashed_cursor_factory, hashed_address)
+                .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
+                .with_branch_node_masks(with_branch_node_masks)
+                .with_added_removed_keys(added_removed_keys)
+                .storage_multiproof(target_slots)
+                .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         // Decode proof into DecodedStorageMultiProof
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
