@@ -350,14 +350,6 @@ where
             let provider_ro = match view.provider_ro() {
                 Ok(provider_ro) => provider_ro,
                 Err(err) => {
-                    tracing::error!(
-                        target: "trie::proof_task",
-                        worker_id,
-                        ?err,
-                        requested = storage_worker_count,
-                        spawned_workers,
-                        "Failed to create transaction for storage worker"
-                    );
                     return Err(err);
                 }
             };
