@@ -320,9 +320,9 @@ where
     /// Creates a new [`ProofTaskManager`] with pre-spawned storage proof workers.
     ///
     /// The `storage_worker_count` determines how many storage workers to spawn, and
-    /// `max_concurrency` determines the limit for on-demand operations (blinded nodes).
+    /// `max_concurrency` determines the limit for on-demand operations (blinded account nodes).
     /// These are now independent - storage workers are spawned as requested, and on-demand
-    /// operations use a separate concurrency pool.
+    /// operations use a separate concurrency pool for blinded account nodes.
     /// Returns an error if the underlying provider fails to create the transactions required for
     /// spawning workers.
     pub fn new(
