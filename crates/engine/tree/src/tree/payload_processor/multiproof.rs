@@ -351,6 +351,8 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Sender to the account proof task.
+    account_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     ///
@@ -376,6 +378,7 @@ where
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+        account_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -385,6 +388,7 @@ where
             inflight: 0,
             metrics,
             storage_proof_task_handle,
+            account_proof_task_handle,
             missed_leaves_storage_roots: Default::default(),
         }
     }
@@ -526,7 +530,7 @@ where
             state_root_message_sender,
             multi_added_removed_keys,
         } = multiproof_input;
-        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
+        let account_proof_task_handle = self.account_proof_task_handle.clone();
         let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
 
         self.executor.spawn_blocking(move || {
@@ -544,17 +548,36 @@ where
             );
 
             let start = Instant::now();
-            let proof_result = ParallelProof::new(
-                config.consistent_view,
-                config.nodes_sorted,
-                config.state_sorted,
-                config.prefix_sets,
+
+            // Extend prefix sets with targets 
+            let frozen_prefix_sets = ParallelProof::<Factory>::extend_prefix_sets_with_targets(
+                &config.prefix_sets,
+                &proof_targets,
+            );
+
+            // Queue account multiproof to worker pool 
+            let input = AccountMultiproofInput {
+                targets: proof_targets,
+                prefix_sets: frozen_prefix_sets,
+                collect_branch_node_masks: true,
+                multi_added_removed_keys,
                 missed_leaves_storage_roots,
-                storage_proof_task_handle.clone(),
-            )
-            .with_branch_node_masks(true)
-            .with_multi_added_removed_keys(multi_added_removed_keys)
-            .decoded_multiproof(proof_targets);
+            };
+
+            let (sender, receiver) = channel();
+            let proof_result: Result<DecodedMultiProof, ParallelStateRootError> = (|| {
+                account_proof_task_handle
+                    .queue_task(ProofTaskKind::AccountMultiproof(input, sender))
+                    .map_err(|_| {
+                        ParallelStateRootError::Other(
+                            "Failed to queue account multiproof to worker pool".into(),
+                        )
+                    })?;
+
+                receiver.recv().map_err(|_| {
+                    ParallelStateRootError::Other("Account multiproof channel closed".into())
+                })?
+            })();
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -698,6 +721,7 @@ where
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
+                proof_task_handle.clone(),
                 proof_task_handle,
                 max_concurrency,
             ),
