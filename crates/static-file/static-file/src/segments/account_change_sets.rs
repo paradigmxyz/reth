@@ -8,7 +8,7 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
 
 /// Static File segment responsible for [`StaticFileSegment::AccountChangeSets`] part of data.
