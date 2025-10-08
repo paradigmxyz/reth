@@ -1479,7 +1479,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
         // Check which blocks in the range are in memory
         if let Some(head_block) = &self.head_block {
-            for block_number in range.clone() {
+            for block_number in range {
                 if let Some(state) = head_block.block_on_chain(block_number.into()) {
                     // Found block in memory, collect its changesets
                     let block_changesets = state

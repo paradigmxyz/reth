@@ -87,12 +87,17 @@ pub struct StaticFileTargets {
     pub receipts: Option<RangeInclusive<BlockNumber>>,
     /// Targeted range of transactions.
     pub transactions: Option<RangeInclusive<BlockNumber>>,
+    /// Targeted range of account changesets.
+    pub account_changesets: Option<RangeInclusive<BlockNumber>>,
 }
 
 impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
     pub const fn any(&self) -> bool {
-        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
+        self.headers.is_some() ||
+            self.receipts.is_some() ||
+            self.transactions.is_some() ||
+            self.account_changesets.is_some()
     }
 
     /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
@@ -102,6 +107,7 @@ impl StaticFileTargets {
             (self.headers.as_ref(), static_files.headers),
             (self.receipts.as_ref(), static_files.receipts),
             (self.transactions.as_ref(), static_files.transactions),
+            (self.account_changesets.as_ref(), static_files.account_change_sets),
         ]
         .iter()
         .all(|(target_block_range, highest_static_file_block)| {

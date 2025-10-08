@@ -973,7 +973,7 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         range: core::ops::Range<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         // Use the static file provider's helper method that handles both sources
-        self.static_file_provider.get_account_changesets_range(range.clone(), |db_range| {
+        self.static_file_provider.get_account_changesets_range(range, |db_range| {
             // Fetch from database for blocks not in static files
             let mut result = Vec::new();
             let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;

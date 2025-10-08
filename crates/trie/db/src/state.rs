@@ -274,7 +274,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
     }
 }
 
-/// Load hashed post state from reverts using a provider that implements ChangeSetReader.
+/// Load hashed post state from reverts using a provider that implements `ChangeSetReader`.
 /// This function can read changesets from both static files and database.
 pub fn hashed_post_state_from_reverts_with_provider<Provider, KH>(
     provider: &Provider,
