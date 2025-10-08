@@ -1417,7 +1417,54 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<reth_db::models::AccountBeforeTx>> {
-        todo!()
+        let provider = match self.get_segment_provider_from_block(
+            StaticFileSegment::AccountChangeSets,
+            block_number,
+            None,
+        ) {
+            Ok(provider) => provider,
+            Err(ProviderError::MissingStaticFileBlock(_, _)) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        if let Some(offset) = provider.user_header().changeset_offset(block_number) {
+            let mut cursor = provider.cursor()?;
+            let range = offset.changeset_range();
+            let mut low = range.start;
+            let mut high = range.end;
+
+            while low < high {
+                let mid = low + (high - low) / 2;
+                if let Some(change) =
+                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(mid.into())?
+                {
+                    if change.address < address {
+                        low = mid + 1;
+                    } else {
+                        high = mid;
+                    }
+                } else {
+                    // This is unexpected in a consistent file. The binary search can't
+                    // proceed reliably. For safety, we abort the search.
+                    low = range.end;
+                    break;
+                }
+            }
+
+            if low < range.end {
+                if let Some(change) =
+                    cursor.get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
+                {
+                    if change.address == address {
+                        return Ok(Some(change));
+                    }
+                }
+            }
+            Ok(None)
+        } else {
+            // TODO(rjected) right thing to return here?
+            Ok(None)
+        }
     }
 }
 
