@@ -19,7 +19,11 @@ use reth_trie::{
     updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState, HashedPostStateSorted,
     HashedStorage, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
+use reth_trie_parallel::{
+    proof::ParallelProof,
+    proof_task::{AccountMultiproofInput, ProofTaskKind, ProofTaskManagerHandle},
+    root::ParallelStateRootError,
+};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -549,13 +553,13 @@ where
 
             let start = Instant::now();
 
-            // Extend prefix sets with targets 
+            // Extend prefix sets with targets
             let frozen_prefix_sets = ParallelProof::<Factory>::extend_prefix_sets_with_targets(
                 &config.prefix_sets,
                 &proof_targets,
             );
 
-            // Queue account multiproof to worker pool 
+            // Queue account multiproof to worker pool
             let input = AccountMultiproofInput {
                 targets: proof_targets,
                 prefix_sets: frozen_prefix_sets,
