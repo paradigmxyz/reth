@@ -40,8 +40,8 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
-    #[strum(serialize = "account_change_sets")]
-    /// Static File segment resopnsible for the `AccountChangeSets` table.
+    #[strum(serialize = "accountchangesets")]
+    /// Static File segment responsible for the `AccountChangeSets` table.
     AccountChangeSets,
 }
 
@@ -276,8 +276,8 @@ impl SegmentHeader {
     }
 
     /// Increments block end range depending on segment
-    pub const fn increment_block(&mut self) -> BlockNumber {
-        if let Some(block_range) = &mut self.block_range {
+    pub fn increment_block(&mut self) -> BlockNumber {
+        let block_num = if let Some(block_range) = &mut self.block_range {
             block_range.end += 1;
             block_range.end
         } else {
@@ -286,7 +286,24 @@ impl SegmentHeader {
                 self.expected_block_start(),
             ));
             self.expected_block_start()
+        };
+
+        // For changeset segments, initialize an offset entry for the new block
+        if self.segment.is_account_changesets() {
+            let offsets = self.changeset_offsets.get_or_insert_with(Default::default);
+            // Calculate the offset for the new block
+            let new_offset = if let Some(last_offset) = offsets.last() {
+                // The new block starts after the last block's changes
+                last_offset.offset + last_offset.num_changes
+            } else {
+                // First block starts at offset 0
+                0
+            };
+            // Add a new offset entry with 0 changes initially
+            offsets.push(ChangesetOffset { offset: new_offset, num_changes: 0 });
         }
+
+        block_num
     }
 
     /// Increments tx end range depending on segment
@@ -315,13 +332,34 @@ impl SegmentHeader {
     }
 
     /// Removes `num` elements from end of tx or block range.
-    pub const fn prune(&mut self, num: u64) {
+    pub fn prune(&mut self, num: u64) {
         if self.segment.is_block_based() {
             if let Some(range) = &mut self.block_range {
                 if num > range.end - range.start {
                     self.block_range = None;
+                    // Clear all changeset offsets if we're clearing all blocks
+                    if self.segment.is_account_changesets() {
+                        self.changeset_offsets = None;
+                    }
                 } else {
+                    let old_end = range.end;
                     range.end = range.end.saturating_sub(num);
+
+                    // Update changeset offsets for account changesets
+                    if self.segment.is_account_changesets() {
+                        if let Some(offsets) = &mut self.changeset_offsets {
+                            // Calculate how many blocks we're removing
+                            let blocks_to_remove = old_end - range.end;
+                            // Remove the last `blocks_to_remove` entries from offsets
+                            let new_len = offsets.len().saturating_sub(blocks_to_remove as usize);
+                            offsets.truncate(new_len);
+
+                            // If we removed all offsets, set to None
+                            if offsets.is_empty() {
+                                self.changeset_offsets = None;
+                            }
+                        }
+                    }
                 }
             };
         } else if let Some(range) = &mut self.tx_range {
@@ -334,12 +372,37 @@ impl SegmentHeader {
     }
 
     /// Sets a new `block_range`.
-    pub const fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
+    pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
             block_range.end = block_end;
         } else {
             self.block_range = Some(SegmentRangeInclusive::new(block_start, block_end))
+        }
+    }
+
+    /// Synchronizes changeset offsets with the current block range for account changeset segments.
+    ///
+    /// This should be called after modifying the block range when dealing with changeset segments
+    /// to ensure the offsets vector matches the block range size.
+    pub fn sync_changeset_offsets(&mut self) {
+        if !self.segment.is_account_changesets() {
+            return;
+        }
+
+        if let Some(block_range) = &self.block_range {
+            if let Some(offsets) = &mut self.changeset_offsets {
+                let expected_len = (block_range.end - block_range.start + 1) as usize;
+                if offsets.len() > expected_len {
+                    offsets.truncate(expected_len);
+                    if offsets.is_empty() {
+                        self.changeset_offsets = None;
+                    }
+                }
+            }
+        } else {
+            // No block range means no offsets
+            self.changeset_offsets = None;
         }
     }
 

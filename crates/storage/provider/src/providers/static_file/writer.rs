@@ -711,7 +711,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             );
         }
 
-        todo!()
+        // Return the current block number if we have written any changes
+        Ok(if count > 0 { self.writer.user_header().block_end() } else { None })
     }
 
     /// Adds an instruction to prune `to_delete` transactions during commit.
@@ -742,6 +743,29 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
         self.queue_prune(to_delete, None)
+    }
+
+    /// Adds an instruction to prune `to_delete` account changesets during commit.
+    pub fn prune_account_changesets(&mut self, to_delete: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::AccountChangeSets);
+        let current_block = self.writer.user_header().block_end().ok_or(
+            ProviderError::MissingStaticFileBlock(StaticFileSegment::AccountChangeSets, 0),
+        )?;
+
+        // Calculate the last block after pruning
+        // For AccountChangeSets, we need to provide a block number even when removing all
+        // because the truncate logic needs it
+        let blocks_in_file = current_block + 1; // blocks are 0-indexed
+        let to_delete = to_delete.min(blocks_in_file);
+
+        if to_delete >= blocks_in_file {
+            // Removing all blocks - pass 0 as a sentinel but the truncate
+            // logic should handle removing everything
+            self.queue_prune(blocks_in_file, Some(0))
+        } else {
+            let last_block = current_block - to_delete;
+            self.queue_prune(to_delete, Some(last_block))
+        }
     }
 
     /// Adds an instruction to prune `to_delete` elements during commit.
@@ -886,7 +910,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
     /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    pub const fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
+    pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
