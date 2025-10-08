@@ -79,23 +79,19 @@ impl StorageWorkerJob {
     /// Returns `Ok(())` if the error was sent successfully, or `Err(())` if the receiver was
     /// dropped.
     fn send_worker_unavailable_error(&self) -> Result<(), ()> {
+        let error_msg = "Storage proof worker pool unavailable";
+
         match self {
             Self::StorageProof { result_sender, .. } => {
-                let error = ParallelStateRootError::Other(
-                    "Storage proof worker pool unavailable".to_string(),
-                );
-                result_sender.send(Err(error)).map_err(|_| ())
+                result_sender.send(Err(ParallelStateRootError::Other(error_msg.to_string())))
             }
             Self::BlindedStorageNode { result_sender, .. } => {
-                let error = SparseTrieError::from(SparseTrieErrorKind::Other(Box::new(
-                    std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "Storage worker pool unavailable",
-                    ),
-                )));
-                result_sender.send(Err(error)).map_err(|_| ())
+                result_sender.send(Err(SparseTrieError::from(SparseTrieErrorKind::Other(
+                    Box::new(std::io::Error::new(std::io::ErrorKind::BrokenPipe, error_msg))
+                ))))
             }
         }
+        .map_err(|_| ())
     }
 }
 
