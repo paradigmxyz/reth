@@ -67,17 +67,6 @@ where
         Self { cursor, post_state_cursor, last_account: None }
     }
 
-    /// Returns `true` if the account has been destroyed.
-    /// This check is used for evicting account keys from the state trie.
-    ///
-    /// This function only checks the post state, not the database, because the latter does not
-    /// store destroyed accounts.
-    fn is_account_cleared(&self, account: &B256) -> bool {
-        // We need to check if the account exists in the post state with None value
-        // Since ForwardInMemoryCursor doesn't have a get method, we'll need to handle this
-        // differently in the seek/next logic
-        false // This will be handled in the seek/next methods
-    }
 
     fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
         // Take the next account from the post state with the key greater than or equal to the
@@ -93,7 +82,10 @@ where
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
         let mut db_entry = self.cursor.seek(key)?;
-        while db_entry.as_ref().is_some_and(|(address, _)| self.is_account_cleared(address)) {
+        while db_entry.as_ref().is_some_and(|(address, _)| {
+            // Check if this account was destroyed in post state
+            self.post_state_cursor.seek(address).is_some_and(|(_, account)| account.is_none())
+        }) {
             db_entry = self.cursor.next()?;
         }
 
@@ -111,7 +103,9 @@ where
         // If post state was given precedence or account was cleared, move the cursor forward.
         let mut db_entry = self.cursor.seek(last_account)?;
         while db_entry.as_ref().is_some_and(|(address, _)| {
-            address <= &last_account || self.is_account_cleared(address)
+            address <= &last_account ||
+            // Check if this account was destroyed in post state
+            self.post_state_cursor.seek(address).is_some_and(|(_, account)| account.is_none())
         }) {
             db_entry = self.cursor.next()?;
         }
@@ -211,14 +205,6 @@ where
         Self { cursor, post_state_cursor, storage_wiped, last_slot: None }
     }
 
-    /// Check if the slot was zeroed out in the post state.
-    /// The database is not checked since it already has no zero-valued slots.
-    fn is_slot_zero_valued(&self, slot: &B256) -> bool {
-        // We need to check if the slot exists in the post state with zero value
-        // Since ForwardInMemoryCursor doesn't have a get method, we'll need to handle this
-        // differently in the seek/next logic
-        false // This will be handled in the seek/next methods
-    }
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
     fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
@@ -234,7 +220,11 @@ where
         // It's not an exact match and storage was not wiped,
         // reposition to the first greater or equal account.
         let mut db_entry = self.cursor.seek(subkey)?;
-        while db_entry.as_ref().is_some_and(|entry| self.is_slot_zero_valued(&entry.0)) {
+        while db_entry.as_ref().is_some_and(|entry| {
+            // Check if this slot was zeroed out in post state
+            self.post_state_cursor.as_mut().and_then(|c| c.seek(&entry.0))
+                .is_some_and(|(_, value)| value.is_zero())
+        }) {
             db_entry = self.cursor.next()?;
         }
 
@@ -261,7 +251,12 @@ where
         let mut db_entry = self.cursor.seek(last_slot)?;
         while db_entry
             .as_ref()
-            .is_some_and(|entry| entry.0 == last_slot || self.is_slot_zero_valued(&entry.0))
+            .is_some_and(|entry| {
+                entry.0 == last_slot ||
+                // Check if this slot was zeroed out in post state
+                self.post_state_cursor.as_mut().and_then(|c| c.seek(&entry.0))
+                    .is_some_and(|(_, value)| value.is_zero())
+            })
         {
             db_entry = self.cursor.next()?;
         }
