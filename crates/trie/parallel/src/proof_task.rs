@@ -371,8 +371,7 @@ where
             max_concurrency,
             total_transactions: 0,
             pending_tasks: VecDeque::new(),
-            proof_task_txs: Vec::with_capacity(max_concurrency), /* used for on-demand account
-                                                                  * trie operations */
+            proof_task_txs: Vec::with_capacity(max_concurrency),
             view,
             task_ctx,
             executor,
