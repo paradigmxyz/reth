@@ -1,9 +1,9 @@
 //! Utils for `stages`.
-use alloy_primitives::{BlockNumber, TxNumber};
+use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::sharded_key::NUM_OF_INDICES_IN_SHARD,
+    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
     table::{Decompress, Table},
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
@@ -15,6 +15,7 @@ use reth_provider::{
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
+use reth_storage_api::ChangeSetReader;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
@@ -90,6 +91,76 @@ where
                 cache.clear();
                 flush_counter = 0;
             }
+        }
+    }
+    collect(&cache)?;
+
+    Ok(collector)
+}
+
+/// Collects account history indices using a provider that implements ChangeSetReader.
+/// This version can read changesets from both static files and database.
+pub(crate) fn collect_account_history_indices<Provider>(
+    provider: &Provider,
+    range: impl RangeBounds<BlockNumber>,
+    etl_config: &EtlConfig,
+) -> Result<Collector<ShardedKey<Address>, BlockNumberList>, StageError>
+where
+    Provider: DBProvider + ChangeSetReader,
+{
+    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
+    let mut cache: HashMap<Address, Vec<u64>> = HashMap::default();
+
+    let mut collect = |cache: &HashMap<Address, Vec<u64>>| {
+        for (address, indices) in cache {
+            let last = indices.last().expect("qed");
+            collector.insert(
+                ShardedKey::new(*address, *last),
+                BlockNumberList::new_pre_sorted(indices.iter().copied()),
+            )?;
+        }
+        Ok::<(), StageError>(())
+    };
+
+    // Convert range bounds to concrete range
+    let start = match range.start_bound() {
+        std::ops::Bound::Included(&n) => n,
+        std::ops::Bound::Excluded(&n) => n + 1,
+        std::ops::Bound::Unbounded => 0,
+    };
+
+    let end = match range.end_bound() {
+        std::ops::Bound::Included(&n) => n + 1,
+        std::ops::Bound::Excluded(&n) => n,
+        std::ops::Bound::Unbounded => BlockNumber::MAX,
+    };
+
+    // Get account changesets using the provider (handles static files + database)
+    let account_changesets = provider.account_changesets_range(start..end)?;
+    let total_changesets = account_changesets.len();
+    let interval = (total_changesets / 1000).max(1);
+
+    let mut flush_counter = 0;
+    let mut current_block_number = u64::MAX;
+
+    for (idx, (block_number, AccountBeforeTx { address, .. })) in
+        account_changesets.into_iter().enumerate()
+    {
+        cache.entry(address).or_default().push(block_number);
+
+        if idx > 0 && idx % interval == 0 && total_changesets > 1000 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
+        }
+
+        if block_number != current_block_number {
+            current_block_number = block_number;
+            flush_counter += 1;
+        }
+
+        if flush_counter > DEFAULT_CACHE_THRESHOLD {
+            collect(&cache)?;
+            cache.clear();
+            flush_counter = 0;
         }
     }
     collect(&cache)?;
