@@ -8,7 +8,11 @@
 //! Individual [`ProofTaskTx`] instances manage a dedicated [`InMemoryTrieCursorFactory`] and
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
-use crate::root::ParallelStateRootError;
+use crate::{
+    root::ParallelStateRootError,
+    stats::{ParallelTrieStats, ParallelTrieTracker},
+    StorageRootTargets,
+};
 use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
@@ -52,7 +56,8 @@ use crate::proof_task_metrics::ProofTaskMetrics;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
-type AccountMultiproofResult = Result<DecodedMultiProof, ParallelStateRootError>;
+type AccountMultiproofResult =
+    Result<(DecodedMultiProof, ParallelTrieStats), ParallelStateRootError>;
 
 /// Worker type identifier
 #[derive(Debug)]
