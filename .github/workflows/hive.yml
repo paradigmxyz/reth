@@ -22,10 +22,9 @@ jobs:
       binary_name: reth
 
   prepare-hive:
-    if: github.repository == 'paradigmxyz/reth'
+    if: github.repository == 'op-rs/op-reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Checkout hive tests
@@ -34,13 +33,38 @@ jobs:
           repository: ethereum/hive
           path: hivetests
 
+      - name: Get hive commit hash
+        id: hive-commit
+        run: echo "hash=$(cd hivetests && git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
       - uses: actions/setup-go@v6
         with:
           go-version: "^1.13.1"
       - run: go version
 
+      - name: Restore hive assets cache
+        id: cache-hive
+        uses: actions/cache@v4
+        with:
+          path: ./hive_assets
+          key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
+
       - name: Build hive assets
+        if: steps.cache-hive.outputs.cache-hit != 'true'
         run: .github/assets/hive/build_simulators.sh
+
+      - name: Load cached Docker images
+        if: steps.cache-hive.outputs.cache-hit == 'true'
+        run: |
+          cd hive_assets
+          for tar_file in *.tar; do
+            if [ -f "$tar_file" ]; then
+              echo "Loading $tar_file..."
+              docker load -i "$tar_file"
+            fi
+          done
+          # Make hive binary executable
+          chmod +x hive
 
       - name: Upload hive assets
         uses: actions/upload-artifact@v4
@@ -150,8 +174,7 @@ jobs:
       - prepare-reth
       - prepare-hive
     name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
@@ -218,8 +241,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
