@@ -1,3 +1,5 @@
+#![expect(dead_code)]
+
 use alloy_primitives::keccak256;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
@@ -16,16 +18,15 @@ use reth_trie::{
     StateRoot, StorageMultiProof, StorageRoot, TrieInput,
 };
 
-use crate::storage::{ExternalHashedCursor, ExternalStorageError};
 use crate::{
     proof::{
         DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
         DatabaseTrieWitness,
     },
-    storage::ExternalStorage,
+    storage::{OpProofsHashedCursor, OpProofsStorage, OpProofsStorageError},
 };
 
-pub(crate) struct ExternalOverlayStateProviderRef<'a, P: ExternalStorage> {
+pub(crate) struct OpProofsStateProviderRef<'a, P: OpProofsStorage> {
     /// Historical state provider for non-state related tasks.
     latest: Box<dyn StateProvider + 'a>,
 
@@ -36,7 +37,7 @@ pub(crate) struct ExternalOverlayStateProviderRef<'a, P: ExternalStorage> {
     block_number: BlockNumber,
 }
 
-impl<'a, P: ExternalStorage> ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage> OpProofsStateProviderRef<'a, P> {
     pub(crate) fn new(
         latest: Box<dyn StateProvider + 'a>,
         storage: P,
@@ -46,13 +47,13 @@ impl<'a, P: ExternalStorage> ExternalOverlayStateProviderRef<'a, P> {
     }
 }
 
-impl From<ExternalStorageError> for ProviderError {
-    fn from(error: ExternalStorageError) -> Self {
+impl From<OpProofsStorageError> for ProviderError {
+    fn from(error: OpProofsStorageError) -> Self {
         Self::other(error)
     }
 }
 
-impl<'a, P: ExternalStorage> BlockHashReader for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage> BlockHashReader for OpProofsStateProviderRef<'a, P> {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         self.latest.block_hash(number)
     }
@@ -66,7 +67,7 @@ impl<'a, P: ExternalStorage> BlockHashReader for ExternalOverlayStateProviderRef
     }
 }
 
-impl<'a, P: ExternalStorage + Clone> StateRootProvider for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage + Clone> StateRootProvider for OpProofsStateProviderRef<'a, P> {
     fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
         StateRoot::overlay_root(self.storage.clone(), self.block_number, state)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -98,9 +99,7 @@ impl<'a, P: ExternalStorage + Clone> StateRootProvider for ExternalOverlayStateP
     }
 }
 
-impl<'a, P: ExternalStorage + Clone> StorageRootProvider
-    for ExternalOverlayStateProviderRef<'a, P>
-{
+impl<'a, P: OpProofsStorage + Clone> StorageRootProvider for OpProofsStateProviderRef<'a, P> {
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         StorageRoot::overlay_root(self.storage.clone(), self.block_number, address, storage)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -139,7 +138,7 @@ impl<'a, P: ExternalStorage + Clone> StorageRootProvider
     }
 }
 
-impl<'a, P: ExternalStorage + Clone> StateProofProvider for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage + Clone> StateProofProvider for OpProofsStateProviderRef<'a, P> {
     fn proof(
         &self,
         input: TrieInput,
@@ -166,13 +165,13 @@ impl<'a, P: ExternalStorage + Clone> StateProofProvider for ExternalOverlayState
     }
 }
 
-impl<'a, P: ExternalStorage> HashedPostStateProvider for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage> HashedPostStateProvider for OpProofsStateProviderRef<'a, P> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }
 
-impl<'a, P: ExternalStorage> AccountReader for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage> AccountReader for OpProofsStateProviderRef<'a, P> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let hashed_key = keccak256(address.0);
         Ok(self
@@ -185,7 +184,7 @@ impl<'a, P: ExternalStorage> AccountReader for ExternalOverlayStateProviderRef<'
     }
 }
 
-impl<'a, P: ExternalStorage + Clone> StateProvider for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage + Clone> StateProvider for OpProofsStateProviderRef<'a, P> {
     fn storage(&self, address: Address, storage_key: B256) -> ProviderResult<Option<StorageValue>> {
         let hashed_key = keccak256(storage_key);
         Ok(self
@@ -198,7 +197,7 @@ impl<'a, P: ExternalStorage + Clone> StateProvider for ExternalOverlayStateProvi
     }
 }
 
-impl<'a, P: ExternalStorage> BytecodeReader for ExternalOverlayStateProviderRef<'a, P> {
+impl<'a, P: OpProofsStorage> BytecodeReader for OpProofsStateProviderRef<'a, P> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         self.latest.bytecode_by_hash(code_hash)
     }
