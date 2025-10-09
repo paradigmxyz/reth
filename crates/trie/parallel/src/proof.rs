@@ -182,11 +182,10 @@ where
         // Extend prefix sets with targets
         let prefix_sets = Self::extend_prefix_sets_with_targets(&self.prefix_sets, &targets);
 
-        let storage_root_targets_len = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
-            prefix_sets.storage_prefix_sets.clone(),
-        )
-        .len();
+        let storage_root_targets_len = StorageRootTargets::count(
+            &prefix_sets.account_prefix_set,
+            &prefix_sets.storage_prefix_sets,
+        );
 
         trace!(
             target: "trie::parallel_proof",
