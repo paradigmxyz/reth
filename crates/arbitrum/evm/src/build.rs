@@ -266,6 +266,12 @@ where
             use crate::retryables::DefaultRetryables;
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let db: &mut revm::database::State<D> = *db_ref;
+            
+            let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                              0x00, 0x00, 0x00, 0x64]);
+            let _ = db.load_account(arbos_addr);
+            
             let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
             
             if let Ok(mut reg) = self.predeploys.lock() {
