@@ -127,8 +127,8 @@ where
         trace!(endpoint = ?self.endpoint, "starting ipc server");
 
         if cfg!(unix) {
-            // ensure the file does not exist
-            if std::fs::remove_file(&self.endpoint).is_ok() {
+            // ensure the file does not exist (avoid blocking the async runtime)
+            if tokio::fs::remove_file(&self.endpoint).await.is_ok() {
                 debug!(endpoint = ?self.endpoint, "removed existing IPC endpoint file");
             }
         }
