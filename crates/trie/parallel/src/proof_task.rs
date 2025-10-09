@@ -17,25 +17,31 @@ use alloy_primitives::{
     map::{B256Map, B256Set},
     B256,
 };
+use alloy_rlp::{BufMut, Encodable};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
-    ProviderResult,
+    ProviderError, ProviderResult,
 };
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{TriePrefixSets, TriePrefixSetsMut},
     proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    DecodedMultiProof, DecodedStorageMultiProof, HashedPostStateSorted, MultiProofTargets, Nibbles,
+    walker::TrieWalker,
+    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted,
+    MultiProofTargets, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
+    proof::{DecodedProofNodes, ProofRetainer},
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
@@ -138,10 +144,10 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     account_worker_count: usize,
 
     /// Receives proof task requests from [`ProofTaskManagerHandle`].
-    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
+    proof_task_rx: Receiver<ProofTaskMessage>,
 
     /// Sender for creating handles that can queue tasks.
-    proof_task_tx: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    proof_task_tx: Sender<ProofTaskMessage>,
 
     /// The number of active handles.
     ///
@@ -152,6 +158,9 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Metrics tracking proof task operations.
     #[cfg(feature = "metrics")]
     metrics: ProofTaskMetrics,
+
+    /// Marker to keep the Factory type parameter.
+    _phantom: std::marker::PhantomData<Factory>,
 }
 
 /// Worker loop for storage trie operations.
@@ -324,7 +333,7 @@ fn storage_worker_loop<Tx>(
 fn account_worker_loop<Tx>(
     proof_tx: ProofTaskTx<Tx>,
     work_rx: CrossbeamReceiver<AccountWorkerJob>,
-    storage_proof_handle: ProofTaskManagerHandle<Tx>,
+    storage_proof_handle: ProofTaskManagerHandle,
     worker_id: usize,
 ) where
     Tx: DbTx,
@@ -615,7 +624,7 @@ where
 /// No inline fallback - fails fast if storage workers are unavailable.
 fn collect_storage_proofs<Tx>(
     _proof_tx: &ProofTaskTx<Tx>,
-    storage_proof_handle: &ProofTaskManagerHandle<Tx>,
+    account_proof_handle: &ProofTaskManagerHandle,
     targets: &MultiProofTargets,
     prefix_sets: &TriePrefixSets,
     with_branch_node_masks: bool,
@@ -645,7 +654,7 @@ where
         let (sender, receiver) = channel();
 
         // If queuing fails, propagate error up (no fallback)
-        storage_proof_handle.queue_task(ProofTaskKind::StorageProof(input, sender)).map_err(
+        account_proof_handle.queue_task(ProofTaskKind::StorageProof(input, sender)).map_err(
             |_| {
                 ParallelStateRootError::Other(format!(
                     "Failed to queue storage proof for {}: storage worker pool unavailable",
@@ -757,11 +766,13 @@ where
 
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
+
+            _phantom: std::marker::PhantomData, // TODO: we can remove this once we remove ProofTaskManager / ConsistentDbView
         })
     }
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
-    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
+    pub fn handle(&self) -> ProofTaskManagerHandle {
         ProofTaskManagerHandle::new(self.proof_task_tx.clone(), self.active_handles.clone())
     }
 
@@ -934,9 +945,6 @@ where
                             self.metrics.record();
 
                             return Ok(())
-                        }
-                        ProofTaskMessage::_Phantom(_) => {
-                            unreachable!("_Phantom variant should never be constructed")
                         }
                     }
                 }
