@@ -3,6 +3,7 @@ use crate::{
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
+        persistence_state::CurrentPersistenceAction,
         TreeConfig,
     },
 };
@@ -403,22 +404,17 @@ impl ValidatorTestHarness {
     }
 
     /// Configure `PersistenceState` for specific `PersistingKind` scenarios
-    fn start_persistence_operation(
-        &mut self,
-        action: crate::tree::persistence_state::CurrentPersistenceAction,
-    ) {
+    fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         use tokio::sync::oneshot;
 
         // Create a dummy receiver for testing - it will never receive a value
         let (_tx, rx) = oneshot::channel();
 
         match action {
-            crate::tree::persistence_state::CurrentPersistenceAction::SavingBlocks { highest } => {
+            CurrentPersistenceAction::SavingBlocks { highest } => {
                 self.harness.tree.persistence_state.start_save(highest, rx);
             }
-            crate::tree::persistence_state::CurrentPersistenceAction::RemovingBlocks {
-                new_tip_num,
-            } => {
+            CurrentPersistenceAction::RemovingBlocks { new_tip_num } => {
                 self.harness.tree.persistence_state.start_remove(new_tip_num, rx);
             }
         }
@@ -690,7 +686,6 @@ async fn test_holesky_payload() {
 
 #[tokio::test]
 async fn test_tree_state_on_new_head_reorg() {
-    use crate::tree::persistence_state::CurrentPersistenceAction;
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
 
@@ -877,7 +872,6 @@ fn test_tree_state_on_new_head_deep_fork() {
 
 #[tokio::test]
 async fn test_get_canonical_blocks_to_persist() {
-    use crate::tree::persistence_state::CurrentPersistenceAction;
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec);
     let mut test_block_builder = TestBlockBuilder::eth();
