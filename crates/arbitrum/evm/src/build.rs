@@ -270,7 +270,7 @@ where
             let arbos_addr = alloy_primitives::Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                                               0x00, 0x00, 0x00, 0x64]);
-            let _ = db.load_account(arbos_addr);
+            let _ = db.basic(arbos_addr);
             
             let mut retryables = DefaultRetryables::new(db as *mut _, alloy_primitives::B256::ZERO);
             
