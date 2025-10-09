@@ -32,7 +32,7 @@ impl StorageRootTargets {
     ) -> usize {
         let mut count = storage_prefix_sets.len();
 
-        for nibbles in account_prefix_set.iter() {
+        for nibbles in account_prefix_set {
             let hashed_address = B256::from_slice(&nibbles.pack());
             if !storage_prefix_sets.contains_key(&hashed_address) {
                 count += 1;
