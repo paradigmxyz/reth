@@ -60,7 +60,7 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
         if should_skip_checks {
             tx.chain_id = Some(421614);
         } else {
-            tx.chain_id = Some(signed.chain_id().unwrap_or_default());
+            tx.chain_id = Some(signed.chain_id().unwrap_or(421614));
         }
         
         tx.nonce = signed.nonce();
