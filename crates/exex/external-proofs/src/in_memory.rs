@@ -443,6 +443,37 @@ impl ExternalStorage for InMemoryExternalStorage {
     ) -> ExternalStorageResult<()> {
         let mut inner = self.inner.write().await;
 
+        // Handle wiped storage: iterate all existing values and mark them as deleted
+        // This is an expensive operation and should never happen for blocks going forward.
+        for (hashed_address, storage) in &block_state_diff.post_state.storages {
+            if storage.wiped {
+                // Collect latest values for each slot up to the current block
+                let mut slot_to_latest: std::collections::BTreeMap<B256, (u64, U256)> =
+                    std::collections::BTreeMap::new();
+
+                for ((block, address, slot), value) in &inner.hashed_storages {
+                    if *block < block_number && *address == *hashed_address {
+                        if let Some((existing_block, _)) = slot_to_latest.get(slot) {
+                            if *block > *existing_block {
+                                slot_to_latest.insert(*slot, (*block, *value));
+                            }
+                        } else {
+                            slot_to_latest.insert(*slot, (*block, *value));
+                        }
+                    }
+                }
+
+                // Store zero values for all non-zero slots to mark them as deleted
+                for (slot, (_, value)) in slot_to_latest {
+                    if !value.is_zero() {
+                        inner
+                            .hashed_storages
+                            .insert((block_number, *hashed_address, slot), U256::ZERO);
+                    }
+                }
+            }
+        }
+
         inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
         inner.post_states.insert(block_number, block_state_diff.post_state);
 

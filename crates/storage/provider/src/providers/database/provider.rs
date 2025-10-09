@@ -939,6 +939,19 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
             })
             .collect()
     }
+
+    fn get_account_before_block(
+        &self,
+        block_number: BlockNumber,
+        address: Address,
+    ) -> ProviderResult<Option<AccountBeforeTx>> {
+        self.tx
+            .cursor_dup_read::<tables::AccountChangeSets>()?
+            .seek_by_key_subkey(block_number, address)?
+            .filter(|acc| acc.address == address)
+            .map(Ok)
+            .transpose()
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider

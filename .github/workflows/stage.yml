@@ -22,8 +22,7 @@ jobs:
     name: stage-run-test
     # Only run stage commands test in merge groups
     if: github.event_name == 'merge_group'
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1

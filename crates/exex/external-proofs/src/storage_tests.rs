@@ -1123,4 +1123,89 @@ mod tests {
 
         Ok(())
     }
+
+    /// Test wiped storage in `HashedPostState`
+    ///
+    /// When `store_trie_updates` receives a `HashedPostState` with wiped=true for a storage entry,
+    /// it should iterate all existing values for that address and create deletion entries for them.
+    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[tokio::test]
+    async fn test_store_trie_updates_with_wiped_storage<S: ExternalStorage>(
+        storage: S,
+    ) -> Result<(), ExternalStorageError> {
+        use reth_trie::HashedStorage;
+
+        let hashed_address = B256::repeat_byte(0x01);
+
+        // First, store some storage values at block 50
+        let storage_slots = vec![
+            (B256::repeat_byte(0x10), U256::from(100)),
+            (B256::repeat_byte(0x20), U256::from(200)),
+            (B256::repeat_byte(0x30), U256::from(300)),
+            (B256::repeat_byte(0x40), U256::from(400)),
+        ];
+
+        storage.store_hashed_storages(hashed_address, storage_slots.clone(), 50).await?;
+
+        // Verify all values are present at block 75
+        let mut cursor75 = storage.storage_hashed_cursor(hashed_address, 75)?;
+        let mut found_slots = Vec::new();
+        while let Some((key, value)) = cursor75.next()? {
+            found_slots.push((key, value));
+        }
+        assert_eq!(found_slots.len(), 4, "All storage slots should be present before wipe");
+        assert_eq!(found_slots[0], (B256::repeat_byte(0x10), U256::from(100)));
+        assert_eq!(found_slots[1], (B256::repeat_byte(0x20), U256::from(200)));
+        assert_eq!(found_slots[2], (B256::repeat_byte(0x30), U256::from(300)));
+        assert_eq!(found_slots[3], (B256::repeat_byte(0x40), U256::from(400)));
+
+        // Now create a HashedPostState with wiped=true for this address at block 100
+        let mut post_state = HashedPostState::default();
+        let wiped_storage = HashedStorage::new(true); // wiped=true, empty storage map
+        post_state.storages.insert(hashed_address, wiped_storage);
+
+        let block_state_diff = BlockStateDiff { trie_updates: TrieUpdates::default(), post_state };
+
+        // Store the wiped state
+        storage.store_trie_updates(100, block_state_diff).await?;
+
+        // After wiping, cursor at block 150 should see NO storage values
+        let mut cursor150 = storage.storage_hashed_cursor(hashed_address, 150)?;
+        let mut found_slots_after_wipe = Vec::new();
+        while let Some((key, value)) = cursor150.next()? {
+            found_slots_after_wipe.push((key, value));
+        }
+
+        assert_eq!(
+            found_slots_after_wipe.len(),
+            0,
+            "All storage slots should be deleted after wipe. Found: {:?}",
+            found_slots_after_wipe
+        );
+
+        // Verify individual seeks also return None
+        for (slot, _) in &storage_slots {
+            let mut seek_cursor = storage.storage_hashed_cursor(hashed_address, 150)?;
+            let result = seek_cursor.seek(*slot)?;
+            assert!(
+                result.is_none() || result.unwrap().0 != *slot,
+                "Storage slot {:?} should be deleted after wipe",
+                slot
+            );
+        }
+
+        // Verify cursor at block 75 (before wipe) still sees all values
+        let mut cursor75_after = storage.storage_hashed_cursor(hashed_address, 75)?;
+        let mut found_slots_before_wipe = Vec::new();
+        while let Some((key, value)) = cursor75_after.next()? {
+            found_slots_before_wipe.push((key, value));
+        }
+        assert_eq!(
+            found_slots_before_wipe.len(),
+            4,
+            "All storage slots should still be present when querying before wipe block"
+        );
+
+        Ok(())
+    }
 }
