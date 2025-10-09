@@ -392,7 +392,7 @@ fn account_worker_loop<Tx>(
 
                 let account_prefix_set = std::mem::take(&mut input.prefix_sets.account_prefix_set);
 
-                let result = crate::proof::build_account_multiproof_with_storage_roots(
+                let result = build_account_multiproof_with_storage_roots(
                     trie_cursor_factory.clone(),
                     hashed_cursor_factory.clone(),
                     &input.targets,
@@ -470,6 +470,142 @@ fn account_worker_loop<Tx>(
         account_nodes_processed,
         "Account worker shutting down"
     );
+}
+
+/// Builds an account multiproof given pre-collected storage proofs.
+///
+/// This is a helper function used by account workers to build the account subtree proof
+/// after storage proofs have been collected.
+///
+/// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
+#[allow(clippy::too_many_arguments)]
+fn build_account_multiproof_with_storage_roots<C, H>(
+    trie_cursor_factory: C,
+    hashed_cursor_factory: H,
+    targets: &MultiProofTargets,
+    prefix_set: PrefixSet,
+    collect_branch_node_masks: bool,
+    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
+    mut storage_proofs: B256Map<DecodedStorageMultiProof>,
+    missed_leaves_storage_roots: &DashMap<B256, B256>,
+    tracker: &mut ParallelTrieTracker,
+) -> Result<DecodedMultiProof, ParallelStateRootError>
+where
+    C: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
+{
+    let accounts_added_removed_keys =
+        multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
+
+    // Create the walker.
+    let walker = TrieWalker::<_>::state_trie(
+        trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+        prefix_set,
+    )
+    .with_added_removed_keys(accounts_added_removed_keys)
+    .with_deletions_retained(true);
+
+    // Create a hash builder to rebuild the root node since it is not available in the database.
+    let retainer = targets
+        .keys()
+        .map(Nibbles::unpack)
+        .collect::<ProofRetainer>()
+        .with_added_removed_keys(accounts_added_removed_keys);
+    let mut hash_builder = HashBuilder::default()
+        .with_proof_retainer(retainer)
+        .with_updates(collect_branch_node_masks);
+
+    // Initialize all storage multiproofs as empty.
+    // Storage multiproofs for non empty tries will be overwritten if necessary.
+    let mut collected_decoded_storages: B256Map<DecodedStorageMultiProof> =
+        targets.keys().map(|key| (*key, DecodedStorageMultiProof::empty())).collect();
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    let mut account_node_iter = TrieNodeIter::state_trie(
+        walker,
+        hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+    );
+
+    while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        match account_node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let root = match storage_proofs.remove(&hashed_address) {
+                    Some(proof) => {
+                        let root = proof.root;
+                        if let Some(entry) = collected_decoded_storages.get_mut(&hashed_address) {
+                            *entry = proof;
+                        }
+                        root
+                    }
+                    // Since we do not store all intermediate nodes in the database, there might
+                    // be a possibility of re-adding a non-modified leaf to the hash builder.
+                    None => {
+                        tracker.inc_missed_leaves();
+
+                        match missed_leaves_storage_roots.entry(hashed_address) {
+                            dashmap::Entry::Occupied(occ) => *occ.get(),
+                            dashmap::Entry::Vacant(vac) => {
+                                let root = StorageProof::new_hashed(
+                                    trie_cursor_factory.clone(),
+                                    hashed_cursor_factory.clone(),
+                                    hashed_address,
+                                )
+                                .with_prefix_set_mut(Default::default())
+                                .storage_multiproof(
+                                    targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                )
+                                .map_err(|e| {
+                                    ParallelStateRootError::StorageRoot(
+                                        reth_execution_errors::StorageRootError::Database(
+                                            DatabaseError::Other(e.to_string()),
+                                        ),
+                                    )
+                                })?
+                                .root;
+
+                                vac.insert(root);
+                                root
+                            }
+                        }
+                    }
+                };
+
+                // Encode account
+                account_rlp.clear();
+                let account = account.into_trie_account(root);
+                account.encode(&mut account_rlp as &mut dyn BufMut);
+
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+            }
+        }
+    }
+
+    // Insert storage proofs for accounts not encountered during trie walk.
+    collected_decoded_storages.extend(storage_proofs);
+
+    let _ = hash_builder.root();
+
+    let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
+    let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
+
+    let (branch_node_hash_masks, branch_node_tree_masks) = if collect_branch_node_masks {
+        let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+        (
+            updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
+            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
+        )
+    } else {
+        (Default::default(), Default::default())
+    };
+
+    Ok(DecodedMultiProof {
+        account_subtree: decoded_account_subtree,
+        branch_node_hash_masks,
+        branch_node_tree_masks,
+        storages: collected_decoded_storages,
+    })
 }
 
 /// Collects storage proofs for all accounts in the targets by queueing to storage workers.
