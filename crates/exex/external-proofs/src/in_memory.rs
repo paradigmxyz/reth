@@ -456,8 +456,61 @@ impl ExternalStorage for InMemoryExternalStorage {
             }
         }
 
-        inner.trie_updates.insert(block_number, block_state_diff.trie_updates);
-        inner.post_states.insert(block_number, block_state_diff.post_state);
+        // Store account branch nodes
+        for (path, branch) in block_state_diff.trie_updates.account_nodes_ref() {
+            inner.account_branches.insert((block_number, *path), Some(branch.clone()));
+        }
+
+        // Store removed account nodes
+        let account_removals = block_state_diff
+            .trie_updates
+            .removed_nodes_ref()
+            .iter()
+            .filter_map(|n| {
+                (!block_state_diff.trie_updates.account_nodes_ref().contains_key(n))
+                    .then_some((n, None))
+            })
+            .collect::<Vec<_>>();
+
+        for (path, branch) in account_removals {
+            inner.account_branches.insert((block_number, *path), branch);
+        }
+
+        // Store storage branch nodes and removals
+        for (address, storage_trie_updates) in block_state_diff.trie_updates.storage_tries_ref() {
+            // Store storage branch nodes
+            for (path, branch) in storage_trie_updates.storage_nodes_ref() {
+                inner
+                    .storage_branches
+                    .insert((block_number, *address, *path), Some(branch.clone()));
+            }
+
+            // Store removed storage nodes
+            let storage_removals = storage_trie_updates
+                .removed_nodes_ref()
+                .iter()
+                .filter_map(|n| {
+                    (!storage_trie_updates.storage_nodes_ref().contains_key(n)).then_some((n, None))
+                })
+                .collect::<Vec<_>>();
+
+            for (path, branch) in storage_removals {
+                inner.storage_branches.insert((block_number, *address, *path), branch);
+            }
+        }
+
+        for (address, account) in &block_state_diff.post_state.accounts {
+            inner.hashed_accounts.insert((block_number, *address), *account);
+        }
+
+        for (hashed_address, storage) in &block_state_diff.post_state.storages {
+            for (slot, value) in &storage.storage {
+                inner.hashed_storages.insert((block_number, *hashed_address, *slot), *value);
+            }
+        }
+
+        inner.trie_updates.insert(block_number, block_state_diff.trie_updates.clone());
+        inner.post_states.insert(block_number, block_state_diff.post_state.clone());
 
         Ok(())
     }

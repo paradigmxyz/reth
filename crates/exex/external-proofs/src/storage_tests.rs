@@ -1208,4 +1208,172 @@ mod tests {
 
         Ok(())
     }
+
+    /// Test that `store_trie_updates` properly stores branch nodes, leaf nodes, and removals
+    ///
+    /// This test verifies that all data stored via `store_trie_updates` can be read back
+    /// through the cursor APIs.
+    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[tokio::test]
+    async fn test_store_trie_updates_comprehensive<S: ExternalStorage>(
+        storage: S,
+    ) -> Result<(), ExternalStorageError> {
+        use reth_trie::{updates::StorageTrieUpdates, HashedStorage};
+
+        let block_number = 100;
+
+        // Create comprehensive trie updates with branches, leaves, and removals
+        let mut trie_updates = TrieUpdates::default();
+
+        // Add account branch nodes
+        let account_path1 = nibbles_from(vec![1, 2, 3]);
+        let account_path2 = nibbles_from(vec![4, 5, 6]);
+        let account_branch1 = create_test_branch();
+        let account_branch2 = create_test_branch_variant();
+
+        trie_updates.account_nodes.insert(account_path1, account_branch1.clone());
+        trie_updates.account_nodes.insert(account_path2, account_branch2.clone());
+
+        // Add removed account nodes
+        let removed_account_path = nibbles_from(vec![7, 8, 9]);
+        trie_updates.removed_nodes.insert(removed_account_path);
+
+        // Add storage branch nodes for an address
+        let hashed_address = B256::repeat_byte(0x42);
+        let storage_path1 = nibbles_from(vec![1, 1]);
+        let storage_path2 = nibbles_from(vec![2, 2]);
+        let storage_branch = create_test_branch();
+
+        let mut storage_trie = StorageTrieUpdates::default();
+        storage_trie.storage_nodes.insert(storage_path1, storage_branch.clone());
+        storage_trie.storage_nodes.insert(storage_path2, storage_branch.clone());
+
+        // Add removed storage node
+        let removed_storage_path = nibbles_from(vec![3, 3]);
+        storage_trie.removed_nodes.insert(removed_storage_path);
+
+        trie_updates.insert_storage_updates(hashed_address, storage_trie);
+
+        // Create post state with accounts and storage
+        let mut post_state = HashedPostState::default();
+
+        // Add accounts
+        let account1_addr = B256::repeat_byte(0x10);
+        let account2_addr = B256::repeat_byte(0x20);
+        let account1 = create_test_account_with_values(1, 1000, 0xAA);
+        let account2 = create_test_account_with_values(2, 2000, 0xBB);
+
+        post_state.accounts.insert(account1_addr, Some(account1));
+        post_state.accounts.insert(account2_addr, Some(account2));
+
+        // Add deleted account
+        let deleted_account_addr = B256::repeat_byte(0x30);
+        post_state.accounts.insert(deleted_account_addr, None);
+
+        // Add storage for an address
+        let storage_addr = B256::repeat_byte(0x50);
+        let mut hashed_storage = HashedStorage::new(false);
+        hashed_storage.storage.insert(B256::repeat_byte(0x01), U256::from(111));
+        hashed_storage.storage.insert(B256::repeat_byte(0x02), U256::from(222));
+        hashed_storage.storage.insert(B256::repeat_byte(0x03), U256::ZERO); // Deleted storage
+        post_state.storages.insert(storage_addr, hashed_storage);
+
+        let block_state_diff = BlockStateDiff { trie_updates, post_state };
+
+        // Store the updates
+        storage.store_trie_updates(block_number, block_state_diff).await?;
+
+        // ========== Verify Account Branch Nodes ==========
+        let mut account_trie_cursor = storage.trie_cursor(None, block_number + 10)?;
+
+        // Should find the added branches
+        let result1 = account_trie_cursor.seek_exact(account_path1)?;
+        assert!(result1.is_some(), "Account branch node 1 should be found");
+        assert_eq!(result1.unwrap().0, account_path1);
+
+        let result2 = account_trie_cursor.seek_exact(account_path2)?;
+        assert!(result2.is_some(), "Account branch node 2 should be found");
+        assert_eq!(result2.unwrap().0, account_path2);
+
+        // Removed node should not be found
+        let removed_result = account_trie_cursor.seek_exact(removed_account_path)?;
+        assert!(removed_result.is_none(), "Removed account node should not be found");
+
+        // ========== Verify Storage Branch Nodes ==========
+        let mut storage_trie_cursor =
+            storage.trie_cursor(Some(hashed_address), block_number + 10)?;
+
+        let storage_result1 = storage_trie_cursor.seek_exact(storage_path1)?;
+        assert!(storage_result1.is_some(), "Storage branch node 1 should be found");
+
+        let storage_result2 = storage_trie_cursor.seek_exact(storage_path2)?;
+        assert!(storage_result2.is_some(), "Storage branch node 2 should be found");
+
+        // Removed storage node should not be found
+        let removed_storage_result = storage_trie_cursor.seek_exact(removed_storage_path)?;
+        assert!(removed_storage_result.is_none(), "Removed storage node should not be found");
+
+        // ========== Verify Account Leaves ==========
+        let mut account_cursor = storage.account_hashed_cursor(block_number + 10)?;
+
+        let acc1_result = account_cursor.seek(account1_addr)?;
+        assert!(acc1_result.is_some(), "Account 1 should be found");
+        assert_eq!(acc1_result.unwrap().0, account1_addr);
+        assert_eq!(acc1_result.unwrap().1.nonce, 1);
+        assert_eq!(acc1_result.unwrap().1.balance, U256::from(1000));
+
+        let acc2_result = account_cursor.seek(account2_addr)?;
+        assert!(acc2_result.is_some(), "Account 2 should be found");
+        assert_eq!(acc2_result.unwrap().1.nonce, 2);
+
+        // Deleted account should not be found
+        let deleted_acc_result = account_cursor.seek(deleted_account_addr)?;
+        assert!(
+            deleted_acc_result.is_none() || deleted_acc_result.unwrap().0 != deleted_account_addr,
+            "Deleted account should not be found"
+        );
+
+        // ========== Verify Storage Leaves ==========
+        let mut storage_cursor = storage.storage_hashed_cursor(storage_addr, block_number + 10)?;
+
+        let slot1_result = storage_cursor.seek(B256::repeat_byte(0x01))?;
+        assert!(slot1_result.is_some(), "Storage slot 1 should be found");
+        assert_eq!(slot1_result.unwrap().1, U256::from(111));
+
+        let slot2_result = storage_cursor.seek(B256::repeat_byte(0x02))?;
+        assert!(slot2_result.is_some(), "Storage slot 2 should be found");
+        assert_eq!(slot2_result.unwrap().1, U256::from(222));
+
+        // Zero-valued storage should not be found (deleted)
+        let slot3_result = storage_cursor.seek(B256::repeat_byte(0x03))?;
+        assert!(
+            slot3_result.is_none() || slot3_result.unwrap().0 != B256::repeat_byte(0x03),
+            "Zero-valued storage slot should not be found"
+        );
+
+        // ========== Verify fetch_trie_updates can retrieve the data ==========
+        let fetched_diff = storage.fetch_trie_updates(block_number).await?;
+
+        // Check that trie updates are stored
+        assert_eq!(
+            fetched_diff.trie_updates.account_nodes_ref().len(),
+            2,
+            "Should have 2 account nodes"
+        );
+        assert_eq!(
+            fetched_diff.trie_updates.storage_tries_ref().len(),
+            1,
+            "Should have 1 storage trie"
+        );
+
+        // Check that post state is stored
+        assert_eq!(
+            fetched_diff.post_state.accounts.len(),
+            3,
+            "Should have 3 accounts (including deleted)"
+        );
+        assert_eq!(fetched_diff.post_state.storages.len(), 1, "Should have 1 storage entry");
+
+        Ok(())
+    }
 }
