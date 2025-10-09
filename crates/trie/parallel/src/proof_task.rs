@@ -128,7 +128,7 @@ enum StorageWorkerJob {
 /// - Use standard `std::mpsc` message passing
 /// - Receive consistent return types and error handling
 #[derive(Debug)]
-pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
+pub struct ProofTaskManager {
     /// Sender for storage worker jobs to worker pool.
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
 
@@ -158,9 +158,6 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Metrics tracking proof task operations.
     #[cfg(feature = "metrics")]
     metrics: ProofTaskMetrics,
-
-    /// Marker to keep the Factory type parameter.
-    _phantom: std::marker::PhantomData<Factory>,
 }
 
 /// Worker loop for storage trie operations.
@@ -690,23 +687,23 @@ where
     Ok(storage_proofs)
 }
 
-impl<Factory> ProofTaskManager<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>,
-{
+impl ProofTaskManager {
     /// Creates a new [`ProofTaskManager`] with pre-spawned storage and account proof workers.
     ///
     /// The `storage_worker_count` determines how many storage workers to spawn, and
     /// `account_worker_count` determines how many account workers to spawn.
     /// Returns an error if the underlying provider fails to create the transactions required for
     /// spawning workers.
-    pub fn new(
+    pub fn new<Factory>(
         executor: Handle,
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
         storage_worker_count: usize,
         account_worker_count: usize,
-    ) -> ProviderResult<Self> {
+    ) -> ProviderResult<Self>
+    where
+        Factory: DatabaseProviderFactory<Provider: BlockReader>,
+    {
         let (proof_task_tx, proof_task_rx) = channel();
 
         // Use unbounded channel to ensure all storage operations are queued to workers.
@@ -766,8 +763,6 @@ where
 
             #[cfg(feature = "metrics")]
             metrics: ProofTaskMetrics::default(),
-
-            _phantom: std::marker::PhantomData, // TODO: we can remove this once we remove ProofTaskManager / ConsistentDbView
         })
     }
 
@@ -790,7 +785,7 @@ where
     ///
     /// Returns
     /// The number of workers successfully spawned
-    fn spawn_worker_pool<Job, F>(
+    fn spawn_worker_pool<Factory, Job, F>(
         executor: &Handle,
         view: &ConsistentDbView<Factory>,
         task_ctx: &ProofTaskCtx,
@@ -800,6 +795,7 @@ where
         worker_fn: F,
     ) -> ProviderResult<usize>
     where
+        Factory: DatabaseProviderFactory<Provider: BlockReader>,
         Job: Send + 'static,
         F: Fn(ProofTaskTx<FactoryTx<Factory>>, CrossbeamReceiver<Job>, usize)
             + Send
@@ -831,12 +827,7 @@ where
 
         Ok(spawned_workers)
     }
-}
 
-impl<Factory> ProofTaskManager<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + 'static,
-{
     /// Loops, managing the proof tasks, routing them to the appropriate worker pools.
     ///
     /// # Task Routing
