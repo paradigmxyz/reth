@@ -2,6 +2,13 @@ use alloy_primitives::{Address, B256, U256};
 use revm::Database;
 use std::collections::HashMap;
 
+fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>) {
+    let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                   0x00, 0x00, 0x00, 0x64]);
+    let _ = state.basic(arbos_addr);
+}
+
 
 pub struct Storage<D> {
     pub state: *mut revm::database::State<D>,
@@ -39,33 +46,19 @@ impl<D: Database> Storage<D> {
         let slot = self.compute_slot(offset);
         unsafe {
             let state = &mut *self.state;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
             let value_u256 = U256::from_be_bytes(value.0);
             
             use revm_state::EvmStorageSlot;
-            use revm_database::{BundleAccount, AccountStatus};
-            use std::collections::HashMap;
             
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     slot,
                     EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
                 );
-            } else {
-                let mut storage = HashMap::default();
-                storage.insert(
-                    slot,
-                    EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
-                );
-                let acc = BundleAccount {
-                    info: None,
-                    storage,
-                    original_info: Default::default(),
-                    status: AccountStatus::Changed,
-                };
-                state.bundle_state.state.insert(arbos_addr, acc);
             }
             Ok(())
         }
@@ -96,6 +89,7 @@ impl<D: Database> Storage<D> {
     pub fn set(&self, key: B256, value: B256) -> Result<(), ()> {
         unsafe {
             let state = &mut *self.state;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -103,27 +97,12 @@ impl<D: Database> Storage<D> {
             let value_u256 = U256::from_be_bytes(value.0);
             
             use revm_state::EvmStorageSlot;
-            use revm_database::{BundleAccount, AccountStatus};
-            use std::collections::HashMap;
             
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     slot,
                     EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
                 );
-            } else {
-                let mut storage = HashMap::default();
-                storage.insert(
-                    slot,
-                    EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
-                );
-                let acc = BundleAccount {
-                    info: None,
-                    storage,
-                    original_info: Default::default(),
-                    status: AccountStatus::Changed,
-                };
-                state.bundle_state.state.insert(arbos_addr, acc);
             }
             Ok(())
         }
@@ -179,33 +158,19 @@ impl<D: Database> StorageBackedUint64<D> {
     pub fn set(&self, value: u64) -> Result<(), ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
             let value_u256 = U256::from(value);
             
             use revm_state::EvmStorageSlot;
-            use revm_database::{BundleAccount, AccountStatus};
-            use std::collections::HashMap;
             
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     self.slot,
                     EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
                 );
-            } else {
-                let mut storage = HashMap::default();
-                storage.insert(
-                    self.slot,
-                    EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
-                );
-                let acc = BundleAccount {
-                    info: None,
-                    storage,
-                    original_info: Default::default(),
-                    status: AccountStatus::Changed,
-                };
-                state.bundle_state.state.insert(arbos_addr, acc);
             }
             Ok(())
         }
@@ -242,32 +207,18 @@ impl<D: Database> StorageBackedBigUint<D> {
     pub fn set(&self, value: U256) -> Result<(), ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
             
             use revm_state::EvmStorageSlot;
-            use revm_database::{BundleAccount, AccountStatus};
-            use std::collections::HashMap;
             
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     self.slot,
                     EvmStorageSlot { present_value: value, ..Default::default() }.into(),
                 );
-            } else {
-                let mut storage = HashMap::default();
-                storage.insert(
-                    self.slot,
-                    EvmStorageSlot { present_value: value, ..Default::default() }.into(),
-                );
-                let acc = BundleAccount {
-                    info: None,
-                    storage,
-                    original_info: Default::default(),
-                    status: AccountStatus::Changed,
-                };
-                state.bundle_state.state.insert(arbos_addr, acc);
             }
             Ok(())
         }
@@ -308,6 +259,7 @@ impl<D: Database> StorageBackedAddress<D> {
     pub fn set(&self, value: Address) -> Result<(), ()> {
         unsafe {
             let state = &mut *self.storage;
+            ensure_arbos_account_loaded(state);
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);
@@ -316,27 +268,12 @@ impl<D: Database> StorageBackedAddress<D> {
             let value_u256 = U256::from_be_bytes(value_bytes);
             
             use revm_state::EvmStorageSlot;
-            use revm_database::{BundleAccount, AccountStatus};
-            use std::collections::HashMap;
             
             if let Some(acc) = state.bundle_state.state.get_mut(&arbos_addr) {
                 acc.storage.insert(
                     self.slot,
                     EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
                 );
-            } else {
-                let mut storage = HashMap::default();
-                storage.insert(
-                    self.slot,
-                    EvmStorageSlot { present_value: value_u256, ..Default::default() }.into(),
-                );
-                let acc = BundleAccount {
-                    info: None,
-                    storage,
-                    original_info: Default::default(),
-                    status: AccountStatus::Changed,
-                };
-                state.bundle_state.state.insert(arbos_addr, acc);
             }
             Ok(())
         }
