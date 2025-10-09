@@ -3,24 +3,6 @@
 //! This module provides a complete in-memory implementation of the [`ExternalStorage`] trait
 //! that can be used for testing and development. The implementation uses tokio async `RwLock`
 //! for thread-safe concurrent access and stores all data in memory using `BTreeMap` collections.
-//!
-//! # Examples
-//!
-//! ```rust,no_run
-//! use external_proofs::inmemory::InMemory;
-//! use external_proofs::storage::;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let storage = InMemory::new();
-//!
-//! // Set earliest block
-//! storage.set_earliest_(1, Default::default()).await?;
-//!
-//! // Store some trie updates
-//! storage.store_trie_updates(5, Default::default(), Default::default()).await?;
-//! # Ok(())
-//! # }
-//! ```
 
 #![allow(dead_code, unreachable_pub)]
 
