@@ -1,4 +1,4 @@
-//! Optimism supervisor and sequencer metrics
+//! Optimism supervisor metrics
 
 use crate::supervisor::InteropTxValidatorError;
 use op_alloy_rpc_types::SuperchainDAError;
