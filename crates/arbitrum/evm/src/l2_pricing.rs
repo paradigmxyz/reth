@@ -28,8 +28,9 @@ const DEFAULT_SPEED_LIMIT_PER_SECOND: u64 = 7_000_000;
 const DEFAULT_MIN_BASE_FEE_WEI: u128 = 100_000_000; // 0.1 Gwei
 
 impl<D: Database> L2PricingState<D> {
-    pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
-        let storage = Storage::new(state, base_key);
+    pub fn open(storage: Storage<D>) -> Self {
+        let state = storage.state;
+        let base_key = storage.base_key;
         
         Self {
             gas_pool: StorageBackedBigUint::new(state, base_key, GAS_POOL_OFFSET),
@@ -42,7 +43,31 @@ impl<D: Database> L2PricingState<D> {
         }
     }
 
-    pub fn initialize(&self, initial_base_fee: U256) -> Result<(), ()> {
+    pub fn initialize(storage: &Storage<D>, initial_base_fee: U256) {
+        let state = storage.state;
+        let base_key = storage.base_key;
+        
+        let gas_pool = StorageBackedBigUint::new(state, base_key, GAS_POOL_OFFSET);
+        let initial_pool = U256::from(DEFAULT_PER_BLOCK_GAS_LIMIT) * U256::from(2);
+        gas_pool.set(initial_pool).ok();
+        
+        let pricing_inertia = StorageBackedUint64::new(state, base_key, PRICING_INERTIA_OFFSET);
+        pricing_inertia.set(DEFAULT_PRICING_INERTIA).ok();
+        
+        let base_fee_l2 = StorageBackedBigUint::new(state, base_key, BASE_FEE_L2_OFFSET);
+        base_fee_l2.set(initial_base_fee).ok();
+        
+        let per_block_gas_limit = StorageBackedUint64::new(state, base_key, PER_BLOCK_GAS_LIMIT_OFFSET);
+        per_block_gas_limit.set(DEFAULT_PER_BLOCK_GAS_LIMIT).ok();
+        
+        let speed_limit_per_second = StorageBackedUint64::new(state, base_key, SPEED_LIMIT_PER_SECOND_OFFSET);
+        speed_limit_per_second.set(DEFAULT_SPEED_LIMIT_PER_SECOND).ok();
+        
+        let min_base_fee_wei = StorageBackedBigUint::new(state, base_key, MIN_BASE_FEE_WEI_OFFSET);
+        min_base_fee_wei.set(U256::from(DEFAULT_MIN_BASE_FEE_WEI)).ok();
+    }
+
+    pub fn set_initial_values(&self, initial_base_fee: U256) -> Result<(), ()> {
         let initial_pool = U256::from(DEFAULT_PER_BLOCK_GAS_LIMIT) * U256::from(2);
         self.gas_pool.set(initial_pool)?;
         

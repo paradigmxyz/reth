@@ -81,7 +81,7 @@ impl<D: Database> Storage<D> {
 
     pub fn get(&self, key: B256) -> Result<B256, ()> {
         unsafe {
-            let state = &*self.state;
+            let state = &mut *self.state;
             let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                            0x00, 0x00, 0x00, 0x64]);

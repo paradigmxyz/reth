@@ -55,8 +55,9 @@ pub const L1_PRICER_FUNDS_POOL_ADDRESS: Address = Address::new([
 ]);
 
 impl<D: Database> L1PricingState<D> {
-    pub fn new(state: *mut revm::database::State<D>, base_key: B256, arbos_version: u64) -> Self {
-        let storage = Storage::new(state, base_key);
+    pub fn open(storage: Storage<D>, arbos_version: u64) -> Self {
+        let state = storage.state;
+        let base_key = storage.base_key;
         
         Self {
             pay_rewards_to: StorageBackedAddress::new(state, base_key, PAY_REWARDS_TO_OFFSET),
@@ -78,6 +79,55 @@ impl<D: Database> L1PricingState<D> {
     }
 
     pub fn initialize(
+        storage: &Storage<D>,
+        initial_rewards_recipient: Address,
+        initial_l1_base_fee: U256,
+    ) {
+        let state = storage.state;
+        let base_key = storage.base_key;
+        
+        let pay_rewards_to = StorageBackedAddress::new(state, base_key, PAY_REWARDS_TO_OFFSET);
+        pay_rewards_to.set(initial_rewards_recipient).ok();
+        
+        let equilibration_units = StorageBackedBigUint::new(state, base_key, EQUILIBRATION_UNITS_OFFSET);
+        let initial_equilibration_units = U256::from(60u64 * 16u64 * 100_000u64);
+        equilibration_units.set(initial_equilibration_units).ok();
+        
+        let inertia = StorageBackedUint64::new(state, base_key, INERTIA_OFFSET);
+        inertia.set(INITIAL_INERTIA).ok();
+        
+        let per_unit_reward = StorageBackedUint64::new(state, base_key, PER_UNIT_REWARD_OFFSET);
+        per_unit_reward.set(INITIAL_PER_UNIT_REWARD).ok();
+        
+        let funds_due_for_rewards = StorageBackedBigUint::new(state, base_key, FUNDS_DUE_FOR_REWARDS_OFFSET);
+        funds_due_for_rewards.set(U256::ZERO).ok();
+        
+        let price_per_unit = StorageBackedBigUint::new(state, base_key, PRICE_PER_UNIT_OFFSET);
+        price_per_unit.set(initial_l1_base_fee).ok();
+        
+        let last_update_time = StorageBackedUint64::new(state, base_key, LAST_UPDATE_TIME_OFFSET);
+        last_update_time.set(0).ok();
+        
+        let units_since_update = StorageBackedUint64::new(state, base_key, UNITS_SINCE_OFFSET);
+        units_since_update.set(0).ok();
+        
+        let last_surplus = StorageBackedBigUint::new(state, base_key, LAST_SURPLUS_OFFSET);
+        last_surplus.set(U256::ZERO).ok();
+        
+        let per_batch_gas_cost = StorageBackedUint64::new(state, base_key, PER_BATCH_GAS_COST_OFFSET);
+        per_batch_gas_cost.set(INITIAL_PER_BATCH_GAS_COST_V6).ok();
+        
+        let amortized_cost_cap_bips = StorageBackedUint64::new(state, base_key, AMORTIZED_COST_CAP_BIPS_OFFSET);
+        amortized_cost_cap_bips.set(0).ok();
+        
+        let l1_fees_available = StorageBackedBigUint::new(state, base_key, L1_FEES_AVAILABLE_OFFSET);
+        l1_fees_available.set(U256::ZERO).ok();
+        
+        let gas_floor_per_token = StorageBackedUint64::new(state, base_key, GAS_FLOOR_PER_TOKEN_OFFSET);
+        gas_floor_per_token.set(0).ok();
+    }
+
+    pub fn set_initial_values(
         &self,
         initial_rewards_recipient: Address,
         initial_l1_base_fee: U256,
