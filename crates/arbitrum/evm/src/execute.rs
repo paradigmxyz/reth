@@ -1,8 +1,9 @@
 use alloy_primitives::{Address, U256, B256};
 use arb_alloy_util::l1_pricing::L1PricingState;
 use crate::retryables::{Retryables, DefaultRetryables, RetryableCreateParams, RetryableAction, RetryableTicketId};
-use reth_arbitrum_primitives::{ArbTxType, ArbTransactionSigned};
+use reth_arbitrum_primitives::{ArbTxType, ArbTransactionSigned, ArbTypedTransaction};
 use alloy_consensus::Transaction as AlloyCoinbaseTransaction;
+use revm::Database;
 
 pub struct ArbStartTxContext {
     pub sender: Address,
@@ -54,41 +55,43 @@ impl DefaultArbOsHooks {
         q.try_into().unwrap_or(u64::MAX)
     }
 
-    fn mint_balance<DB>(db: &mut DB, address: Address, amount: U256) 
+    pub fn mint_balance<D>(state: &mut revm::database::State<D>, address: Address, amount: U256) 
     where
-        DB: revm::Database,
+        D: revm::Database,
     {
         if amount.is_zero() {
             return;
         }
         let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
-        let _ = db.increment_balances(core::iter::once((address, amount_u128)));
+        let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
 
-    fn transfer_balance<DB>(
-        db: &mut DB,
+    fn transfer_balance<D>(
+        state: &mut revm::database::State<D>,
         from: Address,
         to: Address,
         amount: U256,
     ) -> Result<(), ()>
     where
-        DB: revm::Database,
+        D: revm::Database,
     {
         if amount.is_zero() {
             return Ok(());
         }
         
-        let from_balance = db.basic(from)
-            .map(|info| info.map(|i| U256::from(i.balance)).unwrap_or_default())
-            .unwrap_or_default();
+        let from_account = match state.basic(from) {
+            Ok(info) => info,
+            Err(_) => return Err(()),
+        };
+        let from_balance = from_account.map(|i| U256::from(i.balance)).unwrap_or_default();
         
         if from_balance < amount {
             return Err(());
         }
         
         let amount_u128: u128 = amount.try_into().unwrap_or(u128::MAX);
-        let _ = db.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
-        let _ = db.increment_balances(core::iter::once((to, amount_u128)));
+        let _ = state.increment_balances(core::iter::once((from, amount_u128.wrapping_neg())));
+        let _ = state.increment_balances(core::iter::once((to, amount_u128)));
         Ok(())
     }
 
@@ -98,8 +101,8 @@ impl DefaultArbOsHooks {
         taken
     }
 
-    pub fn execute_submit_retryable<DB>(
-        db: &mut DB,
+    pub fn execute_submit_retryable<D>(
+        state_db: &mut revm::database::State<D>,
         state: &mut ArbTxProcessorState,
         tx: &ArbTransactionSigned,
         tx_hash: B256,
@@ -107,12 +110,10 @@ impl DefaultArbOsHooks {
         block_timestamp: u64,
     ) -> Result<(), ()>
     where
-        DB: revm::Database,
+        D: revm::Database,
     {
-        use reth_arbitrum_primitives::arb_signed_tx::ArbSignedTx;
-        
-        let tx_inner = match tx {
-            ArbTransactionSigned::SubmitRetryable(inner) => inner,
+        let tx_inner = match &**tx {
+            ArbTypedTransaction::SubmitRetryable(inner) => inner,
             _ => return Err(()),
         };
 
@@ -128,17 +129,20 @@ impl DefaultArbOsHooks {
         let gas_limit = tx_inner.gas;
 
         let ticket_id = RetryableTicketId(tx_hash.0);
-        let escrow = arb_alloy_util::retryables::retryable_escrow_address(&ticket_id.0);
+        let escrow_bytes = arb_alloy_util::retryables::escrow_address_from_ticket(ticket_id.0);
+        let escrow = Address::from(escrow_bytes);
         let network_fee_account = state.network_fee_account;
 
         let mut available_refund = deposit_value;
         let retry_value_taken = Self::take_funds(&mut available_refund, retry_value);
 
-        Self::mint_balance(db, from, deposit_value);
+        Self::mint_balance(state_db, from, deposit_value);
 
-        let balance_after_mint = db.basic(from)
-            .map(|info| info.map(|i| U256::from(i.balance)).unwrap_or_default())
-            .unwrap_or_default();
+        let after_mint_account = match state_db.basic(from) {
+            Ok(info) => info,
+            Err(_) => return Err(()),
+        };
+        let balance_after_mint = after_mint_account.map(|i| U256::from(i.balance)).unwrap_or_default();
 
         if balance_after_mint < max_submission_fee {
             return Err(());
@@ -153,18 +157,18 @@ impl DefaultArbOsHooks {
             return Err(());
         }
 
-        Self::transfer_balance(db, from, network_fee_account, submission_fee)?;
+        Self::transfer_balance(state_db, from, network_fee_account, submission_fee)?;
         let withheld_submission_fee = Self::take_funds(&mut available_refund, submission_fee);
 
         let submission_fee_refund = Self::take_funds(
             &mut available_refund,
             max_submission_fee.saturating_sub(submission_fee),
         );
-        let _ = Self::transfer_balance(db, from, fee_refund_addr, submission_fee_refund);
+        let _ = Self::transfer_balance(state_db, from, fee_refund_addr, submission_fee_refund);
 
-        if let Err(_) = Self::transfer_balance(db, from, escrow, retry_value) {
-            let _ = Self::transfer_balance(db, network_fee_account, from, submission_fee);
-            let _ = Self::transfer_balance(db, from, fee_refund_addr, withheld_submission_fee);
+        if let Err(_) = Self::transfer_balance(state_db, from, escrow, retry_value) {
+            let _ = Self::transfer_balance(state_db, network_fee_account, from, submission_fee);
+            let _ = Self::transfer_balance(state_db, from, fee_refund_addr, withheld_submission_fee);
             return Err(());
         }
 

@@ -200,7 +200,8 @@ where
 
         if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable) {
             use alloy_consensus::Transaction as _;
-            let tx_hash = tx.tx().trie_hash();
+            use alloy_consensus::transaction::TxHashRef;
+            let tx_hash = *tx.tx().tx_hash();
             let block_env = alloy_evm::Evm::block(self.evm());
             let block_timestamp = u64::try_from(block_env.timestamp).unwrap_or(0);
             
@@ -220,7 +221,7 @@ where
             self.tx_state = state;
             
             if result.is_err() {
-                return Err(BlockExecutionError::other("SubmitRetryable execution failed"));
+                return Err(BlockExecutionError::msg("SubmitRetryable execution failed"));
             }
         }
 
