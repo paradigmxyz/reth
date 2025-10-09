@@ -1380,8 +1380,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_empty() {
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
-        let chain: Vec<_> = state.canonical_chain().collect();
-        assert!(chain.is_empty());
+        assert!(state.canonical_chain().next().is_none());
     }
 
     #[test]
