@@ -677,6 +677,10 @@ fn queue_storage_proofs(
 impl ProofTaskManager {
     /// Creates a new [`ProofTaskManager`] with pre-spawned storage and account proof workers.
     ///
+    /// This manager coordinates both storage and account worker pools:
+    /// - Storage workers handle `StorageProof` and `BlindedStorageNode` requests
+    /// - Account workers handle `AccountMultiproof` and `BlindedAccountNode` requests
+    ///
     /// The `storage_worker_count` determines how many storage workers to spawn, and
     /// `account_worker_count` determines how many account workers to spawn.
     /// Returns an error if the underlying provider fails to create the transactions required for
@@ -838,7 +842,7 @@ impl ProofTaskManager {
                                         input,
                                         result_sender: sender,
                                     })
-                                    .expect("storage workers are running until Terminate");
+                                    .expect("storage worker pool should be available");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -858,7 +862,7 @@ impl ProofTaskManager {
                                         path,
                                         result_sender: sender,
                                     })
-                                    .expect("storage workers are running until Terminate");
+                                    .expect("storage worker pool should be available");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -879,7 +883,7 @@ impl ProofTaskManager {
                                         path,
                                         result_sender: sender,
                                     })
-                                    .expect("account workers are running until Terminate");
+                                    .expect("account worker pool should be available");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
@@ -894,7 +898,7 @@ impl ProofTaskManager {
                                         input,
                                         result_sender: sender,
                                     })
-                                    .expect("account workers are running until Terminate");
+                                    .expect("account worker pool should be available");
 
                                 tracing::trace!(
                                     target: "trie::proof_task",
