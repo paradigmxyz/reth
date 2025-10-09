@@ -1,6 +1,6 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::forward_cursor::ForwardInMemoryCursor;
-use alloy_primitives::{map::B256Set, B256, U256};
+use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{HashedAccountsSorted, HashedPostStateSorted, HashedStorageSorted};
@@ -50,10 +50,10 @@ where
 pub struct HashedPostStateAccountCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// Forward-only in-memory cursor over accounts.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, Account>,
-    /// Reference to the collection of account keys that were destroyed.
-    destroyed_accounts: &'a B256Set,
+    /// Forward-only in-memory cursor over accounts (Some for updates, None for deletions).
+    post_state_cursor: ForwardInMemoryCursor<'a, B256, Option<Account>>,
+    /// Reference to the sorted collection of destroyed account keys.
+    destroyed_accounts: &'a Vec<B256>,
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
@@ -76,18 +76,20 @@ where
     /// This function only checks the post state, not the database, because the latter does not
     /// store destroyed accounts.
     fn is_account_cleared(&self, account: &B256) -> bool {
-        self.destroyed_accounts.contains(account)
+        self.destroyed_accounts.binary_search(account).is_ok()
     }
 
     fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
         let post_state_entry = self.post_state_cursor.seek(&key);
+        // Filter to only valid updates (Some).
+        let post_state_account = post_state_entry.and_then(|(k, acc)| acc.map(|a| (k, a)));
 
         // It's an exact match, return the account from post state without looking up in the
         // database.
-        if post_state_entry.is_some_and(|entry| entry.0 == key) {
-            return Ok(post_state_entry)
+        if post_state_account.is_some_and(|(k, _)| k == key) {
+            return Ok(post_state_account);
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
@@ -98,12 +100,14 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(post_state_entry, db_entry))
+        Ok(Self::compare_entries(post_state_account, db_entry))
     }
 
     fn next_inner(&mut self, last_account: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
         // Take the next account from the post state with the key greater than the last sought key.
         let post_state_entry = self.post_state_cursor.first_after(&last_account);
+        // Filter to only valid updates (Some).
+        let post_state_account = post_state_entry.and_then(|(k, acc)| acc.map(|a| (k, a)));
 
         // If post state was given precedence or account was cleared, move the cursor forward.
         let mut db_entry = self.cursor.seek(last_account)?;
@@ -114,7 +118,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(post_state_entry, db_entry))
+        Ok(Self::compare_entries(post_state_account, db_entry))
     }
 
     /// Return the account with the lowest hashed account key.
@@ -184,10 +188,11 @@ where
 pub struct HashedPostStateStorageCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// Forward-only in-memory cursor over non zero-valued account storage slots.
-    post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, U256>>,
-    /// Reference to the collection of storage slot keys that were cleared.
-    cleared_slots: Option<&'a B256Set>,
+    /// Forward-only in-memory cursor over storage slots (Some for non-zero updates, None for
+    /// zero/deletions).
+    post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, Option<U256>>>,
+    /// Reference to the sorted collection of zero-valued slot keys.
+    cleared_slots: Option<&'a Vec<B256>>,
     /// Flag indicating whether database storage was wiped.
     storage_wiped: bool,
     /// The last slot that has been returned by the cursor.
@@ -201,8 +206,7 @@ where
 {
     /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
     pub fn new(cursor: C, post_state_storage: Option<&'a HashedStorageSorted>) -> Self {
-        let post_state_cursor =
-            post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.non_zero_valued_slots));
+        let post_state_cursor = post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.slots));
         let cleared_slots = post_state_storage.map(|s| &s.zero_valued_slots);
         let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
         Self { cursor, post_state_cursor, cleared_slots, storage_wiped, last_slot: None }
@@ -211,18 +215,20 @@ where
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
     fn is_slot_zero_valued(&self, slot: &B256) -> bool {
-        self.cleared_slots.is_some_and(|s| s.contains(slot))
+        self.cleared_slots.as_ref().is_some_and(|s| s.binary_search(slot).is_ok())
     }
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
     fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
         // Attempt to find the account's storage in post state.
         let post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.seek(&subkey));
+        // Filter to only valid updates (Some).
+        let post_state_slot = post_state_entry.and_then(|(k, v)| v.map(|val| (k, val)));
 
         // If database storage was wiped or it's an exact match,
         // return the storage slot from post state without looking up in the database.
-        if self.storage_wiped || post_state_entry.is_some_and(|entry| entry.0 == subkey) {
-            return Ok(post_state_entry)
+        if self.storage_wiped || post_state_slot.is_some_and(|(k, _)| k == subkey) {
+            return Ok(post_state_slot);
         }
 
         // It's not an exact match and storage was not wiped,
@@ -233,7 +239,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(post_state_entry, db_entry))
+        Ok(Self::compare_entries(post_state_slot, db_entry))
     }
 
     /// Find the storage entry that is right after current cursor position.
@@ -241,10 +247,12 @@ where
         // Attempt to find the account's storage in post state.
         let post_state_entry =
             self.post_state_cursor.as_mut().and_then(|c| c.first_after(&last_slot));
+        // Filter to only valid updates (Some).
+        let post_state_slot = post_state_entry.and_then(|(k, v)| v.map(|val| (k, val)));
 
         // Return post state entry immediately if database was wiped.
         if self.storage_wiped {
-            return Ok(post_state_entry)
+            return Ok(post_state_slot);
         }
 
         // If post state was given precedence, move the cursor forward.
@@ -258,7 +266,7 @@ where
         }
 
         // Compare two entries and return the lowest.
-        Ok(Self::compare_entries(post_state_entry, db_entry))
+        Ok(Self::compare_entries(post_state_slot, db_entry))
     }
 
     /// Return the storage entry with the lowest hashed storage key (hashed slot).
