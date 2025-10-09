@@ -42,8 +42,8 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-    /// Handle to the storage proof task.
-    storage_proof_task_handle: ProofTaskManagerHandle,
+    /// Handle to the proof task manager.
+    proof_task_handle: ProofTaskManagerHandle,
     /// Cached storage proof roots for missed leaves; this maps
     /// hashed (missed) addresses to their storage proof roots.
     missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
@@ -60,7 +60,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
-        storage_proof_task_handle: ProofTaskManagerHandle,
+        proof_task_handle: ProofTaskManagerHandle,
     ) -> Self {
         Self {
             nodes_sorted,
@@ -69,7 +69,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             missed_leaves_storage_roots,
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
-            storage_proof_task_handle,
+            proof_task_handle,
             _phantom: std::marker::PhantomData,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
@@ -113,8 +113,7 @@ where
         );
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        let _ =
-            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+        let _ = self.proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
         receiver
     }
 
@@ -206,7 +205,7 @@ where
         };
 
         let (sender, receiver) = channel();
-        self.storage_proof_task_handle
+        self.proof_task_handle
             .queue_task(ProofTaskKind::AccountMultiproof(input, sender))
             .map_err(|_| {
                 ParallelStateRootError::Other(
