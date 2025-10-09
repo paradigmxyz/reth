@@ -12,6 +12,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ExternalStorageError {
     // TODO: add more errors once we know what they are
+    /// Other error
     #[error("Other error: {0}")]
     Other(eyre::Error),
 }
