@@ -353,7 +353,7 @@ pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     pending: VecDeque<PendingMultiproofTask<Factory>>,
     /// Executor for tasks
     executor: WorkloadExecutor,
-    /// Handle to the proof task manager used for creating ParallelProof instances for storage
+    /// Handle to the proof task manager used for creating `ParallelProof` instances for storage
     /// proofs.
     storage_proof_task_handle: ProofTaskManagerHandle,
     /// Handle to the proof task manager used for account multiproofs.
