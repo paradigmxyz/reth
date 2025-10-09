@@ -77,12 +77,12 @@ where
         self.inner.finalized_block.borrow().clone()
     }
 
-    /// Returns the canonical head of the chain.
+    /// Returns the BlockNumHash of the canonical head.
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }
 
-    /// Returns the canonical head of the chain.
+    /// Returns the block number of the canonical head.
     pub fn get_canonical_block_number(&self) -> BlockNumber {
         self.inner.canonical_head_number.load(Ordering::Relaxed)
     }
