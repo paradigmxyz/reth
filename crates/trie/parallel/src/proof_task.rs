@@ -1062,7 +1062,7 @@ where
 }
 
 /// This represents an input for a storage proof.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StorageProofInput {
     /// The hashed address for which the proof is calculated.
     hashed_address: B256,
