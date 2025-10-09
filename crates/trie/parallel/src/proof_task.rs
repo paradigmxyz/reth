@@ -48,7 +48,7 @@ use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProvide
 use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, SendError, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Instant,
@@ -144,10 +144,10 @@ pub struct ProofTaskManager {
     account_worker_count: usize,
 
     /// Receives proof task requests from [`ProofTaskManagerHandle`].
-    proof_task_rx: Receiver<ProofTaskMessage>,
+    proof_task_rx: CrossbeamReceiver<ProofTaskMessage>,
 
     /// Sender for creating handles that can queue tasks.
-    proof_task_tx: Sender<ProofTaskMessage>,
+    proof_task_tx: CrossbeamSender<ProofTaskMessage>,
 
     /// The number of active handles.
     ///
@@ -378,15 +378,15 @@ fn account_worker_loop<Tx>(
                 .len();
                 tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-                let storage_proofs = match collect_storage_proofs(
+                let storage_proof_receivers = match queue_storage_proofs(
                     &proof_tx,
                     &storage_proof_handle,
-                    &input.targets,
+                    input.targets.clone(),
                     &input.prefix_sets,
                     input.collect_branch_node_masks,
                     input.multi_added_removed_keys.clone(),
                 ) {
-                    Ok(proofs) => proofs,
+                    Ok(receivers) => receivers,
                     Err(error) => {
                         let _ = result_sender.send(Err(error));
                         continue;
@@ -405,7 +405,7 @@ fn account_worker_loop<Tx>(
                     account_prefix_set,
                     input.collect_branch_node_masks,
                     input.multi_added_removed_keys.as_ref(),
-                    storage_proofs,
+                    storage_proof_receivers,
                     missed_leaves_storage_roots,
                     &mut tracker,
                 );
@@ -478,10 +478,11 @@ fn account_worker_loop<Tx>(
     );
 }
 
-/// Builds an account multiproof given pre-collected storage proofs.
+/// Builds an account multiproof by consuming storage proof receivers lazily during trie walk.
 ///
 /// This is a helper function used by account workers to build the account subtree proof
-/// after storage proofs have been collected.
+/// while storage proofs are still being computed. Receivers are consumed only when needed,
+/// enabling interleaved parallelism between account trie traversal and storage proof computation.
 ///
 /// Returns a `DecodedMultiProof` containing the account subtree and storage proofs.
 #[allow(clippy::too_many_arguments)]
@@ -492,7 +493,7 @@ fn build_account_multiproof_with_storage_roots<C, H>(
     prefix_set: PrefixSet,
     collect_branch_node_masks: bool,
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
-    mut storage_proofs: B256Map<DecodedStorageMultiProof>,
+    mut storage_proof_receivers: B256Map<Receiver<StorageProofResult>>,
     missed_leaves_storage_roots: &DashMap<B256, B256>,
     tracker: &mut ParallelTrieTracker,
 ) -> Result<DecodedMultiProof, ParallelStateRootError>
@@ -537,8 +538,19 @@ where
                 hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
             }
             TrieElement::Leaf(hashed_address, account) => {
-                let root = match storage_proofs.remove(&hashed_address) {
-                    Some(proof) => {
+                let root = match storage_proof_receivers.remove(&hashed_address) {
+                    Some(receiver) => {
+                        // Block on this specific storage proof receiver - enables interleaved
+                        // parallelism
+                        let proof = receiver.recv().map_err(|_| {
+                            ParallelStateRootError::StorageRoot(
+                                reth_execution_errors::StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "Storage proof channel closed for {hashed_address}"
+                                    )),
+                                ),
+                            )
+                        })??;
                         let root = proof.root;
                         if let Some(entry) = collected_decoded_storages.get_mut(&hashed_address) {
                             *entry = proof;
@@ -588,8 +600,12 @@ where
         }
     }
 
-    // Insert storage proofs for accounts not encountered during trie walk.
-    collected_decoded_storages.extend(storage_proofs);
+    // Consume remaining storage proof receivers for accounts not encountered during trie walk.
+    for (hashed_address, receiver) in storage_proof_receivers {
+        if let Ok(Ok(proof)) = receiver.recv() {
+            collected_decoded_storages.insert(hashed_address, proof);
+        }
+    }
 
     let _ = hash_builder.root();
 
@@ -614,36 +630,38 @@ where
     })
 }
 
-/// Collects storage proofs for all accounts in the targets by queueing to storage workers.
+/// Queues storage proofs for all accounts in the targets and returns receivers.
 ///
-/// Queues storage proof tasks to the storage worker pool and collects results.
-/// Propagates errors up if queuing fails, workers return errors, or channels are dropped.
-/// No inline fallback - fails fast if storage workers are unavailable.
-fn collect_storage_proofs<Tx>(
+/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// with receivers, allowing the account trie walk to proceed in parallel with storage proof
+/// computation. This enables interleaved parallelism for better performance.
+///
+/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+fn queue_storage_proofs<Tx>(
     _proof_tx: &ProofTaskTx<Tx>,
     account_proof_handle: &ProofTaskManagerHandle,
-    targets: &MultiProofTargets,
+    targets: MultiProofTargets,
     prefix_sets: &TriePrefixSets,
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-) -> Result<B256Map<DecodedStorageMultiProof>, ParallelStateRootError>
+) -> Result<B256Map<Receiver<StorageProofResult>>, ParallelStateRootError>
 where
     Tx: DbTx,
 {
-    let mut storage_proofs = B256Map::with_capacity_and_hasher(targets.len(), Default::default());
-    let mut pending = Vec::with_capacity(targets.len()); // (address, receiver)
+    let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
     // Queue all storage proofs to worker pool
-    for (hashed_address, target_slots) in targets.iter() {
+    for (hashed_address, target_slots) in targets {
         let prefix_set =
-            prefix_sets.storage_prefix_sets.get(hashed_address).cloned().unwrap_or_default();
+            prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
 
         // Always queue a storage proof so we obtain the storage root even when no slots are
         // requested.
         let input = StorageProofInput::new(
-            *hashed_address,
+            hashed_address,
             prefix_set,
-            target_slots.clone(),
+            target_slots,
             with_branch_node_masks,
             multi_added_removed_keys.clone(),
         );
@@ -660,31 +678,10 @@ where
             },
         )?;
 
-        pending.push((*hashed_address, receiver));
+        storage_proof_receivers.insert(hashed_address, receiver);
     }
 
-    // Collect all results
-    for (hashed_address, receiver) in pending {
-        // If receiving fails or worker returns error, propagate up (no fallback)
-        let proof = receiver
-            .recv()
-            .map_err(|_| {
-                ParallelStateRootError::Other(format!(
-                    "Storage proof channel dropped for {}: worker died or pool shutdown",
-                    hashed_address
-                ))
-            })?
-            .map_err(|e| {
-                ParallelStateRootError::Other(format!(
-                    "Storage proof computation failed for {}: {}",
-                    hashed_address, e
-                ))
-            })?;
-
-        storage_proofs.insert(hashed_address, proof);
-    }
-
-    Ok(storage_proofs)
+    Ok(storage_proof_receivers)
 }
 
 impl ProofTaskManager {
@@ -704,7 +701,10 @@ impl ProofTaskManager {
     where
         Factory: DatabaseProviderFactory<Provider: BlockReader>,
     {
-        let (proof_task_tx, proof_task_rx) = channel();
+        // Use unbounded channel for the router to prevent account workers from blocking
+        // when queuing storage proofs. Account workers queue many storage proofs through
+        // this channel, and blocking on a bounded channel wastes parallel worker capacity.
+        let (proof_task_tx, proof_task_rx) = unbounded();
 
         // Use unbounded channel to ensure all storage operations are queued to workers.
         // This maintains transaction reuse benefits and avoids fallback to on-demand execution.
@@ -1188,20 +1188,26 @@ pub enum ProofTaskKind {
 #[derive(Debug)]
 pub struct ProofTaskManagerHandle {
     /// The sender for the proof task manager.
-    sender: Sender<ProofTaskMessage>,
+    sender: CrossbeamSender<ProofTaskMessage>,
     /// The number of active handles.
     active_handles: Arc<AtomicUsize>,
 }
 
 impl ProofTaskManagerHandle {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub fn new(sender: Sender<ProofTaskMessage>, active_handles: Arc<AtomicUsize>) -> Self {
+    pub fn new(
+        sender: CrossbeamSender<ProofTaskMessage>,
+        active_handles: Arc<AtomicUsize>,
+    ) -> Self {
         active_handles.fetch_add(1, Ordering::SeqCst);
         Self { sender, active_handles }
     }
 
     /// Queues a task to the proof task manager.
-    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage>> {
+    pub fn queue_task(
+        &self,
+        task: ProofTaskKind,
+    ) -> Result<(), crossbeam_channel::SendError<ProofTaskMessage>> {
         self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
@@ -1246,14 +1252,14 @@ pub enum ProofTaskTrieNodeProvider {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage>,
+        sender: CrossbeamSender<ProofTaskMessage>,
     },
     /// Blinded storage trie node provider.
     StorageNode {
         /// Target account.
         account: B256,
         /// Sender to the proof task.
-        sender: Sender<ProofTaskMessage>,
+        sender: CrossbeamSender<ProofTaskMessage>,
     },
 }
 
