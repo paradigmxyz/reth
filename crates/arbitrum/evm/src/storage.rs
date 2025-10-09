@@ -3,10 +3,32 @@ use revm::Database;
 use std::collections::HashMap;
 
 fn ensure_arbos_account_loaded<D: Database>(state: &mut revm::database::State<D>) {
+    use revm_database::{BundleAccount, AccountStatus};
+    use revm_state::AccountInfo;
+    
     let arbos_addr = Address::from([0xa4, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                    0x00, 0x00, 0x00, 0x64]);
-    let _ = state.basic(arbos_addr);
+    
+    if !state.bundle_state.state.contains_key(&arbos_addr) {
+        let info = match state.basic(arbos_addr) {
+            Ok(Some(account_info)) => Some(account_info),
+            _ => Some(AccountInfo {
+                balance: U256::ZERO,
+                nonce: 0,
+                code_hash: alloy_primitives::keccak256([]),
+                code: None,
+            }),
+        };
+        
+        let acc = BundleAccount {
+            info,
+            storage: HashMap::default(),
+            original_info: None,
+            status: AccountStatus::Changed,
+        };
+        state.bundle_state.state.insert(arbos_addr, acc);
+    }
 }
 
 
