@@ -1124,9 +1124,9 @@ mod tests {
         Ok(())
     }
 
-    /// Test wiped storage in HashedPostState
+    /// Test wiped storage in `HashedPostState`
     ///
-    /// When store_trie_updates receives a HashedPostState with wiped=true for a storage entry,
+    /// When `store_trie_updates` receives a `HashedPostState` with wiped=true for a storage entry,
     /// it should iterate all existing values for that address and create deletion entries for them.
     #[test_case(InMemoryExternalStorage::new(); "InMemory")]
     #[tokio::test]
