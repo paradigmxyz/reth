@@ -1,12 +1,12 @@
-//! Common test suite for `ExternalStorage` implementations.
+//! Common test suite for `OpProofsStorage` implementations.
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        in_memory::InMemoryExternalStorage,
+        in_memory::InMemoryProofsStorage,
         storage::{
-            BlockStateDiff, ExternalHashedCursor, ExternalStorage, ExternalStorageError,
-            ExternalTrieCursor,
+            BlockStateDiff, OpProofsHashedCursor, OpProofsStorage, OpProofsStorageError,
+            OpProofsTrieCursor,
         },
     };
     use alloy_primitives::{B256, U256};
@@ -70,11 +70,11 @@ mod tests {
     }
 
     /// Test basic storage and retrieval of earliest block number
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_earliest_block_operations<S: ExternalStorage>(
+    async fn test_earliest_block_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         // Initially should be None
         let earliest = storage.get_earliest_block_number().await?;
         assert!(earliest.is_none());
@@ -91,11 +91,11 @@ mod tests {
     }
 
     /// Test storing and retrieving trie updates
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_trie_updates_operations<S: ExternalStorage>(
+    async fn test_trie_updates_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let block_number = 50;
         let trie_updates = TrieUpdates::default();
         let post_state = HashedPostState::default();
@@ -118,11 +118,11 @@ mod tests {
     // =============================================================================
 
     /// Test cursor operations on empty trie
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_cursor_empty_trie<S: ExternalStorage>(
+    async fn test_cursor_empty_trie<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let mut cursor = storage.trie_cursor(None, 100)?;
 
         // All operations should return None on empty trie
@@ -135,11 +135,11 @@ mod tests {
     }
 
     /// Test cursor operations with single entry
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_cursor_single_entry<S: ExternalStorage>(
+    async fn test_cursor_single_entry<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2, 3]);
         let branch = create_test_branch();
 
@@ -162,11 +162,11 @@ mod tests {
     }
 
     /// Test cursor operations with multiple entries
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_cursor_multiple_entries<S: ExternalStorage>(
+    async fn test_cursor_multiple_entries<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let paths = vec![
             nibbles_from(vec![1]),
             nibbles_from(vec![1, 2]),
@@ -202,11 +202,11 @@ mod tests {
     // =============================================================================
 
     /// Test `seek_exact` with existing path
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_exact_existing_path<S: ExternalStorage>(
+    async fn test_seek_exact_existing_path<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2, 3]);
         let branch = create_test_branch();
 
@@ -220,11 +220,11 @@ mod tests {
     }
 
     /// Test `seek_exact` with non-existing path
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_exact_non_existing_path<S: ExternalStorage>(
+    async fn test_seek_exact_non_existing_path<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2, 3]);
         let branch = create_test_branch();
 
@@ -238,11 +238,11 @@ mod tests {
     }
 
     /// Test `seek_exact` with empty path
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_exact_empty_path<S: ExternalStorage>(
+    async fn test_seek_exact_empty_path<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![]);
         let branch = create_test_branch();
 
@@ -256,11 +256,11 @@ mod tests {
     }
 
     /// Test seek to existing path
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_to_existing_path<S: ExternalStorage>(
+    async fn test_seek_to_existing_path<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2, 3]);
         let branch = create_test_branch();
 
@@ -274,11 +274,11 @@ mod tests {
     }
 
     /// Test seek between existing nodes
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_between_existing_nodes<S: ExternalStorage>(
+    async fn test_seek_between_existing_nodes<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path1 = nibbles_from(vec![1]);
         let path2 = nibbles_from(vec![3]);
         let branch = create_test_branch();
@@ -296,11 +296,11 @@ mod tests {
     }
 
     /// Test seek after all nodes
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_after_all_nodes<S: ExternalStorage>(
+    async fn test_seek_after_all_nodes<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1]);
         let branch = create_test_branch();
 
@@ -315,11 +315,11 @@ mod tests {
     }
 
     /// Test seek before all nodes
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_seek_before_all_nodes<S: ExternalStorage>(
+    async fn test_seek_before_all_nodes<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![5]);
         let branch = create_test_branch();
 
@@ -339,11 +339,11 @@ mod tests {
     // =============================================================================
 
     /// Test next without prior seek
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_next_without_prior_seek<S: ExternalStorage>(
+    async fn test_next_without_prior_seek<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2]);
         let branch = create_test_branch();
 
@@ -358,11 +358,11 @@ mod tests {
     }
 
     /// Test next after seek
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_next_after_seek<S: ExternalStorage>(
+    async fn test_next_after_seek<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path1 = nibbles_from(vec![1]);
         let path2 = nibbles_from(vec![2]);
         let branch = create_test_branch();
@@ -381,11 +381,11 @@ mod tests {
     }
 
     /// Test next at end of trie
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_next_at_end_of_trie<S: ExternalStorage>(
+    async fn test_next_at_end_of_trie<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1]);
         let branch = create_test_branch();
 
@@ -401,11 +401,11 @@ mod tests {
     }
 
     /// Test multiple consecutive next calls
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_multiple_consecutive_next<S: ExternalStorage>(
+    async fn test_multiple_consecutive_next<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let paths = vec![nibbles_from(vec![1]), nibbles_from(vec![2]), nibbles_from(vec![3])];
         let branch = create_test_branch();
 
@@ -428,11 +428,11 @@ mod tests {
     }
 
     /// Test current after operations
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_current_after_operations<S: ExternalStorage>(
+    async fn test_current_after_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path1 = nibbles_from(vec![1]);
         let path2 = nibbles_from(vec![2]);
         let branch = create_test_branch();
@@ -457,11 +457,11 @@ mod tests {
     }
 
     /// Test current with no prior operations
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_current_no_prior_operations<S: ExternalStorage>(
+    async fn test_current_no_prior_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let mut cursor = storage.trie_cursor(None, 100)?;
 
         // Current should be None when no operations performed
@@ -475,11 +475,11 @@ mod tests {
     // =============================================================================
 
     /// Test same path with different blocks
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_same_path_different_blocks<S: ExternalStorage>(
+    async fn test_same_path_different_blocks<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2]);
         let branch1 = create_test_branch();
         let branch2 = create_test_branch_variant();
@@ -502,11 +502,11 @@ mod tests {
     }
 
     /// Test deleted branch nodes
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_deleted_branch_nodes<S: ExternalStorage>(
+    async fn test_deleted_branch_nodes<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2]);
         let branch = create_test_branch();
 
@@ -530,11 +530,11 @@ mod tests {
     // =============================================================================
 
     /// Test account-specific cursor
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_account_specific_cursor<S: ExternalStorage>(
+    async fn test_account_specific_cursor<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2]);
         let addr1 = B256::repeat_byte(0x01);
         let addr2 = B256::repeat_byte(0x02);
@@ -566,11 +566,11 @@ mod tests {
     }
 
     /// Test state trie cursor
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_state_trie_cursor<S: ExternalStorage>(
+    async fn test_state_trie_cursor<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path = nibbles_from(vec![1, 2]);
         let addr = B256::repeat_byte(0x01);
         let branch = create_test_branch();
@@ -597,11 +597,11 @@ mod tests {
     }
 
     /// Test mixed account and state data
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_mixed_account_state_data<S: ExternalStorage>(
+    async fn test_mixed_account_state_data<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let path1 = nibbles_from(vec![1]);
         let path2 = nibbles_from(vec![2]);
         let addr = B256::repeat_byte(0x01);
@@ -637,11 +637,11 @@ mod tests {
     // =============================================================================
 
     /// Test lexicographic ordering
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_lexicographic_ordering<S: ExternalStorage>(
+    async fn test_lexicographic_ordering<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let paths = vec![
             nibbles_from(vec![3, 1]),
             nibbles_from(vec![1, 2]),
@@ -675,11 +675,11 @@ mod tests {
     }
 
     /// Test path prefix scenarios
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_path_prefix_scenarios<S: ExternalStorage>(
+    async fn test_path_prefix_scenarios<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let paths = vec![
             nibbles_from(vec![1]),       // Prefix of next
             nibbles_from(vec![1, 2]),    // Extends first
@@ -708,11 +708,11 @@ mod tests {
     }
 
     /// Test complex nibble combinations
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_complex_nibble_combinations<S: ExternalStorage>(
+    async fn test_complex_nibble_combinations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         // Test various nibble patterns including edge values
         let paths = vec![
             nibbles_from(vec![0]),
@@ -749,11 +749,11 @@ mod tests {
     // =============================================================================
 
     /// Test store and retrieve single account
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_store_and_retrieve_single_account<S: ExternalStorage>(
+    async fn test_store_and_retrieve_single_account<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let account_key = B256::repeat_byte(0x01);
         let account = create_test_account();
 
@@ -773,11 +773,11 @@ mod tests {
     }
 
     /// Test account cursor navigation
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_account_cursor_navigation<S: ExternalStorage>(
+    async fn test_account_cursor_navigation<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let accounts = [
             (B256::repeat_byte(0x01), create_test_account()),
             (B256::repeat_byte(0x03), create_test_account()),
@@ -810,11 +810,11 @@ mod tests {
     }
 
     /// Test account block versioning
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_account_block_versioning<S: ExternalStorage>(
+    async fn test_account_block_versioning<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let account_key = B256::repeat_byte(0x01);
         let account_v1 = create_test_account_with_values(1, 100, 0xBB);
         let account_v2 = create_test_account_with_values(2, 200, 0xDD);
@@ -839,11 +839,11 @@ mod tests {
     }
 
     /// Test store and retrieve storage
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_store_and_retrieve_storage<S: ExternalStorage>(
+    async fn test_store_and_retrieve_storage<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let hashed_address = B256::repeat_byte(0x01);
         let storage_slots = vec![
             (B256::repeat_byte(0x10), U256::from(100)),
@@ -868,11 +868,11 @@ mod tests {
     }
 
     /// Test storage cursor navigation
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_storage_cursor_navigation<S: ExternalStorage>(
+    async fn test_storage_cursor_navigation<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let hashed_address = B256::repeat_byte(0x01);
         let storage_slots = vec![
             (B256::repeat_byte(0x10), U256::from(100)),
@@ -899,11 +899,11 @@ mod tests {
     }
 
     /// Test storage account isolation
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_storage_account_isolation<S: ExternalStorage>(
+    async fn test_storage_account_isolation<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let address1 = B256::repeat_byte(0x01);
         let address2 = B256::repeat_byte(0x02);
         let storage_key = B256::repeat_byte(0x10);
@@ -933,11 +933,11 @@ mod tests {
     }
 
     /// Test storage block versioning
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_storage_block_versioning<S: ExternalStorage>(
+    async fn test_storage_block_versioning<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let hashed_address = B256::repeat_byte(0x01);
         let storage_key = B256::repeat_byte(0x10);
 
@@ -963,11 +963,11 @@ mod tests {
     }
 
     /// Test storage zero value deletion
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_storage_zero_value_deletion<S: ExternalStorage>(
+    async fn test_storage_zero_value_deletion<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let hashed_address = B256::repeat_byte(0x01);
         let storage_key = B256::repeat_byte(0x10);
 
@@ -993,11 +993,11 @@ mod tests {
     }
 
     /// Test that zero values are skipped during iteration
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_storage_cursor_skips_zero_values<S: ExternalStorage>(
+    async fn test_storage_cursor_skips_zero_values<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let hashed_address = B256::repeat_byte(0x01);
 
         // Create a mix of non-zero and zero value storage slots
@@ -1045,11 +1045,11 @@ mod tests {
     }
 
     /// Test empty cursors
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_empty_cursors<S: ExternalStorage>(
+    async fn test_empty_cursors<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         // Test empty account cursor
         let mut account_cursor = storage.account_hashed_cursor(100)?;
         assert!(account_cursor.seek(B256::repeat_byte(0x01))?.is_none());
@@ -1064,11 +1064,11 @@ mod tests {
     }
 
     /// Test cursor boundary conditions
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_cursor_boundary_conditions<S: ExternalStorage>(
+    async fn test_cursor_boundary_conditions<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         let account_key = B256::repeat_byte(0x80); // Middle value
         let account = create_test_account();
 
@@ -1092,11 +1092,11 @@ mod tests {
     }
 
     /// Test large batch operations
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_large_batch_operations<S: ExternalStorage>(
+    async fn test_large_batch_operations<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         // Create large batch of accounts
         let mut accounts = Vec::new();
         for i in 0..100 {
@@ -1129,11 +1129,11 @@ mod tests {
     ///
     /// When `store_trie_updates` receives a `HashedPostState` with wiped=true for a storage entry,
     /// it should iterate all existing values for that address and create deletion entries for them.
-    #[test_case(InMemoryExternalStorage::new(); "InMemory")]
+    #[test_case(InMemoryProofsStorage::new(); "InMemory")]
     #[tokio::test]
-    async fn test_store_trie_updates_with_wiped_storage<S: ExternalStorage>(
+    async fn test_store_trie_updates_with_wiped_storage<S: OpProofsStorage>(
         storage: S,
-    ) -> Result<(), ExternalStorageError> {
+    ) -> Result<(), OpProofsStorageError> {
         use reth_trie::HashedStorage;
 
         let hashed_address = B256::repeat_byte(0x01);
