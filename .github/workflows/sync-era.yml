@@ -17,8 +17,7 @@ concurrency:
 jobs:
   sync:
     name: sync (${{ matrix.chain.bin }})
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
